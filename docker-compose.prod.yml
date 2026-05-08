@@ -1,0 +1,24 @@
+services:
+  app:
+    image: ghcr.io/youruser/whatsapp-bot:${TAG:-latest}
+    restart: always
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+    depends_on: [app]
+
+  mongo:
+    volumes: [mongo_data:/data/db]
+
+volumes:
+  mongo_data:
+  caddy_data:

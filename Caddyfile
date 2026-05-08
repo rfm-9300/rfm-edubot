@@ -1,0 +1,11 @@
+bot.yourdomain.com {
+    reverse_proxy app:8080
+    encode gzip
+    rate_limit {
+        zone webhook {
+            key {remote_host}
+            events 50
+            window 1m
+        }
+    }
+}

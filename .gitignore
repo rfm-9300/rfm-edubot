@@ -1,0 +1,10 @@
+.env
+*.class
+*.jar
+*.log
+build/
+.gradle/
+.idea/
+*.iml
+.DS_Store
+/.env.example
