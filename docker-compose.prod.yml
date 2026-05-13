@@ -1,7 +1,15 @@
 services:
   app:
-    image: ghcr.io/youruser/whatsapp-bot:${TAG:-latest}
+    image: ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}
+    env_file:
+      - .env
+    environment:
+      MONGO_URI: mongodb://mongo:27017
+      PORT: "8080"
+    ports: ["8080:8080"]
     restart: always
+    depends_on:
+      - mongo
     logging:
       driver: json-file
       options:
@@ -17,7 +25,10 @@ services:
     depends_on: [app]
 
   mongo:
+    image: mongo:7
     volumes: [mongo_data:/data/db]
+    command: ["--bind_ip_all"]
+    restart: always
 
 volumes:
   mongo_data:

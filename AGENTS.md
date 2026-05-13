@@ -1,10 +1,52 @@
 # AGENTS.md
 
+## Deployment Intent
+
+When Rodrigo says any of the following, treat it as permission to execute the full production deployment workflow for this project:
+
+- "make deploy"
+- "make deployment"
+- "deploy to VPS"
+- "make the deployment"
+- "deploy"
+- any close variant that clearly means deploying this WhatsApp bot to production
+
+Use [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md) as the source of truth.
+
+## Production Host
+
+- SSH alias: `hillsong-vps`
+- Connect with: `ssh hillsong-vps`
+- Production app directory on the VPS: `~/whatsapp-bot`
+- Production compose file: `docker-compose.prod.yml`
+- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+
+## Deployment Rules
+
+- Use the existing `./deploy.sh` script from the repo root to build and push the Docker image.
+- Use `docker compose -f docker-compose.prod.yml` on the VPS.
+- Prefer the safe deploy sequence: `pull`, `down`, `up -d`.
+- After deploying, check container state, health endpoints, and logs before reporting success.
+- If deployment fails, diagnose the concrete failure, apply the smallest safe fix, then redeploy.
+- Do not reset MongoDB volumes, delete data, rotate secrets, or run destructive cleanup unless Rodrigo explicitly asks.
+- Do not change `.env` or production secrets unless Rodrigo explicitly asks.
+- Keep unrelated local worktree changes intact.
+
+## Command Policy
+
+- General shell commands are allowed when needed to complete the task.
+- Read-only `git` commands are allowed for inspection, such as `git status`, `git diff`, `git log`, `git show`, and `git rev-parse`.
+- Do not run `git` commands that change commits, branches, refs, the index, remotes, or the working tree unless Rodrigo explicitly asks.
+
 ## Commands
 - `./gradlew build` — compile + test
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+
+## Local Run Intent
+
+When Rodrigo says "run local", "start local", "run it locally", "start the app", or any close variant, follow [.claude/LOCAL_RUNBOOK.md](.claude/LOCAL_RUNBOOK.md). Confirm MongoDB, app logs, `/health`, and `/ready` before reporting that local is up.
 
 ## Local Dev Setup
 1. `cp .env.example .env` and fill WhatsApp Cloud API + OpenRouter keys

@@ -1,10 +1,30 @@
 # CLAUDE.md
 
+## Deployment Intent
+
+When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Those phrases grant permission to run the full production deployment workflow: execute `./deploy.sh`, connect to `hillsong-vps`, deploy with `docker-compose.prod.yml`, inspect health/logs/status, fix safe deployment issues, and redeploy if needed.
+
+### Production Host
+- SSH alias: `hillsong-vps`
+- Connect with: `ssh hillsong-vps`
+- Production app directory: `~/whatsapp-bot`
+- Production compose file: `docker-compose.prod.yml`
+- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+
+### Deployment Guardrails
+- Do not reset MongoDB volumes, delete data, rotate secrets, or run destructive cleanup unless Rodrigo explicitly asks.
+- Do not change `.env` or production secrets unless Rodrigo explicitly asks.
+- Keep unrelated local worktree changes intact.
+
 ## Commands
 - `./gradlew build` — compile + test
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+
+## Local Development - "run local"
+
+When Rodrigo says "run local", "start local", "run it locally", "start the app", or any close variant, follow `.claude/LOCAL_RUNBOOK.md`. Those phrases grant permission to start MongoDB with Docker Compose, run the Ktor app with Gradle, watch logs, and verify `/health` and `/ready`.
 
 ## Local Dev Setup
 1. `cp .env.example .env` and fill WhatsApp Cloud API + OpenRouter keys
