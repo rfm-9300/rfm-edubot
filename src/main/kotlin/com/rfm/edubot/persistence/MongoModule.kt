@@ -10,17 +10,23 @@ import java.util.concurrent.TimeUnit
 
 class MongoModule(config: AppConfig.MongoConfig) {
     val client: MongoClient = MongoClient.create(config.uri)
+    val database = client.getDatabase(config.database)
     private val log = LoggerFactory.getLogger("MongoModule")
 
     fun initialize() {
         log.info("Initializing MongoDB indexes")
         runBlocking {
-            val db = client.getDatabase("wabot")
+            val db = database
 
             db.createCollection("users")
             db.createCollection("conversations")
             db.createCollection("messages")
             db.createCollection("webhook_events")
+            db.createCollection("crm.clients")
+            db.createCollection("crm.quotes")
+            db.createCollection("crm.invoices")
+            db.createCollection("crm.sequences")
+            db.createCollection("crm.standard_items")
 
             val users = db.getCollection<Document>("users")
             users.createIndex(Document("waId", 1), IndexOptions().unique(true))
@@ -48,6 +54,28 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 Document("receivedAt", 1),
                 IndexOptions().expireAfter(7, TimeUnit.DAYS)
             )
+
+            val crmClients = db.getCollection<Document>("crm.clients")
+            crmClients.createIndex(Document("phone", 1), IndexOptions().unique(true))
+            crmClients.createIndex(Document("name", "text"))
+
+            val crmQuotes = db.getCollection<Document>("crm.quotes")
+            crmQuotes.createIndex(Document("clientId", 1))
+            crmQuotes.createIndex(Document("status", 1))
+            crmQuotes.createIndex(Document("number", 1), IndexOptions().unique(true))
+
+            val crmInvoices = db.getCollection<Document>("crm.invoices")
+            crmInvoices.createIndex(Document("clientId", 1))
+            crmInvoices.createIndex(Document("status", 1))
+            crmInvoices.createIndex(Document("dueDate", 1))
+            crmInvoices.createIndex(Document("number", 1), IndexOptions().unique(true))
+
+            val crmSequences = db.getCollection<Document>("crm.sequences")
+            crmSequences.createIndex(Document("name", 1), IndexOptions().unique(true))
+
+            val crmStandardItems = db.getCollection<Document>("crm.standard_items")
+            crmStandardItems.createIndex(Document("id", 1), IndexOptions().unique(true))
+            crmStandardItems.createIndex(Document("type", 1).append("category", 1))
         }
         log.info("MongoDB indexes initialized")
     }

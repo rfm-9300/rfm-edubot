@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Isal · Painel de Gestão</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/admin/style.css" />
+</head>
+<body>
+  <aside class="sidebar" data-screen-label="Sidebar">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true">
+        <svg viewBox="0 0 32 32" width="22" height="22">
+          <rect x="2" y="2" width="28" height="28" rx="2" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M2 22 L16 8 L30 22" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="miter"/>
+          <path d="M12 30 L12 18 L20 18 L20 30" fill="none" stroke="currentColor" stroke-width="2"/>
+        </svg>
+      </div>
+      <div class="brand__text">
+        <div class="brand__name">ISAL</div>
+        <div class="brand__sub">Construção · Gestão</div>
+      </div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <a class="nav__item" data-tab="clientes" href="#clientes">
+        <span class="nav__dot"></span>
+        <span class="nav__label">Clientes</span>
+        <span class="nav__count" data-count="clientes">—</span>
+      </a>
+      <a class="nav__item" data-tab="orcamentos" href="#orcamentos">
+        <span class="nav__dot"></span>
+        <span class="nav__label">Orçamentos</span>
+        <span class="nav__count" data-count="orcamentos">—</span>
+      </a>
+      <a class="nav__item" data-tab="faturas" href="#faturas">
+        <span class="nav__dot"></span>
+        <span class="nav__label">Faturas</span>
+        <span class="nav__count" data-count="faturas">—</span>
+      </a>
+      <a class="nav__item" data-tab="items" href="#items">
+        <span class="nav__dot"></span>
+        <span class="nav__label">Items Padrão</span>
+        <span class="nav__count" data-count="items">—</span>
+      </a>
+    </nav>
+
+    <div class="sidebar__foot">
+      <div class="kpi">
+        <div class="kpi__label">A receber</div>
+        <div class="kpi__value" id="kpi-pending">€ 0,00</div>
+      </div>
+      <div class="kpi">
+        <div class="kpi__label">Pago este mês</div>
+        <div class="kpi__value" id="kpi-paid">€ 0,00</div>
+      </div>
+      <div class="meta">
+        <span>v 1.0</span>
+        <span class="meta__sep">·</span>
+        <span id="meta-clock">—</span>
+      </div>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <header class="topbar">
+      <div class="crumb">
+        <span class="crumb__root">Painel</span>
+        <span class="crumb__sep">/</span>
+        <span class="crumb__leaf" id="crumb-leaf">Clientes</span>
+      </div>
+      <div class="topbar__search">
+        <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        <input type="text" id="search" placeholder="Procurar nesta vista…" autocomplete="off" />
+        <kbd>/</kbd>
+      </div>
+      <div class="topbar__actions">
+        <button class="btn btn--ghost" id="btn-export" title="Exportar CSV">
+          <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L8 10 M4 7 L8 11 L12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+          Exportar
+        </button>
+        <button class="btn btn--primary" id="btn-new">
+          <span class="btn__plus" aria-hidden="true">+</span>
+          <span id="btn-new-label">Novo cliente</span>
+        </button>
+      </div>
+    </header>
+
+    <section class="view" id="view"></section>
+  </main>
+
+  <!-- Slide-over drawer (form host) -->
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer__scrim" data-close></div>
+    <aside class="drawer__panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <header class="drawer__head">
+        <div>
+          <div class="drawer__eyebrow" id="drawer-eyebrow">Novo</div>
+          <h2 class="drawer__title" id="drawer-title">—</h2>
+        </div>
+        <button class="iconbtn" data-close aria-label="Fechar">
+          <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+        </button>
+      </header>
+      <div class="drawer__body" id="drawer-body"></div>
+    </aside>
+  </div>
+
+  <!-- Confirm dialog -->
+  <div class="confirm" id="confirm" hidden>
+    <div class="confirm__scrim" data-confirm-cancel></div>
+    <div class="confirm__panel" role="alertdialog" aria-modal="true">
+      <h3 class="confirm__title" id="confirm-title">Confirmar</h3>
+      <p class="confirm__body" id="confirm-body">—</p>
+      <div class="confirm__actions">
+        <button class="btn btn--ghost" data-confirm-cancel>Cancelar</button>
+        <button class="btn btn--danger" id="confirm-ok">Eliminar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="/admin/app.js" defer></script>
+</body>
+</html>

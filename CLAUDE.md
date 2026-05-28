@@ -26,6 +26,10 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 
 When Rodrigo says "run local", "start local", "run it locally", "start the app", or any close variant, follow `.claude/LOCAL_RUNBOOK.md`. Those phrases grant permission to start MongoDB with Docker Compose, run the Ktor app with Gradle, watch logs, and verify `/health` and `/ready`.
 
+## Mock Data - "create-mocks"
+
+When Rodrigo says "create-mocks", "create mocks", "seed mocks", or asks to restore mock data after local MongoDB corruption, use `.claude/skills/create-mocks/SKILL.md` or `mocks/mongo/README.md`. Run `mocks/mongo/create-mocks.js` against the local Mongo container, verify the printed counts, and do not drop databases, delete volumes, or touch production data.
+
 ## Local Dev Setup
 1. `cp .env.example .env` and fill WhatsApp Cloud API + OpenRouter keys
 2. `docker compose up -d mongo` — start MongoDB only (port 27017)

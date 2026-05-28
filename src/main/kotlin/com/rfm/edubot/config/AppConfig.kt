@@ -10,6 +10,7 @@ data class AppConfig(
     val openrouter: OpenRouterConfig,
     val mongo: MongoConfig,
     val rateLimit: RateLimitConfig,
+    val pdfStoragePath: String,
 ) {
     data class WhatsAppConfig(
         val verifyToken: String,
@@ -77,6 +78,7 @@ data class AppConfig(
                 openrouter = openRouterConfig,
                 mongo = mongoConfig,
                 rateLimit = rateLimitConfig,
+                pdfStoragePath = config.getString("app.pdf.storagePath"),
             )
         }
 
@@ -101,6 +103,7 @@ data class AppConfig(
                 "app.mongo.database",
                 "app.ratelimit.perUserPerHour",
                 "app.ratelimit.perUserPerDay",
+                "app.pdf.storagePath",
             )
 
             val present = keys.filter { config.hasPath(it) }

@@ -1,6 +1,6 @@
 # Architecture
 
-WhatsApp AI educational bot built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference.
+WhatsApp AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling.
 
 ## Request Flow
 
@@ -13,7 +13,9 @@ sequenceDiagram
     participant P as MessagePipeline
     participant R as RateLimiter
     participant AI as AiClient (OpenRouter)
+    participant CRM as CRM Tools
     participant DB as MongoDB
+    participant PDF as PdfGenerator
 
     WA->>W: POST /webhook (HMAC-signed)
     W->>W: Verify X-Hub-Signature-256
@@ -28,10 +30,20 @@ sequenceDiagram
         P->>R: tryAcquire(waId)
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message
-        P->>AI: complete(contextMessages)
-        AI-->>P: LLM reply (primary → fallback on error)
+        loop max 5 tool iterations
+            P->>AI: complete(contextMessages, crmTools)
+            AI-->>P: text reply or tool_calls
+            P->>CRM: execute tool calls
+            CRM->>DB: clients / quotes / invoices
+            P->>AI: append tool results
+        end
         P->>DB: insert assistant Message
         P->>WA: sendText reply
+        opt quote/invoice created
+            P->>PDF: generate PDF
+            P->>DB: save pdfPath
+            P->>WA: uploadMedia + sendDocument
+        end
         P->>DB: markProcessed(eventId)
     end
 ```
@@ -42,8 +54,9 @@ sequenceDiagram
 graph TD
     subgraph HTTP["HTTP Layer (Ktor/Netty :8080)"]
         WR[WebhookRoutes]
+        AR[AdminRoutes]
         WV[WebhookVerifier]
-        Health["/health  /ready"]
+        Health["/health  /ready  /admin"]
     end
 
     subgraph Messaging
@@ -56,12 +69,14 @@ graph TD
         UR[UserRepository]
         CR[ConversationRepository]
         MR[MessageRepository]
+        CRM[CRM repositories<br/>clients quotes invoices]
         RL[RateLimiter<br/>token bucket]
     end
 
     subgraph External
         AI[AiClient<br/>OpenRouter]
         WC[WhatsAppClient<br/>Graph API v21]
+        PDF[PdfGenerator<br/>PDFBox]
     end
 
     subgraph Persistence
@@ -72,10 +87,12 @@ graph TD
     WR --> DS
     WR --> MQ
     MQ --> MP
-    MP --> UR & CR & MR & RL & DS
+    MP --> UR & CR & MR & CRM & RL & DS
     MP --> AI
     MP --> WC
-    UR & CR & MR & DS --> Mongo
+    MP --> PDF
+    AR --> CRM
+    UR & CR & MR & CRM & DS --> Mongo
     Health --> Mongo
 ```
 
@@ -86,8 +103,10 @@ graph TD
 | `webhook/` | HTTP edge: HMAC signature verification, GET challenge + POST routing |
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
-| `ai/` | OpenRouter client — retry + primary/fallback model |
-| `whatsapp/` | Outbound Graph API client |
+| `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation |
+| `admin/` | Internal admin REST endpoints and static admin panel routing |
+| `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
+| `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
 | `persistence/` | MongoDB wiring, index creation at startup |
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes |
@@ -101,20 +120,28 @@ graph TD
 | `conversations` | One conversation per user, tracks summary + token totals | unique on `userId` |
 | `messages` | Full message history (user + assistant turns) | `conversationId`, `createdAt` |
 | `webhook_events` | Deduplication log — eventId + status | unique on `eventId` |
+| `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
+| `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
+| `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
+| `crm.sequences` | Atomic quote/invoice numbering counters | unique on `name` |
 
 ## Context Building
 
 `MessagePipeline.buildContext()` assembles the LLM prompt in order:
-1. System prompt (`SystemPrompts.V1`)
+1. System prompt (`SystemPrompts.CRM_V1`)
 2. Conversation summary (if any) wrapped in `<previous_context>`
 3. Last 10 persisted messages (user + assistant)
 4. Current user message
+
+When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to OpenRouter. Tool results are appended as `tool` messages until the model returns a final text response or the five-iteration cap is reached.
 
 ## Key Design Decisions
 
 - **Async decoupling** — webhook POST returns 200 immediately; processing happens in a `SupervisorJob` coroutine scope consuming the `Channel`. Backpressure is handled by `Channel.UNLIMITED` (bounded capacity can be set via `MessageQueue(capacity=N)`).
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
+- **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
+- **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath`, then uploaded to WhatsApp as documents and linked from admin APIs.
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
 
 ## Infrastructure

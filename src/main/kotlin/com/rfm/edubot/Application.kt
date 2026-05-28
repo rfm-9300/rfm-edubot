@@ -1,10 +1,17 @@
 package com.rfm.edubot
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.admin.adminRoutes
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
+import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.CrmTools
+import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.PdfGenerator
+import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessagePipeline
 import com.rfm.edubot.messaging.MessageQueue
@@ -56,6 +63,12 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
     val userRepository = UserRepository(mongoModule)
     val conversationRepository = ConversationRepository(mongoModule)
     val messageRepository = MessageRepository(mongoModule)
+    val clientRepository = ClientRepository(mongoModule)
+    val quoteRepository = QuoteRepository(mongoModule)
+    val invoiceRepository = InvoiceRepository(mongoModule)
+    val standardItemRepository = StandardItemRepository(mongoModule)
+    val crmTools = CrmTools(clientRepository, quoteRepository, invoiceRepository, standardItemRepository)
+    kotlinx.coroutines.runBlocking { standardItemRepository.seedDefaults() }
     val deduplicationService = DeduplicationService(mongoModule)
     val rateLimiter = RateLimiter(
         perHour = appConfig.rateLimit.perUserPerHour,
@@ -82,6 +95,12 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
         aiClient = aiClient,
         whatsappClient = whatsappClient,
         deduplicationService = deduplicationService,
+        crmTools = crmTools,
+        clientRepository = clientRepository,
+        quoteRepository = quoteRepository,
+        invoiceRepository = invoiceRepository,
+        pdfGenerator = PdfGenerator(),
+        pdfStoragePath = appConfig.pdfStoragePath,
     )
 
     val pipelineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -128,6 +147,14 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             config = appConfig.whatsapp,
             messageQueue = messageQueue,
             deduplicationService = deduplicationService,
+        )
+        adminRoutes(
+            clients = clientRepository,
+            quotes = quoteRepository,
+            invoices = invoiceRepository,
+            standardItems = standardItemRepository,
+            pdfGenerator = PdfGenerator(),
+            pdfStoragePath = appConfig.pdfStoragePath,
         )
     }
 }

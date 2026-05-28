@@ -40,7 +40,7 @@ data class Metadata(
 
 @Serializable
 data class Contact(
-    val profile: Profile,
+    val profile: Profile? = null,
     @SerialName("wa_id")
     val waId: String,
 )

@@ -48,6 +48,10 @@ Use [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md) as the source of truth.
 
 When Rodrigo says "run local", "start local", "run it locally", "start the app", or any close variant, follow [.claude/LOCAL_RUNBOOK.md](.claude/LOCAL_RUNBOOK.md). Confirm MongoDB, app logs, `/health`, and `/ready` before reporting that local is up.
 
+## Mock Data Intent
+
+When Rodrigo says "create-mocks", "create mocks", "seed mocks", or asks to restore mock data after local MongoDB corruption, run the local mock seed workflow from `mocks/mongo/README.md` or the `create-mocks` skill. Use the existing Mongo container/service, run `mocks/mongo/create-mocks.js`, verify the printed counts, and do not drop databases, delete volumes, or touch production data.
+
 ## Local Dev Setup
 1. `cp .env.example .env` and fill WhatsApp Cloud API + OpenRouter keys
 2. `docker compose up -d mongo` — start MongoDB only (port 27017)

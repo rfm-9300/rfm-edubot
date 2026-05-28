@@ -38,8 +38,10 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation-jvm")
     implementation("io.ktor:ktor-client-serialization-jvm")
     implementation("io.ktor:ktor-client-serialization-jvm")
+    implementation("io.ktor:ktor-server-call-id-jvm")
 
     implementation("org.mongodb:mongodb-driver-kotlin-coroutine:5.2.1")
+    implementation("org.apache.pdfbox:pdfbox:3.0.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")

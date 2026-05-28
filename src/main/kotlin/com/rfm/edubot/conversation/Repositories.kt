@@ -24,7 +24,7 @@ import org.slf4j.LoggerFactory
 import java.util.Date
 
 class UserRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.client.getDatabase("wabot").getCollection<Document>("users")
+    private val collection = mongoModule.database.getCollection<Document>("users")
     private val log = LoggerFactory.getLogger("UserRepository")
 
     suspend fun findByWaId(waId: String): User? {
@@ -80,7 +80,7 @@ class UserRepository(mongoModule: MongoModule) {
         val metadataDoc = Document()
         metadata.forEach { (key, value) -> metadataDoc.append(key, value) }
 
-        return Document()
+        return Document("_id", id)
             .append("waId", waId)
             .append("displayName", displayName)
             .append("locale", locale)
@@ -92,7 +92,7 @@ class UserRepository(mongoModule: MongoModule) {
 }
 
 class ConversationRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.client.getDatabase("wabot").getCollection<Document>("conversations")
+    private val collection = mongoModule.database.getCollection<Document>("conversations")
     private val log = LoggerFactory.getLogger("ConversationRepository")
 
     suspend fun findByWaId(waId: String): Conversation? {
@@ -156,7 +156,7 @@ class ConversationRepository(mongoModule: MongoModule) {
     }
 
     private fun Conversation.toDocument(): Document {
-        return Document()
+        return Document("_id", id)
             .append("userId", userId)
             .append("waId", waId)
             .append("state", state.name)
@@ -170,7 +170,7 @@ class ConversationRepository(mongoModule: MongoModule) {
 }
 
 class MessageRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.client.getDatabase("wabot").getCollection<Document>("messages")
+    private val collection = mongoModule.database.getCollection<Document>("messages")
     private val log = LoggerFactory.getLogger("MessageRepository")
 
     suspend fun insert(message: Message): Message {
@@ -182,6 +182,15 @@ class MessageRepository(mongoModule: MongoModule) {
 
     suspend fun lastN(conversationId: ObjectId, n: Int): List<Message> {
         return collection.find(Filters.eq("conversationId", conversationId))
+            .sort(Document("createdAt", -1))
+            .limit(n)
+            .toList()
+            .map { it.toMessage() }
+            .reversed()
+    }
+
+    suspend fun lastNByWaId(waId: String, n: Int): List<Message> {
+        return collection.find(Filters.eq("waId", waId))
             .sort(Document("createdAt", -1))
             .limit(n)
             .toList()
@@ -236,7 +245,7 @@ class MessageRepository(mongoModule: MongoModule) {
             Document("prompt", it.prompt).append("completion", it.completion)
         }
 
-        return Document()
+        return Document("_id", id)
             .append("conversationId", conversationId)
             .append("waId", waId)
             .append("role", role.name)

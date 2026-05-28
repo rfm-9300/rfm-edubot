@@ -5,10 +5,11 @@ description: Start the WhatsApp bot's local dev environment (MongoDB + Ktor app 
 
 # Run Local
 
-Project-specific runbook for booting and verifying the WhatsApp bot dev stack on this machine. The stack is two processes:
+Project-specific runbook for booting and verifying the WhatsApp bot dev stack on this machine. The stack is three processes:
 
 - **MongoDB** — `mongo:7` container on port `27017` (via `docker compose`)
 - **Ktor app** — JVM process on port `8080` started by `./gradlew run`
+- **Cloudflare quick tunnel** — `cloudflared tunnel --url http://localhost:8080` exposing the Meta webhook URL
 
 Everything in this skill assumes the working directory is the repo root (`/Users/rodrigomartins/projects/Whatsapp-bot`). All paths below are relative to that.
 
@@ -88,19 +89,50 @@ curl -fsS http://localhost:8080/ready
 
 Both must pass. If `/ready` returns 503, the app is up but can't talk to Mongo — go to the failure table.
 
-### 5. Report
+### 5. Start or verify Cloudflare tunnel
+
+Always provide Rodrigo with the current Cloudflare URL after the app is healthy. Meta's webhook callback URL for this project is the tunnel base URL plus `/webhook`.
+
+First check whether a tunnel is already running:
+
+```bash
+pgrep -fl cloudflared
+```
+
+If no tunnel is running, start one in the background and write logs to the shared temp location:
+
+```bash
+cloudflared tunnel --url http://localhost:8080 > /var/folders/4w/83nr6q7x7fz3nwg5l_5lzd6c0000gn/T/opencode/whatsapp-bot-cloudflared.log 2>&1
+```
+
+Extract the quick tunnel URL from the log:
+
+```bash
+rg -o 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' /var/folders/4w/83nr6q7x7fz3nwg5l_5lzd6c0000gn/T/opencode/whatsapp-bot-cloudflared.log
+```
+
+Report both values:
+
+- Cloudflare tunnel base URL: `https://<generated>.trycloudflare.com`
+- Meta webhook callback URL: `https://<generated>.trycloudflare.com/webhook`
+
+If the log has an old URL but `pgrep -fl cloudflared` shows no running process, treat the old URL as stale, start a fresh tunnel, and report the new URL only.
+
+### 6. Report
 
 Tell the user concisely:
 - Mongo: up (container id) / Ktor: up on :8080
 - `/health` and `/ready` results
+- Cloudflare tunnel base URL and full Meta webhook callback URL (`/webhook`) — always include these when local is running
 - Any warnings spotted in logs (failed signature verifies, OpenRouter errors, rate-limit warns) — surface but don't necessarily fix unless asked
 
-Leave the `./gradlew run` background shell alive so the user can keep using it. Tell the user how to stop it (next section).
+Leave the `./gradlew run` and `cloudflared` background shells alive so the user can keep using them. Tell the user how to stop them (next section).
 
 ## Stopping the stack
 
 ```bash
 # Stop the app: kill the background gradle shell (use the id from phase 3)
+# Stop the tunnel: kill the background cloudflared process (use pgrep -fl cloudflared to find it)
 # Stop mongo:
 docker compose down
 ```
@@ -137,14 +169,17 @@ test -f .env && docker info >/dev/null 2>&1 && echo ok
 # Start stack
 docker compose up -d mongo
 ./gradlew run                     # foreground; use run_in_background:true from the Bash tool
+cloudflared tunnel --url http://localhost:8080
 
 # Verify
 curl -fsS http://localhost:8080/health
 curl -fsS http://localhost:8080/ready
+rg -o 'https://[-a-zA-Z0-9.]+\.trycloudflare\.com' /var/folders/4w/83nr6q7x7fz3nwg5l_5lzd6c0000gn/T/opencode/whatsapp-bot-cloudflared.log
 
 # Inspect
 docker compose logs --tail=100 mongo
 lsof -i :8080 -sTCP:LISTEN -n -P
+pgrep -fl cloudflared
 ./gradlew --status
 
 # Stop

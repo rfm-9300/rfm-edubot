@@ -8,7 +8,7 @@ Triggered when Rodrigo says "make deploy", "make deployment", "deploy to VPS", "
 |-----------|---------|-------|
 | App | Docker image | `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}` |
 | MongoDB | Docker Compose | Persistent `mongo_data` volume |
-| Caddy | Docker Compose | Reverse proxy and TLS |
+| Website Caddy | Existing VPS container | Reverse proxy and TLS for public access |
 
 ## Production Target
 
@@ -65,7 +65,7 @@ ssh hillsong-vps "mkdir -p ~/whatsapp-bot"
 Copy non-secret deployment files to the VPS:
 
 ```bash
-scp docker-compose.prod.yml Caddyfile hillsong-vps:~/whatsapp-bot/
+scp docker-compose.prod.yml hillsong-vps:~/whatsapp-bot/
 ```
 
 Do not copy `.env` unless Rodrigo explicitly asks. Production secrets should already live on the VPS.
@@ -92,7 +92,6 @@ Check logs:
 
 ```bash
 ssh hillsong-vps "cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml logs --tail=100 app"
-ssh hillsong-vps "cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml logs --tail=50 caddy"
 ```
 
 Probe locally on the VPS:
@@ -102,6 +101,45 @@ ssh hillsong-vps "curl -fsS http://localhost:8080/health && echo && curl -fsS ht
 ```
 
 Report success only after containers are up and health checks pass.
+
+## Public Admin Routing
+
+The VPS already runs the `websites-thebots-web` Caddy container on ports `80/443`. The bot production compose intentionally does not publish app port `8080`; public traffic reaches it through a private Docker network shared with the website Caddy container.
+
+Create the shared proxy network once:
+
+```bash
+ssh hillsong-vps "docker network create web_proxy || true"
+```
+
+Add a path route to `/root/websites-thebots/Caddyfile` when exposing the admin panel:
+
+```caddy
+thebotslab.eu {
+  handle /admin* {
+    reverse_proxy whatsapp-bot-app-1:8080
+  }
+
+  handle /webhook* {
+    reverse_proxy whatsapp-bot-app-1:8080
+  }
+}
+```
+
+The website Caddy compose must join the same external network:
+
+```yaml
+networks:
+  default:
+  web_proxy:
+    external: true
+```
+
+Then reload the website Caddy container:
+
+```bash
+ssh hillsong-vps "cd ~/websites-thebots && docker compose exec web caddy reload --config /etc/caddy/Caddyfile"
+```
 
 ## Failure Rules
 

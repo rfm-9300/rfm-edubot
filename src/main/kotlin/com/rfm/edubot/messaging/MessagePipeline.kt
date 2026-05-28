@@ -1,8 +1,14 @@
 package com.rfm.edubot.messaging
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
+import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.CrmTools
+import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.PdfGenerator
+import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
@@ -16,7 +22,17 @@ import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.whatsapp.WhatsAppClient
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
+import org.bson.types.ObjectId
+import java.nio.file.Files
+import java.nio.file.Path
 
 class MessagePipeline(
     private val users: UserRepository,
@@ -26,8 +42,15 @@ class MessagePipeline(
     private val aiClient: AiClient,
     private val whatsappClient: WhatsAppClient,
     private val deduplicationService: DeduplicationService,
+    private val crmTools: CrmTools,
+    private val clientRepository: ClientRepository,
+    private val quoteRepository: QuoteRepository,
+    private val invoiceRepository: InvoiceRepository,
+    private val pdfGenerator: PdfGenerator,
+    private val pdfStoragePath: String,
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
+    private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
     suspend fun handle(inbound: InboundMessage) {
         try {
@@ -62,14 +85,145 @@ class MessagePipeline(
             )
             messages.insert(userMessage)
 
-            val contextMessages = buildContext(conversation, inbound.messageText)
+            val contextMessages = buildContext(conversation, inbound.messageText).toMutableList()
+            val confirmationReply = isConfirmationReplyToCrmPrompt(inbound.messageText, contextMessages)
+            val continuingCrm = isContinuingCrmFlow(contextMessages)
+            if (confirmationReply) {
+                contextMessages.removeAt(contextMessages.lastIndex)
+                contextMessages.add(
+                    ChatMessage(
+                        role = "system",
+                        content = "The user's last message is an explicit confirmation for the pending CRM action. Continue from the previous assistant message and use the CRM tools now. Do not say a client, quote, invoice, or payment was created unless a tool result confirms it."
+                    )
+                )
+                contextMessages.add(ChatMessage(role = "user", content = "pode gerar. Confirmo os dados anteriores."))
+            }
+            // When the bot is still collecting data (phone, service, price), never inject a
+            // synthetic confirmation — just let the AI see the reply in context and decide
+            // what to ask for next. Tools stay available (via useTools below) but are not forced.
+            val pdfReply = if (isPdfRequest(inbound.messageText)) {
+                try {
+                    sendLatestQuotePdf(user.waId, contextMessages)
+                } catch (e: Exception) {
+                    log.error("Failed to send requested PDF: waId={}, error={}", user.waId, e.message, e)
+                    "Encontrei o orçamento, mas não consegui enviar o PDF pelo WhatsApp agora. Tente novamente em alguns segundos."
+                }
+            } else {
+                null
+            }
+            if (pdfReply != null) {
+                val assistantMessage = Message(
+                    conversationId = conversation.id,
+                    waId = user.waId,
+                    role = UserRole.ASSISTANT,
+                    content = MessageContent.Text(pdfReply),
+                    status = MessageStatus.DELIVERED,
+                    createdAt = SystemClock.now(),
+                )
+                messages.insert(assistantMessage)
+                whatsappClient.sendText(user.waId, pdfReply)
+                conversations.bumpActivity(conversation.id, null)
+                deduplicationService.markProcessed(inbound.eventId)
+                log.info("Pipeline completed with requested PDF: waId={}", user.waId)
+                return
+            }
 
-            val aiResponse = aiClient.complete(contextMessages)
+            var replyText = "Sorry, I couldn't process that."
+            var tokenUsage: TokenUsage? = null
+            var responseId: String? = null
+            val createdDocuments = mutableListOf<CreatedDocument>()
 
-            val replyText = aiResponse.choices.firstOrNull()?.message?.content ?: "Sorry, I couldn't process that."
+            // Only true when user gave an explicit confirmation ("sim"/"pode gerar"/etc.) after
+            // seeing the full summary. Providing partial data (phone, service) does NOT count —
+            // the AI must collect everything and show a summary before tools are forced.
+            val isConfirmedCrmAction = confirmationReply
 
-            val tokenUsage = aiResponse.usage?.let {
-                TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens)
+            var completed = false
+            var iterations = 0
+            // Tools must be available when confirmed, plus whenever message has CRM keywords or mid-flow.
+            var useTools = shouldUseCrmTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
+            var feedbackSent = false
+
+            // Send immediate feedback before the first AI call when we know tools will run,
+            // so the user doesn't wait in silence during the ~4-5s model latency.
+            if (isConfirmedCrmAction) {
+                whatsappClient.sendText(user.waId, "Um momento, processando...")
+                feedbackSent = true
+            }
+
+            while (!completed && iterations < 5) {
+                iterations += 1
+                val forceTools = useTools && isConfirmedCrmAction && iterations == 1
+                val aiResponse = try {
+                    aiClient.complete(contextMessages, if (useTools) crmTools.definitions else emptyList(), forceToolUse = forceTools)
+                } catch (e: Exception) {
+                    if (useTools && e.message?.contains("tool", ignoreCase = true) == true) {
+                        log.warn("AI model rejected tool use; retrying without tools: {}", e.message)
+                        useTools = false
+                        aiClient.complete(contextMessages, emptyList())
+                    } else {
+                        throw e
+                    }
+                }
+                when (aiResponse) {
+                    is AiResponse.Text -> {
+                        replyText = aiResponse.content
+                        tokenUsage = aiResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) }
+                        responseId = aiResponse.responseId
+                        completed = true
+                    }
+                    is AiResponse.ToolUse -> {
+                        if (!feedbackSent) {
+                            whatsappClient.sendText(user.waId, "Um momento, processando...")
+                            feedbackSent = true
+                        } else if (iterations == 2) {
+                            whatsappClient.sendText(user.waId, "Quase pronto, gerando o documento...")
+                        }
+                        tokenUsage = aiResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) }
+                        responseId = aiResponse.responseId
+                        contextMessages.add(aiResponse.message)
+                        for (call in aiResponse.calls) {
+                            log.info("Executing CRM tool: name={}, id={}", call.name, call.id)
+                            val result = try {
+                                if (requiresExplicitConfirmation(call.name) && !isConfirmedCrmAction && !hasExplicitConfirmation(inbound.messageText, contextMessages)) {
+                                    buildJsonObject {
+                                        put("error", "confirmation_required")
+                                        put("message", "Before creating or updating records, summarize the proposed data and ask the user to confirm with 'pode gerar' or 'confirmo'.")
+                                    }
+                                } else {
+                                    crmTools.execute(call)
+                                }
+                            } catch (e: Exception) {
+                                log.error("CRM tool failed: name={}, error={}", call.name, e.message, e)
+                                buildJsonObject {
+                                    put("error", "tool_failed")
+                                    put("tool", call.name)
+                                    put("message", e.message ?: "Unknown CRM tool failure")
+                                    put("instruction", "Do not claim this action succeeded. If enough data exists, retry with corrected tool arguments. Otherwise explain the concrete failure briefly.")
+                                }
+                            }
+                            log.info("CRM tool result: name={}, result={}", call.name, json.encodeToString(result))
+                            result.createdDocument()?.let { createdDocuments.add(it) }
+                            contextMessages.add(ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id))
+                        }
+                    }
+                }
+            }
+
+            if (!completed) {
+                log.warn("AI tool loop ended without final text: waId={}, iterations={}", inbound.waId, iterations)
+                val finalResponse = aiClient.complete(
+                    contextMessages + ChatMessage(
+                        role = "system",
+                        content = "Do not call tools now. Reply to the user in Portuguese with the current result. If a tool returned confirmation_required, ask for confirmation before any record is created."
+                    ),
+                    emptyList(),
+                )
+                if (finalResponse is AiResponse.Text) {
+                    replyText = finalResponse.content
+                    tokenUsage = finalResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) } ?: tokenUsage
+                    responseId = finalResponse.responseId
+                }
             }
 
             val assistantMessage = Message(
@@ -78,7 +232,7 @@ class MessagePipeline(
                 role = UserRole.ASSISTANT,
                 content = MessageContent.Text(replyText),
                 tokens = tokenUsage,
-                model = aiResponse.id,
+                model = responseId,
                 costUsd = 0.0,
                 status = MessageStatus.DELIVERED,
                 createdAt = SystemClock.now(),
@@ -86,6 +240,7 @@ class MessagePipeline(
             messages.insert(assistantMessage)
 
             whatsappClient.sendText(user.waId, replyText)
+            sendCreatedDocuments(user.waId, createdDocuments)
 
             conversations.bumpActivity(conversation.id, tokenUsage)
 
@@ -106,7 +261,7 @@ class MessagePipeline(
     private suspend fun buildContext(conversation: Conversation, newUserMessage: String): List<ChatMessage> {
         val contextMessages = mutableListOf<ChatMessage>()
 
-        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.V1))
+        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
 
         conversation.summary?.let { summary ->
             contextMessages.add(
@@ -117,7 +272,7 @@ class MessagePipeline(
             )
         }
 
-        val recentMessages = messages.lastN(conversation.id, 10)
+        val recentMessages = messages.lastNByWaId(conversation.waId, 10)
         for (msg in recentMessages) {
             when (msg.content) {
                 is MessageContent.Text -> {
@@ -136,4 +291,227 @@ class MessagePipeline(
 
         return contextMessages
     }
+
+    private suspend fun sendCreatedDocuments(waId: String, createdDocuments: List<CreatedDocument>) {
+        for (created in createdDocuments.distinctBy { it.type to it.id }) {
+            when (created.type) {
+                "quote" -> {
+                    val quote = quoteRepository.findById(ObjectId(created.id)) ?: continue
+                    val client = clientRepository.findById(quote.clientId) ?: continue
+                    val bytes = pdfGenerator.generateQuote(quote, client)
+                    val filename = "Orcamento ${quote.number}.pdf"
+                    val path = savePdf("quotes", filename, bytes)
+                    quoteRepository.setPdfPath(quote.id, path.toString())
+                    val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
+                    whatsappClient.sendDocument(waId, mediaId, filename)
+                }
+                "invoice" -> {
+                    val invoice = invoiceRepository.findById(ObjectId(created.id)) ?: continue
+                    val client = clientRepository.findById(invoice.clientId) ?: continue
+                    val bytes = pdfGenerator.generateInvoice(invoice, client)
+                    val filename = "Fatura ${invoice.number}.pdf"
+                    val path = savePdf("invoices", filename, bytes)
+                    invoiceRepository.setPdfPath(invoice.id, path.toString())
+                    val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
+                    whatsappClient.sendDocument(waId, mediaId, filename)
+                }
+            }
+        }
+    }
+
+    private fun savePdf(folder: String, filename: String, bytes: ByteArray): Path {
+        val directory = Path.of(pdfStoragePath, folder)
+        Files.createDirectories(directory)
+        val path = directory.resolve(filename)
+        Files.write(path, bytes)
+        return path
+    }
+
+    private suspend fun sendLatestQuotePdf(waId: String, contextMessages: List<ChatMessage>): String? {
+        val client = inferClientFromContext(contextMessages) ?: return null
+        val quote = quoteRepository.list(client.id).firstOrNull() ?: return null
+        val bytes = pdfGenerator.generateQuote(quote, client)
+        val filename = "Orcamento ${quote.number}.pdf"
+        val path = savePdf("quotes", filename, bytes)
+        quoteRepository.setPdfPath(quote.id, path.toString())
+        val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
+        whatsappClient.sendDocument(waId, mediaId, filename)
+        return "Enviei o PDF do orçamento ${quote.number}."
+    }
+
+    private suspend fun inferClientFromContext(contextMessages: List<ChatMessage>): com.rfm.edubot.crm.model.Client? {
+        for (message in contextMessages.asReversed()) {
+            val content = message.content ?: continue
+            for (match in clientNameRegex.findAll(content)) {
+                val name = match.groupValues[1].trim()
+                val client = clientRepository.search(name).firstOrNull { it.name.equals(name, ignoreCase = true) }
+                if (client != null) return client
+            }
+        }
+        return null
+    }
+
+    private fun JsonObject.createdDocument(): CreatedDocument? {
+        val type = get("type")?.jsonPrimitive?.contentOrNull
+        val id = get("id")?.jsonPrimitive?.contentOrNull
+        if (type == null || id == null) return null
+        val created = get("created")?.jsonPrimitive?.contentOrNull == "true"
+        val updated = get("updated")?.jsonPrimitive?.contentOrNull == "true"
+        return if (created || updated) CreatedDocument(type, id) else null
+    }
+
+    private fun shouldUseCrmTools(message: String): Boolean {
+        val text = message.lowercase()
+        return listOf(
+            "orcamento",
+            "orçamento",
+            "fatura",
+            "factura",
+            "cliente",
+            "servico",
+            "serviço",
+            "material",
+            "pago",
+            "pagamento",
+            "pdf",
+            "pode gerar",
+            "confirmo",
+            "cadê",
+            "cade",
+            "conseguiu",
+            "gerou",
+            "soma",
+            "total",
+            "ranking",
+            "resumo",
+            "quanto",
+            "quanto ",
+            "relatorio",
+            "relatório",
+            "atualiza",
+            "atualizar",
+            "modifica",
+            "modificar",
+            "altera",
+            "alterar",
+            "muda",
+            "mudar",
+            "corrige",
+            "corrigir",
+            "remove",
+            "remover",
+            "adiciona",
+            "adicionar",
+        ).any { it in text }
+    }
+
+    private fun requiresExplicitConfirmation(toolName: String): Boolean = toolName in setOf(
+        "create_client",
+        "create_quote",
+        "update_quote",
+        "create_invoice",
+        "mark_invoice_paid",
+    )
+
+    private fun hasExplicitConfirmation(message: String, contextMessages: List<ChatMessage>): Boolean {
+        val text = message.lowercase()
+        if (listOf(
+            "pode gerar",
+            "pode criar",
+            "pode emitir",
+            "confirmo",
+            "confirmado",
+            "aprovado",
+            "sim, gerar",
+            "sim gerar",
+            "gerar agora",
+            "emitir agora",
+        ).any { it in text }) {
+            return true
+        }
+        // Bot asked for specific data (name, phone) and user provided it — counts as confirmation
+        if (isContinuingCrmFlow(contextMessages)) return true
+        return isConfirmationReplyToCrmPrompt(message, contextMessages)
+    }
+
+    private fun isConfirmationReplyToCrmPrompt(message: String, contextMessages: List<ChatMessage>): Boolean {
+        val text = message.trim().lowercase()
+        if (text !in setOf("sim", "s", "ok", "pode", "isso", "certo")) return false
+        // If the bot is still collecting missing data, "sim" is not a confirmation.
+        if (isContinuingCrmFlow(contextMessages)) return false
+        val recentAssistantText = contextMessages
+            .asReversed()
+            .filter { it.role == "assistant" }
+            .take(3)
+            .joinToString("\n") { it.content.orEmpty().lowercase() }
+        return listOf(
+            "confirma",
+            "confirme",
+            "prosseguir",
+            "pode gerar",
+            "gerar o orçamento",
+            "gerar o orcamento",
+            "criar o orçamento",
+            "criar o orcamento",
+            "criar o cliente",
+        ).any { it in recentAssistantText }
+    }
+
+    private fun isContinuingCrmFlow(contextMessages: List<ChatMessage>): Boolean {
+        val lastAssistant = contextMessages
+            .asReversed()
+            .firstOrNull { it.role == "assistant" }
+            ?.content?.lowercase() ?: return false
+        return listOf(
+            // bot asking for missing data
+            "nome completo",
+            "informe um telefone",
+            "informe o telefone",
+            "telefone para o cadastro",
+            "número de telefone",
+            "numero de telefone",
+            "preciso do telefone",
+            "preciso do número",
+            "telefone do cliente",
+            "qual o telefone",
+            "qual é o telefone",
+            "forneça o telefone",
+            "forneca o telefone",
+            "confirme o nome",
+            "informe o nome",
+            "pode me informar",
+            "informe um e-mail",
+            // bot presenting a summary waiting for confirmation
+            "confirma a criação",
+            "confirma a criacao",
+            "confirme os dados",
+            "confirma os dados",
+            "criar o cliente",
+            "criação do cliente",
+            "criacao do cliente",
+            "posso prosseguir",
+            "posso criar",
+            "aguardo sua confirmação",
+            "aguardo sua confirmacao",
+            "se estiver tudo certo",
+            // bot asking if user wants to create a not-found client
+            "não encontrei",
+            "nao encontrei",
+            "deseja criar",
+            "quer criar",
+            "criar este cliente",
+            "criar esse cliente",
+            "você deseja criar",
+            "voce deseja criar",
+        ).any { it in lastAssistant }
+    }
+
+    private fun isPdfRequest(message: String): Boolean {
+        val text = message.lowercase()
+        return "pdf" in text && listOf("me da", "me dá", "manda", "envia", "enviar", "quero", "gerar").any { it in text }
+    }
+
+    private val clientNameRegex = Regex("cliente\\s+[\\\"“”']([^\\\"“”']+)[\\\"“”']", RegexOption.IGNORE_CASE)
+
+    private data class CreatedDocument(val type: String, val id: String)
 }
