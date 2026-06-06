@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Tenant Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/admin/style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true">AI</div>
+      <div class="brand__text"><div class="brand__name" id="brand-name">Dashboard</div><div class="brand__sub" id="brand-sub">Chatbot · Dados</div></div>
+    </div>
+    <nav class="nav" id="nav"></nav>
+    <div class="sidebar__foot">
+      <div class="kpi"><div class="kpi__label">Mensagens</div><div class="kpi__value" id="kpi-messages">—</div></div>
+      <div class="kpi"><div class="kpi__label">Contactos</div><div class="kpi__value" id="kpi-users">—</div></div>
+      <div class="meta"><span id="principal-type">—</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
+    </div>
+  </aside>
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb"><span class="crumb__root">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
+      <div class="topbar__search"><input type="text" id="search" placeholder="Procurar…" autocomplete="off" /><kbd>/</kbd></div>
+      <div class="topbar__actions"><button class="btn btn--ghost" id="btn-logout">Sair</button><button class="btn btn--primary" id="btn-new" hidden>Novo</button></div>
+    </header>
+    <section class="view" id="view"></section>
+  </main>
+  <div class="drawer" id="drawer" hidden><div class="drawer__scrim" data-close></div><aside class="drawer__panel"><header class="drawer__head"><div><div class="drawer__eyebrow">Dashboard</div><h2 class="drawer__title" id="drawer-title">—</h2></div><button class="iconbtn" data-close>×</button></header><div class="drawer__body" id="drawer-body"></div></aside></div>
+  <div class="toast" id="toast" hidden></div>
+  <script src="/app/app.js" defer></script>
+</body>
+</html>

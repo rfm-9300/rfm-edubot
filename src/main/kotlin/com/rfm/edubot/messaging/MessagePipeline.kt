@@ -48,6 +48,7 @@ class MessagePipeline(
     private val invoiceRepository: InvoiceRepository,
     private val pdfGenerator: PdfGenerator,
     private val pdfStoragePath: String,
+    private val openrouterModel: String? = null,
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -75,6 +76,7 @@ class MessagePipeline(
             val conversation = conversations.findOrCreate(user.id, inbound.waId)
 
             val userMessage = Message(
+                tenantId = inbound.tenantId,
                 conversationId = conversation.id,
                 waId = user.waId,
                 role = UserRole.USER,
@@ -113,6 +115,7 @@ class MessagePipeline(
             }
             if (pdfReply != null) {
                 val assistantMessage = Message(
+                    tenantId = inbound.tenantId,
                     conversationId = conversation.id,
                     waId = user.waId,
                     role = UserRole.ASSISTANT,
@@ -155,12 +158,12 @@ class MessagePipeline(
                 iterations += 1
                 val forceTools = useTools && isConfirmedCrmAction && iterations == 1
                 val aiResponse = try {
-                    aiClient.complete(contextMessages, if (useTools) crmTools.definitions else emptyList(), forceToolUse = forceTools)
+                    aiClient.complete(contextMessages, if (useTools) crmTools.definitions else emptyList(), forceToolUse = forceTools, modelOverride = openrouterModel)
                 } catch (e: Exception) {
                     if (useTools && e.message?.contains("tool", ignoreCase = true) == true) {
                         log.warn("AI model rejected tool use; retrying without tools: {}", e.message)
                         useTools = false
-                        aiClient.complete(contextMessages, emptyList())
+                        aiClient.complete(contextMessages, emptyList(), modelOverride = openrouterModel)
                     } else {
                         throw e
                     }
@@ -218,6 +221,7 @@ class MessagePipeline(
                         content = "Do not call tools now. Reply to the user in Portuguese with the current result. If a tool returned confirmation_required, ask for confirmation before any record is created."
                     ),
                     emptyList(),
+                    modelOverride = openrouterModel,
                 )
                 if (finalResponse is AiResponse.Text) {
                     replyText = finalResponse.content
@@ -227,6 +231,7 @@ class MessagePipeline(
             }
 
             val assistantMessage = Message(
+                tenantId = inbound.tenantId,
                 conversationId = conversation.id,
                 waId = user.waId,
                 role = UserRole.ASSISTANT,

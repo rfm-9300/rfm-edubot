@@ -33,6 +33,8 @@ dependencies {
     implementation("io.ktor:ktor-server-call-logging-jvm")
     implementation("io.ktor:ktor-server-status-pages-jvm")
     implementation("io.ktor:ktor-server-config-yaml-jvm")
+    implementation("io.ktor:ktor-server-auth-jvm")
+    implementation("io.ktor:ktor-server-auth-jwt-jvm")
     implementation("io.ktor:ktor-client-core-jvm")
     implementation("io.ktor:ktor-client-cio-jvm")
     implementation("io.ktor:ktor-client-content-negotiation-jvm")
@@ -48,6 +50,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.9.0")
 
     implementation("com.typesafe:config:1.4.3")
+    implementation("at.favre.lib:bcrypt:0.10.2")
 
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 

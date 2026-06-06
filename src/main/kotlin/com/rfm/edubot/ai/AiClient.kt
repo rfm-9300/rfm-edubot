@@ -115,12 +115,12 @@ class AiClient(
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true }
     private val log = LoggerFactory.getLogger("AiClient")
 
-    suspend fun complete(messages: List<ChatMessage>, tools: List<ToolDefinition> = emptyList(), forceToolUse: Boolean = false): AiResponse {
+    suspend fun complete(messages: List<ChatMessage>, tools: List<ToolDefinition> = emptyList(), forceToolUse: Boolean = false, modelOverride: String? = null): AiResponse {
         var lastException: Exception? = null
 
         for (attempt in 1..maxRetries) {
             try {
-                val model = if (attempt > 1) fallbackModel else primaryModel
+                val model = modelOverride?.takeIf { it.isNotBlank() } ?: if (attempt > 1) fallbackModel else primaryModel
                 return executeRequest(model, messages, tools, forceToolUse).toAiResponse()
             } catch (e: Exception) {
                 lastException = e

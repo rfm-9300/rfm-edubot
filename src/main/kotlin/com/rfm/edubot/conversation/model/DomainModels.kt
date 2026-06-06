@@ -22,6 +22,7 @@ enum class ConversationState {
 
 data class User(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val waId: String,
     val displayName: String? = null,
     val locale: String = "pt_BR",
@@ -33,6 +34,7 @@ data class User(
 
 data class Conversation(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val userId: ObjectId,
     val waId: String,
     val state: ConversationState = ConversationState.ACTIVE,
@@ -46,6 +48,7 @@ data class Conversation(
 
 data class Message(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val conversationId: ObjectId,
     val waId: String,
     val role: UserRole,

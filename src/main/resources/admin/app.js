@@ -1,14 +1,27 @@
-/* ISAL · Painel de Gestão — app.js · vanilla JS, backend API */
+/* CRM · Painel de Gestão — app.js · vanilla JS, backend API */
 
 /* ----------  API  ---------- */
 
-const API_BASE = '/admin/api';
+const token = localStorage.getItem('adminToken');
+const tenantSlug = new URLSearchParams(location.search).get('tenant');
+
+if (!tenantSlug || !token) {
+  location.replace('/backoffice/');
+}
+
+const API_BASE = `/admin/api/tenants/${encodeURIComponent(tenantSlug)}`;
 
 async function api(path, options = {}) {
+  const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` };
   const res = await fetch(API_BASE + path, {
-    headers: options.body ? { 'Content-Type': 'application/json' } : {},
     ...options,
+    headers: { ...headers, ...(options.headers || {}) },
   });
+  if (res.status === 401) {
+    localStorage.removeItem('adminToken');
+    location.replace('/backoffice/');
+    return;
+  }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   if (res.status === 204) return null;
   return res.json();
@@ -125,9 +138,18 @@ function pdfLink(id, type, hasPdf, label) {
       <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
       pendente</span>`;
   }
-  return `<a class="pdf" href="/admin/api/${type}/${encodeURIComponent(id)}/pdf" target="_blank">
+  return `<button class="pdf" type="button" data-pdf-url="${API_BASE}/${type}/${encodeURIComponent(id)}/pdf">
     <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="5.5" y="10" font-family="monospace" font-size="3.6" text-anchor="middle" fill="currentColor">PDF</text></svg>
-    ${escapeHTML(label)}</a>`;
+    ${escapeHTML(label)}</button>`;
+}
+
+async function openPdf(url) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  window.open(objectUrl, '_blank');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
 }
 
 /* ----------  TOAST + CONFIRM  ---------- */
@@ -259,6 +281,12 @@ function render() {
   const view = $('#view');
   view.innerHTML = '';
   TABS[activeTab].render(view);
+  view.querySelectorAll('[data-pdf-url]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try { await openPdf(btn.dataset.pdfUrl); }
+      catch (e) { toast(`Erro PDF: ${e.message}`); }
+    });
+  });
 }
 
 /* ============================================================
@@ -896,6 +924,16 @@ async function deleteItem(id) {
    ============================================================ */
 
 async function init() {
+  try {
+    const tenant = await api('');
+    document.title = `${tenant.name} · Painel de Gestão`;
+    $('#brand-name').textContent = tenant.name;
+    $('#brand-sub').textContent = `${tenant.slug} · CRM`;
+  } catch (e) {
+    $('#view').innerHTML = `<div class="empty"><p class="empty__title">Tenant inválido</p><p class="empty__desc">Volte ao backoffice e abra um CRM válido.</p></div>`;
+    return;
+  }
+
   $$('.nav__item').forEach(a => {
     a.addEventListener('click', e => { e.preventDefault(); setActive(a.dataset.tab); });
   });
