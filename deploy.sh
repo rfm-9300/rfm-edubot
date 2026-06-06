@@ -16,5 +16,5 @@ echo "Image pushed: ${FULL_IMAGE_NAME}"
 echo
 echo "Next deploy steps:"
 echo "  ssh hillsong-vps 'mkdir -p ~/whatsapp-bot'"
-echo "  scp docker-compose.prod.yml Caddyfile hillsong-vps:~/whatsapp-bot/"
+echo "  scp docker-compose.prod.yml hillsong-vps:~/whatsapp-bot/"
 echo "  ssh hillsong-vps 'cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml down && docker compose -f docker-compose.prod.yml up -d'"

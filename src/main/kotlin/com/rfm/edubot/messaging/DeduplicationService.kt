@@ -7,6 +7,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.datetime.Clock
 import org.bson.Document
+import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 import java.util.Date
 
@@ -15,7 +16,7 @@ class DeduplicationService(mongoModule: MongoModule) {
     private val mutex = Mutex()
     private val log = LoggerFactory.getLogger("DeduplicationService")
 
-    suspend fun isDuplicate(eventId: String, rawPayload: String): Boolean {
+    suspend fun isDuplicate(eventId: String, rawPayload: String, tenantId: ObjectId? = null): Boolean {
         return mutex.withLock {
             val now = Date()
             val filter = Filters.eq("eventId", eventId)
@@ -23,6 +24,7 @@ class DeduplicationService(mongoModule: MongoModule) {
                 Document("eventId", eventId)
                     .append("type", "message")
                     .append("rawPayload", rawPayload)
+                    .append("tenantId", tenantId)
                     .append("receivedAt", now)
                     .append("status", "received")
             )

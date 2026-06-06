@@ -14,9 +14,11 @@ import kotlin.test.assertTrue
 class PdfGeneratorTest {
 
     private val generator = PdfGenerator()
+    private val tenantId = ObjectId()
 
     private val client = Client(
         id = ObjectId(),
+        tenantId = tenantId,
         number = "CLT-001",
         name = "Cliente Teste",
         phone = "+351 900 000 000",
@@ -56,6 +58,7 @@ class PdfGeneratorTest {
 
     private fun quote(items: List<com.rfm.edubot.crm.model.LineItem>) = Quote(
         id = ObjectId(),
+        tenantId = tenantId,
         number = "ORC-TEST",
         clientId = client.id,
         items = items,

@@ -1,45 +1,20 @@
 package com.rfm.edubot.admin
 
-import com.rfm.edubot.crm.ClientRepository
-import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
-import com.rfm.edubot.crm.QuoteRepository
-import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
-import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.Quote
-import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.crm.StandardItem
-import io.ktor.http.ContentType
-import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.call
-import io.ktor.server.request.receive
-import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
-import io.ktor.server.response.respondRedirect
-import io.ktor.server.response.respondText
-import io.ktor.server.routing.Route
-import io.ktor.server.routing.delete
-import io.ktor.server.routing.get
-import io.ktor.server.routing.patch
-import io.ktor.server.routing.post
-import io.ktor.server.routing.route
+import io.ktor.http.*
+import io.ktor.server.application.*
+import io.ktor.server.response.*
+import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import kotlinx.datetime.LocalDate
-import org.bson.types.ObjectId
 import java.nio.file.Files
 import java.nio.file.Path
 
-fun Route.adminRoutes(
-    clients: ClientRepository,
-    quotes: QuoteRepository,
-    invoices: InvoiceRepository,
-    standardItems: StandardItemRepository,
-    pdfGenerator: PdfGenerator,
-    pdfStoragePath: String,
-) {
+fun Route.adminRoutes() {
     get("/admin") { call.respondRedirect("/admin/") }
     get("/admin/") {
         val html = this::class.java.classLoader.getResource("admin/index.html")?.readText()
@@ -56,118 +31,16 @@ fun Route.adminRoutes(
             ?: return@get call.respond(HttpStatusCode.NotFound)
         call.respondBytes(bytes, contentType)
     }
-
-    route("/admin/api") {
-        get("/clients") { call.respond(clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() }) }
-        get("/standard-items") {
-            call.respond(
-                standardItems.search(
-                    query = call.request.queryParameters["q"],
-                    type = call.request.queryParameters["type"],
-                )
-            )
-        }
-        post("/standard-items") {
-            val request = call.receive<StandardItemRequest>()
-            val item = standardItems.create(request.toStandardItem(request.id))
-            call.respond(HttpStatusCode.Created, item)
-        }
-        post("/standard-items/{id}") {
-            val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val request = call.receive<StandardItemRequest>()
-            val item = standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound)
-            call.respond(item)
-        }
-        delete("/standard-items/{id}") {
-            val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
-            if (!standardItems.delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
-            call.respond(mapOf("deleted" to true))
-        }
-        get("/clients/{id}") {
-            val client = clients.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respond(client.dto())
-        }
-        post("/clients") {
-            val request = call.receive<CreateClientRequest>()
-            if (request.name.isBlank() || request.phone.isBlank()) {
-                return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            }
-            val client = clients.create(request.name, request.phone, request.address)
-            call.respond(HttpStatusCode.Created, client.dto())
-        }
-        get("/quotes") {
-            val result = quotes.list(
-                clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
-                status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { QuoteStatus.valueOf(it.uppercase()) },
-            )
-            call.respond(result.map { it.dto(clients.findById(it.clientId)) })
-        }
-        post("/quotes") {
-            val request = call.receive<CreateQuoteRequest>()
-            if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
-            val quote = quotes.create(
-                clientId = ObjectId(request.clientId),
-                items = request.items.map { it.toLineItem() },
-                notes = request.notes,
-                validUntil = request.validUntil?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) },
-            )
-            val client = clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            val path = savePdf(pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", pdfGenerator.generateQuote(quote, client))
-            quotes.setPdfPath(quote.id, path.toString())
-            call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
-        }
-        get("/quotes/{id}") {
-            val quote = quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respond(quote.dto(clients.findById(quote.clientId)))
-        }
-        get("/quotes/{id}/pdf") {
-            val quote = quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respondPdf(quote.pdfPath)
-        }
-        get("/invoices") {
-            val result = invoices.list(
-                clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
-                status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { InvoiceStatus.valueOf(it.uppercase()) },
-            )
-            call.respond(result.map { it.dto(clients.findById(it.clientId)) })
-        }
-        post("/invoices") {
-            val request = call.receive<CreateInvoiceRequest>()
-            if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
-            val invoice = invoices.create(
-                clientId = ObjectId(request.clientId),
-                quoteId = request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) },
-                items = request.items.map { it.toLineItem() },
-                dueDate = LocalDate.parse(request.dueDate),
-            )
-            val client = clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            val path = savePdf(pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", pdfGenerator.generateInvoice(invoice, client))
-            invoices.setPdfPath(invoice.id, path.toString())
-            call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
-        }
-        get("/invoices/{id}") {
-            val invoice = invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respond(invoice.dto(clients.findById(invoice.clientId)))
-        }
-        get("/invoices/{id}/pdf") {
-            val invoice = invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respondPdf(invoice.pdfPath)
-        }
-        patch("/invoices/{id}/paid") {
-            val invoice = invoices.markPaid(ObjectId(call.parameters["id"])) ?: return@patch call.respond(HttpStatusCode.NotFound)
-            call.respond(invoice.dto(clients.findById(invoice.clientId)))
-        }
-    }
 }
 
-private suspend fun io.ktor.server.application.ApplicationCall.respondPdf(path: String?) {
+internal suspend fun io.ktor.server.application.ApplicationCall.respondPdf(path: String?) {
     if (path.isNullOrBlank()) return respond(HttpStatusCode.NotFound, mapOf("error" to "PDF not generated"))
     val pdf = Path.of(path)
     if (!Files.exists(pdf)) return respond(HttpStatusCode.NotFound, mapOf("error" to "PDF file missing"))
     respondBytes(Files.readAllBytes(pdf), ContentType.Application.Pdf)
 }
 
-private fun savePdf(basePath: String, folder: String, filename: String, bytes: ByteArray): Path {
+internal fun savePdf(basePath: String, folder: String, filename: String, bytes: ByteArray): Path {
     val directory = Path.of(basePath, folder)
     Files.createDirectories(directory)
     val path = directory.resolve(filename)
@@ -176,14 +49,14 @@ private fun savePdf(basePath: String, folder: String, filename: String, bytes: B
 }
 
 @Serializable
-private data class CreateClientRequest(
+internal data class CreateClientRequest(
     val name: String,
     val phone: String,
     val address: String? = null,
 )
 
 @Serializable
-private data class CreateQuoteRequest(
+internal data class CreateQuoteRequest(
     val clientId: String,
     val items: List<CreateLineItemRequest>,
     val notes: String? = null,
@@ -191,7 +64,7 @@ private data class CreateQuoteRequest(
 )
 
 @Serializable
-private data class CreateInvoiceRequest(
+internal data class CreateInvoiceRequest(
     val clientId: String,
     val quoteId: String? = null,
     val items: List<CreateLineItemRequest>,
@@ -199,7 +72,7 @@ private data class CreateInvoiceRequest(
 )
 
 @Serializable
-private data class CreateLineItemRequest(
+internal data class CreateLineItemRequest(
     val description: String,
     val quantity: Double = 1.0,
     val unitPriceEur: Double,
@@ -208,7 +81,7 @@ private data class CreateLineItemRequest(
 }
 
 @Serializable
-private data class StandardItemRequest(
+internal data class StandardItemRequest(
     val id: String,
     val type: String,
     val category: String,
@@ -227,7 +100,7 @@ private data class StandardItemRequest(
 }
 
 @Serializable
-private data class ClientDto(
+internal data class ClientDto(
     val id: String,
     val number: String,
     val name: String,
@@ -237,7 +110,7 @@ private data class ClientDto(
 )
 
 @Serializable
-private data class QuoteDto(
+internal data class QuoteDto(
     val id: String,
     val number: String,
     val clientId: String,
@@ -250,7 +123,7 @@ private data class QuoteDto(
 )
 
 @Serializable
-private data class InvoiceDto(
+internal data class InvoiceDto(
     val id: String,
     val number: String,
     val clientId: String,
@@ -262,7 +135,7 @@ private data class InvoiceDto(
     val createdAt: String,
 )
 
-private fun Client.dto() = ClientDto(
+internal fun Client.dto() = ClientDto(
     id = id.toHexString(),
     number = number,
     name = name,
@@ -271,7 +144,7 @@ private fun Client.dto() = ClientDto(
     createdAt = createdAt.toString(),
 )
 
-private fun Quote.dto(client: Client?) = QuoteDto(
+internal fun Quote.dto(client: Client?) = QuoteDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -283,7 +156,7 @@ private fun Quote.dto(client: Client?) = QuoteDto(
     createdAt = createdAt.toString(),
 )
 
-private fun Invoice.dto(client: Client?) = InvoiceDto(
+internal fun Invoice.dto(client: Client?) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),

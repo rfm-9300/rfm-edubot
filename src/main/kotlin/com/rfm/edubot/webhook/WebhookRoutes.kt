@@ -4,6 +4,8 @@ import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.InboundMessage
 import com.rfm.edubot.messaging.MessageQueue
+import com.rfm.edubot.tenant.TenantRegistry
+import com.rfm.edubot.tenant.model.TenantStatus
 import com.rfm.edubot.webhook.dto.WebhookPayload
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -21,6 +23,7 @@ fun Routing.webhookRoutes(
     config: AppConfig.WhatsAppConfig,
     messageQueue: MessageQueue,
     deduplicationService: DeduplicationService,
+    tenantRegistry: TenantRegistry,
 ) {
     route("/webhook") {
         get {
@@ -76,9 +79,24 @@ fun Routing.webhookRoutes(
                     }
 
                     val value = change.value
+                    val phoneNumberId = value.metadata?.phoneNumberId
+                    if (phoneNumberId.isNullOrBlank()) {
+                        log.warn("Skipping webhook change without phone_number_id metadata")
+                        continue
+                    }
+                    val tenant = tenantRegistry.byPhoneNumberId(phoneNumberId)
+                    if (tenant == null) {
+                        log.warn("Skipping webhook change for unknown phoneNumberId={}", phoneNumberId)
+                        continue
+                    }
+                    if (tenant.status != TenantStatus.ACTIVE) {
+                        log.info("Skipping webhook change for inactive tenant slug={} status={}", tenant.slug, tenant.status)
+                        continue
+                    }
+
                     value.messages?.let { messages ->
                         for (message in messages) {
-                            if (deduplicationService.isDuplicate(message.id, body)) {
+                            if (deduplicationService.isDuplicate(message.id, body, tenant.id)) {
                                 log.debug("Skipping duplicate message: id={}", message.id)
                                 continue
                             }
@@ -92,6 +110,8 @@ fun Routing.webhookRoutes(
                             }
 
                             val inboundMessage = InboundMessage(
+                                tenantId = tenant.id,
+                                phoneNumberId = phoneNumberId,
                                 waId = message.from,
                                 waMessageId = message.id,
                                 profileName = profileName,
@@ -102,7 +122,8 @@ fun Routing.webhookRoutes(
 
                             messageQueue.enqueue(inboundMessage)
                             log.info(
-                                "Enqueued message: from={} id={}",
+                                "Enqueued message: tenant={} from={} id={}",
+                                tenant.slug,
                                 message.from,
                                 message.id
                             )

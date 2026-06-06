@@ -3,6 +3,7 @@ package com.rfm.edubot.persistence
 import com.mongodb.client.model.IndexOptions
 import com.rfm.edubot.config.AppConfig
 import com.mongodb.kotlin.client.coroutine.MongoClient
+import com.mongodb.kotlin.client.coroutine.MongoCollection
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.slf4j.LoggerFactory
@@ -18,64 +19,86 @@ class MongoModule(config: AppConfig.MongoConfig) {
         runBlocking {
             val db = database
 
-            db.createCollection("users")
-            db.createCollection("conversations")
-            db.createCollection("messages")
-            db.createCollection("webhook_events")
-            db.createCollection("crm.clients")
-            db.createCollection("crm.quotes")
-            db.createCollection("crm.invoices")
-            db.createCollection("crm.sequences")
-            db.createCollection("crm.standard_items")
+            listOf(
+                "users",
+                "conversations",
+                "messages",
+                "webhook_events",
+                "tenants",
+                "dashboard_users",
+                "crm.clients",
+                "crm.quotes",
+                "crm.invoices",
+                "crm.sequences",
+                "crm.standard_items",
+            ).forEach { name -> try { db.createCollection(name) } catch (_: Exception) {} }
+
+            val tenants = db.getCollection<Document>("tenants")
+            tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true))
+            tenants.createIndex(Document("slug", 1), IndexOptions().unique(true))
+
+            val dashboardUsers = db.getCollection<Document>("dashboard_users")
+            dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))
+            dashboardUsers.createIndex(Document("tenantId", 1))
 
             val users = db.getCollection<Document>("users")
-            users.createIndex(Document("waId", 1), IndexOptions().unique(true))
-            users.createIndex(Document("lastSeenAt", -1))
+            users.dropIndexIfExists("waId_1")
+            users.createIndex(Document("tenantId", 1).append("waId", 1), IndexOptions().unique(true))
+            users.createIndex(Document("tenantId", 1).append("lastSeenAt", -1))
 
             val conversations = db.getCollection<Document>("conversations")
-            conversations.createIndex(Document("userId", 1), IndexOptions().unique(true))
-            conversations.createIndex(Document("waId", 1), IndexOptions().unique(true))
-            conversations.createIndex(Document("lastMessageAt", -1))
+            conversations.dropIndexIfExists("userId_1")
+            conversations.dropIndexIfExists("waId_1")
+            conversations.createIndex(Document("tenantId", 1).append("userId", 1), IndexOptions().unique(true))
+            conversations.createIndex(Document("tenantId", 1).append("waId", 1), IndexOptions().unique(true))
+            conversations.createIndex(Document("tenantId", 1).append("lastMessageAt", -1))
 
             val messages = db.getCollection<Document>("messages")
-            messages.createIndex(Document("conversationId", 1).append("createdAt", -1))
-            try { messages.dropIndex("waMessageId_1") } catch (_: Exception) {}
+            messages.createIndex(Document("tenantId", 1).append("conversationId", 1).append("createdAt", -1))
+            messages.dropIndexIfExists("waMessageId_1")
             messages.createIndex(
-                Document("waMessageId", 1),
+                Document("tenantId", 1).append("waMessageId", 1),
                 IndexOptions().unique(true).partialFilterExpression(
                     Document("waMessageId", Document("\$type", "string"))
                 )
             )
-            messages.createIndex(Document("createdAt", -1))
+            messages.createIndex(Document("tenantId", 1).append("waId", 1).append("createdAt", -1))
+            messages.createIndex(Document("tenantId", 1).append("createdAt", -1))
 
             val webhookEvents = db.getCollection<Document>("webhook_events")
             webhookEvents.createIndex(Document("eventId", 1), IndexOptions().unique(true))
+            webhookEvents.createIndex(Document("tenantId", 1))
             webhookEvents.createIndex(
                 Document("receivedAt", 1),
                 IndexOptions().expireAfter(7, TimeUnit.DAYS)
             )
 
             val crmClients = db.getCollection<Document>("crm.clients")
-            crmClients.createIndex(Document("phone", 1), IndexOptions().unique(true))
+            crmClients.dropIndexIfExists("phone_1")
+            crmClients.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
             crmClients.createIndex(Document("name", "text"))
 
             val crmQuotes = db.getCollection<Document>("crm.quotes")
-            crmQuotes.createIndex(Document("clientId", 1))
-            crmQuotes.createIndex(Document("status", 1))
-            crmQuotes.createIndex(Document("number", 1), IndexOptions().unique(true))
+            crmQuotes.dropIndexIfExists("number_1")
+            crmQuotes.createIndex(Document("tenantId", 1).append("clientId", 1))
+            crmQuotes.createIndex(Document("tenantId", 1).append("status", 1))
+            crmQuotes.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 
             val crmInvoices = db.getCollection<Document>("crm.invoices")
-            crmInvoices.createIndex(Document("clientId", 1))
-            crmInvoices.createIndex(Document("status", 1))
-            crmInvoices.createIndex(Document("dueDate", 1))
-            crmInvoices.createIndex(Document("number", 1), IndexOptions().unique(true))
+            crmInvoices.dropIndexIfExists("number_1")
+            crmInvoices.createIndex(Document("tenantId", 1).append("clientId", 1))
+            crmInvoices.createIndex(Document("tenantId", 1).append("status", 1))
+            crmInvoices.createIndex(Document("tenantId", 1).append("dueDate", 1))
+            crmInvoices.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 
             val crmSequences = db.getCollection<Document>("crm.sequences")
-            crmSequences.createIndex(Document("name", 1), IndexOptions().unique(true))
+            crmSequences.dropIndexIfExists("name_1")
+            crmSequences.createIndex(Document("tenantId", 1).append("name", 1), IndexOptions().unique(true))
 
             val crmStandardItems = db.getCollection<Document>("crm.standard_items")
-            crmStandardItems.createIndex(Document("id", 1), IndexOptions().unique(true))
-            crmStandardItems.createIndex(Document("type", 1).append("category", 1))
+            crmStandardItems.dropIndexIfExists("id_1")
+            crmStandardItems.createIndex(Document("tenantId", 1).append("id", 1), IndexOptions().unique(true))
+            crmStandardItems.createIndex(Document("tenantId", 1).append("type", 1).append("category", 1))
         }
         log.info("MongoDB indexes initialized")
     }
@@ -83,5 +106,9 @@ class MongoModule(config: AppConfig.MongoConfig) {
     fun shutdown() {
         log.info("Closing MongoDB connection")
         client.close()
+    }
+
+    private suspend fun MongoCollection<Document>.dropIndexIfExists(name: String) {
+        try { dropIndex(name) } catch (_: Exception) {}
     }
 }

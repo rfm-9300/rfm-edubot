@@ -45,9 +45,11 @@ class WhatsAppClient(
     private val phoneNumberId: String,
     private val apiVersion: String = "v21.0",
     private val maxRetries: Int = 3,
+    private val httpClient: HttpClient? = null,
 ) {
     private val baseUrl = "https://graph.facebook.com/$apiVersion/$phoneNumberId"
-    private val client = HttpClient(CIO) {
+    private val ownsClient = httpClient == null
+    private val client = httpClient ?: HttpClient(CIO) {
         install(HttpTimeout) {
             requestTimeoutMillis = 15000
         }
@@ -133,6 +135,6 @@ class WhatsAppClient(
     }
 
     fun close() {
-        client.close()
+        if (ownsClient) client.close()
     }
 }

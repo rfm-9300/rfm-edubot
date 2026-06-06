@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Backoffice · WhatsApp Bot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/admin/style.css" />
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand__mark" aria-hidden="true">BO</div>
+      <div class="brand__text">
+        <div class="brand__name">BACKOFFICE</div>
+        <div class="brand__sub">Platform · Tenants</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <a class="nav__item is-active" href="#tenants">
+        <span class="nav__dot"></span>
+        <span class="nav__label">Tenants</span>
+        <span class="nav__count" id="tenant-count">—</span>
+      </a>
+    </nav>
+    <div class="sidebar__foot">
+      <div class="kpi"><div class="kpi__label">Activos</div><div class="kpi__value" id="kpi-active">—</div></div>
+      <div class="kpi"><div class="kpi__label">Mensagens</div><div class="kpi__value" id="kpi-messages">—</div></div>
+      <div class="meta"><span>v 1.0</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="topbar">
+      <div class="crumb"><span class="crumb__root">Platform</span><span class="crumb__sep">/</span><span class="crumb__leaf">Tenants</span></div>
+      <div class="topbar__search">
+        <input type="text" id="search" placeholder="Procurar tenant…" autocomplete="off" />
+        <kbd>/</kbd>
+      </div>
+      <div class="topbar__actions">
+        <button class="btn btn--ghost" id="btn-logout">Sair</button>
+        <button class="btn btn--primary" id="btn-new"><span class="btn__plus">+</span>Novo bot/cliente</button>
+      </div>
+    </header>
+    <section class="view" id="view"></section>
+  </main>
+
+  <div class="drawer" id="drawer" hidden>
+    <div class="drawer__scrim" data-close></div>
+    <aside class="drawer__panel" role="dialog" aria-modal="true">
+      <header class="drawer__head">
+        <div><div class="drawer__eyebrow" id="drawer-eyebrow">Tenant</div><h2 class="drawer__title" id="drawer-title">—</h2></div>
+        <button class="iconbtn" data-close aria-label="Fechar">×</button>
+      </header>
+      <div class="drawer__body" id="drawer-body"></div>
+    </aside>
+  </div>
+
+  <div class="confirm" id="confirm" hidden>
+    <div class="confirm__scrim" data-confirm-cancel></div>
+    <div class="confirm__panel" role="alertdialog" aria-modal="true">
+      <h3 class="confirm__title" id="confirm-title">Confirmar</h3>
+      <p class="confirm__body" id="confirm-body">—</p>
+      <div class="confirm__actions">
+        <button class="btn btn--ghost" data-confirm-cancel>Cancelar</button>
+        <button class="btn btn--danger" id="confirm-ok">Confirmar</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden></div>
+  <script src="/backoffice/app.js" defer></script>
+</body>
+</html>

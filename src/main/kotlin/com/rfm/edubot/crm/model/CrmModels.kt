@@ -7,6 +7,7 @@ import org.bson.types.ObjectId
 
 data class Client(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val number: String,
     val name: String,
     val phone: String,
@@ -29,6 +30,7 @@ enum class InvoiceStatus { PENDING, PAID, OVERDUE, CANCELLED }
 
 data class Quote(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val number: String,
     val clientId: ObjectId,
     val items: List<LineItem>,
@@ -43,6 +45,7 @@ data class Quote(
 
 data class Invoice(
     @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
     val number: String,
     val clientId: ObjectId,
     val quoteId: ObjectId? = null,

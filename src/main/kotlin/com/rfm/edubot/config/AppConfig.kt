@@ -10,6 +10,7 @@ data class AppConfig(
     val openrouter: OpenRouterConfig,
     val mongo: MongoConfig,
     val rateLimit: RateLimitConfig,
+    val admin: AdminConfig,
     val pdfStoragePath: String,
 ) {
     data class WhatsAppConfig(
@@ -35,6 +36,13 @@ data class AppConfig(
     data class RateLimitConfig(
         val perUserPerHour: Int = 30,
         val perUserPerDay: Int = 200,
+    )
+
+    data class AdminConfig(
+        val jwtSecret: String,
+        val jwtIssuer: String = "wabot-platform",
+        val jwtExpiryHours: Int = 24,
+        val adminPasswordHash: String,
     )
 
     companion object {
@@ -70,6 +78,13 @@ data class AppConfig(
                 perUserPerDay = config.getInt("app.ratelimit.perUserPerDay"),
             )
 
+            val adminConfig = AdminConfig(
+                jwtSecret = getRequired(config, "app.admin.jwtSecret"),
+                jwtIssuer = config.getString("app.admin.jwtIssuer"),
+                jwtExpiryHours = config.getInt("app.admin.jwtExpiryHours"),
+                adminPasswordHash = getRequired(config, "app.admin.adminPasswordHash"),
+            )
+
             logStartupKeys(config)
 
             return AppConfig(
@@ -78,6 +93,7 @@ data class AppConfig(
                 openrouter = openRouterConfig,
                 mongo = mongoConfig,
                 rateLimit = rateLimitConfig,
+                admin = adminConfig,
                 pdfStoragePath = config.getString("app.pdf.storagePath"),
             )
         }
@@ -103,6 +119,10 @@ data class AppConfig(
                 "app.mongo.database",
                 "app.ratelimit.perUserPerHour",
                 "app.ratelimit.perUserPerDay",
+                "app.admin.jwtSecret",
+                "app.admin.jwtIssuer",
+                "app.admin.jwtExpiryHours",
+                "app.admin.adminPasswordHash",
                 "app.pdf.storagePath",
             )
 

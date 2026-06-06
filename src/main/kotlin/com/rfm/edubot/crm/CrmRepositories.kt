@@ -23,22 +23,24 @@ import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
 
-class ClientRepository(mongoModule: MongoModule) {
+class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.clients")
-    private val sequences = SequenceRepository(mongoModule)
+    private val sequences = SequenceRepository(mongoModule, tenantId)
 
-    suspend fun findById(id: ObjectId): Client? = collection.find(Filters.eq("_id", id)).firstOrNull()?.toClient()
+    suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
     suspend fun search(query: String): List<Client> {
         val trimmed = query.trim()
         val filter = if (trimmed.isBlank()) {
-            Document()
+            Filters.eq("tenantId", tenantId)
         } else {
-            Filters.or(
-                Filters.regex("number", ".*${Regex.escape(trimmed)}.*", "i"),
-                Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
-                Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
-                Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
+            scoped(
+                Filters.or(
+                    Filters.regex("number", ".*${Regex.escape(trimmed)}.*", "i"),
+                    Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
+                    Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
+                    Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
+                )
             )
         }
         return collection.find(filter).limit(20).toList().map { it.toClient() }
@@ -47,13 +49,14 @@ class ClientRepository(mongoModule: MongoModule) {
     suspend fun create(name: String, phone: String, address: String? = null): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"
-        val client = Client(number = number, name = name.trim(), phone = phone.trim(), address = address?.trim()?.takeIf { it.isNotBlank() }, createdAt = now, updatedAt = now)
+        val client = Client(tenantId = tenantId, number = number, name = name.trim(), phone = phone.trim(), address = address?.trim()?.takeIf { it.isNotBlank() }, createdAt = now, updatedAt = now)
         collection.insertOne(client.toDocument())
         return client
     }
 
     private fun Document.toClient() = Client(
         id = getObjectId("_id"),
+        tenantId = getObjectId("tenantId"),
         number = getString("number") ?: "CLT-???",
         name = getString("name"),
         phone = getString("phone"),
@@ -63,31 +66,35 @@ class ClientRepository(mongoModule: MongoModule) {
     )
 
     private fun Client.toDocument() = Document("_id", id)
+        .append("tenantId", tenantId)
         .append("number", number)
         .append("name", name)
         .append("phone", phone)
         .append("address", address)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-class QuoteRepository(mongoModule: MongoModule) {
+class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.quotes")
-    private val sequences = SequenceRepository(mongoModule)
+    private val sequences = SequenceRepository(mongoModule, tenantId)
 
-    suspend fun findById(id: ObjectId): Quote? = collection.find(Filters.eq("_id", id)).firstOrNull()?.toQuote()
+    suspend fun findById(id: ObjectId): Quote? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toQuote()
 
     suspend fun list(clientId: ObjectId? = null, status: QuoteStatus? = null): List<Quote> {
-        val filters = mutableListOf<Bson>()
+        val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
-        val filter = if (filters.isEmpty()) Document() else Filters.and(filters)
+        val filter = Filters.and(filters)
         return collection.find(filter).sort(Document("createdAt", -1)).limit(100).toList().map { it.toQuote() }
     }
 
     suspend fun create(clientId: ObjectId, items: List<LineItem>, notes: String?, validUntil: LocalDate?): Quote {
         val now = SystemClock.now()
         val quote = Quote(
+            tenantId = tenantId,
             number = "ORC-${sequences.next("quote_number").toString().padStart(3, '0')}",
             clientId = clientId,
             items = items,
@@ -102,7 +109,7 @@ class QuoteRepository(mongoModule: MongoModule) {
     }
 
     suspend fun findByNumber(number: String): Quote? =
-        collection.find(Filters.regex("number", ".*${Regex.escape(number.trim())}.*", "i")).firstOrNull()?.toQuote()
+        collection.find(scoped(Filters.regex("number", ".*${Regex.escape(number.trim())}.*", "i"))).firstOrNull()?.toQuote()
 
     suspend fun update(id: ObjectId, items: List<LineItem>?, notes: String?, validUntil: LocalDate?, status: QuoteStatus?): Quote? {
         val now = SystemClock.now()
@@ -115,7 +122,7 @@ class QuoteRepository(mongoModule: MongoModule) {
         validUntil?.let { ops.add(Updates.set("validUntil", it.toString())) }
         status?.let { ops.add(Updates.set("status", it.name)) }
         val doc = collection.findOneAndUpdate(
-            Filters.eq("_id", id),
+            scoped(Filters.eq("_id", id)),
             Updates.combine(ops),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
@@ -123,19 +130,23 @@ class QuoteRepository(mongoModule: MongoModule) {
     }
 
     suspend fun setPdfPath(id: ObjectId, pdfPath: String) {
-        collection.updateOne(Filters.eq("_id", id), Updates.set("pdfPath", pdfPath))
+        collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("pdfPath", pdfPath))
     }
 
     data class ClientQuoteTotal(val clientId: ObjectId, val clientName: String, val clientNumber: String, val totalCents: Long, val quoteCount: Int)
 
     suspend fun sumByClient(): List<ClientQuoteTotal> {
         val pipeline = listOf(
+            Document("\$match", Document("tenantId", tenantId)),
             Document("\$group", Document("_id", "\$clientId")
                 .append("totalCents", Document("\$sum", "\$totalCents"))
                 .append("quoteCount", Document("\$sum", 1))),
             Document("\$lookup", Document("from", "crm.clients")
-                .append("localField", "_id")
-                .append("foreignField", "_id")
+                .append("let", Document("clientId", "\$_id"))
+                .append("pipeline", listOf(Document("\$match", Document("\$expr", Document("\$and", listOf(
+                    Document("\$eq", listOf("\$_id", "\$\$clientId")),
+                    Document("\$eq", listOf("\$tenantId", tenantId)),
+                ))))))
                 .append("as", "client")),
             Document("\$unwind", "\$client"),
             Document("\$sort", Document("totalCents", -1)),
@@ -154,6 +165,7 @@ class QuoteRepository(mongoModule: MongoModule) {
 
     private fun Document.toQuote() = Quote(
         id = getObjectId("_id"),
+        tenantId = getObjectId("tenantId"),
         number = getString("number"),
         clientId = getObjectId("clientId"),
         items = getList("items", Document::class.java).map { it.toLineItem() },
@@ -167,6 +179,7 @@ class QuoteRepository(mongoModule: MongoModule) {
     )
 
     private fun Quote.toDocument() = Document("_id", id)
+        .append("tenantId", tenantId)
         .append("number", number)
         .append("clientId", clientId)
         .append("items", items.map { it.toDocument() })
@@ -177,25 +190,28 @@ class QuoteRepository(mongoModule: MongoModule) {
         .append("pdfPath", pdfPath)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-class InvoiceRepository(mongoModule: MongoModule) {
+class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.invoices")
-    private val sequences = SequenceRepository(mongoModule)
+    private val sequences = SequenceRepository(mongoModule, tenantId)
 
-    suspend fun findById(id: ObjectId): Invoice? = collection.find(Filters.eq("_id", id)).firstOrNull()?.toInvoice()
+    suspend fun findById(id: ObjectId): Invoice? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toInvoice()
 
     suspend fun list(clientId: ObjectId? = null, status: InvoiceStatus? = null): List<Invoice> {
-        val filters = mutableListOf<Bson>()
+        val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
-        val filter = if (filters.isEmpty()) Document() else Filters.and(filters)
+        val filter = Filters.and(filters)
         return collection.find(filter).sort(Document("createdAt", -1)).limit(100).toList().map { it.toInvoice() }
     }
 
     suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate): Invoice {
         val now = SystemClock.now()
         val invoice = Invoice(
+            tenantId = tenantId,
             number = "FAT-${sequences.next("invoice_number").toString().padStart(3, '0')}",
             clientId = clientId,
             quoteId = quoteId,
@@ -210,13 +226,14 @@ class InvoiceRepository(mongoModule: MongoModule) {
     }
 
     suspend fun setPdfPath(id: ObjectId, pdfPath: String) {
-        collection.updateOne(Filters.eq("_id", id), Updates.set("pdfPath", pdfPath))
+        collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("pdfPath", pdfPath))
     }
 
     data class ClientInvoiceTotal(val clientId: ObjectId, val clientName: String, val clientNumber: String, val totalCents: Long, val invoiceCount: Int, val paidCents: Long)
 
     suspend fun sumByClient(): List<ClientInvoiceTotal> {
         val pipeline = listOf(
+            Document("\$match", Document("tenantId", tenantId)),
             Document("\$group", Document("_id", "\$clientId")
                 .append("totalCents", Document("\$sum", "\$totalCents"))
                 .append("paidCents", Document("\$sum", Document("\$cond", listOf(
@@ -224,8 +241,11 @@ class InvoiceRepository(mongoModule: MongoModule) {
                 ))))
                 .append("invoiceCount", Document("\$sum", 1))),
             Document("\$lookup", Document("from", "crm.clients")
-                .append("localField", "_id")
-                .append("foreignField", "_id")
+                .append("let", Document("clientId", "\$_id"))
+                .append("pipeline", listOf(Document("\$match", Document("\$expr", Document("\$and", listOf(
+                    Document("\$eq", listOf("\$_id", "\$\$clientId")),
+                    Document("\$eq", listOf("\$tenantId", tenantId)),
+                ))))))
                 .append("as", "client")),
             Document("\$unwind", "\$client"),
             Document("\$sort", Document("totalCents", -1)),
@@ -246,7 +266,7 @@ class InvoiceRepository(mongoModule: MongoModule) {
     suspend fun markPaid(id: ObjectId): Invoice? {
         val now = SystemClock.now()
         val doc = collection.findOneAndUpdate(
-            Filters.eq("_id", id),
+            scoped(Filters.eq("_id", id)),
             Updates.combine(Updates.set("status", InvoiceStatus.PAID.name), Updates.set("paidAt", now.toDate()), Updates.set("updatedAt", now.toDate())),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
@@ -255,6 +275,7 @@ class InvoiceRepository(mongoModule: MongoModule) {
 
     private fun Document.toInvoice() = Invoice(
         id = getObjectId("_id"),
+        tenantId = getObjectId("tenantId"),
         number = getString("number"),
         clientId = getObjectId("clientId"),
         quoteId = get("quoteId", ObjectId::class.java),
@@ -269,6 +290,7 @@ class InvoiceRepository(mongoModule: MongoModule) {
     )
 
     private fun Invoice.toDocument() = Document("_id", id)
+        .append("tenantId", tenantId)
         .append("number", number)
         .append("clientId", clientId)
         .append("quoteId", quoteId)
@@ -280,18 +302,20 @@ class InvoiceRepository(mongoModule: MongoModule) {
         .append("pdfPath", pdfPath)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-class StandardItemRepository(mongoModule: MongoModule) {
+class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")
 
     suspend fun seedDefaults() {
-        if (collection.countDocuments() > 0) return
+        if (collection.countDocuments(Filters.eq("tenantId", tenantId)) > 0) return
         collection.insertMany(StandardItems.defaults.map { it.toDocument() })
     }
 
     suspend fun search(query: String? = null, type: String? = null): List<StandardItem> {
-        val filters = mutableListOf<Bson>()
+        val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         type?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { filters.add(Filters.eq("type", it)) }
         query?.trim()?.takeIf { it.isNotBlank() }?.let { term ->
             filters.add(
@@ -302,7 +326,7 @@ class StandardItemRepository(mongoModule: MongoModule) {
                 )
             )
         }
-        val filter = if (filters.isEmpty()) Document() else Filters.and(filters)
+        val filter = Filters.and(filters)
         return collection.find(filter).sort(Document("type", 1).append("category", 1).append("description", 1)).toList().map { it.toStandardItem() }
     }
 
@@ -313,7 +337,7 @@ class StandardItemRepository(mongoModule: MongoModule) {
 
     suspend fun update(id: String, item: StandardItem): StandardItem? {
         val result = collection.findOneAndUpdate(
-            Filters.eq("id", id),
+            scoped(Filters.eq("id", id)),
             Updates.combine(
                 Updates.set("type", item.type),
                 Updates.set("category", item.category),
@@ -326,7 +350,7 @@ class StandardItemRepository(mongoModule: MongoModule) {
         return result?.toStandardItem()
     }
 
-    suspend fun delete(id: String): Boolean = collection.deleteOne(Filters.eq("id", id)).deletedCount > 0
+    suspend fun delete(id: String): Boolean = collection.deleteOne(scoped(Filters.eq("id", id))).deletedCount > 0
 
     private fun Document.toStandardItem() = StandardItem(
         id = getString("id"),
@@ -338,20 +362,27 @@ class StandardItemRepository(mongoModule: MongoModule) {
     )
 
     private fun StandardItem.toDocument() = Document("id", id)
+        .append("tenantId", tenantId)
         .append("type", type)
         .append("category", category)
         .append("description", description)
         .append("unit", unit)
         .append("defaultUnitPriceEur", defaultUnitPriceEur)
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-private class SequenceRepository(mongoModule: MongoModule) {
+private class SequenceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.sequences")
 
     suspend fun next(name: String): Long {
         val doc = collection.findOneAndUpdate(
-            Filters.eq("name", name),
-            Updates.inc("value", 1L),
+            Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("name", name)),
+            Updates.combine(
+                Updates.inc("value", 1L),
+                Updates.setOnInsert("tenantId", tenantId),
+                Updates.setOnInsert("name", name),
+            ),
             FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER),
         ) ?: error("Could not increment sequence $name")
         return doc.getLongValue("value")

@@ -19,16 +19,17 @@ import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import org.bson.Document
+import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 import java.util.Date
 
-class UserRepository(mongoModule: MongoModule) {
+class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("users")
     private val log = LoggerFactory.getLogger("UserRepository")
 
     suspend fun findByWaId(waId: String): User? {
-        val doc = collection.find(Filters.eq("waId", waId)).firstOrNull()
+        val doc = collection.find(scoped(Filters.eq("waId", waId))).firstOrNull()
         return doc?.toUser()
     }
 
@@ -37,7 +38,7 @@ class UserRepository(mongoModule: MongoModule) {
         if (existing != null) {
             val now = SystemClock.now()
             collection.updateOne(
-                Filters.eq("waId", waId),
+                scoped(Filters.eq("waId", waId)),
                 Updates.combine(
                     Updates.set("lastSeenAt", now.toDate()),
                     Updates.set("displayName", displayName ?: existing.displayName)
@@ -48,6 +49,7 @@ class UserRepository(mongoModule: MongoModule) {
 
         val now = SystemClock.now()
         val user = User(
+            tenantId = tenantId,
             waId = waId,
             displayName = displayName,
             createdAt = now,
@@ -58,9 +60,34 @@ class UserRepository(mongoModule: MongoModule) {
         return user
     }
 
+    suspend fun list(query: String? = null, limit: Int = 100): List<User> {
+        val term = query?.trim()?.takeIf { it.isNotBlank() }
+        val filter = if (term == null) {
+            Filters.eq("tenantId", tenantId)
+        } else {
+            scoped(
+                Filters.or(
+                    Filters.regex("waId", ".*${Regex.escape(term)}.*", "i"),
+                    Filters.regex("displayName", ".*${Regex.escape(term)}.*", "i"),
+                )
+            )
+        }
+        return collection.find(filter).sort(Document("lastSeenAt", -1)).limit(limit).toList().map { it.toUser() }
+    }
+
+    suspend fun setStatus(id: ObjectId, status: UserStatus): User? {
+        val doc = collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.set("status", status.name),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )
+        return doc?.toUser()
+    }
+
     private fun Document.toUser(): User {
         return User(
             id = getObjectId("_id"),
+            tenantId = getObjectId("tenantId"),
             waId = getString("waId")!!,
             displayName = getString("displayName"),
             locale = getString("locale") ?: "pt_BR",
@@ -81,6 +108,7 @@ class UserRepository(mongoModule: MongoModule) {
         metadata.forEach { (key, value) -> metadataDoc.append(key, value) }
 
         return Document("_id", id)
+            .append("tenantId", tenantId)
             .append("waId", waId)
             .append("displayName", displayName)
             .append("locale", locale)
@@ -89,19 +117,21 @@ class UserRepository(mongoModule: MongoModule) {
             .append("lastSeenAt", lastSeenAt.toDate())
             .append("metadata", metadataDoc)
     }
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-class ConversationRepository(mongoModule: MongoModule) {
+class ConversationRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("conversations")
     private val log = LoggerFactory.getLogger("ConversationRepository")
 
     suspend fun findByWaId(waId: String): Conversation? {
-        val doc = collection.find(Filters.eq("waId", waId)).firstOrNull()
+        val doc = collection.find(scoped(Filters.eq("waId", waId))).firstOrNull()
         return doc?.toConversation()
     }
 
     suspend fun findById(id: ObjectId): Conversation? {
-        val doc = collection.find(Filters.eq("_id", id)).firstOrNull()
+        val doc = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()
         return doc?.toConversation()
     }
 
@@ -113,6 +143,7 @@ class ConversationRepository(mongoModule: MongoModule) {
 
         val now = SystemClock.now()
         val conversation = Conversation(
+            tenantId = tenantId,
             userId = userId,
             waId = waId,
             lastMessageAt = now,
@@ -135,14 +166,25 @@ class ConversationRepository(mongoModule: MongoModule) {
         }
 
         collection.updateOne(
-            Filters.eq("_id", convoId),
+            scoped(Filters.eq("_id", convoId)),
             Updates.combine(updates)
         )
+    }
+
+    suspend fun list(query: String? = null, limit: Int = 100): List<Conversation> {
+        val term = query?.trim()?.takeIf { it.isNotBlank() }
+        val filter = if (term == null) {
+            Filters.eq("tenantId", tenantId)
+        } else {
+            scoped(Filters.regex("waId", ".*${Regex.escape(term)}.*", "i"))
+        }
+        return collection.find(filter).sort(Document("lastMessageAt", -1)).limit(limit).toList().map { it.toConversation() }
     }
 
     private fun Document.toConversation(): Conversation {
         return Conversation(
             id = getObjectId("_id"),
+            tenantId = getObjectId("tenantId"),
             userId = getObjectId("userId"),
             waId = getString("waId")!!,
             state = ConversationState.valueOf(getString("state") ?: "ACTIVE"),
@@ -157,6 +199,7 @@ class ConversationRepository(mongoModule: MongoModule) {
 
     private fun Conversation.toDocument(): Document {
         return Document("_id", id)
+            .append("tenantId", tenantId)
             .append("userId", userId)
             .append("waId", waId)
             .append("state", state.name)
@@ -167,9 +210,11 @@ class ConversationRepository(mongoModule: MongoModule) {
             .append("systemPromptVersion", systemPromptVersion)
             .append("createdAt", createdAt.toDate())
     }
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-class MessageRepository(mongoModule: MongoModule) {
+class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("messages")
     private val log = LoggerFactory.getLogger("MessageRepository")
 
@@ -181,7 +226,7 @@ class MessageRepository(mongoModule: MongoModule) {
     }
 
     suspend fun lastN(conversationId: ObjectId, n: Int): List<Message> {
-        return collection.find(Filters.eq("conversationId", conversationId))
+        return collection.find(scoped(Filters.eq("conversationId", conversationId)))
             .sort(Document("createdAt", -1))
             .limit(n)
             .toList()
@@ -190,12 +235,20 @@ class MessageRepository(mongoModule: MongoModule) {
     }
 
     suspend fun lastNByWaId(waId: String, n: Int): List<Message> {
-        return collection.find(Filters.eq("waId", waId))
+        return collection.find(scoped(Filters.eq("waId", waId)))
             .sort(Document("createdAt", -1))
             .limit(n)
             .toList()
             .map { it.toMessage() }
             .reversed()
+    }
+
+    suspend fun threadByConversation(conversationId: ObjectId, limit: Int = 200): List<Message> {
+        return collection.find(scoped(Filters.eq("conversationId", conversationId)))
+            .sort(Document("createdAt", 1))
+            .limit(limit)
+            .toList()
+            .map { it.toMessage() }
     }
 
     private fun Document.toMessage(): Message {
@@ -219,6 +272,7 @@ class MessageRepository(mongoModule: MongoModule) {
 
         return Message(
             id = getObjectId("_id"),
+            tenantId = getObjectId("tenantId"),
             conversationId = getObjectId("conversationId"),
             waId = getString("waId")!!,
             role = UserRole.valueOf(getString("role")!!),
@@ -246,6 +300,7 @@ class MessageRepository(mongoModule: MongoModule) {
         }
 
         return Document("_id", id)
+            .append("tenantId", tenantId)
             .append("conversationId", conversationId)
             .append("waId", waId)
             .append("role", role.name)
@@ -257,6 +312,8 @@ class MessageRepository(mongoModule: MongoModule) {
             .append("status", status.name)
             .append("createdAt", createdAt.toDate())
     }
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
 private fun Document.getObjectId(field: String): ObjectId {

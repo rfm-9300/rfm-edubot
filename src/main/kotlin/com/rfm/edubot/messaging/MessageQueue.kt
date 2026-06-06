@@ -1,8 +1,11 @@
 package com.rfm.edubot.messaging
 
 import kotlinx.coroutines.channels.Channel
+import org.bson.types.ObjectId
 
 data class InboundMessage(
+    val tenantId: ObjectId,
+    val phoneNumberId: String,
     val waId: String,
     val waMessageId: String,
     val profileName: String? = null,
