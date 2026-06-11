@@ -11,11 +11,15 @@ import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.QuoteStatus
+import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
+import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
 import io.ktor.http.HttpStatusCode
@@ -44,6 +48,7 @@ fun Route.tenantAdminRoutes(
     pipelineFactory: TenantPipelineFactory,
     appConfig: AppConfig,
 ) {
+    val bindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
     authenticate("admin-jwt") {
         route("/admin/api") {
             get("/agent-types") { call.respond(listOf("CRM_V1")) }
@@ -54,26 +59,38 @@ fun Route.tenantAdminRoutes(
 
             post("/tenants") {
                 val request = call.receive<TenantCreateRequest>()
-                if (request.name.isBlank() || request.slug.isBlank() || request.phoneNumberId.isBlank()) {
-                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name, slug and phoneNumberId are required"))
+                if (request.name.isBlank() || request.slug.isBlank()) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and slug are required"))
+                    return@post
+                }
+                val bindings = request.channels.toBindings().ifEmpty {
+                    request.phoneNumberId?.trim()?.takeIf { it.isNotBlank() }
+                        ?.let { listOf(ChannelBinding(Platform.WHATSAPP, it, appConfig.whatsapp.accessToken)) }
+                        .orEmpty()
+                }
+                val validationError = validateBindings(bindings)
+                if (validationError != null) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to validationError))
                     return@post
                 }
                 val now = SystemClock.now()
                 val tenant = Tenant(
                     slug = request.slug.trim(),
                     name = request.name.trim(),
-                    phoneNumberId = request.phoneNumberId.trim(),
+                    channels = bindings,
                     agentType = request.agentType.ifBlank { "CRM_V1" },
                     openrouterModel = request.openrouterModel?.trim()?.takeIf { it.isNotBlank() },
+                    enabledModules = null,
                     rateLimitPerHour = request.rateLimitPerHour,
                     rateLimitPerDay = request.rateLimitPerDay,
                     createdAt = now,
                     updatedAt = now,
                 )
-                tenantRepository.create(tenant)
+                val tenantWithModules = tenant.copy(enabledModules = DashboardModules.sanitizeForTenant(tenant, request.enabledModules))
+                tenantRepository.create(tenantWithModules)
                 StandardItemRepository(mongo, tenant.id).seedDefaults()
-                tenantRegistry.put(tenant)
-                call.respond(HttpStatusCode.Created, tenant.dto())
+                tenantRegistry.put(tenantWithModules)
+                call.respond(HttpStatusCode.Created, tenantWithModules.dto())
             }
 
             get("/tenants/{slug}") {
@@ -84,18 +101,33 @@ fun Route.tenantAdminRoutes(
             put("/tenants/{slug}") {
                 val slug = call.parameters["slug"] ?: return@put call.respond(HttpStatusCode.BadRequest)
                 val request = call.receive<TenantUpdateRequest>()
+                val current = tenantRepository.findBySlug(slug) ?: return@put call.respond(HttpStatusCode.NotFound)
                 val now = SystemClock.now()
+                val updates = mutableListOf(
+                    Updates.set("name", request.name.trim()),
+                    Updates.set("agentType", request.agentType.ifBlank { "CRM_V1" }),
+                    Updates.set("openrouterModel", request.openrouterModel?.trim()?.takeIf { it.isNotBlank() }),
+                    Updates.set("rateLimitPerHour", request.rateLimitPerHour),
+                    Updates.set("rateLimitPerDay", request.rateLimitPerDay),
+                    Updates.set("updatedAt", now.toDate()),
+                )
+                val moduleTenant = current.copy(agentType = request.agentType.ifBlank { "CRM_V1" })
+                updates.add(Updates.set("enabledModules", DashboardModules.sanitizeForTenant(moduleTenant, request.enabledModules)))
+                request.channels?.let {
+                    val bindings = it.toBindings(current.channels)
+                    val validationError = validateBindings(bindings)
+                    if (validationError != null) {
+                        call.respond(HttpStatusCode.BadRequest, mapOf("error" to validationError))
+                        return@put
+                    }
+                    updates.add(Updates.set("channels", bindings.map { binding -> binding.toDocument() }))
+                    updates.add(phoneNumberIdUpdate(bindings))
+                }
                 val updated = tenantRepository.update(
                     slug,
-                    Updates.combine(
-                        Updates.set("name", request.name.trim()),
-                        Updates.set("agentType", request.agentType.ifBlank { "CRM_V1" }),
-                        Updates.set("openrouterModel", request.openrouterModel?.trim()?.takeIf { it.isNotBlank() }),
-                        Updates.set("rateLimitPerHour", request.rateLimitPerHour),
-                        Updates.set("rateLimitPerDay", request.rateLimitPerDay),
-                        Updates.set("updatedAt", now.toDate()),
-                    ),
+                    Updates.combine(updates),
                 ) ?: return@put call.respond(HttpStatusCode.NotFound)
+                tenantRegistry.remove(current)
                 tenantRegistry.put(updated)
                 pipelineFactory.evict(updated.id)
                 call.respond(updated.dto())
@@ -125,6 +157,28 @@ fun Route.tenantAdminRoutes(
                 pipelineFactory.evict(tenant.id)
                 tenantRegistry.put(tenant)
                 call.respond(mapOf("reloaded" to true))
+            }
+
+            post("/tenants/{slug}/channels") {
+                val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                val request = call.receive<ChannelBindingRequest>()
+                val binding = request.toBinding()
+                val validationError = validateBindings(listOf(binding))
+                if (validationError != null) {
+                    call.respond(HttpStatusCode.BadRequest, mapOf("error" to validationError))
+                    return@post
+                }
+                val updated = bindingService.upsert(slug, binding) ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.dto())
+            }
+
+            delete("/tenants/{slug}/channels/{platform}/{externalId}") {
+                val slug = call.parameters["slug"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
+                val platform = call.parameters["platform"]?.uppercase()?.let { runCatching { Platform.valueOf(it) }.getOrNull() }
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid platform"))
+                val externalId = call.parameters["externalId"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
+                val updated = bindingService.remove(slug, platform, externalId) ?: return@delete call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.dto())
             }
 
             get("/tenants/{slug}/stats") {
@@ -293,11 +347,13 @@ private suspend fun tenantStats(mongo: MongoModule, tenantId: ObjectId): TenantS
 private data class TenantCreateRequest(
     val name: String,
     val slug: String,
-    val phoneNumberId: String,
+    val phoneNumberId: String? = null,
     val agentType: String = "CRM_V1",
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
+    val channels: List<ChannelBindingRequest> = emptyList(),
+    val enabledModules: List<String>? = null,
 )
 
 @Serializable
@@ -307,6 +363,15 @@ private data class TenantUpdateRequest(
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
+    val channels: List<ChannelBindingRequest>? = null,
+    val enabledModules: List<String>? = null,
+)
+
+@Serializable
+private data class ChannelBindingRequest(
+    val platform: String,
+    val externalId: String,
+    val accessToken: String = "",
 )
 
 @Serializable
@@ -317,11 +382,22 @@ private data class TenantDto(
     val phoneNumberId: String,
     val agentType: String,
     val openrouterModel: String? = null,
+    val enabledModules: List<String>? = null,
+    val effectiveModules: List<String>,
+    val availableModules: List<String>,
     val rateLimitPerHour: Int,
     val rateLimitPerDay: Int,
     val status: String,
+    val channels: List<ChannelBindingDto>,
     val createdAt: String,
     val updatedAt: String,
+)
+
+@Serializable
+private data class ChannelBindingDto(
+    val platform: String,
+    val externalId: String,
+    val hasAccessToken: Boolean,
 )
 
 @Serializable
@@ -341,11 +417,42 @@ private fun Tenant.dto() = TenantDto(
     phoneNumberId = phoneNumberId,
     agentType = agentType,
     openrouterModel = openrouterModel,
+    enabledModules = enabledModules,
+    effectiveModules = DashboardModules.effectiveFor(this),
+    availableModules = DashboardModules.availableFor(this).toList(),
     rateLimitPerHour = rateLimitPerHour,
     rateLimitPerDay = rateLimitPerDay,
     status = status.name,
+    channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank()) },
     createdAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
 )
+
+private fun List<ChannelBindingRequest>?.toBindings(existing: List<ChannelBinding> = emptyList()): List<ChannelBinding> =
+    this.orEmpty().map { request ->
+        val platform = Platform.valueOf(request.platform.uppercase())
+        val existingToken = existing.firstOrNull { it.platform == platform && it.externalId == request.externalId.trim() }?.accessToken.orEmpty()
+        ChannelBinding(platform, request.externalId.trim(), request.accessToken.ifBlank { existingToken })
+    }
+
+private fun ChannelBindingRequest.toBinding(): ChannelBinding =
+    ChannelBinding(Platform.valueOf(platform.uppercase()), externalId.trim(), accessToken.trim())
+
+private fun validateBindings(bindings: List<ChannelBinding>): String? {
+    if (bindings.isEmpty()) return "at least one channel binding is required"
+    if (bindings.any { it.externalId.isBlank() }) return "channel externalId is required"
+    if (bindings.distinctBy { it.platform to it.externalId }.size != bindings.size) return "duplicate channel bindings are not allowed"
+    if (bindings.any { it.platform == Platform.INSTAGRAM && it.accessToken.isBlank() }) return "Instagram accessToken is required"
+    return null
+}
+
+private fun ChannelBinding.toDocument(): Document = Document("platform", platform.name)
+    .append("externalId", externalId)
+    .append("accessToken", accessToken)
+
+private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =
+    bindings.firstOrNull { it.platform == Platform.WHATSAPP }?.externalId?.takeIf { it.isNotBlank() }
+        ?.let { Updates.set("phoneNumberId", it) }
+        ?: Updates.unset("phoneNumberId")
 
 private fun kotlinx.datetime.Instant.toDate(): java.util.Date = java.util.Date(toEpochMilliseconds())

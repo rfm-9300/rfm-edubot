@@ -1,11 +1,14 @@
 package com.rfm.edubot.messaging
 
+import com.rfm.edubot.tenant.model.Platform
 import kotlinx.coroutines.channels.Channel
 import org.bson.types.ObjectId
 
 data class InboundMessage(
     val tenantId: ObjectId,
     val phoneNumberId: String,
+    val platform: Platform = Platform.WHATSAPP,
+    val channelExternalId: String = phoneNumberId,
     val waId: String,
     val waMessageId: String,
     val profileName: String? = null,

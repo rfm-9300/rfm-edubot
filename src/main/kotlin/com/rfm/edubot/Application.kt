@@ -13,7 +13,15 @@ import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
+import com.rfm.edubot.legal.legalRoutes
+import com.rfm.edubot.oauth.InstagramOAuthClient
+import com.rfm.edubot.oauth.OAuthState
+import com.rfm.edubot.oauth.instagramMetaCallbacks
+import com.rfm.edubot.oauth.instagramOAuthRoutes
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.persona.PersonaCompiler
+import com.rfm.edubot.persona.PersonaRepository
+import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.plugins.configureMonitoring
 import com.rfm.edubot.plugins.configureSerialization
 import com.rfm.edubot.plugins.configureStatusPages
@@ -92,19 +100,36 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
         appConfig = appConfig,
     )
 
+    val channelBindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
+    val oauthState = OAuthState(secret = appConfig.admin.jwtSecret)
+    val instagramOAuthClient = InstagramOAuthClient(appConfig.instagram, whatsappHttpClient)
+
     val pipelineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+
+    val personaCompiler = PersonaCompiler(
+        repository = PersonaRepository(mongoModule),
+        aiClient = aiClient,
+        scope = pipelineScope,
+        onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
+    )
 
     pipelineScope.launch {
         for (inbound in messageQueue.receiveChannel()) {
-            val tenant = tenantRegistry.byPhoneNumberId(inbound.phoneNumberId)
+            val tenant = tenantRegistry.byExternalId(inbound.platform, inbound.channelExternalId)
             if (tenant == null) {
-                LoggerFactory.getLogger("PipelineConsumer").warn("Skipping queued message for unknown phoneNumberId={}", inbound.phoneNumberId)
+                LoggerFactory.getLogger("PipelineConsumer").warn("Skipping queued message for unknown binding platform={} externalId={}", inbound.platform, inbound.channelExternalId)
+                continue
+            }
+            val responder = try {
+                pipelineFactory.responderFor(tenant, inbound.platform)
+            } catch (e: Exception) {
+                LoggerFactory.getLogger("PipelineConsumer").warn("Skipping queued message without responder: tenant={} platform={} error={}", tenant.slug, inbound.platform, e.message)
                 continue
             }
             val pipeline = pipelineFactory.getOrCreate(tenant)
             launch {
                 try {
-                    pipeline.handle(inbound)
+                    pipeline.handle(inbound, responder)
                 } catch (e: Exception) {
                     LoggerFactory.getLogger("PipelineConsumer").error(
                         "Pipeline failed for tenant={} waId={}: {}",
@@ -144,6 +169,7 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
 
         webhookRoutes(
             config = appConfig.whatsapp,
+            instagramAppSecret = appConfig.instagram.appSecret,
             messageQueue = messageQueue,
             deduplicationService = deduplicationService,
             tenantRegistry = tenantRegistry,
@@ -155,6 +181,9 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             mongo = mongoModule,
             tenantRepository = tenantRepository,
             dashboardUsers = dashboardUserRepository,
+            pipelineFactory = pipelineFactory,
+            personaCompiler = personaCompiler,
+            aiClient = aiClient,
             appConfig = appConfig,
         )
         dashboardImpersonationRoute(
@@ -170,5 +199,18 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             pipelineFactory = pipelineFactory,
             appConfig = appConfig,
         )
+        instagramOAuthRoutes(
+            config = appConfig.instagram,
+            oauthState = oauthState,
+            oauthClient = instagramOAuthClient,
+            bindingService = channelBindingService,
+            tenantRepository = tenantRepository,
+        )
+        instagramMetaCallbacks(
+            config = appConfig.instagram,
+            tenantRegistry = tenantRegistry,
+            bindingService = channelBindingService,
+        )
+        legalRoutes()
     }
 }

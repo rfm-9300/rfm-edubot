@@ -1,6 +1,7 @@
 package com.rfm.edubot.tenant
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
@@ -13,8 +14,11 @@ import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessagePipeline
+import com.rfm.edubot.persona.PersonaRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.ratelimit.RateLimiter
+import com.rfm.edubot.instagram.InstagramClient
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.whatsapp.WhatsAppClient
 import io.ktor.client.HttpClient
@@ -37,25 +41,36 @@ class TenantPipelineFactory(
         pipelines.remove(tenantId)
     }
 
+    fun responderFor(tenant: Tenant, platform: Platform): OutboundClient {
+        val binding = tenant.binding(platform) ?: throw IllegalStateException("Tenant ${tenant.slug} has no $platform binding")
+        return when (platform) {
+            Platform.WHATSAPP -> WhatsAppClient(
+                accessToken = binding.accessToken.ifBlank { appConfig.whatsapp.accessToken },
+                phoneNumberId = binding.externalId,
+                apiVersion = appConfig.whatsapp.apiVersion,
+                httpClient = whatsappHttpClient,
+            )
+            Platform.INSTAGRAM -> InstagramClient(
+                accessToken = binding.accessToken,
+                instagramAccountId = binding.externalId,
+                apiVersion = appConfig.instagram.graphVersion,
+                httpClient = whatsappHttpClient,
+            )
+        }
+    }
+
     private fun build(tenant: Tenant): MessagePipeline {
         val clients = ClientRepository(mongo, tenant.id)
         val quotes = QuoteRepository(mongo, tenant.id)
         val invoices = InvoiceRepository(mongo, tenant.id)
         val items = StandardItemRepository(mongo, tenant.id).also { runBlocking { it.seedDefaults() } }
-        val whatsappClient = WhatsAppClient(
-            accessToken = appConfig.whatsapp.accessToken,
-            phoneNumberId = tenant.phoneNumberId,
-            apiVersion = appConfig.whatsapp.apiVersion,
-            httpClient = whatsappHttpClient,
-        )
-
+        val compiledPersona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions }
         return MessagePipeline(
             users = UserRepository(mongo, tenant.id),
             conversations = ConversationRepository(mongo, tenant.id),
             messages = MessageRepository(mongo, tenant.id),
             rateLimiter = RateLimiter(tenant.rateLimitPerHour, tenant.rateLimitPerDay),
             aiClient = aiClient,
-            whatsappClient = whatsappClient,
             deduplicationService = deduplicationService,
             crmTools = CrmTools(clients, quotes, invoices, items),
             clientRepository = clients,
@@ -64,6 +79,7 @@ class TenantPipelineFactory(
             pdfGenerator = PdfGenerator(),
             pdfStoragePath = "${appConfig.pdfStoragePath}/${tenant.slug}",
             openrouterModel = tenant.openrouterModel,
+            compiledPersona = compiledPersona,
         )
     }
 }

@@ -26,6 +26,8 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "webhook_events",
                 "tenants",
                 "dashboard_users",
+                "tenant_persona",
+                "persona_sources",
                 "crm.clients",
                 "crm.quotes",
                 "crm.invoices",
@@ -34,23 +36,33 @@ class MongoModule(config: AppConfig.MongoConfig) {
             ).forEach { name -> try { db.createCollection(name) } catch (_: Exception) {} }
 
             val tenants = db.getCollection<Document>("tenants")
-            tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true))
+            tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true).sparse(true))
             tenants.createIndex(Document("slug", 1), IndexOptions().unique(true))
+            tenants.createIndex(Document("channels.platform", 1).append("channels.externalId", 1))
 
             val dashboardUsers = db.getCollection<Document>("dashboard_users")
             dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))
             dashboardUsers.createIndex(Document("tenantId", 1))
 
+            val tenantPersona = db.getCollection<Document>("tenant_persona")
+            tenantPersona.createIndex(Document("tenantId", 1), IndexOptions().unique(true))
+
+            val personaSources = db.getCollection<Document>("persona_sources")
+            personaSources.createIndex(Document("tenantId", 1).append("createdAt", -1))
+            personaSources.createIndex(Document("tenantId", 1).append("compiledIntoVersion", 1))
+
             val users = db.getCollection<Document>("users")
             users.dropIndexIfExists("waId_1")
-            users.createIndex(Document("tenantId", 1).append("waId", 1), IndexOptions().unique(true))
+            users.dropIndexIfExists("tenantId_1_waId_1")
+            users.createIndex(Document("tenantId", 1).append("channel", 1).append("waId", 1), IndexOptions().unique(true))
             users.createIndex(Document("tenantId", 1).append("lastSeenAt", -1))
 
             val conversations = db.getCollection<Document>("conversations")
             conversations.dropIndexIfExists("userId_1")
             conversations.dropIndexIfExists("waId_1")
+            conversations.dropIndexIfExists("tenantId_1_waId_1")
             conversations.createIndex(Document("tenantId", 1).append("userId", 1), IndexOptions().unique(true))
-            conversations.createIndex(Document("tenantId", 1).append("waId", 1), IndexOptions().unique(true))
+            conversations.createIndex(Document("tenantId", 1).append("channel", 1).append("waId", 1), IndexOptions().unique(true))
             conversations.createIndex(Document("tenantId", 1).append("lastMessageAt", -1))
 
             val messages = db.getCollection<Document>("messages")
@@ -62,7 +74,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                     Document("waMessageId", Document("\$type", "string"))
                 )
             )
-            messages.createIndex(Document("tenantId", 1).append("waId", 1).append("createdAt", -1))
+            messages.createIndex(Document("tenantId", 1).append("channel", 1).append("waId", 1).append("createdAt", -1))
             messages.createIndex(Document("tenantId", 1).append("createdAt", -1))
 
             val webhookEvents = db.getCollection<Document>("webhook_events")

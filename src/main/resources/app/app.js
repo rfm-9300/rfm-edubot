@@ -1,9 +1,10 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
-let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], search: '', active: 'overview' };
+let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], search: '', active: 'overview' };
+let personaChatBusy = false;
 
-const labels = { overview: 'Overview', conversations: 'Conversas', contacts: 'Contactos', clients: 'Clientes', quotes: 'Orçamentos', invoices: 'Faturas', catalog: 'Catálogo', settings: 'Settings' };
+const labels = { overview: 'Overview', conversations: 'Conversas', contacts: 'Contactos', clients: 'Clientes', quotes: 'Orçamentos', invoices: 'Faturas', catalog: 'Catálogo', persona: 'Persona', settings: 'Settings' };
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const fmtEUR = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -22,7 +23,7 @@ function toast(msg) { const el = $('#toast'); el.innerHTML = `<span class="toast
 
 function renderLogin() {
   $('#nav').innerHTML = '';
-  $('#view').innerHTML = `<div class="view__hero"><div><h1 class="view__title">Login</h1><p class="view__desc">Aceda ao dashboard do seu chatbot.</p></div></div><div class="panel" style="max-width:460px"><div class="drawer__body"><form class="form" id="login-form"><div class="form__row"><label class="lbl">Email</label><input class="inp" id="email" type="email" /></div><div class="form__row"><label class="lbl">Password</label><input class="inp" id="password" type="password" /></div><button class="btn btn--primary" type="submit">Entrar</button></form></div></div>`;
+  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">AI</div><p class="auth__eyebrow">thebots.lab / tenant</p><h1 class="auth__title">Entrar no dashboard</h1><p class="auth__desc">Aceda aos dados, conversas e CRM do seu chatbot.</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="email">Email</label><input class="inp" id="email" type="email" autocomplete="email" required /></div><div class="form__row"><label class="lbl" for="password">Password</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">Entrar</button></form></div></div>`;
   $('#login-form').addEventListener('submit', async e => {
     e.preventDefault();
     try { const res = await api('/app/auth/login', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) }); token = res.token; localStorage.setItem('dashboardToken', token); await bootAuthed(); }
@@ -35,6 +36,7 @@ async function bootAuthed() {
   $('#brand-name').textContent = state.me.tenant.name;
   $('#brand-sub').textContent = `${state.me.tenant.agentType} · ${state.me.tenant.slug}`;
   $('#principal-type').textContent = state.me.principalType;
+  if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
   renderNav();
   await loadModule(state.active);
   render();
@@ -55,6 +57,7 @@ async function loadModule(tab) {
   if (tab === 'quotes') state.quotes = await api('/app/api/crm/quotes');
   if (tab === 'invoices') state.invoices = await api('/app/api/crm/invoices');
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
+  if (tab === 'persona') state.persona = await api('/app/api/persona');
 }
 
 function render() {
@@ -73,6 +76,7 @@ function render() {
   if (state.active === 'quotes') return renderQuotes(root);
   if (state.active === 'invoices') return renderInvoices(root);
   if (state.active === 'catalog') return renderCatalog(root);
+  if (state.active === 'persona') return renderPersona(root);
   renderSettings(root);
 }
 
@@ -87,6 +91,161 @@ function renderClients(root) { const rows = state.clients.map(c => `<tr><td clas
 function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero('Orçamentos', 'CRM · Propostas comerciais.') + panelTable('<tr><th>Número</th><th>Cliente</th><th>Status</th><th class="right">Total</th></tr>', rows); }
 function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero('Faturas', 'CRM · Faturas emitidas.') + panelTable('<tr><th>Número</th><th>Cliente</th><th>Status</th><th>Vencimento</th><th class="right">Total</th></tr>', rows); }
 function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero('Catálogo', 'CRM · Serviços e materiais padrão.') + panelTable('<tr><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Unid.</th><th class="right">Preço</th></tr>', rows); }
+let personaPollTimer;
+async function refreshPersona() {
+  state.persona = await api('/app/api/persona');
+  if (state.active === 'persona') render();
+  clearTimeout(personaPollTimer);
+  if (state.persona.status === 'COMPILING') personaPollTimer = setTimeout(refreshPersona, 3000);
+}
+
+function renderPersona(root) {
+  const p = state.persona || {};
+  const sources = p.sources || [];
+  const compiling = p.status === 'COMPILING';
+  const sourceRows = sources.map(s => `<tr><td>${s.kind === 'FILE' ? '📄' : '📝'} ${escapeHTML(s.label)}</td><td>${s.compiled ? '<span class="muted">sincronizada</span>' : '<span>pendente</span>'}</td><td class="mono muted">${fmtDate(s.createdAt)}</td><td class="right"><button class="btn btn--sm" data-del-source="${s.id}">Remover</button></td></tr>`).join('');
+  root.innerHTML = `${hero('Persona', 'Personalidade do bot — sintetizada a partir de notas e ficheiros que carrega.')}
+    <div class="view__stats" style="margin-bottom:18px">
+      <div class="stat"><div class="stat__label">Status</div><div class="stat__value">${compiling ? 'A sintetizar…' : escapeHTML(p.status || 'EMPTY')}</div></div>
+      <div class="stat"><div class="stat__label">Versão</div><div class="stat__value">${p.version || 0}</div></div>
+      <div class="stat"><div class="stat__label">Tokens est.</div><div class="stat__value">${p.tokenEstimate || 0}</div></div>
+      <div class="stat"><div class="stat__label">Actualizado</div><div class="stat__value" style="font-size:16px">${escapeHTML(fmtDate(p.updatedAt))}</div></div>
+    </div>
+
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <h2 class="view__title" style="font-size:18px">Testar o bot</h2>
+        <button class="btn btn--sm" id="persona-chat-clear">Limpar</button>
+      </div>
+      <p class="view__desc" style="margin-bottom:14px">Converse com o bot usando a persona atual para testar o tom e as respostas. As mensagens de teste não são guardadas e não criam clientes, orçamentos ou faturas.</p>
+      <div class="chat__log" id="persona-chat-log"></div>
+      <form class="chat__form" id="persona-chat-form">
+        <input class="inp chat__input" id="persona-chat-input" placeholder="Escreva uma mensagem de teste…" autocomplete="off" />
+        <button class="btn btn--primary" type="submit" id="persona-chat-send">Enviar</button>
+      </form>
+    </div>
+
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">Adicionar informação</h2>
+      <p class="view__desc" style="margin-bottom:14px">Escreva uma nota ou carregue um ficheiro (PDF, TXT, MD). É sintetizado no ficheiro de instruções abaixo.</p>
+      <form class="form" id="persona-note-form">
+        <div class="form__row form__row--full">
+          <label class="lbl" for="persona-note">Nota</label>
+          <textarea class="txt" id="persona-note" rows="4" placeholder="Ex: Somos uma clínica dentária em Lisboa. Tom acolhedor, tratamos por 'você'..."></textarea>
+        </div>
+        <button class="btn btn--primary" type="submit">Adicionar nota</button>
+      </form>
+      <div class="form__row form__row--full" style="margin-top:14px">
+        <label class="lbl" for="persona-file">Ficheiro</label>
+        <input class="inp" id="persona-file" type="file" accept=".pdf,.txt,.md,.markdown" />
+        <div class="hint">PDF, TXT ou Markdown. O texto é extraído e sintetizado.</div>
+      </div>
+    </div>
+
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+        <div><h2 class="view__title" style="font-size:18px">Fontes</h2><p class="view__desc">Material em bruto que alimenta a síntese.</p></div>
+        <button class="btn btn--sm" id="persona-rebuild" ${compiling ? 'disabled' : ''}>Recompilar tudo</button>
+      </div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fonte</th><th>Estado</th><th>Criada</th><th class="right">Acções</th></tr></thead><tbody>${sourceRows || '<tr><td colspan="4"><div class="empty"><p class="empty__title">Sem fontes ainda</p><p class="empty__desc">Adicione uma nota ou ficheiro acima.</p></div></td></tr>'}</tbody></table></div>
+    </div>
+
+    <div class="panel" style="padding:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">Ficheiro de instruções compilado</h2>
+      <p class="view__desc" style="margin-bottom:14px">Resultado da síntese. Pode editar manualmente; a próxima síntese irá revê-lo.</p>
+      <form class="form" id="persona-form">
+        <div class="form__row form__row--full">
+          <textarea class="txt" id="persona-text" rows="16" placeholder="Ainda vazio — adicione informação acima para o bot ganhar personalidade.">${escapeHTML(p.compiledInstructions || '')}</textarea>
+        </div>
+        <button class="btn btn--primary" type="submit">Guardar edição manual</button>
+      </form>
+    </div>`;
+
+  $('#persona-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const compiledInstructions = $('#persona-text').value.trim();
+    state.persona = await api('/app/api/persona', { method: 'PUT', body: JSON.stringify({ compiledInstructions }) });
+    toast('Persona guardada');
+    render();
+  });
+  $('#persona-note-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const content = $('#persona-note').value.trim();
+    if (!content) return;
+    state.persona = await api('/app/api/persona/sources', { method: 'POST', body: JSON.stringify({ content }) });
+    toast('Nota adicionada — a sintetizar');
+    render();
+    refreshPersona();
+  });
+  $('#persona-file').addEventListener('change', async e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      state.persona = await uploadPersonaFile(file);
+      toast('Ficheiro carregado — a sintetizar');
+      render();
+      refreshPersona();
+    } catch (err) { toast(err.message || 'Falha no upload'); }
+  });
+  $('#persona-rebuild').addEventListener('click', async () => {
+    state.persona = await api('/app/api/persona/rebuild', { method: 'POST', body: '{}' });
+    toast('Recompilação iniciada');
+    render();
+    refreshPersona();
+  });
+  $$('[data-del-source]').forEach(b => b.addEventListener('click', async () => {
+    await api(`/app/api/persona/sources/${b.dataset.delSource}`, { method: 'DELETE' });
+    await refreshPersona();
+  }));
+
+  renderPersonaChatLog(personaChatBusy);
+  $('#persona-chat-clear').addEventListener('click', () => { state.personaChat = []; renderPersonaChatLog(); });
+  $('#persona-chat-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (personaChatBusy) return;
+    const input = $('#persona-chat-input');
+    const text = input.value.trim();
+    if (!text) return;
+    state.personaChat.push({ role: 'user', content: text });
+    input.value = '';
+    personaChatBusy = true;
+    $('#persona-chat-send').disabled = true;
+    renderPersonaChatLog(true);
+    try {
+      const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify({ messages: state.personaChat }) });
+      state.personaChat.push({ role: 'assistant', content: res.reply });
+    } catch (err) {
+      state.personaChat.push({ role: 'assistant', content: '⚠️ Erro ao contactar o bot. Tente novamente.' });
+    } finally {
+      personaChatBusy = false;
+      renderPersonaChatLog();
+      const send = $('#persona-chat-send'); if (send) send.disabled = false;
+      const inp = $('#persona-chat-input'); if (inp) inp.focus();
+    }
+  });
+}
+
+function renderPersonaChatLog(busy = false) {
+  const log = $('#persona-chat-log');
+  if (!log) return;
+  const msgs = state.personaChat || [];
+  if (!msgs.length && !busy) {
+    log.innerHTML = '<div class="chat__empty">Envie uma mensagem para testar a persona do bot.</div>';
+    return;
+  }
+  log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>`).join('')
+    + (busy ? '<div class="chat__msg chat__msg--bot chat__typing">a escrever…</div>' : '');
+  log.scrollTop = log.scrollHeight;
+}
+
+async function uploadPersonaFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/app/api/persona/sources/file', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
+  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
+  return res.json();
+}
 function renderSettings(root) { root.innerHTML = hero('Settings', 'Business profile, team e bot tweaks entram aqui nas próximas fases.') + '<div class="panel"><div class="empty"><p class="empty__title">Settings v1</p><p class="empty__desc">Team é criado no backoffice por enquanto. Business profile/PDF branding ainda pendente.</p></div></div>'; }
 
 function openDrawer(title, body) { const root = $('#drawer'); $('#drawer-title').textContent = title; $('#drawer-body').innerHTML = ''; $('#drawer-body').appendChild(body); root.hidden = false; const close = () => { root.hidden = true; }; $$('[data-close]', root).forEach(b => b.onclick = close); }

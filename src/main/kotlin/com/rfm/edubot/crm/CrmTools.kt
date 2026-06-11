@@ -39,6 +39,9 @@ class CrmTools(
         tool("sum_invoices_by_client", "Return total invoice value grouped by client (with paid/pending split), sorted by total descending.", obj()),
     )
 
+    /** Tools that only read data — safe for the persona test playground (never mutate the tenant's records). */
+    val readOnlyDefinitions: List<ToolDefinition> = definitions.filter { it.name in READ_ONLY_TOOL_NAMES }
+
     suspend fun execute(call: ToolCall): JsonObject = when (call.name) {
         "search_clients" -> searchClients(call.arguments)
         "list_service_templates" -> listServiceTemplates(call.arguments)
@@ -344,5 +347,18 @@ class CrmTools(
             })
         })
         if (invoice) put("due_date_required", JsonPrimitive(true))
+    }
+
+    companion object {
+        /** Names of tools that only read data — used to build [readOnlyDefinitions] and to guard execution in the test playground. */
+        val READ_ONLY_TOOL_NAMES = setOf(
+            "search_clients",
+            "list_service_templates",
+            "list_standard_items",
+            "list_quotes",
+            "list_invoices",
+            "sum_quotes_by_client",
+            "sum_invoices_by_client",
+        )
     }
 }

@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy Policy</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+           max-width: 760px; margin: 0 auto; padding: 40px 20px; color: #1a1a1a; }
+    @media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #121212; } a { color: #6ea8fe; } }
+    h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+    code { background: rgba(127,127,127,.18); padding: 1px 5px; border-radius: 4px; }
+    .meta { opacity: .7; font-size: .9rem; }
+  </style>
+</head>
+<body>
+  <h1>Privacy Policy</h1>
+  <p class="meta">Last updated: 8 June 2026</p>
+
+  <p>TheBotsLab (&ldquo;we&rdquo;, &ldquo;us&rdquo;) operates a messaging assistant that lets a
+  business receive and answer customer messages on <strong>WhatsApp</strong> and
+  <strong>Instagram</strong> through an automated AI agent. This policy explains what data we process
+  when a business connects an account and when its customers send messages.</p>
+
+  <h2>1. Who this applies to</h2>
+  <p>Two groups: the <strong>business</strong> that connects its own WhatsApp or Instagram
+  professional account to our service, and the <strong>end users</strong> who message that business.</p>
+
+  <h2>2. Data we collect</h2>
+  <ul>
+    <li><strong>Connected account data</strong> — when a business connects an Instagram account, we
+      receive and store its Instagram account ID, username, and an access token issued by Meta. For
+      WhatsApp we store the phone number ID and access token. Tokens are used only to send and receive
+      messages on that account&rsquo;s behalf and are never shown back to the browser.</li>
+    <li><strong>Message data</strong> — the content, sender ID, and timestamps of direct messages sent
+      to a connected account, plus the replies we generate, so the assistant can maintain conversation
+      context.</li>
+    <li><strong>Operational data</strong> — delivery status and minimal logs (identifiers and
+      timestamps, not message bodies) used to run and debug the service.</li>
+  </ul>
+
+  <h2>3. How we use it</h2>
+  <p>Solely to deliver the service: receive incoming messages, generate a relevant reply with an AI
+  model, and send that reply back on the same channel. We do <strong>not</strong> sell personal data,
+  use it for advertising, or build cross-site profiles.</p>
+
+  <h2>4. Third parties we share with</h2>
+  <ul>
+    <li><strong>Meta Platforms</strong> — the WhatsApp Business and Instagram Graph APIs, to receive
+      and send messages.</li>
+    <li><strong>OpenRouter / the underlying LLM provider</strong> — message text is sent to generate a
+      reply. We do not send access tokens to the model provider.</li>
+    <li><strong>Our database (MongoDB)</strong> — message and account data is stored on infrastructure
+      we control.</li>
+  </ul>
+
+  <h2>5. Retention</h2>
+  <p>We keep connected-account data for as long as the account stays connected, and conversation data
+  for as long as needed to provide the service. When a business disconnects an account — or Meta sends
+  us a deauthorization for it — we remove the stored access token and stop processing messages for that
+  account.</p>
+
+  <h2>6. Your rights &amp; deleting your data</h2>
+  <p>You can request access to, or deletion of, the data we hold about you at any time. See our
+  <a href="/data-deletion">Data Deletion</a> page, or email us at
+  <a href="mailto:hello@thebotslab.pt">hello@thebotslab.pt</a>. A business can also disconnect an account at
+  any time from the operator dashboard or from its Instagram settings, which triggers removal of the
+  stored token for that account.</p>
+
+  <h2>7. Contact</h2>
+  <p>Questions about this policy: <a href="mailto:hello@thebotslab.pt">hello@thebotslab.pt</a>.</p>
+</body>
+</html>

@@ -1,0 +1,45 @@
+<!doctype html>
+<!--
+  Doubles as (a) the "Data Deletion Instructions URL" in App Settings and
+  (b) the status page the data-deletion callback redirects users to (may carry a ?code= query).
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Data Deletion</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
+           max-width: 760px; margin: 0 auto; padding: 40px 20px; color: #1a1a1a; }
+    @media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #121212; } a { color: #6ea8fe; } }
+    h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+    ol { padding-left: 1.2rem; }
+    code { background: rgba(127,127,127,.18); padding: 1px 5px; border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <h1>Data Deletion</h1>
+
+  <p>TheBotsLab lets a business answer its WhatsApp and Instagram messages through an automated
+  assistant. This page explains how to have the data we hold deleted.</p>
+
+  <h2>Disconnect an account (immediate)</h2>
+  <p>A connected business can remove an account at any time:</p>
+  <ol>
+    <li>From the operator dashboard, open the tenant and remove the channel; or</li>
+    <li>From Instagram: <strong>Settings → Apps and websites</strong>, and remove this app.</li>
+  </ol>
+  <p>Either action revokes our access and deletes the stored access token for that account. We also
+  receive an automatic notification from Meta when the app is removed and delete the token on our
+  side.</p>
+
+  <h2>Request full deletion of your data</h2>
+  <p>To delete the conversation history and any other data we hold about you, email
+  <a href="mailto:hello@thebotslab.pt">hello@thebotslab.pt</a> with the account or username involved. We will
+  process the request and confirm by reply, typically within 30 days.</p>
+
+  <p>If you were redirected here from Instagram with a confirmation code, your deletion request has been
+  received and is being processed; keep that code for reference.</p>
+</body>
+</html>

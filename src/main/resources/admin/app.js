@@ -2,11 +2,12 @@
 
 /* ----------  API  ---------- */
 
-const token = localStorage.getItem('adminToken');
+let token = localStorage.getItem('adminToken') || '';
 const tenantSlug = new URLSearchParams(location.search).get('tenant');
 
-if (!tenantSlug || !token) {
+if (!tenantSlug) {
   location.replace('/backoffice/');
+  throw new Error('Missing tenant slug');
 }
 
 const API_BASE = `/admin/api/tenants/${encodeURIComponent(tenantSlug)}`;
@@ -19,8 +20,9 @@ async function api(path, options = {}) {
   });
   if (res.status === 401) {
     localStorage.removeItem('adminToken');
-    location.replace('/backoffice/');
-    return;
+    token = '';
+    renderLogin();
+    throw new Error('unauthorized');
   }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   if (res.status === 204) return null;
@@ -183,6 +185,38 @@ function confirmDialog({ title, body, okLabel = 'Eliminar', danger = true }) {
     const onCancel = () => cleanup(false);
     ok.addEventListener('click', onOk, { once: true });
     $$('[data-confirm-cancel]', root).forEach(b => b.addEventListener('click', onCancel, { once: true }));
+  });
+}
+
+function renderLogin() {
+  $('#nav').hidden = true;
+  $('#brand-name').textContent = 'CRM';
+  $('#brand-sub').textContent = `${tenantSlug} · login`;
+  $('#crumb-leaf').textContent = 'Login';
+  $('#btn-new').hidden = true;
+  $('#btn-export').hidden = true;
+  $('#search').disabled = true;
+  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">CRM</div><p class="auth__eyebrow">thebots.lab / ${escapeHTML(tenantSlug)}</p><h1 class="auth__title">Entrar no CRM</h1><p class="auth__desc">Use a password de operador para abrir este painel de gestão.</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="password">Password</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">Entrar</button></form></div></div>`;
+  $('#login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    try {
+      const res = await fetch('/admin/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('#password').value }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const body = await res.json();
+      token = body.token;
+      localStorage.setItem('adminToken', token);
+      $('#nav').hidden = false;
+      $('#btn-new').hidden = false;
+      $('#btn-export').hidden = false;
+      $('#search').disabled = false;
+      await init();
+    } catch (err) {
+      toast('Login inválido');
+    }
   });
 }
 
@@ -930,6 +964,7 @@ async function init() {
     $('#brand-name').textContent = tenant.name;
     $('#brand-sub').textContent = `${tenant.slug} · CRM`;
   } catch (e) {
+    if (!token) return;
     $('#view').innerHTML = `<div class="empty"><p class="empty__title">Tenant inválido</p><p class="empty__desc">Volte ao backoffice e abra um CRM válido.</p></div>`;
     return;
   }
@@ -972,4 +1007,5 @@ async function init() {
   setActive(initial);
 }
 
-init();
+if (token) init();
+else renderLogin();

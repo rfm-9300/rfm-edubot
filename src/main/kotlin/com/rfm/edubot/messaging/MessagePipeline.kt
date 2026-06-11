@@ -4,6 +4,7 @@ import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
+import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
@@ -21,7 +22,6 @@ import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
-import com.rfm.edubot.whatsapp.WhatsAppClient
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -40,7 +40,6 @@ class MessagePipeline(
     private val messages: MessageRepository,
     private val rateLimiter: RateLimiter,
     private val aiClient: AiClient,
-    private val whatsappClient: WhatsAppClient,
     private val deduplicationService: DeduplicationService,
     private val crmTools: CrmTools,
     private val clientRepository: ClientRepository,
@@ -49,15 +48,16 @@ class MessagePipeline(
     private val pdfGenerator: PdfGenerator,
     private val pdfStoragePath: String,
     private val openrouterModel: String? = null,
+    private val compiledPersona: String? = null,
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
-    suspend fun handle(inbound: InboundMessage) {
+    suspend fun handle(inbound: InboundMessage, responder: OutboundClient) {
         try {
-            log.info("Processing message: waId={}, id={}", inbound.waId, inbound.waMessageId)
+            log.info("Processing message: platform={}, waId={}, id={}", inbound.platform, inbound.waId, inbound.waMessageId)
 
-            val user = users.findOrCreate(inbound.waId, inbound.profileName)
+            val user = users.findOrCreate(inbound.waId, inbound.profileName, inbound.platform)
 
             if (user.status == com.rfm.edubot.conversation.model.UserStatus.BLOCKED) {
                 log.warn("Blocked user attempted message: waId={}", inbound.waId)
@@ -65,19 +65,20 @@ class MessagePipeline(
                 return
             }
 
-            val rateResult = rateLimiter.tryAcquire(user.waId)
+            val rateResult = rateLimiter.tryAcquire("${inbound.platform.name}:${user.waId}")
             if (rateResult is RateDecision.Reject) {
                 log.warn("Rate limited user: waId={}", inbound.waId)
-                whatsappClient.sendText(user.waId, rateResult.message)
+                responder.sendText(user.waId, rateResult.message)
                 deduplicationService.markProcessed(inbound.eventId)
                 return
             }
 
-            val conversation = conversations.findOrCreate(user.id, inbound.waId)
+            val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
 
             val userMessage = Message(
                 tenantId = inbound.tenantId,
                 conversationId = conversation.id,
+                channel = inbound.platform,
                 waId = user.waId,
                 role = UserRole.USER,
                 waMessageId = inbound.waMessageId,
@@ -105,10 +106,10 @@ class MessagePipeline(
             // what to ask for next. Tools stay available (via useTools below) but are not forced.
             val pdfReply = if (isPdfRequest(inbound.messageText)) {
                 try {
-                    sendLatestQuotePdf(user.waId, contextMessages)
+                    sendLatestQuotePdf(user.waId, contextMessages, responder)
                 } catch (e: Exception) {
                     log.error("Failed to send requested PDF: waId={}, error={}", user.waId, e.message, e)
-                    "Encontrei o orçamento, mas não consegui enviar o PDF pelo WhatsApp agora. Tente novamente em alguns segundos."
+                    "Encontrei o orçamento, mas não consegui enviar o PDF por este canal agora. Tente novamente em alguns segundos."
                 }
             } else {
                 null
@@ -117,6 +118,7 @@ class MessagePipeline(
                 val assistantMessage = Message(
                     tenantId = inbound.tenantId,
                     conversationId = conversation.id,
+                    channel = inbound.platform,
                     waId = user.waId,
                     role = UserRole.ASSISTANT,
                     content = MessageContent.Text(pdfReply),
@@ -124,7 +126,7 @@ class MessagePipeline(
                     createdAt = SystemClock.now(),
                 )
                 messages.insert(assistantMessage)
-                whatsappClient.sendText(user.waId, pdfReply)
+                responder.sendText(user.waId, pdfReply)
                 conversations.bumpActivity(conversation.id, null)
                 deduplicationService.markProcessed(inbound.eventId)
                 log.info("Pipeline completed with requested PDF: waId={}", user.waId)
@@ -150,7 +152,7 @@ class MessagePipeline(
             // Send immediate feedback before the first AI call when we know tools will run,
             // so the user doesn't wait in silence during the ~4-5s model latency.
             if (isConfirmedCrmAction) {
-                whatsappClient.sendText(user.waId, "Um momento, processando...")
+                responder.sendText(user.waId, "Um momento, processando...")
                 feedbackSent = true
             }
 
@@ -177,10 +179,10 @@ class MessagePipeline(
                     }
                     is AiResponse.ToolUse -> {
                         if (!feedbackSent) {
-                            whatsappClient.sendText(user.waId, "Um momento, processando...")
+                            responder.sendText(user.waId, "Um momento, processando...")
                             feedbackSent = true
                         } else if (iterations == 2) {
-                            whatsappClient.sendText(user.waId, "Quase pronto, gerando o documento...")
+                            responder.sendText(user.waId, "Quase pronto, gerando o documento...")
                         }
                         tokenUsage = aiResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) }
                         responseId = aiResponse.responseId
@@ -233,6 +235,7 @@ class MessagePipeline(
             val assistantMessage = Message(
                 tenantId = inbound.tenantId,
                 conversationId = conversation.id,
+                channel = inbound.platform,
                 waId = user.waId,
                 role = UserRole.ASSISTANT,
                 content = MessageContent.Text(replyText),
@@ -244,8 +247,8 @@ class MessagePipeline(
             )
             messages.insert(assistantMessage)
 
-            whatsappClient.sendText(user.waId, replyText)
-            sendCreatedDocuments(user.waId, createdDocuments)
+            responder.sendText(user.waId, replyText)
+            sendCreatedDocuments(user.waId, createdDocuments, responder)
 
             conversations.bumpActivity(conversation.id, tokenUsage)
 
@@ -267,6 +270,9 @@ class MessagePipeline(
         val contextMessages = mutableListOf<ChatMessage>()
 
         contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
+        compiledPersona?.takeIf { it.isNotBlank() }?.let { persona ->
+            contextMessages.add(ChatMessage(role = "system", content = "<persona>\n$persona\n</persona>"))
+        }
 
         conversation.summary?.let { summary ->
             contextMessages.add(
@@ -277,7 +283,7 @@ class MessagePipeline(
             )
         }
 
-        val recentMessages = messages.lastNByWaId(conversation.waId, 10)
+        val recentMessages = messages.lastNByWaId(conversation.waId, 10, conversation.channel)
         for (msg in recentMessages) {
             when (msg.content) {
                 is MessageContent.Text -> {
@@ -297,7 +303,7 @@ class MessagePipeline(
         return contextMessages
     }
 
-    private suspend fun sendCreatedDocuments(waId: String, createdDocuments: List<CreatedDocument>) {
+    private suspend fun sendCreatedDocuments(waId: String, createdDocuments: List<CreatedDocument>, responder: OutboundClient) {
         for (created in createdDocuments.distinctBy { it.type to it.id }) {
             when (created.type) {
                 "quote" -> {
@@ -307,8 +313,11 @@ class MessagePipeline(
                     val filename = "Orcamento ${quote.number}.pdf"
                     val path = savePdf("quotes", filename, bytes)
                     quoteRepository.setPdfPath(quote.id, path.toString())
-                    val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
-                    whatsappClient.sendDocument(waId, mediaId, filename)
+                    if (responder.capabilities.supportsDocuments) {
+                        responder.sendDocument(waId, bytes, filename, "application/pdf")
+                    } else {
+                        responder.sendText(waId, "O orçamento ${quote.number} foi gerado e ficou disponível no dashboard.")
+                    }
                 }
                 "invoice" -> {
                     val invoice = invoiceRepository.findById(ObjectId(created.id)) ?: continue
@@ -317,8 +326,11 @@ class MessagePipeline(
                     val filename = "Fatura ${invoice.number}.pdf"
                     val path = savePdf("invoices", filename, bytes)
                     invoiceRepository.setPdfPath(invoice.id, path.toString())
-                    val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
-                    whatsappClient.sendDocument(waId, mediaId, filename)
+                    if (responder.capabilities.supportsDocuments) {
+                        responder.sendDocument(waId, bytes, filename, "application/pdf")
+                    } else {
+                        responder.sendText(waId, "A fatura ${invoice.number} foi gerada e ficou disponível no dashboard.")
+                    }
                 }
             }
         }
@@ -332,16 +344,19 @@ class MessagePipeline(
         return path
     }
 
-    private suspend fun sendLatestQuotePdf(waId: String, contextMessages: List<ChatMessage>): String? {
+    private suspend fun sendLatestQuotePdf(waId: String, contextMessages: List<ChatMessage>, responder: OutboundClient): String? {
         val client = inferClientFromContext(contextMessages) ?: return null
         val quote = quoteRepository.list(client.id).firstOrNull() ?: return null
         val bytes = pdfGenerator.generateQuote(quote, client)
         val filename = "Orcamento ${quote.number}.pdf"
         val path = savePdf("quotes", filename, bytes)
         quoteRepository.setPdfPath(quote.id, path.toString())
-        val mediaId = whatsappClient.uploadMedia(bytes, "application/pdf")
-        whatsappClient.sendDocument(waId, mediaId, filename)
-        return "Enviei o PDF do orçamento ${quote.number}."
+        return if (responder.capabilities.supportsDocuments) {
+            responder.sendDocument(waId, bytes, filename, "application/pdf")
+            "Enviei o PDF do orçamento ${quote.number}."
+        } else {
+            "O PDF do orçamento ${quote.number} foi gerado e ficou disponível no dashboard."
+        }
     }
 
     private suspend fun inferClientFromContext(contextMessages: List<ChatMessage>): com.rfm.edubot.crm.model.Client? {

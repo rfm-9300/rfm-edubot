@@ -1,6 +1,6 @@
 # Architecture
 
-WhatsApp AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling.
+Multi-channel AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling. A tenant can bind WhatsApp and Instagram DM accounts to the same agent; the pipeline stays shared and channel-specific behavior is isolated at ingress and egress.
 
 ## Request Flow
 
@@ -53,7 +53,7 @@ sequenceDiagram
 ```mermaid
 graph TD
     subgraph HTTP["HTTP Layer (Ktor/Netty :8080)"]
-        WR[WebhookRoutes]
+        WR[WebhookRoutes<br/>WhatsApp + Instagram]
         AR[AdminRoutes]
         WV[WebhookVerifier]
         Health["/health  /ready  /admin"]
@@ -75,7 +75,7 @@ graph TD
 
     subgraph External
         AI[AiClient<br/>OpenRouter]
-        WC[WhatsAppClient<br/>Graph API v21]
+        OC[OutboundClient<br/>WhatsApp / Instagram]
         PDF[PdfGenerator<br/>PDFBox]
     end
 
@@ -89,7 +89,7 @@ graph TD
     MQ --> MP
     MP --> UR & CR & MR & CRM & RL & DS
     MP --> AI
-    MP --> WC
+    MP --> OC
     MP --> PDF
     AR --> CRM
     UR & CR & MR & CRM & DS --> Mongo
@@ -106,6 +106,8 @@ graph TD
 | `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
+| `channel/` | `OutboundClient` interface and per-channel capability flags used by the pipeline |
+| `instagram/` | Instagram DM Graph API outbound adapter |
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
 | `persistence/` | MongoDB wiring, index creation at startup |
@@ -138,6 +140,9 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 ## Key Design Decisions
 
 - **Async decoupling** — webhook POST returns 200 immediately; processing happens in a `SupervisorJob` coroutine scope consuming the `Channel`. Backpressure is handled by `Channel.UNLIMITED` (bounded capacity can be set via `MessageQueue(capacity=N)`).
+- **Channel adapters at the edges** — webhook ingress normalizes WhatsApp and Instagram payloads into `InboundMessage`; the consumer selects an `OutboundClient` from the tenant's channel binding before calling the shared `MessagePipeline`.
+- **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
+- **Shared web design system** — `/admin`, `/app`, and `/backoffice` all load the same static stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). The stylesheet centralizes the dark-first thebots.lab tokens, component classes, and auth card styles so the three HTML surfaces stay visually consistent without route-specific CSS.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.

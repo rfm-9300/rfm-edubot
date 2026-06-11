@@ -5,6 +5,8 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
 import kotlinx.coroutines.flow.firstOrNull
@@ -19,7 +21,12 @@ class TenantRepository(mongoModule: MongoModule) {
     private val collection = mongoModule.database.getCollection<Document>("tenants")
 
     suspend fun findByPhoneNumberId(phoneNumberId: String): Tenant? =
-        collection.find(Filters.eq("phoneNumberId", phoneNumberId)).firstOrNull()?.toTenant()
+        collection.find(
+            Filters.or(
+                Filters.eq("phoneNumberId", phoneNumberId),
+                Filters.elemMatch("channels", Filters.and(Filters.eq("platform", Platform.WHATSAPP.name), Filters.eq("externalId", phoneNumberId))),
+            )
+        ).firstOrNull()?.toTenant()
 
     suspend fun findBySlug(slug: String): Tenant? =
         collection.find(Filters.eq("slug", slug)).firstOrNull()?.toTenant()
@@ -49,9 +56,10 @@ class TenantRepository(mongoModule: MongoModule) {
         id = getObjectId("_id"),
         slug = getString("slug"),
         name = getString("name"),
-        phoneNumberId = getString("phoneNumberId"),
+        channels = getChannels(),
         agentType = getString("agentType") ?: "CRM_V1",
         openrouterModel = getString("openrouterModel"),
+        enabledModules = getList("enabledModules", String::class.java),
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
@@ -59,18 +67,39 @@ class TenantRepository(mongoModule: MongoModule) {
         updatedAt = getInstant("updatedAt"),
     )
 
-    private fun Tenant.toDocument() = Document("_id", id)
-        .append("slug", slug)
-        .append("name", name)
-        .append("phoneNumberId", phoneNumberId)
-        .append("agentType", agentType)
-        .append("openrouterModel", openrouterModel)
-        .append("rateLimitPerHour", rateLimitPerHour)
-        .append("rateLimitPerDay", rateLimitPerDay)
-        .append("status", status.name)
-        .append("createdAt", createdAt.toDate())
-        .append("updatedAt", updatedAt.toDate())
+    private fun Tenant.toDocument(): Document {
+        val doc = Document("_id", id)
+            .append("slug", slug)
+            .append("name", name)
+            .append("channels", channels.map { it.toDocument() })
+            .append("agentType", agentType)
+            .append("openrouterModel", openrouterModel)
+            .append("enabledModules", enabledModules)
+            .append("rateLimitPerHour", rateLimitPerHour)
+            .append("rateLimitPerDay", rateLimitPerDay)
+            .append("status", status.name)
+            .append("createdAt", createdAt.toDate())
+            .append("updatedAt", updatedAt.toDate())
+        if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
+        return doc
+    }
 }
+
+private fun Document.getChannels(): List<ChannelBinding> {
+    val raw = getList("channels", Document::class.java).orEmpty()
+    val channels = raw.mapNotNull { doc ->
+        val platform = doc.getString("platform")?.let { runCatching { Platform.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
+        val externalId = doc.getString("externalId")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+        ChannelBinding(platform = platform, externalId = externalId, accessToken = doc.getString("accessToken").orEmpty())
+    }
+    if (channels.isNotEmpty()) return channels
+    val legacyPhoneNumberId = getString("phoneNumberId")
+    return if (legacyPhoneNumberId.isNullOrBlank()) emptyList() else listOf(ChannelBinding(Platform.WHATSAPP, legacyPhoneNumberId))
+}
+
+private fun ChannelBinding.toDocument(): Document = Document("platform", platform.name)
+    .append("externalId", externalId)
+    .append("accessToken", accessToken)
 
 private fun Document.getInstant(field: String): Instant = Instant.fromEpochMilliseconds(getDate(field).time)
 

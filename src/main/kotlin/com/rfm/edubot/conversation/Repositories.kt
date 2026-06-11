@@ -16,6 +16,7 @@ import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.model.Platform
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import org.bson.Document
@@ -28,17 +29,17 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("users")
     private val log = LoggerFactory.getLogger("UserRepository")
 
-    suspend fun findByWaId(waId: String): User? {
-        val doc = collection.find(scoped(Filters.eq("waId", waId))).firstOrNull()
+    suspend fun findByWaId(waId: String, channel: Platform = Platform.WHATSAPP): User? {
+        val doc = collection.find(scoped(channel, Filters.eq("waId", waId))).firstOrNull()
         return doc?.toUser()
     }
 
-    suspend fun findOrCreate(waId: String, displayName: String? = null): User {
-        val existing = findByWaId(waId)
+    suspend fun findOrCreate(waId: String, displayName: String? = null, channel: Platform = Platform.WHATSAPP): User {
+        val existing = findByWaId(waId, channel)
         if (existing != null) {
             val now = SystemClock.now()
             collection.updateOne(
-                scoped(Filters.eq("waId", waId)),
+                scoped(channel, Filters.eq("waId", waId)),
                 Updates.combine(
                     Updates.set("lastSeenAt", now.toDate()),
                     Updates.set("displayName", displayName ?: existing.displayName)
@@ -50,6 +51,7 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         val now = SystemClock.now()
         val user = User(
             tenantId = tenantId,
+            channel = channel,
             waId = waId,
             displayName = displayName,
             createdAt = now,
@@ -88,6 +90,7 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         return User(
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
+            channel = getPlatform(),
             waId = getString("waId")!!,
             displayName = getString("displayName"),
             locale = getString("locale") ?: "pt_BR",
@@ -109,6 +112,7 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
 
         return Document("_id", id)
             .append("tenantId", tenantId)
+            .append("channel", channel.name)
             .append("waId", waId)
             .append("displayName", displayName)
             .append("locale", locale)
@@ -119,14 +123,15 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+    private fun scoped(channel: Platform, filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("channel", channel.name), filter)
 }
 
 class ConversationRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("conversations")
     private val log = LoggerFactory.getLogger("ConversationRepository")
 
-    suspend fun findByWaId(waId: String): Conversation? {
-        val doc = collection.find(scoped(Filters.eq("waId", waId))).firstOrNull()
+    suspend fun findByWaId(waId: String, channel: Platform = Platform.WHATSAPP): Conversation? {
+        val doc = collection.find(scoped(channel, Filters.eq("waId", waId))).firstOrNull()
         return doc?.toConversation()
     }
 
@@ -135,8 +140,8 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
         return doc?.toConversation()
     }
 
-    suspend fun findOrCreate(userId: ObjectId, waId: String): Conversation {
-        val existing = findByWaId(waId)
+    suspend fun findOrCreate(userId: ObjectId, waId: String, channel: Platform = Platform.WHATSAPP): Conversation {
+        val existing = findByWaId(waId, channel)
         if (existing != null) {
             return existing
         }
@@ -145,6 +150,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
         val conversation = Conversation(
             tenantId = tenantId,
             userId = userId,
+            channel = channel,
             waId = waId,
             lastMessageAt = now,
             createdAt = now,
@@ -186,6 +192,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
             userId = getObjectId("userId"),
+            channel = getPlatform(),
             waId = getString("waId")!!,
             state = ConversationState.valueOf(getString("state") ?: "ACTIVE"),
             summary = getString("summary"),
@@ -201,6 +208,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
         return Document("_id", id)
             .append("tenantId", tenantId)
             .append("userId", userId)
+            .append("channel", channel.name)
             .append("waId", waId)
             .append("state", state.name)
             .append("summary", summary)
@@ -212,6 +220,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+    private fun scoped(channel: Platform, filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("channel", channel.name), filter)
 }
 
 class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
@@ -234,8 +243,8 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             .reversed()
     }
 
-    suspend fun lastNByWaId(waId: String, n: Int): List<Message> {
-        return collection.find(scoped(Filters.eq("waId", waId)))
+    suspend fun lastNByWaId(waId: String, n: Int, channel: Platform = Platform.WHATSAPP): List<Message> {
+        return collection.find(scoped(channel, Filters.eq("waId", waId)))
             .sort(Document("createdAt", -1))
             .limit(n)
             .toList()
@@ -274,6 +283,7 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
             conversationId = getObjectId("conversationId"),
+            channel = getPlatform(),
             waId = getString("waId")!!,
             role = UserRole.valueOf(getString("role")!!),
             waMessageId = getString("waMessageId"),
@@ -302,6 +312,7 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         return Document("_id", id)
             .append("tenantId", tenantId)
             .append("conversationId", conversationId)
+            .append("channel", channel.name)
             .append("waId", waId)
             .append("role", role.name)
             .append("waMessageId", waMessageId)
@@ -314,7 +325,10 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+    private fun scoped(channel: Platform, filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("channel", channel.name), filter)
 }
+
+private fun Document.getPlatform(): Platform = getString("channel")?.let { Platform.valueOf(it) } ?: Platform.WHATSAPP
 
 private fun Document.getObjectId(field: String): ObjectId {
     return get(field, ObjectId::class.java)!!

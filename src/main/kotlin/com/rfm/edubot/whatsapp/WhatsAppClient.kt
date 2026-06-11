@@ -1,5 +1,7 @@
 package com.rfm.edubot.whatsapp
 
+import com.rfm.edubot.channel.ChannelCapabilities
+import com.rfm.edubot.channel.OutboundClient
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.*
@@ -46,7 +48,7 @@ class WhatsAppClient(
     private val apiVersion: String = "v21.0",
     private val maxRetries: Int = 3,
     private val httpClient: HttpClient? = null,
-) {
+) : OutboundClient {
     private val baseUrl = "https://graph.facebook.com/$apiVersion/$phoneNumberId"
     private val ownsClient = httpClient == null
     private val client = httpClient ?: HttpClient(CIO) {
@@ -58,7 +60,9 @@ class WhatsAppClient(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("WhatsAppClient")
 
-    suspend fun sendText(to: String, text: String) {
+    override val capabilities = ChannelCapabilities(supportsDocuments = true)
+
+    override suspend fun sendText(to: String, text: String) {
         var lastException: Exception? = null
 
         for (attempt in 1..maxRetries) {
@@ -132,6 +136,11 @@ class WhatsAppClient(
         if (response.status.value >= 400) {
             throw RuntimeException("WhatsApp document send error: ${response.status.value} - ${response.bodyAsText()}")
         }
+    }
+
+    override suspend fun sendDocument(to: String, bytes: ByteArray, filename: String, mimeType: String) {
+        val mediaId = uploadMedia(bytes, mimeType)
+        sendDocument(to, mediaId, filename)
     }
 
     fun close() {

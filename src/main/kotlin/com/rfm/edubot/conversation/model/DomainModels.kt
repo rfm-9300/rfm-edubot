@@ -1,5 +1,6 @@
 package com.rfm.edubot.conversation.model
 
+import com.rfm.edubot.tenant.model.Platform
 import kotlinx.datetime.Instant
 import org.bson.codecs.pojo.annotations.BsonId
 import org.bson.types.ObjectId
@@ -23,6 +24,7 @@ enum class ConversationState {
 data class User(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
+    val channel: Platform = Platform.WHATSAPP,
     val waId: String,
     val displayName: String? = null,
     val locale: String = "pt_BR",
@@ -36,6 +38,7 @@ data class Conversation(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
     val userId: ObjectId,
+    val channel: Platform = Platform.WHATSAPP,
     val waId: String,
     val state: ConversationState = ConversationState.ACTIVE,
     val summary: String? = null,
@@ -50,6 +53,7 @@ data class Message(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
     val conversationId: ObjectId,
+    val channel: Platform = Platform.WHATSAPP,
     val waId: String,
     val role: UserRole,
     val waMessageId: String? = null,

@@ -7,6 +7,7 @@ import org.slf4j.LoggerFactory
 data class AppConfig(
     val port: Int,
     val whatsapp: WhatsAppConfig,
+    val instagram: InstagramConfig,
     val openrouter: OpenRouterConfig,
     val mongo: MongoConfig,
     val rateLimit: RateLimitConfig,
@@ -20,6 +21,21 @@ data class AppConfig(
         val accessToken: String,
         val apiVersion: String = "v21.0",
     )
+
+    /**
+     * Instagram-Login OAuth onboarding (see docs/plan-instagram-oauth-onboarding.md).
+     * Uses a separate Instagram app id/secret (NOT the WhatsApp/Facebook app secret).
+     * All fields optional: when [appId]/[appSecret]/[redirectUri] are blank the OAuth
+     * onboarding feature is disabled (the connect route returns 503), but the app still boots.
+     */
+    data class InstagramConfig(
+        val appId: String = "",
+        val appSecret: String = "",
+        val redirectUri: String = "",
+        val graphVersion: String = "v21.0",
+    ) {
+        val oauthEnabled: Boolean get() = appId.isNotBlank() && appSecret.isNotBlank() && redirectUri.isNotBlank()
+    }
 
     data class OpenRouterConfig(
         val apiKey: String,
@@ -61,6 +77,13 @@ data class AppConfig(
                 apiVersion = config.getString("app.whatsapp.apiVersion"),
             )
 
+            val instagramConfig = InstagramConfig(
+                appId = getOptional(config, "app.instagram.appId"),
+                appSecret = getOptional(config, "app.instagram.appSecret"),
+                redirectUri = getOptional(config, "app.instagram.redirectUri"),
+                graphVersion = if (config.hasPath("app.instagram.graphVersion")) config.getString("app.instagram.graphVersion") else "v21.0",
+            )
+
             val openRouterConfig = OpenRouterConfig(
                 apiKey = getRequired(config, "app.openrouter.apiKey"),
                 primaryModel = config.getString("app.openrouter.primaryModel"),
@@ -90,6 +113,7 @@ data class AppConfig(
             return AppConfig(
                 port = port,
                 whatsapp = whatsAppConfig,
+                instagram = instagramConfig,
                 openrouter = openRouterConfig,
                 mongo = mongoConfig,
                 rateLimit = rateLimitConfig,
@@ -106,6 +130,9 @@ data class AppConfig(
             return config.getString(path)
         }
 
+        private fun getOptional(config: Config, path: String): String =
+            if (config.hasPath(path)) config.getString(path) else ""
+
         private fun logStartupKeys(config: Config) {
             val keys = listOf(
                 "ktor.deployment.port",
@@ -113,6 +140,9 @@ data class AppConfig(
                 "app.whatsapp.appSecret",
                 "app.whatsapp.phoneNumberId",
                 "app.whatsapp.accessToken",
+                "app.instagram.appId",
+                "app.instagram.appSecret",
+                "app.instagram.redirectUri",
                 "app.openrouter.apiKey",
                 "app.openrouter.primaryModel",
                 "app.mongo.uri",
