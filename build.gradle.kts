@@ -57,6 +57,7 @@ dependencies {
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
     testImplementation("io.ktor:ktor-server-test-host-jvm")
+    testImplementation("io.ktor:ktor-client-mock-jvm")
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.0.21")
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")

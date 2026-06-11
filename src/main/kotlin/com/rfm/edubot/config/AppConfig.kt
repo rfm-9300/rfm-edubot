@@ -20,7 +20,15 @@ data class AppConfig(
         val phoneNumberId: String,
         val accessToken: String,
         val apiVersion: String = "v21.0",
-    )
+        val embeddedSignup: EmbeddedSignupConfig = EmbeddedSignupConfig(),
+    ) {
+        data class EmbeddedSignupConfig(
+            val appId: String = "",
+            val configId: String = "",
+        ) {
+            val enabled: Boolean get() = appId.isNotBlank() && configId.isNotBlank()
+        }
+    }
 
     /**
      * Instagram-Login OAuth onboarding (see docs/plan-instagram-oauth-onboarding.md).
@@ -75,6 +83,10 @@ data class AppConfig(
                 phoneNumberId = getRequired(config, "app.whatsapp.phoneNumberId"),
                 accessToken = getRequired(config, "app.whatsapp.accessToken"),
                 apiVersion = config.getString("app.whatsapp.apiVersion"),
+                embeddedSignup = AppConfig.WhatsAppConfig.EmbeddedSignupConfig(
+                    appId = getOptional(config, "app.whatsapp.embeddedSignup.appId"),
+                    configId = getOptional(config, "app.whatsapp.embeddedSignup.configId"),
+                ),
             )
 
             val instagramConfig = InstagramConfig(
@@ -140,6 +152,8 @@ data class AppConfig(
                 "app.whatsapp.appSecret",
                 "app.whatsapp.phoneNumberId",
                 "app.whatsapp.accessToken",
+                "app.whatsapp.embeddedSignup.appId",
+                "app.whatsapp.embeddedSignup.configId",
                 "app.instagram.appId",
                 "app.instagram.appSecret",
                 "app.instagram.redirectUri",

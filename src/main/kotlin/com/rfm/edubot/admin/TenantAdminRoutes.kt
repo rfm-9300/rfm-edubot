@@ -398,6 +398,9 @@ private data class ChannelBindingDto(
     val platform: String,
     val externalId: String,
     val hasAccessToken: Boolean,
+    val displayName: String? = null,
+    val wabaId: String? = null,
+    val source: String? = null,
 )
 
 @Serializable
@@ -423,7 +426,7 @@ private fun Tenant.dto() = TenantDto(
     rateLimitPerHour = rateLimitPerHour,
     rateLimitPerDay = rateLimitPerDay,
     status = status.name,
-    channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank()) },
+    channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank(), it.displayName, it.wabaId, it.source) },
     createdAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
 )
@@ -432,7 +435,16 @@ private fun List<ChannelBindingRequest>?.toBindings(existing: List<ChannelBindin
     this.orEmpty().map { request ->
         val platform = Platform.valueOf(request.platform.uppercase())
         val existingToken = existing.firstOrNull { it.platform == platform && it.externalId == request.externalId.trim() }?.accessToken.orEmpty()
-        ChannelBinding(platform, request.externalId.trim(), request.accessToken.ifBlank { existingToken })
+        val existingBinding = existing.firstOrNull { it.platform == platform && it.externalId == request.externalId.trim() }
+        ChannelBinding(
+            platform = platform,
+            externalId = request.externalId.trim(),
+            accessToken = request.accessToken.ifBlank { existingToken },
+            displayName = existingBinding?.displayName,
+            wabaId = existingBinding?.wabaId,
+            tokenObtainedAt = existingBinding?.tokenObtainedAt,
+            source = existingBinding?.source,
+        )
     }
 
 private fun ChannelBindingRequest.toBinding(): ChannelBinding =
@@ -449,6 +461,10 @@ private fun validateBindings(bindings: List<ChannelBinding>): String? {
 private fun ChannelBinding.toDocument(): Document = Document("platform", platform.name)
     .append("externalId", externalId)
     .append("accessToken", accessToken)
+    .appendIfNotNull("displayName", displayName)
+    .appendIfNotNull("wabaId", wabaId)
+    .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
+    .appendIfNotNull("source", source)
 
 private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =
     bindings.firstOrNull { it.platform == Platform.WHATSAPP }?.externalId?.takeIf { it.isNotBlank() }
@@ -456,3 +472,7 @@ private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =
         ?: Updates.unset("phoneNumberId")
 
 private fun kotlinx.datetime.Instant.toDate(): java.util.Date = java.util.Date(toEpochMilliseconds())
+
+private fun Document.appendIfNotNull(key: String, value: Any?): Document = apply {
+    if (value != null) append(key, value)
+}

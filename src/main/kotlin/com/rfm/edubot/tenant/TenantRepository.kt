@@ -90,7 +90,15 @@ private fun Document.getChannels(): List<ChannelBinding> {
     val channels = raw.mapNotNull { doc ->
         val platform = doc.getString("platform")?.let { runCatching { Platform.valueOf(it) }.getOrNull() } ?: return@mapNotNull null
         val externalId = doc.getString("externalId")?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
-        ChannelBinding(platform = platform, externalId = externalId, accessToken = doc.getString("accessToken").orEmpty())
+        ChannelBinding(
+            platform = platform,
+            externalId = externalId,
+            accessToken = doc.getString("accessToken").orEmpty(),
+            displayName = doc.getString("displayName"),
+            wabaId = doc.getString("wabaId"),
+            tokenObtainedAt = doc.getDate("tokenObtainedAt")?.let { Instant.fromEpochMilliseconds(it.time) },
+            source = doc.getString("source"),
+        )
     }
     if (channels.isNotEmpty()) return channels
     val legacyPhoneNumberId = getString("phoneNumberId")
@@ -100,7 +108,15 @@ private fun Document.getChannels(): List<ChannelBinding> {
 private fun ChannelBinding.toDocument(): Document = Document("platform", platform.name)
     .append("externalId", externalId)
     .append("accessToken", accessToken)
+    .appendIfNotNull("displayName", displayName)
+    .appendIfNotNull("wabaId", wabaId)
+    .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
+    .appendIfNotNull("source", source)
 
 private fun Document.getInstant(field: String): Instant = Instant.fromEpochMilliseconds(getDate(field).time)
 
 private fun Instant.toDate(): Date = Date(toEpochMilliseconds())
+
+private fun Document.appendIfNotNull(key: String, value: Any?): Document = apply {
+    if (value != null) append(key, value)
+}

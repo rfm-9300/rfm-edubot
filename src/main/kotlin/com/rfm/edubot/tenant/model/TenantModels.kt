@@ -30,6 +30,10 @@ data class ChannelBinding(
     val platform: Platform,
     val externalId: String,
     val accessToken: String = "",
+    val displayName: String? = null,
+    val wabaId: String? = null,
+    val tokenObtainedAt: Instant? = null,
+    val source: String? = null,
 )
 
 enum class TenantStatus { ACTIVE, SUSPENDED, DELETED }

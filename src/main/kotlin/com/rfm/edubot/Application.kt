@@ -30,6 +30,8 @@ import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.TenantSeeder
 import com.rfm.edubot.webhook.webhookRoutes
+import com.rfm.edubot.whatsapp.signup.WhatsAppSignupClient
+import com.rfm.edubot.whatsapp.signup.whatsAppSignupRoutes
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -103,6 +105,7 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
     val channelBindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
     val oauthState = OAuthState(secret = appConfig.admin.jwtSecret)
     val instagramOAuthClient = InstagramOAuthClient(appConfig.instagram, whatsappHttpClient)
+    val whatsAppSignupClient = WhatsAppSignupClient(appConfig.whatsapp, whatsappHttpClient)
 
     val pipelineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -203,6 +206,12 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             config = appConfig.instagram,
             oauthState = oauthState,
             oauthClient = instagramOAuthClient,
+            bindingService = channelBindingService,
+            tenantRepository = tenantRepository,
+        )
+        whatsAppSignupRoutes(
+            config = appConfig.whatsapp,
+            signupClient = whatsAppSignupClient,
             bindingService = channelBindingService,
             tenantRepository = tenantRepository,
         )

@@ -2,7 +2,8 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 let token = localStorage.getItem('adminToken') || '';
-let state = { tenants: [], stats: {}, agentTypes: ['CRM_V1'], search: '' };
+let state = { tenants: [], stats: {}, agentTypes: ['CRM_V1'], search: '', whatsAppSignup: { enabled: false } };
+let fbSdkPromise;
 
 const MODULES = [
   { id: 'overview', label: 'Overview', always: true },
@@ -113,8 +114,14 @@ function renderLogin() {
 }
 
 async function loadAll() {
-  state.agentTypes = await api('/admin/api/agent-types');
-  state.tenants = await api('/admin/api/tenants');
+  const [agentTypes, tenants, whatsAppSignup] = await Promise.all([
+    api('/admin/api/agent-types'),
+    api('/admin/api/tenants'),
+    api('/admin/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false })),
+  ]);
+  state.agentTypes = agentTypes;
+  state.tenants = tenants;
+  state.whatsAppSignup = whatsAppSignup;
   const stats = await Promise.all(state.tenants.map(t => api(`/admin/api/tenants/${encodeURIComponent(t.slug)}/stats`).catch(() => null)));
   state.stats = Object.fromEntries(state.tenants.map((t, i) => [t.slug, stats[i] || {}]));
 }
@@ -238,6 +245,7 @@ function tenantForm(editing) {
       <div class="row" style="justify-content:space-between">
         <label class="lbl">Channels <span class="req">●</span></label>
         <div class="row" style="gap:6px">
+          ${editing && state.whatsAppSignup.enabled ? '<button class="btn btn--sm btn--ghost" type="button" id="wa-connect">Connect WhatsApp</button>' : ''}
           ${editing ? '<button class="btn btn--sm btn--ghost" type="button" id="ig-connect">Connect Instagram</button>' : ''}
           <button class="btn btn--sm btn--ghost" type="button" id="add-channel">+ Add channel</button>
         </div>
@@ -252,6 +260,7 @@ function tenantForm(editing) {
   existingChannels.forEach(c => addChannelRow(wrap, c));
   renderModulesBox(wrap, editing);
   $('#add-channel', wrap).addEventListener('click', () => addChannelRow(wrap));
+  $('#wa-connect', wrap)?.addEventListener('click', () => connectWhatsApp(editing.slug));
   $('#ig-connect', wrap)?.addEventListener('click', () => connectInstagram(editing.slug));
   $('#t-agent', wrap).addEventListener('change', () => renderModulesBox(wrap, editing));
   if (!editing) {
@@ -361,6 +370,100 @@ async function connectInstagram(slug) {
     }
   };
   window.addEventListener('message', onMessage);
+}
+
+function loadFacebookSdk(appId, graphVersion) {
+  if (window.FB) {
+    window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
+    return Promise.resolve(window.FB);
+  }
+  if (fbSdkPromise) return fbSdkPromise;
+  fbSdkPromise = new Promise((resolve, reject) => {
+    window.fbAsyncInit = () => {
+      window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
+      resolve(window.FB);
+    };
+    const script = document.createElement('script');
+    script.id = 'facebook-jssdk';
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error('facebook_sdk_load_failed'));
+    document.body.appendChild(script);
+  });
+  return fbSdkPromise;
+}
+
+function waitForWhatsAppSignupMessage() {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      reject(new Error('signup_message_timeout'));
+    }, 5 * 60 * 1000);
+    const onMessage = ev => {
+      if (!['https://www.facebook.com', 'https://web.facebook.com'].includes(ev.origin)) return;
+      const data = typeof ev.data === 'string' ? (() => { try { return JSON.parse(ev.data); } catch (_) { return null; } })() : ev.data;
+      if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
+      if (data.event && data.event !== 'FINISH') {
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        reject(new Error(data.event === 'CANCEL' ? 'signup_cancelled' : 'signup_not_finished'));
+        return;
+      }
+      const wabaId = data.data?.waba_id || data.data?.wabaId;
+      const phoneNumberId = data.data?.phone_number_id || data.data?.phoneNumberId;
+      if (!wabaId || !phoneNumberId) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve({ wabaId, phoneNumberId });
+    };
+    window.addEventListener('message', onMessage);
+  });
+}
+
+function facebookLoginForBusiness(FB, configId) {
+  return new Promise((resolve, reject) => {
+    FB.login(response => {
+      const code = response?.authResponse?.code;
+      if (!code) {
+        reject(new Error(response?.status === 'not_authorized' ? 'not_authorized' : 'missing_code'));
+        return;
+      }
+      resolve(code);
+    }, {
+      config_id: configId,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { setup: {} },
+    });
+  });
+}
+
+async function connectWhatsApp(slug) {
+  const cfg = state.whatsAppSignup;
+  if (!cfg?.enabled) { toast('WhatsApp Embedded Signup não configurado'); return; }
+  try {
+    const FB = await loadFacebookSdk(cfg.appId, cfg.graphVersion || 'v21.0');
+    toast('Abre o popup Meta para ligar o WhatsApp');
+    const sessionPromise = waitForWhatsAppSignupMessage();
+    const codePromise = facebookLoginForBusiness(FB, cfg.configId);
+    const [session, code] = await Promise.all([sessionPromise, codePromise]);
+    await api(`/admin/api/tenants/${encodeURIComponent(slug)}/whatsapp/connect`, {
+      method: 'POST',
+      body: JSON.stringify({ code, wabaId: session.wabaId, phoneNumberId: session.phoneNumberId }),
+    });
+    toast('WhatsApp ligado');
+    await loadAll();
+    renderTenants();
+  } catch (e) {
+    const messages = {
+      signup_cancelled: 'Ligação WhatsApp cancelada',
+      missing_code: 'Meta não devolveu o código de autorização',
+      signup_message_timeout: 'Tempo esgotado à espera do Embedded Signup',
+      facebook_sdk_load_failed: 'Não foi possível carregar o Facebook SDK',
+    };
+    toast(messages[e.message] || `WhatsApp falhou: ${e.message}`);
+  }
 }
 
 // When the OAuth popup lands back on /backoffice/?ig=..., relay the outcome to the opener and close.

@@ -53,8 +53,16 @@ class ChannelBindingService(
 private fun ChannelBinding.toDocument(): Document = Document("platform", platform.name)
     .append("externalId", externalId)
     .append("accessToken", accessToken)
+    .appendIfNotNull("displayName", displayName)
+    .appendIfNotNull("wabaId", wabaId)
+    .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.let { Date(it.toEpochMilliseconds()) })
+    .appendIfNotNull("source", source)
 
 private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =
     bindings.firstOrNull { it.platform == Platform.WHATSAPP }?.externalId?.takeIf { it.isNotBlank() }
         ?.let { Updates.set("phoneNumberId", it) }
         ?: Updates.unset("phoneNumberId")
+
+private fun Document.appendIfNotNull(key: String, value: Any?): Document = apply {
+    if (value != null) append(key, value)
+}
