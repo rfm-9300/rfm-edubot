@@ -70,7 +70,10 @@ fun Route.instagramOAuthRoutes(
             return@get call.respondRedirect(resultUrl("error", reason = "exchange_failed", tenant = slug))
         }
 
-        val updated = bindingService.upsert(slug, ChannelBinding(Platform.INSTAGRAM, result.igId, result.accessToken))
+        val updated = bindingService.upsert(
+            slug,
+            ChannelBinding(Platform.INSTAGRAM, result.igId, result.accessToken, displayName = result.username),
+        )
         if (updated == null) {
             return@get call.respondRedirect(resultUrl("error", reason = "tenant_not_found", tenant = slug))
         }

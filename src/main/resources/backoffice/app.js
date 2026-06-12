@@ -169,7 +169,8 @@ function channelBadges(channels = []) {
   return `<div class="row" style="gap:6px; flex-wrap:wrap">${channels.map(c => {
     const cls = c.platform === 'INSTAGRAM' ? 'pill--accent' : 'pill--info';
     const token = c.hasAccessToken ? 'token' : 'no token';
-    return `<span class="pill ${cls}" title="${escapeHTML(c.externalId)} · ${token}">${escapeHTML(c.platform)}</span>`;
+    const label = c.displayName ? `${c.platform} · ${c.platform === 'INSTAGRAM' ? '@' : ''}${c.displayName}` : c.platform;
+    return `<span class="pill ${cls}" title="${escapeHTML(c.externalId)} · ${token}">${escapeHTML(label)}</span>`;
   }).join('')}</div>`;
 }
 
