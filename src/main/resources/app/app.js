@@ -4,7 +4,61 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], search: '', active: 'overview' };
 let personaChatBusy = false;
 
-const labels = { overview: 'Overview', conversations: 'Conversas', contacts: 'Contactos', clients: 'Clientes', quotes: 'Orçamentos', invoices: 'Faturas', catalog: 'Catálogo', persona: 'Persona', settings: 'Settings' };
+const labels = { overview: 'Overview', conversations: 'Conversations', contacts: 'Contacts', clients: 'Clients', quotes: 'Quotes', invoices: 'Invoices', catalog: 'Catalog', persona: 'Persona', settings: 'Settings' };
+// User-facing copy (en). Single source for translatable strings — a future i18n layer swaps this map per locale.
+const STR = {
+  settingsDesc: 'Connected channels and bot configuration.',
+  channelsTitle: 'Channels',
+  channelsDesc: 'Accounts where the assistant replies to your customers.',
+  colChannel: 'Channel', colAccount: 'Account', colStatus: 'Status', colActions: 'Actions',
+  connected: 'Connected', notConnected: 'Not connected',
+  igConnect: 'Connect Instagram', igReconnect: 'Reconnect Instagram',
+  igHint: 'Connecting Instagram opens a Meta window to authorize your professional account. The account must be Business or Creator.',
+  moreSettingsTitle: 'More settings coming soon',
+  moreSettingsDesc: 'Team members are managed in the backoffice for now. Business profile / PDF branding still pending.',
+  sessionExpired: 'Session expired',
+  igUnavailable: 'Instagram connection is not available',
+  igAllowPopups: 'Allow popups to connect Instagram',
+  igConnected: 'Instagram connected ✓',
+  igFailed: reason => `Could not connect Instagram${reason ? ` (${reason})` : ''}`,
+  quickCreateSoon: 'Quick create for this module is coming soon.',
+  loginEyebrow: 'thebots.lab / tenant',
+  loginTitle: 'Sign in to the dashboard',
+  loginDesc: 'Access your chatbot data, conversations and CRM.',
+  loginEmail: 'Email', loginPassword: 'Password', loginSubmit: 'Sign in', loginInvalid: 'Invalid login',
+  newPrefix: 'New',
+  noData: 'No data',
+  overviewDesc: 'Chatbot status and recent activity.',
+  statMessages24h: 'Messages 24h', statMessages: 'Messages', statContacts: 'Contacts', statConversations: 'Conversations', statQuotes: 'Quotes', statInvoices: 'Invoices',
+  contactsDesc: 'End-users who talked to the bot.',
+  thName: 'Name', thStatus: 'Status', thLastSeen: 'Last seen', thActions: 'Actions',
+  conversationsDesc: 'Read-only conversation history.',
+  thState: 'State', thMsgs: 'Msgs', thLast: 'Last',
+  threadTitle: 'Conversation', noMessages: 'No messages',
+  clientsDesc: 'CRM · Clients.', thPhone: 'Phone', thAddress: 'Address', thNo: 'No.',
+  quotesDesc: 'CRM · Commercial proposals.', thNumber: 'Number', thClient: 'Client', thTotal: 'Total',
+  invoicesDesc: 'CRM · Issued invoices.', thDueDate: 'Due date',
+  catalogDesc: 'CRM · Standard services and materials.', thType: 'Type', thCategory: 'Category', thDescription: 'Description', thUnit: 'Unit', thPrice: 'Price',
+  personaDesc: 'Bot personality — synthesized from notes and files you upload.',
+  personaCompiling: 'Synthesizing…', statVersion: 'Version', statTokens: 'Tokens est.', statUpdated: 'Updated',
+  testBotTitle: 'Test the bot', clear: 'Clear',
+  testBotDesc: 'Chat with the bot using the current persona to test tone and replies. Test messages are not saved and do not create clients, quotes or invoices.',
+  chatPlaceholder: 'Type a test message…', send: 'Send',
+  chatEmpty: 'Send a message to test the bot persona.', typing: 'typing…', chatError: '⚠️ Error contacting the bot. Please try again.',
+  addInfoTitle: 'Add information',
+  addInfoDesc: 'Write a note or upload a file (PDF, TXT, MD). It is synthesized into the instructions file below.',
+  noteLabel: 'Note', notePlaceholder: "E.g.: We are a dental clinic in Lisbon. Warm tone, formal address...", addNote: 'Add note',
+  fileLabel: 'File', fileHint: 'PDF, TXT or Markdown. The text is extracted and synthesized.',
+  sourcesTitle: 'Sources', sourcesDesc: 'Raw material feeding the synthesis.', rebuildAll: 'Recompile all',
+  sourceSynced: 'synced', sourcePending: 'pending', remove: 'Remove',
+  thSource: 'Source', thCreated: 'Created',
+  noSourcesTitle: 'No sources yet', noSourcesDesc: 'Add a note or file above.',
+  compiledTitle: 'Compiled instructions file',
+  compiledDesc: 'Synthesis result. You can edit it manually; the next synthesis will review it.',
+  compiledPlaceholder: 'Still empty — add information above to give the bot personality.',
+  saveManual: 'Save manual edit',
+  personaSaved: 'Persona saved', noteAdded: 'Note added — synthesizing', fileUploaded: 'File uploaded — synthesizing', rebuildStarted: 'Recompilation started', uploadFailed: 'Upload failed',
+};
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const fmtEUR = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -23,11 +77,11 @@ function toast(msg) { const el = $('#toast'); el.innerHTML = `<span class="toast
 
 function renderLogin() {
   $('#nav').innerHTML = '';
-  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">AI</div><p class="auth__eyebrow">thebots.lab / tenant</p><h1 class="auth__title">Entrar no dashboard</h1><p class="auth__desc">Aceda aos dados, conversas e CRM do seu chatbot.</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="email">Email</label><input class="inp" id="email" type="email" autocomplete="email" required /></div><div class="form__row"><label class="lbl" for="password">Password</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">Entrar</button></form></div></div>`;
+  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">AI</div><p class="auth__eyebrow">${escapeHTML(STR.loginEyebrow)}</p><h1 class="auth__title">${escapeHTML(STR.loginTitle)}</h1><p class="auth__desc">${escapeHTML(STR.loginDesc)}</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="email">${escapeHTML(STR.loginEmail)}</label><input class="inp" id="email" type="email" autocomplete="email" required /></div><div class="form__row"><label class="lbl" for="password">${escapeHTML(STR.loginPassword)}</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">${escapeHTML(STR.loginSubmit)}</button></form></div></div>`;
   $('#login-form').addEventListener('submit', async e => {
     e.preventDefault();
     try { const res = await api('/app/auth/login', { method: 'POST', body: JSON.stringify({ email: $('#email').value, password: $('#password').value }) }); token = res.token; localStorage.setItem('dashboardToken', token); await bootAuthed(); }
-    catch { toast('Login inválido'); }
+    catch { toast(STR.loginInvalid); }
   });
 }
 
@@ -67,7 +121,7 @@ function render() {
   $('#kpi-messages').textContent = state.overview?.messages ?? '—';
   $('#kpi-users').textContent = state.overview?.users ?? '—';
   $('#btn-new').hidden = !['clients', 'quotes', 'invoices', 'catalog'].includes(state.active);
-  $('#btn-new').textContent = `Novo ${labels[state.active] || ''}`;
+  $('#btn-new').textContent = `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
   if (state.active === 'overview') return renderOverview(root);
   if (state.active === 'contacts') return renderContacts(root);
@@ -81,16 +135,16 @@ function render() {
 }
 
 function hero(title, desc) { return `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div></div>`; }
-function panelTable(head, rows, empty = 'Sem dados') { return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="8"><div class="empty"><p class="empty__title">${empty}</p></div></td></tr>`}</tbody></table></div></div>`; }
+function panelTable(head, rows, empty = STR.noData) { return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="8"><div class="empty"><p class="empty__title">${empty}</p></div></td></tr>`}</tbody></table></div></div>`; }
 
-function renderOverview(root) { const o = state.overview || {}; root.innerHTML = `${hero('Overview', 'Estado do chatbot e actividade recente.')}<div class="view__stats" style="margin-bottom:22px"><div class="stat"><div class="stat__label">Mensagens 24h</div><div class="stat__value">${o.messagesToday || 0}</div></div><div class="stat"><div class="stat__label">Mensagens</div><div class="stat__value">${o.messages || 0}</div></div><div class="stat"><div class="stat__label">Contactos</div><div class="stat__value">${o.users || 0}</div></div><div class="stat"><div class="stat__label">Conversas</div><div class="stat__value">${o.conversations || 0}</div></div><div class="stat"><div class="stat__label">Orçamentos</div><div class="stat__value">${o.quotes || 0}</div></div><div class="stat"><div class="stat__label">Faturas</div><div class="stat__value">${o.invoices || 0}</div></div></div>`; }
-function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? 'Unblock' : 'Block'}</button></td></tr>`).join(''); root.innerHTML = hero('Contactos', 'End-users que falaram com o bot.') + panelTable('<tr><th>Nome</th><th>WhatsApp</th><th>Status</th><th>Último visto</th><th class="right">Acções</th></tr>', rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
-function renderConversations(root) { const rows = state.conversations.map(c => `<tr data-conversation="${c.id}"><td class="mono">${escapeHTML(c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td></tr>`).join(''); root.innerHTML = hero('Conversas', 'Histórico read-only das conversas.') + panelTable('<tr><th>WhatsApp</th><th>Estado</th><th>Msgs</th><th>Última</th></tr>', rows); $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation))); }
-async function openThread(id) { const msgs = await api(`/app/api/conversations/${id}/messages`); const body = document.createElement('div'); body.className = 'form'; body.innerHTML = msgs.map(m => `<div class="panel" style="padding:12px"><div class="mono muted">${m.role} · ${fmtDate(m.createdAt)}</div><div>${escapeHTML(m.text)}</div></div>`).join('') || '<div class="empty">Sem mensagens</div>'; openDrawer('Conversa', body); }
-function renderClients(root) { const rows = state.clients.map(c => `<tr><td class="name">${escapeHTML(c.name)}</td><td class="mono">${escapeHTML(c.phone)}</td><td>${escapeHTML(c.address || '')}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`).join(''); root.innerHTML = hero('Clientes', 'CRM · Clientes.') + panelTable('<tr><th>Nome</th><th>Telefone</th><th>Morada</th><th class="right">Nº</th></tr>', rows); }
-function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero('Orçamentos', 'CRM · Propostas comerciais.') + panelTable('<tr><th>Número</th><th>Cliente</th><th>Status</th><th class="right">Total</th></tr>', rows); }
-function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero('Faturas', 'CRM · Faturas emitidas.') + panelTable('<tr><th>Número</th><th>Cliente</th><th>Status</th><th>Vencimento</th><th class="right">Total</th></tr>', rows); }
-function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero('Catálogo', 'CRM · Serviços e materiais padrão.') + panelTable('<tr><th>Tipo</th><th>Categoria</th><th>Descrição</th><th>Unid.</th><th class="right">Preço</th></tr>', rows); }
+function renderOverview(root) { const o = state.overview || {}; root.innerHTML = `${hero(labels.overview, STR.overviewDesc)}<div class="view__stats" style="margin-bottom:22px"><div class="stat"><div class="stat__label">${STR.statMessages24h}</div><div class="stat__value">${o.messagesToday || 0}</div></div><div class="stat"><div class="stat__label">${STR.statMessages}</div><div class="stat__value">${o.messages || 0}</div></div><div class="stat"><div class="stat__label">${STR.statContacts}</div><div class="stat__value">${o.users || 0}</div></div><div class="stat"><div class="stat__label">${STR.statConversations}</div><div class="stat__value">${o.conversations || 0}</div></div><div class="stat"><div class="stat__label">${STR.statQuotes}</div><div class="stat__value">${o.quotes || 0}</div></div><div class="stat"><div class="stat__label">${STR.statInvoices}</div><div class="stat__value">${o.invoices || 0}</div></div></div>`; }
+function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? 'Unblock' : 'Block'}</button></td></tr>`).join(''); root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>WhatsApp</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
+function renderConversations(root) { const rows = state.conversations.map(c => `<tr data-conversation="${c.id}"><td class="mono">${escapeHTML(c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td></tr>`).join(''); root.innerHTML = hero(labels.conversations, STR.conversationsDesc) + panelTable(`<tr><th>WhatsApp</th><th>${STR.thState}</th><th>${STR.thMsgs}</th><th>${STR.thLast}</th></tr>`, rows); $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation))); }
+async function openThread(id) { const msgs = await api(`/app/api/conversations/${id}/messages`); const body = document.createElement('div'); body.className = 'form'; body.innerHTML = msgs.map(m => `<div class="panel" style="padding:12px"><div class="mono muted">${m.role} · ${fmtDate(m.createdAt)}</div><div>${escapeHTML(m.text)}</div></div>`).join('') || `<div class="empty">${STR.noMessages}</div>`; openDrawer(STR.threadTitle, body); }
+function renderClients(root) { const rows = state.clients.map(c => `<tr><td class="name">${escapeHTML(c.name)}</td><td class="mono">${escapeHTML(c.phone)}</td><td>${escapeHTML(c.address || '')}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`).join(''); root.innerHTML = hero(labels.clients, STR.clientsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.thPhone}</th><th>${STR.thAddress}</th><th class="right">${STR.thNo}</th></tr>`, rows); }
+function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.quotes, STR.quotesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
+function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.invoices, STR.invoicesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th>${STR.thDueDate}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
+function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.catalog, STR.catalogDesc) + panelTable(`<tr><th>${STR.thType}</th><th>${STR.thCategory}</th><th>${STR.thDescription}</th><th>${STR.thUnit}</th><th class="right">${STR.thPrice}</th></tr>`, rows); }
 let personaPollTimer;
 async function refreshPersona() {
   state.persona = await api('/app/api/persona');
@@ -103,61 +157,61 @@ function renderPersona(root) {
   const p = state.persona || {};
   const sources = p.sources || [];
   const compiling = p.status === 'COMPILING';
-  const sourceRows = sources.map(s => `<tr><td>${s.kind === 'FILE' ? '📄' : '📝'} ${escapeHTML(s.label)}</td><td>${s.compiled ? '<span class="muted">sincronizada</span>' : '<span>pendente</span>'}</td><td class="mono muted">${fmtDate(s.createdAt)}</td><td class="right"><button class="btn btn--sm" data-del-source="${s.id}">Remover</button></td></tr>`).join('');
-  root.innerHTML = `${hero('Persona', 'Personalidade do bot — sintetizada a partir de notas e ficheiros que carrega.')}
+  const sourceRows = sources.map(s => `<tr><td>${s.kind === 'FILE' ? '📄' : '📝'} ${escapeHTML(s.label)}</td><td>${s.compiled ? `<span class="muted">${STR.sourceSynced}</span>` : `<span>${STR.sourcePending}</span>`}</td><td class="mono muted">${fmtDate(s.createdAt)}</td><td class="right"><button class="btn btn--sm" data-del-source="${s.id}">${STR.remove}</button></td></tr>`).join('');
+  root.innerHTML = `${hero(labels.persona, STR.personaDesc)}
     <div class="view__stats" style="margin-bottom:18px">
-      <div class="stat"><div class="stat__label">Status</div><div class="stat__value">${compiling ? 'A sintetizar…' : escapeHTML(p.status || 'EMPTY')}</div></div>
-      <div class="stat"><div class="stat__label">Versão</div><div class="stat__value">${p.version || 0}</div></div>
-      <div class="stat"><div class="stat__label">Tokens est.</div><div class="stat__value">${p.tokenEstimate || 0}</div></div>
-      <div class="stat"><div class="stat__label">Actualizado</div><div class="stat__value" style="font-size:16px">${escapeHTML(fmtDate(p.updatedAt))}</div></div>
+      <div class="stat"><div class="stat__label">${STR.thStatus}</div><div class="stat__value">${compiling ? STR.personaCompiling : escapeHTML(p.status || 'EMPTY')}</div></div>
+      <div class="stat"><div class="stat__label">${STR.statVersion}</div><div class="stat__value">${p.version || 0}</div></div>
+      <div class="stat"><div class="stat__label">${STR.statTokens}</div><div class="stat__value">${p.tokenEstimate || 0}</div></div>
+      <div class="stat"><div class="stat__label">${STR.statUpdated}</div><div class="stat__value" style="font-size:16px">${escapeHTML(fmtDate(p.updatedAt))}</div></div>
     </div>
 
     <div class="panel" style="padding:18px;margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <h2 class="view__title" style="font-size:18px">Testar o bot</h2>
-        <button class="btn btn--sm" id="persona-chat-clear">Limpar</button>
+        <h2 class="view__title" style="font-size:18px">${escapeHTML(STR.testBotTitle)}</h2>
+        <button class="btn btn--sm" id="persona-chat-clear">${escapeHTML(STR.clear)}</button>
       </div>
-      <p class="view__desc" style="margin-bottom:14px">Converse com o bot usando a persona atual para testar o tom e as respostas. As mensagens de teste não são guardadas e não criam clientes, orçamentos ou faturas.</p>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.testBotDesc)}</p>
       <div class="chat__log" id="persona-chat-log"></div>
       <form class="chat__form" id="persona-chat-form">
-        <input class="inp chat__input" id="persona-chat-input" placeholder="Escreva uma mensagem de teste…" autocomplete="off" />
-        <button class="btn btn--primary" type="submit" id="persona-chat-send">Enviar</button>
+        <input class="inp chat__input" id="persona-chat-input" placeholder="${escapeHTML(STR.chatPlaceholder)}" autocomplete="off" />
+        <button class="btn btn--primary" type="submit" id="persona-chat-send">${escapeHTML(STR.send)}</button>
       </form>
     </div>
 
     <div class="panel" style="padding:18px;margin-bottom:18px">
-      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">Adicionar informação</h2>
-      <p class="view__desc" style="margin-bottom:14px">Escreva uma nota ou carregue um ficheiro (PDF, TXT, MD). É sintetizado no ficheiro de instruções abaixo.</p>
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.addInfoTitle)}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.addInfoDesc)}</p>
       <form class="form" id="persona-note-form">
         <div class="form__row form__row--full">
-          <label class="lbl" for="persona-note">Nota</label>
-          <textarea class="txt" id="persona-note" rows="4" placeholder="Ex: Somos uma clínica dentária em Lisboa. Tom acolhedor, tratamos por 'você'..."></textarea>
+          <label class="lbl" for="persona-note">${escapeHTML(STR.noteLabel)}</label>
+          <textarea class="txt" id="persona-note" rows="4" placeholder="${escapeHTML(STR.notePlaceholder)}"></textarea>
         </div>
-        <button class="btn btn--primary" type="submit">Adicionar nota</button>
+        <button class="btn btn--primary" type="submit">${escapeHTML(STR.addNote)}</button>
       </form>
       <div class="form__row form__row--full" style="margin-top:14px">
-        <label class="lbl" for="persona-file">Ficheiro</label>
+        <label class="lbl" for="persona-file">${escapeHTML(STR.fileLabel)}</label>
         <input class="inp" id="persona-file" type="file" accept=".pdf,.txt,.md,.markdown" />
-        <div class="hint">PDF, TXT ou Markdown. O texto é extraído e sintetizado.</div>
+        <div class="hint">${escapeHTML(STR.fileHint)}</div>
       </div>
     </div>
 
     <div class="panel" style="padding:18px;margin-bottom:18px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div><h2 class="view__title" style="font-size:18px">Fontes</h2><p class="view__desc">Material em bruto que alimenta a síntese.</p></div>
-        <button class="btn btn--sm" id="persona-rebuild" ${compiling ? 'disabled' : ''}>Recompilar tudo</button>
+        <div><h2 class="view__title" style="font-size:18px">${escapeHTML(STR.sourcesTitle)}</h2><p class="view__desc">${escapeHTML(STR.sourcesDesc)}</p></div>
+        <button class="btn btn--sm" id="persona-rebuild" ${compiling ? 'disabled' : ''}>${escapeHTML(STR.rebuildAll)}</button>
       </div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>Fonte</th><th>Estado</th><th>Criada</th><th class="right">Acções</th></tr></thead><tbody>${sourceRows || '<tr><td colspan="4"><div class="empty"><p class="empty__title">Sem fontes ainda</p><p class="empty__desc">Adicione uma nota ou ficheiro acima.</p></div></td></tr>'}</tbody></table></div>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${STR.thSource}</th><th>${STR.thState}</th><th>${STR.thCreated}</th><th class="right">${STR.thActions}</th></tr></thead><tbody>${sourceRows || `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(STR.noSourcesTitle)}</p><p class="empty__desc">${escapeHTML(STR.noSourcesDesc)}</p></div></td></tr>`}</tbody></table></div>
     </div>
 
     <div class="panel" style="padding:18px">
-      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">Ficheiro de instruções compilado</h2>
-      <p class="view__desc" style="margin-bottom:14px">Resultado da síntese. Pode editar manualmente; a próxima síntese irá revê-lo.</p>
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.compiledTitle)}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.compiledDesc)}</p>
       <form class="form" id="persona-form">
         <div class="form__row form__row--full">
-          <textarea class="txt" id="persona-text" rows="16" placeholder="Ainda vazio — adicione informação acima para o bot ganhar personalidade.">${escapeHTML(p.compiledInstructions || '')}</textarea>
+          <textarea class="txt" id="persona-text" rows="16" placeholder="${escapeHTML(STR.compiledPlaceholder)}">${escapeHTML(p.compiledInstructions || '')}</textarea>
         </div>
-        <button class="btn btn--primary" type="submit">Guardar edição manual</button>
+        <button class="btn btn--primary" type="submit">${escapeHTML(STR.saveManual)}</button>
       </form>
     </div>`;
 
@@ -165,7 +219,7 @@ function renderPersona(root) {
     e.preventDefault();
     const compiledInstructions = $('#persona-text').value.trim();
     state.persona = await api('/app/api/persona', { method: 'PUT', body: JSON.stringify({ compiledInstructions }) });
-    toast('Persona guardada');
+    toast(STR.personaSaved);
     render();
   });
   $('#persona-note-form').addEventListener('submit', async e => {
@@ -173,7 +227,7 @@ function renderPersona(root) {
     const content = $('#persona-note').value.trim();
     if (!content) return;
     state.persona = await api('/app/api/persona/sources', { method: 'POST', body: JSON.stringify({ content }) });
-    toast('Nota adicionada — a sintetizar');
+    toast(STR.noteAdded);
     render();
     refreshPersona();
   });
@@ -182,14 +236,14 @@ function renderPersona(root) {
     if (!file) return;
     try {
       state.persona = await uploadPersonaFile(file);
-      toast('Ficheiro carregado — a sintetizar');
+      toast(STR.fileUploaded);
       render();
       refreshPersona();
-    } catch (err) { toast(err.message || 'Falha no upload'); }
+    } catch (err) { toast(err.message || STR.uploadFailed); }
   });
   $('#persona-rebuild').addEventListener('click', async () => {
     state.persona = await api('/app/api/persona/rebuild', { method: 'POST', body: '{}' });
-    toast('Recompilação iniciada');
+    toast(STR.rebuildStarted);
     render();
     refreshPersona();
   });
@@ -215,7 +269,7 @@ function renderPersona(root) {
       const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify({ messages: state.personaChat }) });
       state.personaChat.push({ role: 'assistant', content: res.reply });
     } catch (err) {
-      state.personaChat.push({ role: 'assistant', content: '⚠️ Erro ao contactar o bot. Tente novamente.' });
+      state.personaChat.push({ role: 'assistant', content: STR.chatError });
     } finally {
       personaChatBusy = false;
       renderPersonaChatLog();
@@ -230,11 +284,11 @@ function renderPersonaChatLog(busy = false) {
   if (!log) return;
   const msgs = state.personaChat || [];
   if (!msgs.length && !busy) {
-    log.innerHTML = '<div class="chat__empty">Envie uma mensagem para testar a persona do bot.</div>';
+    log.innerHTML = `<div class="chat__empty">${escapeHTML(STR.chatEmpty)}</div>`;
     return;
   }
   log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>`).join('')
-    + (busy ? '<div class="chat__msg chat__msg--bot chat__typing">a escrever…</div>' : '');
+    + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }
 
@@ -246,14 +300,66 @@ async function uploadPersonaFile(file) {
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
   return res.json();
 }
-function renderSettings(root) { root.innerHTML = hero('Settings', 'Business profile, team e bot tweaks entram aqui nas próximas fases.') + '<div class="panel"><div class="empty"><p class="empty__title">Settings v1</p><p class="empty__desc">Team é criado no backoffice por enquanto. Business profile/PDF branding ainda pendente.</p></div></div>'; }
+function renderSettings(root) {
+  const channels = state.me?.tenant?.channels || [];
+  const wa = channels.find(c => c.platform === 'WHATSAPP');
+  const ig = channels.find(c => c.platform === 'INSTAGRAM');
+  root.innerHTML = `${hero(labels.settings, STR.settingsDesc)}
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.channelsTitle)}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.channelsDesc)}</p>
+      <div class="tbl-wrap"><table class="tbl">
+        <thead><tr><th>${escapeHTML(STR.colChannel)}</th><th>${escapeHTML(STR.colAccount)}</th><th>${escapeHTML(STR.colStatus)}</th><th class="right">${escapeHTML(STR.colActions)}</th></tr></thead>
+        <tbody>
+          <tr><td class="name">WhatsApp</td><td class="mono">${escapeHTML(wa?.displayName || wa?.externalId || '—')}</td><td>${wa ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td><td class="right"></td></tr>
+          <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
+            <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button></td></tr>
+        </tbody>
+      </table></div>
+      <div class="hint" style="margin-top:10px">${escapeHTML(STR.igHint)}</div>
+    </div>
+    <div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.moreSettingsTitle)}</p><p class="empty__desc">${escapeHTML(STR.moreSettingsDesc)}</p></div></div>`;
+  $('#ig-connect').addEventListener('click', connectInstagram);
+}
+
+async function connectInstagram() {
+  let res;
+  try { res = await api('/app/api/instagram/connect'); }
+  catch (e) { toast(e.message === 'unauthorized' ? STR.sessionExpired : STR.igUnavailable); return; }
+  const popup = window.open(res.authorizeUrl, 'ig-oauth', 'width=600,height=750');
+  if (!popup) { toast(STR.igAllowPopups); return; }
+  const onMsg = async ev => {
+    if (ev.origin !== window.location.origin || ev.data?.type !== 'ig-oauth') return;
+    window.removeEventListener('message', onMsg);
+    if (ev.data.status === 'connected') {
+      toast(STR.igConnected);
+      state.me = await api('/app/api/me');
+      if (state.active === 'settings') render();
+    } else {
+      toast(STR.igFailed(ev.data.reason));
+    }
+  };
+  window.addEventListener('message', onMsg);
+}
+
+// When the OAuth popup lands back on /app/?ig=..., relay the outcome to the opener and close.
+// Returns true if this load was an OAuth popup (so the normal app boot is skipped).
+function handleOAuthPopup() {
+  const params = new URLSearchParams(window.location.search);
+  const ig = params.get('ig');
+  if (!ig || !window.opener) return false;
+  window.opener.postMessage({ type: 'ig-oauth', status: ig, reason: params.get('reason'), tenant: params.get('tenant') }, window.location.origin);
+  window.close();
+  return true;
+}
 
 function openDrawer(title, body) { const root = $('#drawer'); $('#drawer-title').textContent = title; $('#drawer-body').innerHTML = ''; $('#drawer-body').appendChild(body); root.hidden = false; const close = () => { root.hidden = true; }; $$('[data-close]', root).forEach(b => b.onclick = close); }
 
 async function init() {
+  if (handleOAuthPopup()) return;
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
-  $('#btn-new').addEventListener('click', () => toast('Criação rápida neste módulo será adicionada no próximo passo.'));
+  $('#btn-new').addEventListener('click', () => toast(STR.quickCreateSoon));
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });
   if (!token) return renderLogin();
   state.active = (location.hash || '').replace('#', '') || 'overview';

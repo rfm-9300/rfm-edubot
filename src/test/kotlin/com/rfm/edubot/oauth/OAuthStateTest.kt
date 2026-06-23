@@ -11,7 +11,22 @@ class OAuthStateTest {
     fun `mint then verify round-trips the slug`() {
         val state = OAuthState(secret)
         val token = state.mint("acme-bot")
-        assertEquals("acme-bot", state.verify(token))
+        assertEquals("acme-bot", state.verify(token)?.slug)
+    }
+
+    @Test
+    fun `mint defaults to backoffice origin`() {
+        val state = OAuthState(secret)
+        assertEquals(OAuthState.ORIGIN_BACKOFFICE, state.verify(state.mint("acme-bot"))?.origin)
+    }
+
+    @Test
+    fun `mint round-trips a dashboard origin`() {
+        val state = OAuthState(secret)
+        val token = state.mint("acme-bot", origin = OAuthState.ORIGIN_DASHBOARD)
+        val verified = state.verify(token)
+        assertEquals("acme-bot", verified?.slug)
+        assertEquals(OAuthState.ORIGIN_DASHBOARD, verified?.origin)
     }
 
     @Test
@@ -41,7 +56,7 @@ class OAuthStateTest {
     fun `replayed state is rejected on second verify`() {
         val state = OAuthState(secret)
         val token = state.mint("acme-bot")
-        assertEquals("acme-bot", state.verify(token))
+        assertEquals("acme-bot", state.verify(token)?.slug)
         assertNull(state.verify(token)) // nonce already consumed
     }
 

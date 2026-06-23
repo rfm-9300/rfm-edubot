@@ -82,6 +82,14 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - Fat JAR output: `build/libs/app.jar` (Dockerfile multi-stage, distroless-style)
 - MongoDB indexes created at startup in `MongoModule.initialize()`
 
+## Frontend UI Strings
+
+The product is intended to be multi-language. Do not hardcode user-facing strings — especially not Portuguese-only text — directly in markup or JS render functions.
+
+- New user-facing strings in the frontends (`src/main/resources/app/`, `backoffice/`, `admin/`) must go through a translatable layer (a labels/strings map at the top of the file at minimum, a proper i18n mechanism once one exists), not inline literals.
+- When touching code near existing hardcoded strings, prefer lifting them into the strings map rather than adding more inline text.
+- Placeholder/"coming soon" copy counts as a user-facing string — same rules apply.
+
 ## Documentation
 
 - Keep Mermaid diagrams updated

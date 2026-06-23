@@ -519,7 +519,8 @@ private suspend fun runPersonaTest(
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
-@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val agentType: String)
+@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val agentType: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable private data class ChannelMeDto(val platform: String, val externalId: String, val displayName: String? = null)
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
 @Serializable private data class OverviewDto(val users: Long, val conversations: Long, val messages: Long, val messagesToday: Long, val quotes: Long, val invoices: Long)
 @Serializable private data class ContactStatusRequest(val status: String)
@@ -534,7 +535,7 @@ private suspend fun runPersonaTest(
 @Serializable private data class ConversationDto(val id: String, val waId: String, val state: String, val lastMessageAt: String, val messageCount: Int)
 @Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val createdAt: String)
 
-private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, agentType)
+private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, agentType, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),

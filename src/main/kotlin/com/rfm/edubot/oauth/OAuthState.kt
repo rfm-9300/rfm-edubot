@@ -21,7 +21,10 @@ class OAuthState(
     private val now: () -> Long = System::currentTimeMillis,
 ) {
     @Serializable
-    private data class Payload(val slug: String, val nonce: String, val exp: Long)
+    private data class Payload(val slug: String, val nonce: String, val exp: Long, val origin: String = ORIGIN_BACKOFFICE)
+
+    /** Slug + which UI surface initiated the flow, so the callback can redirect back to it. */
+    data class Verified(val slug: String, val origin: String)
 
     private val json = Json { encodeDefaults = true }
     private val encoder: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
@@ -29,14 +32,14 @@ class OAuthState(
     private val random = SecureRandom()
     private val consumedNonces = ConcurrentHashMap<String, Long>()
 
-    fun mint(slug: String): String {
-        val payload = Payload(slug, randomNonce(), now() + ttlMillis)
+    fun mint(slug: String, origin: String = ORIGIN_BACKOFFICE): String {
+        val payload = Payload(slug, randomNonce(), now() + ttlMillis, origin)
         val body = encoder.encodeToString(json.encodeToString(Payload.serializer(), payload).toByteArray())
         return "$body.${sign(body)}"
     }
 
-    /** Returns the slug if the state is well-formed, unexpired and not previously consumed; else null. */
-    fun verify(state: String): String? {
+    /** Returns slug + origin if the state is well-formed, unexpired and not previously consumed; else null. */
+    fun verify(state: String): Verified? {
         val dot = state.lastIndexOf('.')
         if (dot <= 0) return null
         val body = state.substring(0, dot)
@@ -49,7 +52,12 @@ class OAuthState(
         purgeExpired()
         // single-use: putIfAbsent returns non-null if the nonce was already consumed (replay)
         if (consumedNonces.putIfAbsent(payload.nonce, payload.exp) != null) return null
-        return payload.slug
+        return Verified(payload.slug, payload.origin)
+    }
+
+    companion object {
+        const val ORIGIN_BACKOFFICE = "backoffice"
+        const val ORIGIN_DASHBOARD = "app"
     }
 
     private fun sign(body: String): String {
