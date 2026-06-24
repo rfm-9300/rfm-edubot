@@ -10,6 +10,7 @@ data class Tenant(
     val name: String,
     val channels: List<ChannelBinding>,
     val agentType: String = "CRM_V1",
+    val locale: String = TenantLocales.DEFAULT,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,
     val rateLimitPerHour: Int = 30,
@@ -24,7 +25,14 @@ data class Tenant(
     fun binding(platform: Platform): ChannelBinding? = channels.firstOrNull { it.platform == platform }
 }
 
-enum class Platform { WHATSAPP, INSTAGRAM }
+/** Supported UI languages. Mirrors the locales shipped to the web frontends (admin/catalog.*.js). */
+object TenantLocales {
+    const val DEFAULT = "pt-PT"
+    val SUPPORTED = setOf("en", "pt-PT", "es")
+    fun normalize(value: String?): String = value?.takeIf { it in SUPPORTED } ?: DEFAULT
+}
+
+enum class Platform { WHATSAPP, INSTAGRAM, WEB }
 
 data class ChannelBinding(
     val platform: Platform,
@@ -34,6 +42,8 @@ data class ChannelBinding(
     val wabaId: String? = null,
     val tokenObtainedAt: Instant? = null,
     val source: String? = null,
+    // WEB only: browser origins allowed to open the widget WebSocket. Empty = allow any.
+    val allowedOrigins: List<String> = emptyList(),
 )
 
 enum class TenantStatus { ACTIVE, SUSPENDED, DELETED }

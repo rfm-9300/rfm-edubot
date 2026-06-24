@@ -25,6 +25,10 @@ import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.plugins.configureMonitoring
 import com.rfm.edubot.plugins.configureSerialization
 import com.rfm.edubot.plugins.configureStatusPages
+import com.rfm.edubot.plugins.configureWebSockets
+import com.rfm.edubot.web.WebChannelRegistry
+import com.rfm.edubot.web.webChatRoutes
+import com.rfm.edubot.web.widgetRoutes
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
@@ -94,12 +98,14 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
     }
 
     val messageQueue = MessageQueue()
+    val webChannelRegistry = WebChannelRegistry()
     val pipelineFactory = TenantPipelineFactory(
         mongo = mongoModule,
         aiClient = aiClient,
         deduplicationService = deduplicationService,
         whatsappHttpClient = whatsappHttpClient,
         appConfig = appConfig,
+        webChannelRegistry = webChannelRegistry,
     )
 
     val channelBindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
@@ -149,6 +155,7 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
     configureMonitoring()
     configureSerialization()
     configureStatusPages()
+    configureWebSockets()
     configureAdminAuth(appConfig.admin)
 
     routing {
@@ -188,6 +195,7 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             personaCompiler = personaCompiler,
             aiClient = aiClient,
             appConfig = appConfig,
+            channelBindingService = channelBindingService,
         )
         dashboardImpersonationRoute(
             tenantRepository = tenantRepository,
@@ -221,5 +229,11 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             bindingService = channelBindingService,
         )
         legalRoutes()
+        widgetRoutes()
+        webChatRoutes(
+            messageQueue = messageQueue,
+            tenantRegistry = tenantRegistry,
+            webChannelRegistry = webChannelRegistry,
+        )
     }
 }

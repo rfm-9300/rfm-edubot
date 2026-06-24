@@ -52,12 +52,16 @@ class TenantRepository(mongoModule: MongoModule) {
     suspend fun setStatus(slug: String, status: TenantStatus, updatedAt: Instant): Tenant? =
         update(slug, Updates.combine(Updates.set("status", status.name), Updates.set("updatedAt", updatedAt.toDate())))
 
+    suspend fun setLocale(slug: String, locale: String, updatedAt: Instant): Tenant? =
+        update(slug, Updates.combine(Updates.set("locale", locale), Updates.set("updatedAt", updatedAt.toDate())))
+
     private fun Document.toTenant() = Tenant(
         id = getObjectId("_id"),
         slug = getString("slug"),
         name = getString("name"),
         channels = getChannels(),
         agentType = getString("agentType") ?: "CRM_V1",
+        locale = com.rfm.edubot.tenant.model.TenantLocales.normalize(getString("locale")),
         openrouterModel = getString("openrouterModel"),
         enabledModules = getList("enabledModules", String::class.java),
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
@@ -73,6 +77,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("name", name)
             .append("channels", channels.map { it.toDocument() })
             .append("agentType", agentType)
+            .append("locale", locale)
             .append("openrouterModel", openrouterModel)
             .append("enabledModules", enabledModules)
             .append("rateLimitPerHour", rateLimitPerHour)
@@ -98,6 +103,7 @@ private fun Document.getChannels(): List<ChannelBinding> {
             wabaId = doc.getString("wabaId"),
             tokenObtainedAt = doc.getDate("tokenObtainedAt")?.let { Instant.fromEpochMilliseconds(it.time) },
             source = doc.getString("source"),
+            allowedOrigins = doc.getList("allowedOrigins", String::class.java).orEmpty(),
         )
     }
     if (channels.isNotEmpty()) return channels
@@ -112,6 +118,7 @@ private fun ChannelBinding.toDocument(): Document = Document("platform", platfor
     .appendIfNotNull("wabaId", wabaId)
     .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
     .appendIfNotNull("source", source)
+    .append("allowedOrigins", allowedOrigins)
 
 private fun Document.getInstant(field: String): Instant = Instant.fromEpochMilliseconds(getDate(field).time)
 

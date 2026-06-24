@@ -9,6 +9,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/admin/style.css" />
 <script src="/admin/theme.js"></script>
+<script src="/admin/catalog.en.js"></script>
+<script src="/admin/catalog.pt.js"></script>
+<script src="/admin/catalog.es.js"></script>
+<script src="/admin/i18n.js"></script>
 </head>
 <body>
   <aside class="sidebar">
@@ -16,34 +20,34 @@
       <div class="brand__mark" aria-hidden="true">BO</div>
       <div class="brand__text">
         <div class="brand__name">BACKOFFICE</div>
-        <div class="brand__sub">Platform · Tenants</div>
+        <div class="brand__sub" data-i18n="backoffice.brandSub">Platform · Tenants</div>
       </div>
     </div>
     <nav class="nav">
       <a class="nav__item is-active" href="#tenants">
         <span class="nav__dot"></span>
-        <span class="nav__label">Tenants</span>
+        <span class="nav__label" data-i18n="backoffice.heroTitle">Tenants</span>
         <span class="nav__count" id="tenant-count">—</span>
       </a>
     </nav>
     <div class="sidebar__foot">
-      <div class="kpi"><div class="kpi__label">Activos</div><div class="kpi__value" id="kpi-active">—</div></div>
-      <div class="kpi"><div class="kpi__label">Mensagens</div><div class="kpi__value" id="kpi-messages">—</div></div>
+      <div class="kpi"><div class="kpi__label" data-i18n="backoffice.kpiActive">Activos</div><div class="kpi__value" id="kpi-active">—</div></div>
+      <div class="kpi"><div class="kpi__label" data-i18n="backoffice.kpiMessages">Mensagens</div><div class="kpi__value" id="kpi-messages">—</div></div>
       <div class="meta"><span>v 1.0</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
     </div>
   </aside>
 
   <main class="main">
     <header class="topbar">
-      <div class="crumb"><span class="crumb__root">Platform</span><span class="crumb__sep">/</span><span class="crumb__leaf">Tenants</span></div>
+      <div class="crumb"><span class="crumb__root" data-i18n="backoffice.crumbRoot">Platform</span><span class="crumb__sep">/</span><span class="crumb__leaf" data-i18n="backoffice.heroTitle">Tenants</span></div>
       <div class="topbar__search">
-        <input type="text" id="search" placeholder="Procurar tenant…" autocomplete="off" />
+        <input type="text" id="search" data-i18n-placeholder="backoffice.searchPlaceholder" placeholder="Procurar tenant…" autocomplete="off" />
         <kbd>/</kbd>
       </div>
       <div class="topbar__actions">
-        <button class="iconbtn iconbtn--theme" id="btn-theme" type="button" aria-label="Mudar tema">🌙</button>
-        <button class="btn btn--ghost" id="btn-logout">Sair</button>
-        <button class="btn btn--primary" id="btn-new"><span class="btn__plus">+</span>Novo bot/cliente</button>
+        <button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="backoffice.themeAria" aria-label="Mudar tema">🌙</button>
+        <button class="btn btn--ghost" id="btn-logout" data-i18n="backoffice.logout">Sair</button>
+        <button class="btn btn--primary" id="btn-new"><span class="btn__plus">+</span><span data-i18n="backoffice.newTenant">Novo bot/cliente</span></button>
       </div>
     </header>
     <section class="view" id="view"></section>
@@ -53,8 +57,8 @@
     <div class="drawer__scrim" data-close></div>
     <aside class="drawer__panel" role="dialog" aria-modal="true">
       <header class="drawer__head">
-        <div><div class="drawer__eyebrow" id="drawer-eyebrow">Tenant</div><h2 class="drawer__title" id="drawer-title">—</h2></div>
-        <button class="iconbtn" data-close aria-label="Fechar">×</button>
+        <div><div class="drawer__eyebrow" id="drawer-eyebrow" data-i18n="backoffice.drawerEyebrow">Tenant</div><h2 class="drawer__title" id="drawer-title">—</h2></div>
+        <button class="iconbtn" data-close data-i18n-aria-label="backoffice.closeAria" aria-label="Fechar">×</button>
       </header>
       <div class="drawer__body" id="drawer-body"></div>
     </aside>
@@ -63,11 +67,11 @@
   <div class="confirm" id="confirm" hidden>
     <div class="confirm__scrim" data-confirm-cancel></div>
     <div class="confirm__panel" role="alertdialog" aria-modal="true">
-      <h3 class="confirm__title" id="confirm-title">Confirmar</h3>
+      <h3 class="confirm__title" id="confirm-title" data-i18n="backoffice.confirm">Confirmar</h3>
       <p class="confirm__body" id="confirm-body">—</p>
       <div class="confirm__actions">
-        <button class="btn btn--ghost" data-confirm-cancel>Cancelar</button>
-        <button class="btn btn--danger" id="confirm-ok">Confirmar</button>
+        <button class="btn btn--ghost" data-confirm-cancel data-i18n="backoffice.cancel">Cancelar</button>
+        <button class="btn btn--danger" id="confirm-ok" data-i18n="backoffice.confirm">Confirmar</button>
       </div>
     </div>
   </div>

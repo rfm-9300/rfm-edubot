@@ -5,16 +5,21 @@ let token = localStorage.getItem('adminToken') || '';
 let state = { tenants: [], stats: {}, agentTypes: ['CRM_V1'], search: '', whatsAppSignup: { enabled: false } };
 let fbSdkPromise;
 
+// Backoffice copy comes from the shared i18n catalogs (admin/catalog.*.js). Locale follows the
+// browser / the operator's saved choice (super-admin is not tenant-scoped). `T` is a live proxy.
+const T = I18N.section('backoffice');
+
+// Module ids only — display labels come from the shared catalog (common.nav.<id>) at render time.
 const MODULES = [
-  { id: 'overview', label: 'Overview', always: true },
-  { id: 'conversations', label: 'Conversas', always: true },
-  { id: 'contacts', label: 'Contactos', always: true },
-  { id: 'settings', label: 'Settings', always: true },
-  { id: 'persona', label: 'Persona' },
-  { id: 'clients', label: 'Clientes', crm: true },
-  { id: 'quotes', label: 'Orçamentos', crm: true },
-  { id: 'invoices', label: 'Faturas', crm: true },
-  { id: 'catalog', label: 'Catálogo', crm: true },
+  { id: 'overview', always: true },
+  { id: 'conversations', always: true },
+  { id: 'contacts', always: true },
+  { id: 'settings', always: true },
+  { id: 'persona' },
+  { id: 'clients', crm: true },
+  { id: 'quotes', crm: true },
+  { id: 'invoices', crm: true },
+  { id: 'catalog', crm: true },
 ];
 
 async function api(path, options = {}) {
@@ -44,7 +49,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2800);
 }
 
-function confirmDialog({ title, body, okLabel = 'Confirmar', danger = true }) {
+function confirmDialog({ title, body, okLabel = T.confirm, danger = true }) {
   return new Promise(resolve => {
     const root = $('#confirm');
     $('#confirm-title').textContent = title;
@@ -67,7 +72,7 @@ function confirmDialog({ title, body, okLabel = 'Confirmar', danger = true }) {
   });
 }
 
-function openDrawer({ title, body, onSave, saveLabel = 'Guardar' }) {
+function openDrawer({ title, body, onSave, saveLabel = T.save }) {
   const root = $('#drawer');
   $('#drawer-title').textContent = title;
   const host = $('#drawer-body');
@@ -75,7 +80,7 @@ function openDrawer({ title, body, onSave, saveLabel = 'Guardar' }) {
   host.appendChild(body);
   const foot = document.createElement('div');
   foot.className = 'drawer__foot';
-  foot.innerHTML = `<button class="btn btn--ghost" data-close>Cancelar</button><button class="btn btn--accent" id="drawer-save">${escapeHTML(saveLabel)}</button>`;
+  foot.innerHTML = `<button class="btn btn--ghost" data-close>${escapeHTML(T.cancel)}</button><button class="btn btn--accent" id="drawer-save">${escapeHTML(saveLabel)}</button>`;
   host.appendChild(foot);
   root.hidden = false;
   const close = () => { root.hidden = true; $$('[data-close]', root).forEach(b => b.removeEventListener('click', close)); };
@@ -91,12 +96,12 @@ function renderLogin() {
   $('#view').innerHTML = `
     <div class="auth"><div class="auth__card">
       <div class="auth__mark">BO</div>
-      <p class="auth__eyebrow">thebots.lab / platform</p>
-      <h1 class="auth__title">Backoffice</h1>
-      <p class="auth__desc">Acesso de operador para gerir bots, tenants e equipas.</p>
+      <p class="auth__eyebrow">${escapeHTML(T.login.eyebrow)}</p>
+      <h1 class="auth__title">${escapeHTML(T.login.title)}</h1>
+      <p class="auth__desc">${escapeHTML(T.login.desc)}</p>
       <form class="form" id="login-form">
-        <div class="form__row"><label class="lbl" for="password">Password</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div>
-        <button class="btn btn--primary" type="submit">Entrar</button>
+        <div class="form__row"><label class="lbl" for="password">${escapeHTML(T.login.password)}</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div>
+        <button class="btn btn--primary" type="submit">${escapeHTML(T.login.submit)}</button>
       </form>
     </div></div>`;
   $('#login-form').addEventListener('submit', async e => {
@@ -108,7 +113,7 @@ function renderLogin() {
       await loadAll();
       renderTenants();
     } catch (err) {
-      toast('Login inválido');
+      toast(T.login.invalid);
     }
   });
 }
@@ -134,12 +139,12 @@ function renderTenants() {
   $('#kpi-messages').textContent = Object.values(state.stats).reduce((sum, s) => sum + Number(s.messages || 0), 0);
   $('#meta-clock').textContent = new Date().toLocaleString('pt-PT', { hour: '2-digit', minute: '2-digit' });
   $('#view').innerHTML = `
-    <div class="view__hero"><div><h1 class="view__title">Tenants</h1><p class="view__desc">Bots/clientes configurados nesta plataforma.</p></div></div>
-    <div class="panel"><div class="panel__head"><h2 class="panel__title">Bots <span class="tag">${rows.length}</span></h2></div>
+    <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
+    <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>Nome</th><th>Slug</th><th>Channels</th><th>Agent</th><th>Status</th><th class="right">Msgs</th><th>Última actividade</th><th class="right">Acções</th>
+        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thAgent)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
-      ${rows.length === 0 ? '<tr><td colspan="8"><div class="empty"><p class="empty__title">Nenhum tenant encontrado</p></div></td></tr>' : rows.map(t => {
+      ${rows.length === 0 ? `<tr><td colspan="8"><div class="empty"><p class="empty__title">${escapeHTML(T.emptyTenants)}</p></div></td></tr>` : rows.map(t => {
         const s = state.stats[t.slug] || {};
         const pillClass = t.status === 'ACTIVE' ? 'pill--ok' : t.status === 'SUSPENDED' ? 'pill--warn' : 'pill--bad';
         return `<tr>
@@ -151,11 +156,11 @@ function renderTenants() {
           <td class="num">${s.messages || 0}</td>
           <td class="mono muted">${fmtDate(s.lastMessageAt)}</td>
           <td class="right"><div class="actions">
-            <button class="btn btn--sm" data-open-dashboard="${escapeHTML(t.slug)}">Open Dashboard</button>
-            <button class="btn btn--sm btn--ghost" data-users="${escapeHTML(t.slug)}">Users</button>
-            <button class="btn btn--sm btn--ghost" data-edit="${escapeHTML(t.slug)}">Edit</button>
-            ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${escapeHTML(t.slug)}">Suspend</button>` : `<button class="btn btn--sm btn--accent" data-activate="${escapeHTML(t.slug)}">Activate</button>`}
-            <button class="btn btn--sm btn--ghost" data-reload="${escapeHTML(t.slug)}">Reload</button>
+            <button class="btn btn--sm" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>
+            <button class="btn btn--sm btn--ghost" data-users="${escapeHTML(t.slug)}">${escapeHTML(T.users)}</button>
+            <button class="btn btn--sm btn--ghost" data-edit="${escapeHTML(t.slug)}">${escapeHTML(T.edit)}</button>
+            ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${escapeHTML(t.slug)}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${escapeHTML(t.slug)}">${escapeHTML(T.activate)}</button>`}
+            <button class="btn btn--sm btn--ghost" data-reload="${escapeHTML(t.slug)}">${escapeHTML(T.reload)}</button>
             <button class="iconbtn iconbtn--danger" data-delete="${escapeHTML(t.slug)}">×</button>
           </div></td>
         </tr>`;
@@ -168,7 +173,7 @@ function channelBadges(channels = []) {
   if (!channels.length) return '<span class="muted">—</span>';
   return `<div class="row" style="gap:6px; flex-wrap:wrap">${channels.map(c => {
     const cls = c.platform === 'INSTAGRAM' ? 'pill--accent' : 'pill--info';
-    const token = c.hasAccessToken ? 'token' : 'no token';
+    const token = c.hasAccessToken ? T.token : T.noToken;
     const label = c.displayName ? `${c.platform} · ${c.platform === 'INSTAGRAM' ? '@' : ''}${c.displayName}` : c.platform;
     return `<span class="pill ${cls}" title="${escapeHTML(c.externalId)} · ${token}">${escapeHTML(label)}</span>`;
   }).join('')}</div>`;
@@ -178,9 +183,9 @@ function bindTenantActions() {
   $$('[data-open-dashboard]').forEach(b => b.addEventListener('click', () => openDashboard(b.dataset.openDashboard)));
   $$('[data-users]').forEach(b => b.addEventListener('click', () => usersDrawer(b.dataset.users)));
   $$('[data-edit]').forEach(b => b.addEventListener('click', () => tenantForm(state.tenants.find(t => t.slug === b.dataset.edit))));
-  $$('[data-suspend]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.suspend, 'suspend', 'Suspender tenant?', 'Suspender')));
-  $$('[data-activate]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.activate, 'activate', 'Activar tenant?', 'Activar', false)));
-  $$('[data-reload]').forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(b.dataset.reload)}/reload`, { method: 'POST' }); toast('Pipeline recarregada'); }));
+  $$('[data-suspend]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.suspend, 'suspend', T.suspendTitle, T.suspend)));
+  $$('[data-activate]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.activate, 'activate', T.activateTitle, T.activate, false)));
+  $$('[data-reload]').forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(b.dataset.reload)}/reload`, { method: 'POST' }); toast(T.pipelineReloaded); }));
   $$('[data-delete]').forEach(b => b.addEventListener('click', () => deleteTenant(b.dataset.delete)));
 }
 
@@ -189,7 +194,7 @@ async function openDashboard(slug) {
     const res = await api(`/admin/api/tenants/${encodeURIComponent(slug)}/impersonate`, { method: 'POST' });
     localStorage.setItem('dashboardToken', res.token);
     location.href = '/app/';
-  } catch (e) { toast(`Erro: ${e.message}`); }
+  } catch (e) { toast(T.error({ msg: e.message })); }
 }
 
 async function usersDrawer(slug) {
@@ -197,32 +202,32 @@ async function usersDrawer(slug) {
   const wrap = document.createElement('div');
   wrap.className = 'form';
   wrap.innerHTML = `
-    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Email</th><th>Role</th><th>Status</th><th class="right">Acções</th></tr></thead><tbody>
-      ${users.length === 0 ? '<tr><td colspan="4"><div class="empty"><p class="empty__title">Sem utilizadores</p></div></td></tr>' : users.map(u => `<tr>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
+      ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
         <td class="name">${escapeHTML(u.email)}</td><td>${escapeHTML(u.role)}</td><td>${escapeHTML(u.status)}</td>
-        <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">Disable</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">Activate</button>`}</td>
+        <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">${escapeHTML(T.disable)}</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">${escapeHTML(T.activate)}</button>`}</td>
       </tr>`).join('')}
     </tbody></table></div></div>
     <div class="form__grid">
-      <div class="form__row"><label class="lbl">Email</label><input class="inp" id="u-email" type="email" /></div>
-      <div class="form__row"><label class="lbl">Password temporária</label><input class="inp" id="u-password" type="password" /></div>
-      <div class="form__row"><label class="lbl">Role</label><select class="sel" id="u-role"><option>TENANT_ADMIN</option><option>TENANT_MEMBER</option></select></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.emailLabel)}</label><input class="inp" id="u-email" type="email" /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.tempPassword)}</label><input class="inp" id="u-password" type="password" /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.roleLabel)}</label><select class="sel" id="u-role"><option>TENANT_ADMIN</option><option>TENANT_MEMBER</option></select></div>
     </div>`;
   openDrawer({
-    title: `Dashboard users · ${slug}`,
+    title: T.usersTitle({ slug }),
     body: wrap,
-    saveLabel: 'Criar utilizador',
+    saveLabel: T.createUser,
     async onSave() {
       const email = $('#u-email', wrap).value.trim();
       const password = $('#u-password', wrap).value;
       const role = $('#u-role', wrap).value;
-      if (!email || !password) { toast('Email e password obrigatórios'); return false; }
+      if (!email || !password) { toast(T.emailPasswordRequired); return false; }
       await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users`, { method: 'POST', body: JSON.stringify({ email, password, role }) });
-      toast('Utilizador criado');
+      toast(T.userCreated);
     },
   });
-  $$('[data-disable-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.disableUser}/disable`, { method: 'POST' }); toast('Utilizador desactivado'); usersDrawer(slug); }));
-  $$('[data-activate-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.activateUser}/activate`, { method: 'POST' }); toast('Utilizador activado'); usersDrawer(slug); }));
+  $$('[data-disable-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.disableUser}/disable`, { method: 'POST' }); toast(T.userDisabled); usersDrawer(slug); }));
+  $$('[data-activate-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.activateUser}/activate`, { method: 'POST' }); toast(T.userActivated); usersDrawer(slug); }));
 }
 
 function tenantForm(editing) {
@@ -230,32 +235,33 @@ function tenantForm(editing) {
   wrap.className = 'form';
   wrap.innerHTML = `
     <div class="form__grid">
-      <div class="form__row form__row--full"><label class="lbl">Nome</label><input class="inp" id="t-name" value="${escapeHTML(editing?.name || '')}" /></div>
-      <div class="form__row"><label class="lbl">Slug</label><input class="inp inp--mono" id="t-slug" value="${escapeHTML(editing?.slug || '')}" ${editing ? 'readonly' : ''} /></div>
-      <div class="form__row"><label class="lbl">Agent type</label><select class="sel" id="t-agent">${state.agentTypes.map(a => `<option value="${a}" ${editing?.agentType === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
-      <div class="form__row"><label class="lbl">Model override</label><input class="inp inp--mono" id="t-model" value="${escapeHTML(editing?.openrouterModel || '')}" placeholder="blank = default" /></div>
-      <div class="form__row"><label class="lbl">Rate / hour</label><input class="inp inp--mono" id="t-hour" type="number" value="${editing?.rateLimitPerHour || 30}" /></div>
-      <div class="form__row"><label class="lbl">Rate / day</label><input class="inp inp--mono" id="t-day" type="number" value="${editing?.rateLimitPerDay || 200}" /></div>
+      <div class="form__row form__row--full"><label class="lbl">${escapeHTML(T.tenantNameLabel)}</label><input class="inp" id="t-name" value="${escapeHTML(editing?.name || '')}" /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.tenantSlugLabel)}</label><input class="inp inp--mono" id="t-slug" value="${escapeHTML(editing?.slug || '')}" ${editing ? 'readonly' : ''} /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.agentTypeLabel)}</label><select class="sel" id="t-agent">${state.agentTypes.map(a => `<option value="${a}" ${editing?.agentType === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.languageLabel)}</label><select class="sel" id="t-locale">${I18N.SUPPORTED.map(l => `<option value="${l}" ${(editing?.locale || I18N.DEFAULT) === l ? 'selected' : ''}>${escapeHTML(I18N.LANG_NAMES[l] || l)}</option>`).join('')}</select></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.modelOverride)}</label><input class="inp inp--mono" id="t-model" value="${escapeHTML(editing?.openrouterModel || '')}" placeholder="${escapeHTML(T.modelPlaceholder)}" /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerHour)}</label><input class="inp inp--mono" id="t-hour" type="number" value="${editing?.rateLimitPerHour || 30}" /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerDay)}</label><input class="inp inp--mono" id="t-day" type="number" value="${editing?.rateLimitPerDay || 200}" /></div>
     </div>
     <div class="form__row">
-      <label class="lbl">Modules</label>
+      <label class="lbl">${escapeHTML(T.modulesLabel)}</label>
       <div class="panel" style="padding:12px" id="modules-box"></div>
-      <div class="hint">Always-on modules stay checked. CRM modules require agent type CRM_V1.</div>
+      <div class="hint">${escapeHTML(T.modulesHint)}</div>
     </div>
     <div class="form__row">
       <div class="row" style="justify-content:space-between">
-        <label class="lbl">Channels <span class="req">●</span></label>
+        <label class="lbl">${escapeHTML(T.channelsLabel)} <span class="req">●</span></label>
         <div class="row" style="gap:6px">
-          ${editing && state.whatsAppSignup.enabled ? '<button class="btn btn--sm btn--ghost" type="button" id="wa-connect">Connect WhatsApp</button>' : ''}
-          ${editing ? '<button class="btn btn--sm btn--ghost" type="button" id="ig-connect">Connect Instagram</button>' : ''}
-          <button class="btn btn--sm btn--ghost" type="button" id="add-channel">+ Add channel</button>
+          ${editing && state.whatsAppSignup.enabled ? `<button class="btn btn--sm btn--ghost" type="button" id="wa-connect">${escapeHTML(T.connectWhatsApp)}</button>` : ''}
+          ${editing ? `<button class="btn btn--sm btn--ghost" type="button" id="ig-connect">${escapeHTML(T.connectInstagram)}</button>` : ''}
+          <button class="btn btn--sm btn--ghost" type="button" id="add-channel">${escapeHTML(T.addChannel)}</button>
         </div>
       </div>
       <div class="lines" id="channels-box">
-        <div class="lines__head" style="grid-template-columns:130px 1fr 1fr 32px"><span>Platform</span><span>External ID</span><span>Access token</span><span></span></div>
+        <div class="lines__head" style="grid-template-columns:130px 1fr 1fr 32px"><span>${escapeHTML(T.colPlatform)}</span><span>${escapeHTML(T.colExternalId)}</span><span>${escapeHTML(T.colAccessToken)}</span><span></span></div>
         <div id="channels-body"></div>
       </div>
-      <div class="hint">Instagram token is required when adding a channel. In edit, leave token blank to keep the existing one.</div>
+      <div class="hint">${escapeHTML(T.channelsHint)}</div>
     </div>`;
   const existingChannels = editing?.channels?.length ? editing.channels : (editing?.phoneNumberId ? [{ platform: 'WHATSAPP', externalId: editing.phoneNumberId, hasAccessToken: true }] : [{ platform: 'WHATSAPP', externalId: '', hasAccessToken: false }]);
   existingChannels.forEach(c => addChannelRow(wrap, c));
@@ -270,33 +276,34 @@ function tenantForm(editing) {
     $('#t-name', wrap).addEventListener('input', () => { if (!touched) $('#t-slug', wrap).value = slugify($('#t-name', wrap).value); });
   }
   openDrawer({
-    title: editing ? `Editar · ${editing.slug}` : 'Novo bot/cliente',
+    title: editing ? T.editTenant({ slug: editing.slug }) : T.newTenant,
     body: wrap,
-    saveLabel: editing ? 'Guardar alterações' : 'Criar tenant',
+    saveLabel: editing ? T.saveChanges : T.createTenant,
     async onSave() {
       const payload = {
         name: $('#t-name', wrap).value.trim(),
         agentType: $('#t-agent', wrap).value,
+        locale: $('#t-locale', wrap).value,
         openrouterModel: $('#t-model', wrap).value.trim() || null,
         rateLimitPerHour: Number($('#t-hour', wrap).value || 30),
         rateLimitPerDay: Number($('#t-day', wrap).value || 200),
         channels: collectChannels(wrap, Boolean(editing)),
         enabledModules: collectModules(wrap),
       };
-      if (!payload.name) { toast('Nome obrigatório'); return false; }
-      if (payload.channels.length === 0) { toast('Adicione pelo menos um channel'); return false; }
-      if (payload.channels.some(c => c.platform === 'INSTAGRAM' && !editing && !c.accessToken)) { toast('Instagram precisa de Page access token'); return false; }
+      if (!payload.name) { toast(T.nameRequired); return false; }
+      if (payload.channels.length === 0) { toast(T.addOneChannel); return false; }
+      if (payload.channels.some(c => c.platform === 'INSTAGRAM' && !editing && !c.accessToken)) { toast(T.igNeedsToken); return false; }
       try {
         if (editing) {
           await api(`/admin/api/tenants/${encodeURIComponent(editing.slug)}`, { method: 'PUT', body: JSON.stringify(payload) });
-          toast('Tenant actualizado');
+          toast(T.tenantUpdated);
         } else {
           await api('/admin/api/tenants', { method: 'POST', body: JSON.stringify({ ...payload, slug: $('#t-slug', wrap).value.trim() }) });
-          toast('Bot criado. Liga os canais à app Meta e aponta o webhook.');
+          toast(T.botCreated);
         }
         await loadAll();
         renderTenants();
-      } catch (e) { toast(`Erro: ${e.message}`); return false; }
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
     },
   });
 }
@@ -315,7 +322,7 @@ function renderModulesBox(root, editing) {
   const selected = new Set(selectedModulesFor(editing, agentType));
   $('#modules-box', root).innerHTML = `<div class="row" style="gap:10px; flex-wrap:wrap">
     ${modulesForAgent(agentType).map(m => `<label class="pill ${m.always ? 'pill--ok' : 'pill--info'}" style="cursor:${m.always ? 'not-allowed' : 'pointer'}">
-      <input type="checkbox" data-module="${m.id}" ${selected.has(m.id) ? 'checked' : ''} ${m.always ? 'disabled' : ''} /> ${escapeHTML(m.label)}
+      <input type="checkbox" data-module="${m.id}" ${selected.has(m.id) ? 'checked' : ''} ${m.always ? 'disabled' : ''} /> ${escapeHTML(I18N.t('common.nav.' + m.id))}
     </label>`).join('')}
   </div>`;
 }
@@ -333,9 +340,9 @@ function addChannelRow(root, channel = { platform: 'WHATSAPP', externalId: '', h
       <option value="WHATSAPP" ${channel.platform === 'WHATSAPP' ? 'selected' : ''}>WHATSAPP</option>
       <option value="INSTAGRAM" ${channel.platform === 'INSTAGRAM' ? 'selected' : ''}>INSTAGRAM</option>
     </select>
-    <input class="inp inp--mono" data-channel-external value="${escapeHTML(channel.externalId || '')}" placeholder="phone_number_id or IG account id" />
-    <input class="inp inp--mono" data-channel-token type="password" placeholder="${channel.hasAccessToken ? 'unchanged' : 'access token'}" />
-    <button class="l-rm" type="button" aria-label="Remove channel">×</button>
+    <input class="inp inp--mono" data-channel-external value="${escapeHTML(channel.externalId || '')}" placeholder="${escapeHTML(T.chExternalPlaceholder)}" />
+    <input class="inp inp--mono" data-channel-token type="password" placeholder="${channel.hasAccessToken ? escapeHTML(T.chTokenUnchanged) : escapeHTML(T.chTokenPlaceholder)}" />
+    <button class="l-rm" type="button" aria-label="${escapeHTML(T.removeChannel)}">×</button>
   `;
   row.querySelector('.l-rm').addEventListener('click', () => row.remove());
   $('#channels-body', root).appendChild(row);
@@ -354,20 +361,20 @@ async function connectInstagram(slug) {
   try {
     res = await api(`/admin/api/tenants/${encodeURIComponent(slug)}/instagram/connect`);
   } catch (e) {
-    toast(e.message === 'unauthorized' ? 'Sessão expirada' : 'Instagram OAuth não configurado (IG_APP_ID)');
+    toast(e.message === 'unauthorized' ? T.igSessionExpired : T.igNotConfigured);
     return;
   }
   const popup = window.open(res.authorizeUrl, 'ig-oauth', 'width=600,height=750');
-  if (!popup) { toast('Permite popups para ligar o Instagram'); return; }
+  if (!popup) { toast(T.igAllowPopups); return; }
   const onMessage = async ev => {
     if (ev.origin !== window.location.origin || ev.data?.type !== 'ig-oauth') return;
     window.removeEventListener('message', onMessage);
     if (ev.data.status === 'connected') {
-      toast('Instagram ligado ✓');
+      toast(T.igConnected);
       await loadAll();
       renderTenants();
     } else {
-      toast(`Instagram falhou: ${ev.data.reason || 'erro'}`);
+      toast(T.igFailed({ reason: ev.data.reason }));
     }
   };
   window.addEventListener('message', onMessage);
@@ -442,10 +449,10 @@ function facebookLoginForBusiness(FB, configId) {
 
 async function connectWhatsApp(slug) {
   const cfg = state.whatsAppSignup;
-  if (!cfg?.enabled) { toast('WhatsApp Embedded Signup não configurado'); return; }
+  if (!cfg?.enabled) { toast(T.waNotConfigured); return; }
   try {
     const FB = await loadFacebookSdk(cfg.appId, cfg.graphVersion || 'v21.0');
-    toast('Abre o popup Meta para ligar o WhatsApp');
+    toast(T.waOpenPopup);
     const sessionPromise = waitForWhatsAppSignupMessage();
     const codePromise = facebookLoginForBusiness(FB, cfg.configId);
     const [session, code] = await Promise.all([sessionPromise, codePromise]);
@@ -453,17 +460,17 @@ async function connectWhatsApp(slug) {
       method: 'POST',
       body: JSON.stringify({ code, wabaId: session.wabaId, phoneNumberId: session.phoneNumberId }),
     });
-    toast('WhatsApp ligado');
+    toast(T.waConnected);
     await loadAll();
     renderTenants();
   } catch (e) {
     const messages = {
-      signup_cancelled: 'Ligação WhatsApp cancelada',
-      missing_code: 'Meta não devolveu o código de autorização',
-      signup_message_timeout: 'Tempo esgotado à espera do Embedded Signup',
-      facebook_sdk_load_failed: 'Não foi possível carregar o Facebook SDK',
+      signup_cancelled: T.waCancelled,
+      missing_code: T.waMissingCode,
+      signup_message_timeout: T.waTimeout,
+      facebook_sdk_load_failed: T.waSdkFailed,
     };
-    toast(messages[e.message] || `WhatsApp falhou: ${e.message}`);
+    toast(messages[e.message] || T.waFailed({ msg: e.message }));
   }
 }
 
@@ -479,14 +486,14 @@ function handleOAuthPopup() {
 }
 
 async function lifecycle(slug, action, title, okLabel, danger = true) {
-  if (!await confirmDialog({ title, body: `Tenant ${slug}`, okLabel, danger })) return;
+  if (!await confirmDialog({ title, body: T.tenantLine({ slug }), okLabel, danger })) return;
   await api(`/admin/api/tenants/${encodeURIComponent(slug)}/${action}`, { method: 'POST' });
   await loadAll();
   renderTenants();
 }
 
 async function deleteTenant(slug) {
-  if (!await confirmDialog({ title: 'Eliminar tenant?', body: `${slug} ficará marcado como DELETED. Dados existentes não serão apagados.`, okLabel: 'Eliminar' })) return;
+  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ slug }), okLabel: T.delete })) return;
   await api(`/admin/api/tenants/${encodeURIComponent(slug)}`, { method: 'DELETE' });
   await loadAll();
   renderTenants();
@@ -494,6 +501,7 @@ async function deleteTenant(slug) {
 
 async function init() {
   if (handleOAuthPopup()) return;
+  I18N.applyDom(document);
   $('#btn-new').addEventListener('click', () => tenantForm());
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('adminToken'); token = ''; renderLogin(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; renderTenants(); });
@@ -503,7 +511,7 @@ async function init() {
   });
   if (!token) return renderLogin();
   try { await loadAll(); renderTenants(); }
-  catch (e) { if (token) $('#view').innerHTML = `<div class="empty"><p class="empty__title">Erro ao carregar</p><p class="empty__desc">${escapeHTML(e.message)}</p></div>`; }
+  catch (e) { if (token) $('#view').innerHTML = `<div class="empty"><p class="empty__title">${escapeHTML(T.loadError)}</p><p class="empty__desc">${escapeHTML(e.message)}</p></div>`; }
 }
 
 init();

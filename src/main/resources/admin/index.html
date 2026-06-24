@@ -9,6 +9,10 @@
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/admin/style.css" />
 <script src="/admin/theme.js"></script>
+<script src="/admin/catalog.en.js"></script>
+<script src="/admin/catalog.pt.js"></script>
+<script src="/admin/catalog.es.js"></script>
+<script src="/admin/i18n.js"></script>
 </head>
 <body>
   <aside class="sidebar" data-screen-label="Sidebar">
@@ -22,40 +26,40 @@
       </div>
       <div class="brand__text">
         <div class="brand__name" id="brand-name">CRM</div>
-        <div class="brand__sub" id="brand-sub">Tenant · Gestão</div>
+        <div class="brand__sub" id="brand-sub" data-i18n="admin.brandSub">Tenant · Gestão</div>
       </div>
     </div>
 
     <nav class="nav" id="nav">
       <a class="nav__item" data-tab="clientes" href="#clientes">
         <span class="nav__dot"></span>
-        <span class="nav__label">Clientes</span>
+        <span class="nav__label" data-i18n="admin.nav.clientes">Clientes</span>
         <span class="nav__count" data-count="clientes">—</span>
       </a>
       <a class="nav__item" data-tab="orcamentos" href="#orcamentos">
         <span class="nav__dot"></span>
-        <span class="nav__label">Orçamentos</span>
+        <span class="nav__label" data-i18n="admin.nav.orcamentos">Orçamentos</span>
         <span class="nav__count" data-count="orcamentos">—</span>
       </a>
       <a class="nav__item" data-tab="faturas" href="#faturas">
         <span class="nav__dot"></span>
-        <span class="nav__label">Faturas</span>
+        <span class="nav__label" data-i18n="admin.nav.faturas">Faturas</span>
         <span class="nav__count" data-count="faturas">—</span>
       </a>
       <a class="nav__item" data-tab="items" href="#items">
         <span class="nav__dot"></span>
-        <span class="nav__label">Items Padrão</span>
+        <span class="nav__label" data-i18n="admin.nav.items">Items Padrão</span>
         <span class="nav__count" data-count="items">—</span>
       </a>
     </nav>
 
     <div class="sidebar__foot">
       <div class="kpi">
-        <div class="kpi__label">A receber</div>
+        <div class="kpi__label" data-i18n="admin.kpiReceivable">A receber</div>
         <div class="kpi__value" id="kpi-pending">€ 0,00</div>
       </div>
       <div class="kpi">
-        <div class="kpi__label">Pago este mês</div>
+        <div class="kpi__label" data-i18n="admin.kpiPaid">Pago este mês</div>
         <div class="kpi__value" id="kpi-paid">€ 0,00</div>
       </div>
       <div class="meta">
@@ -69,25 +73,25 @@
   <main class="main" id="main">
     <header class="topbar">
       <div class="crumb">
-        <span class="crumb__root">Painel</span>
+        <span class="crumb__root" data-i18n="admin.crumbRoot">Painel</span>
         <span class="crumb__sep">/</span>
-        <span class="crumb__leaf" id="crumb-leaf">Clientes</span>
+        <span class="crumb__leaf" id="crumb-leaf" data-i18n="admin.nav.clientes">Clientes</span>
       </div>
       <div class="topbar__search">
         <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="5" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M11 11 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-        <input type="text" id="search" placeholder="Procurar nesta vista…" autocomplete="off" />
+        <input type="text" id="search" data-i18n-placeholder="admin.searchPlaceholder" placeholder="Procurar nesta vista…" autocomplete="off" />
         <kbd>/</kbd>
       </div>
       <div class="topbar__actions">
-        <button class="iconbtn iconbtn--theme" id="btn-theme" type="button" aria-label="Mudar tema">🌙</button>
-        <a class="btn btn--ghost" href="/backoffice/">← Backoffice</a>
-        <button class="btn btn--ghost" id="btn-export" title="Exportar CSV">
+        <button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="admin.themeAria" aria-label="Mudar tema">🌙</button>
+        <a class="btn btn--ghost" href="/backoffice/" data-i18n="admin.backoffice">← Backoffice</a>
+        <button class="btn btn--ghost" id="btn-export" data-i18n-title="admin.exportTitle" title="Exportar CSV">
           <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1 L8 10 M4 7 L8 11 L12 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M2 14 L14 14" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
-          Exportar
+          <span data-i18n="admin.export">Exportar</span>
         </button>
         <button class="btn btn--primary" id="btn-new">
           <span class="btn__plus" aria-hidden="true">+</span>
-          <span id="btn-new-label">Novo cliente</span>
+          <span id="btn-new-label" data-i18n="admin.tabs.clientes.newLabel">Novo cliente</span>
         </button>
       </div>
     </header>
@@ -101,10 +105,10 @@
     <aside class="drawer__panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
       <header class="drawer__head">
         <div>
-          <div class="drawer__eyebrow" id="drawer-eyebrow">Novo</div>
+          <div class="drawer__eyebrow" id="drawer-eyebrow" data-i18n="app.newPrefix">Novo</div>
           <h2 class="drawer__title" id="drawer-title">—</h2>
         </div>
-        <button class="iconbtn" data-close aria-label="Fechar">
+        <button class="iconbtn" data-close data-i18n-aria-label="admin.closeAria" aria-label="Fechar">
           <svg width="14" height="14" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
         </button>
       </header>
@@ -116,11 +120,11 @@
   <div class="confirm" id="confirm" hidden>
     <div class="confirm__scrim" data-confirm-cancel></div>
     <div class="confirm__panel" role="alertdialog" aria-modal="true">
-      <h3 class="confirm__title" id="confirm-title">Confirmar</h3>
+      <h3 class="confirm__title" id="confirm-title" data-i18n="admin.confirm">Confirmar</h3>
       <p class="confirm__body" id="confirm-body">—</p>
       <div class="confirm__actions">
-        <button class="btn btn--ghost" data-confirm-cancel>Cancelar</button>
-        <button class="btn btn--danger" id="confirm-ok">Eliminar</button>
+        <button class="btn btn--ghost" data-confirm-cancel data-i18n="admin.cancel">Cancelar</button>
+        <button class="btn btn--danger" id="confirm-ok" data-i18n="admin.delete">Eliminar</button>
       </div>
     </div>
   </div>

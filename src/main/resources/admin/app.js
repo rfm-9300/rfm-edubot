@@ -12,6 +12,10 @@ if (!tenantSlug) {
 
 const API_BASE = `/admin/api/tenants/${encodeURIComponent(tenantSlug)}`;
 
+// CRM copy comes from the shared i18n catalogs (catalog.*.js). Locale follows the tenant (resolved
+// in init() from the tenant API), with the usual localStorage/browser fallbacks. `T` is a live proxy.
+const T = I18N.section('admin');
+
 async function api(path, options = {}) {
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` };
   const res = await fetch(API_BASE + path, {
@@ -31,13 +35,11 @@ async function api(path, options = {}) {
 
 /* ----------  STATUS MAPS  ---------- */
 
-const QUOTE_STATUS_PT   = { PENDENTE: 'Pendente', ACEITO: 'Aceito' };
-const INVOICE_STATUS_PT = { PENDING: 'PENDENTE', PAID: 'PAGA', OVERDUE: 'VENCIDA', CANCELLED: 'CANCELADA' };
-
-const QUOTE_STATUS_LABELS   = ['Pendente', 'Aceito'];
-const INVOICE_STATUS_LABELS = ['PENDENTE', 'PAGA', 'VENCIDA', 'CANCELADA'];
-const QUOTE_STATUS_API_MAP   = { Pendente: 'PENDENTE', Aceito: 'ACEITO' };
-const INVOICE_STATUS_API_MAP = { PENDENTE: 'PENDING', PAGA: 'PAID', VENCIDA: 'OVERDUE', CANCELADA: 'CANCELLED' };
+// API status codes (never translated — the labels come from the catalog: T.quoteStatus / T.invoiceStatus).
+const QUOTE_STATUSES   = ['PENDENTE', 'ACEITO'];
+const INVOICE_STATUSES = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED'];
+const quoteStatusLabel   = code => (T.quoteStatus && T.quoteStatus[code]) || code;
+const invoiceStatusLabel = code => (T.invoiceStatus && T.invoiceStatus[code]) || code;
 
 /* ----------  STATE (client-side cache)  ---------- */
 
@@ -54,7 +56,7 @@ const normalizeQuote = q => ({
   id: q.id, numero: q.number,
   clienteId: q.clientId, clienteNome: q.clientName || '—',
   statusApi: q.status,
-  status: QUOTE_STATUS_PT[q.status] || q.status,
+  status: quoteStatusLabel(q.status),
   validoAte: q.validUntil || '',
   criadoEm: (q.createdAt || '').slice(0, 10),
   totalEur: q.totalEur || 0,
@@ -65,7 +67,7 @@ const normalizeInvoice = i => ({
   id: i.id, numero: i.number,
   clienteId: i.clientId, clienteNome: i.clientName || '—',
   statusApi: i.status,
-  status: INVOICE_STATUS_PT[i.status] || i.status,
+  status: invoiceStatusLabel(i.status),
   vencimento: i.dueDate || '',
   criadoEm: (i.createdAt || '').slice(0, 10),
   totalEur: i.totalEur || 0,
@@ -125,20 +127,20 @@ function escapeHTML(s = '') {
 
 /* ----------  STATUS PILLS  ---------- */
 
-function pill(status) {
+// Color is driven by the API status code; the visible text is the already-localized label.
+function pill(statusApi, label) {
   const map = {
-    RASCUNHO: '', ENVIADO: 'pill--info', ACEITE: 'pill--ok',
-    RECUSADO: 'pill--bad', EXPIRADO: 'pill--warn',
-    PENDENTE: 'pill--warn', PAGA: 'pill--ok', VENCIDA: 'pill--bad', CANCELADA: '',
+    PENDENTE: 'pill--warn', ACEITO: 'pill--ok',
+    PENDING: 'pill--warn', PAID: 'pill--ok', OVERDUE: 'pill--bad', CANCELLED: '',
   };
-  return `<span class="pill ${map[status] || ''}">${escapeHTML(status)}</span>`;
+  return `<span class="pill ${map[statusApi] || ''}">${escapeHTML(label)}</span>`;
 }
 
 function pdfLink(id, type, hasPdf, label) {
   if (!hasPdf) {
     return `<span class="pdf pdf--ghost">
       <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-      pendente</span>`;
+      ${escapeHTML(T.pdfPending)}</span>`;
   }
   return `<button class="pdf" type="button" data-pdf-url="${API_BASE}/${type}/${encodeURIComponent(id)}/pdf">
     <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="5.5" y="10" font-family="monospace" font-size="3.6" text-anchor="middle" fill="currentColor">PDF</text></svg>
@@ -165,7 +167,7 @@ function toast(msg) {
   toastTimer = setTimeout(() => { el.hidden = true; }, 2800);
 }
 
-function confirmDialog({ title, body, okLabel = 'Eliminar', danger = true }) {
+function confirmDialog({ title, body, okLabel = T.delete, danger = true }) {
   return new Promise(resolve => {
     const root = $('#confirm');
     $('#confirm-title').textContent = title;
@@ -192,11 +194,11 @@ function renderLogin() {
   $('#nav').hidden = true;
   $('#brand-name').textContent = 'CRM';
   $('#brand-sub').textContent = `${tenantSlug} · login`;
-  $('#crumb-leaf').textContent = 'Login';
+  $('#crumb-leaf').textContent = T.login.crumb;
   $('#btn-new').hidden = true;
   $('#btn-export').hidden = true;
   $('#search').disabled = true;
-  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">CRM</div><p class="auth__eyebrow">thebots.lab / ${escapeHTML(tenantSlug)}</p><h1 class="auth__title">Entrar no CRM</h1><p class="auth__desc">Use a password de operador para abrir este painel de gestão.</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="password">Password</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">Entrar</button></form></div></div>`;
+  $('#view').innerHTML = `<div class="auth"><div class="auth__card"><div class="auth__mark">CRM</div><p class="auth__eyebrow">${escapeHTML(T.login.eyebrow({ tenant: tenantSlug }))}</p><h1 class="auth__title">${escapeHTML(T.login.title)}</h1><p class="auth__desc">${escapeHTML(T.login.desc)}</p><form class="form" id="login-form"><div class="form__row"><label class="lbl" for="password">${escapeHTML(T.login.password)}</label><input class="inp" id="password" type="password" autocomplete="current-password" required /></div><button class="btn btn--primary" type="submit">${escapeHTML(T.login.submit)}</button></form></div></div>`;
   $('#login-form').addEventListener('submit', async e => {
     e.preventDefault();
     try {
@@ -215,14 +217,14 @@ function renderLogin() {
       $('#search').disabled = false;
       await init();
     } catch (err) {
-      toast('Login inválido');
+      toast(T.login.invalid);
     }
   });
 }
 
 /* ----------  DRAWER  ---------- */
 
-function openDrawer({ eyebrow, title, body, wide = false, onSave, saveLabel = 'Guardar' }) {
+function openDrawer({ eyebrow, title, body, wide = false, onSave, saveLabel = T.save }) {
   const root = $('#drawer');
   $('#drawer-eyebrow').textContent = eyebrow;
   $('#drawer-title').textContent   = title;
@@ -236,7 +238,7 @@ function openDrawer({ eyebrow, title, body, wide = false, onSave, saveLabel = 'G
   const foot = document.createElement('div');
   foot.className = 'drawer__foot';
   foot.innerHTML = `
-    <button class="btn btn--ghost" data-close>Cancelar</button>
+    <button class="btn btn--ghost" data-close>${escapeHTML(T.cancel)}</button>
     <button class="btn btn--accent" id="drawer-save">${escapeHTML(saveLabel)}</button>
   `;
   host.appendChild(foot);
@@ -251,7 +253,7 @@ function openDrawer({ eyebrow, title, body, wide = false, onSave, saveLabel = 'G
   const saveBtn = $('#drawer-save');
   saveBtn.addEventListener('click', async () => {
     saveBtn.disabled    = true;
-    saveBtn.textContent = 'A guardar…';
+    saveBtn.textContent = T.saving;
     const ok = await onSave?.();
     if (ok !== false) {
       close();
@@ -269,11 +271,12 @@ function openDrawer({ eyebrow, title, body, wide = false, onSave, saveLabel = 'G
    ROUTING / SHELL
    ============================================================ */
 
+// Behaviour only — title/desc/newLabel come from the catalog (T.tabs[tab]) so they follow the locale.
 const TABS = {
-  clientes:   { title: 'Clientes',     desc: 'Diretório de clientes da empresa.',                                   newLabel: 'Novo cliente',   render: renderClientes,   onNew: () => formClient()  },
-  orcamentos: { title: 'Orçamentos',   desc: 'Propostas comerciais emitidas.',                                      newLabel: 'Novo orçamento', render: renderOrcamentos, onNew: () => formQuote()   },
-  faturas:    { title: 'Faturas',      desc: 'Faturas emitidas e respetivo estado.',                                newLabel: 'Nova fatura',    render: renderFaturas,    onNew: () => formInvoice() },
-  items:      { title: 'Items Padrão', desc: 'Catálogo de serviços e materiais para orçamentos e faturas.',         newLabel: 'Novo item',      render: renderItems,      onNew: () => formItem()    },
+  clientes:   { render: renderClientes,   onNew: () => formClient()  },
+  orcamentos: { render: renderOrcamentos, onNew: () => formQuote()   },
+  faturas:    { render: renderFaturas,    onNew: () => formInvoice() },
+  items:      { render: renderItems,      onNew: () => formItem()    },
 };
 
 let activeTab           = 'clientes';
@@ -285,8 +288,8 @@ function setActive(tab) {
   if (!TABS[tab]) tab = 'clientes';
   activeTab = tab;
   $$('.nav__item').forEach(n => n.classList.toggle('is-active', n.dataset.tab === tab));
-  $('#crumb-leaf').textContent    = TABS[tab].title;
-  $('#btn-new-label').textContent = TABS[tab].newLabel;
+  $('#crumb-leaf').textContent    = T.tabs[tab].title;
+  $('#btn-new-label').textContent = T.tabs[tab].newLabel;
   $('#search').value = '';
   searchTerm          = '';
   filterQuoteStatus   = '';
@@ -318,7 +321,7 @@ function render() {
   view.querySelectorAll('[data-pdf-url]').forEach(btn => {
     btn.addEventListener('click', async () => {
       try { await openPdf(btn.dataset.pdfUrl); }
-      catch (e) { toast(`Erro PDF: ${e.message}`); }
+      catch (e) { toast(T.errorPdf({ msg: e.message })); }
     });
   });
 }
@@ -328,7 +331,7 @@ function render() {
    ============================================================ */
 
 function renderClientes(root) {
-  const t = TABS.clientes;
+  const t = T.tabs.clientes;
   const q = searchTerm.toLowerCase();
   const rows = state.clients
     .filter(c => !q || (c.numero + ' ' + c.nome + ' ' + c.telefone + ' ' + c.morada).toLowerCase().includes(q))
@@ -345,28 +348,28 @@ function renderClientes(root) {
         <p class="view__desc">${escapeHTML(t.desc)}</p>
       </div>
       <div class="view__stats">
-        <div class="stat"><div class="stat__label">Total</div><div class="stat__value">${state.clients.length}</div></div>
-        <div class="stat"><div class="stat__label">Novos · 30d</div><div class="stat__value stat__value--accent">${novos30}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.clients.total)}</div><div class="stat__value">${state.clients.length}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.clients.new30)}</div><div class="stat__value stat__value--accent">${novos30}</div></div>
       </div>
     </div>
     <div class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Diretório <span class="tag">${rows.length} ${rows.length === 1 ? 'cliente' : 'clientes'}</span></h2>
+        <h2 class="panel__title">${escapeHTML(T.clients.directory)} <span class="tag">${rows.length} ${escapeHTML(rows.length === 1 ? T.clients.one : T.clients.many)}</span></h2>
       </div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>
-            <th style="width:28%">Nome</th>
-            <th style="width:30%">Morada</th>
-            <th style="width:22%">Telefone</th>
-            <th style="width:10%">Criado em</th>
-            <th style="width:10%" class="right">Nº Cliente</th>
+            <th style="width:28%">${escapeHTML(T.clients.thName)}</th>
+            <th style="width:30%">${escapeHTML(T.clients.thAddress)}</th>
+            <th style="width:22%">${escapeHTML(T.clients.thPhone)}</th>
+            <th style="width:10%">${escapeHTML(T.clients.thCreated)}</th>
+            <th style="width:10%" class="right">${escapeHTML(T.clients.thNo)}</th>
           </tr></thead>
           <tbody>
             ${rows.length === 0 ? `
               <tr><td colspan="5"><div class="empty">
-                <p class="empty__title">Nenhum cliente encontrado</p>
-                <p class="empty__desc">Ajuste a pesquisa ou crie um novo cliente.</p>
+                <p class="empty__title">${escapeHTML(T.clients.emptyTitle)}</p>
+                <p class="empty__desc">${escapeHTML(T.clients.emptyDesc)}</p>
               </div></td></tr>
             ` : rows.map(c => `
               <tr>
@@ -390,32 +393,32 @@ function formClient() {
   wrap.innerHTML = `
     <div class="form__grid">
       <div class="form__row form__row--full">
-        <label class="lbl" for="f-nome">Nome <span class="req">●</span></label>
-        <input class="inp" id="f-nome" required placeholder="Ex: Manuel Costa, Lda." />
+        <label class="lbl" for="f-nome">${escapeHTML(T.clients.formName)} <span class="req">●</span></label>
+        <input class="inp" id="f-nome" required placeholder="${escapeHTML(T.clients.phName)}" />
       </div>
       <div class="form__row form__row--full">
-        <label class="lbl" for="f-morada">Morada</label>
-        <input class="inp" id="f-morada" placeholder="Ex: Rua das Flores 12, 1200-001 Lisboa" />
+        <label class="lbl" for="f-morada">${escapeHTML(T.clients.formAddress)}</label>
+        <input class="inp" id="f-morada" placeholder="${escapeHTML(T.clients.phAddress)}" />
       </div>
       <div class="form__row form__row--full">
-        <label class="lbl" for="f-tel">Telefone <span class="req">●</span></label>
-        <input class="inp inp--mono" id="f-tel" required placeholder="+351 912 345 678" />
+        <label class="lbl" for="f-tel">${escapeHTML(T.clients.formPhone)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="f-tel" required placeholder="${escapeHTML(T.clients.phPhone)}" />
       </div>
     </div>
   `;
   openDrawer({
-    eyebrow: 'Clientes', title: 'Novo cliente', body: wrap, saveLabel: 'Criar cliente',
+    eyebrow: T.clients.eyebrow, title: T.clients.formTitle, body: wrap, saveLabel: T.clients.saveLabel,
     async onSave() {
       const name    = $('#f-nome',   wrap).value.trim();
       const phone   = $('#f-tel',    wrap).value.trim();
       const address = $('#f-morada', wrap).value.trim() || undefined;
-      if (!name || !phone) { toast('Preencha nome e telefone'); return false; }
+      if (!name || !phone) { toast(T.clients.validate); return false; }
       try {
         await api('/clients', { method: 'POST', body: JSON.stringify({ name, phone, address }) });
         await reloadClients();
         render();
-        toast(`Cliente criado · ${name}`);
-      } catch (e) { toast(`Erro: ${e.message}`); return false; }
+        toast(T.clients.created({ name }));
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
     },
   });
 }
@@ -425,7 +428,7 @@ function formClient() {
    ============================================================ */
 
 function renderOrcamentos(root) {
-  const t = TABS.orcamentos;
+  const t = T.tabs.orcamentos;
   const q = searchTerm.toLowerCase();
   const rows = state.quotes
     .filter(o => !filterQuoteStatus || o.statusApi === filterQuoteStatus)
@@ -442,41 +445,41 @@ function renderOrcamentos(root) {
         <p class="view__desc">${escapeHTML(t.desc)}</p>
       </div>
       <div class="view__stats">
-        <div class="stat"><div class="stat__label">Total</div><div class="stat__value">${state.quotes.length}</div></div>
-        <div class="stat"><div class="stat__label">Enviados</div><div class="stat__value">${fmtEUR(totalEnviado)}</div></div>
-        <div class="stat"><div class="stat__label">Aceites</div><div class="stat__value stat__value--accent">${fmtEUR(totalAceite)}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.quotes.total)}</div><div class="stat__value">${state.quotes.length}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.quotes.sent)}</div><div class="stat__value">${fmtEUR(totalEnviado)}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.quotes.accepted)}</div><div class="stat__value stat__value--accent">${fmtEUR(totalAceite)}</div></div>
       </div>
     </div>
     <div class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Propostas <span class="tag">${rows.length}</span></h2>
+        <h2 class="panel__title">${escapeHTML(T.quotes.proposals)} <span class="tag">${rows.length}</span></h2>
         <div class="panel__tools">
-          <button class="chip ${!filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">Todos</button>
-          ${QUOTE_STATUS_LABELS.map(s => `<button class="chip ${filterQuoteStatus === QUOTE_STATUS_API_MAP[s] ? 'is-on' : ''}" data-filter-quote="${QUOTE_STATUS_API_MAP[s]}">${s}</button>`).join('')}
+          <button class="chip ${!filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(T.quotes.filterAll)}</button>
+          ${QUOTE_STATUSES.map(s => `<button class="chip ${filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}</button>`).join('')}
         </div>
       </div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>
-            <th style="width:14%">Número</th>
-            <th style="width:28%">Cliente</th>
-            <th style="width:14%">Status</th>
-            <th style="width:14%">Válido até</th>
-            <th style="width:14%" class="right">Total</th>
-            <th style="width:16%" class="right">PDF</th>
+            <th style="width:14%">${escapeHTML(T.quotes.thNumber)}</th>
+            <th style="width:28%">${escapeHTML(T.quotes.thClient)}</th>
+            <th style="width:14%">${escapeHTML(T.quotes.thStatus)}</th>
+            <th style="width:14%">${escapeHTML(T.quotes.thValidUntil)}</th>
+            <th style="width:14%" class="right">${escapeHTML(T.quotes.thTotal)}</th>
+            <th style="width:16%" class="right">${escapeHTML(T.quotes.thPdf)}</th>
           </tr></thead>
           <tbody>
             ${rows.length === 0 ? `
               <tr><td colspan="6"><div class="empty">
-                <p class="empty__title">Sem orçamentos</p>
-                <p class="empty__desc">Crie o primeiro orçamento com o botão acima.</p>
+                <p class="empty__title">${escapeHTML(T.quotes.emptyTitle)}</p>
+                <p class="empty__desc">${escapeHTML(T.quotes.emptyDesc)}</p>
               </div></td></tr>
             ` : rows.map(o => {
               const rowClass = o.statusApi === 'ACEITO' ? 'is-paid' : '';
               return `<tr class="${rowClass}">
                 <td class="id">${escapeHTML(o.numero)}</td>
                 <td class="name">${escapeHTML(o.clienteNome)}</td>
-                <td>${pill(o.status)}</td>
+                <td>${pill(o.statusApi, o.status)}</td>
                 <td class="mono muted">${fmtDate(o.validoAte)}</td>
                 <td class="num">${fmtEUR(o.totalEur)}</td>
                 <td class="right">${pdfLink(o.id, 'quotes', o.hasPdf, o.numero)}</td>
@@ -497,25 +500,25 @@ function formQuote() {
   const node = lineItemsForm({
     extraTop: `
       <div class="form__row">
-        <label class="lbl" for="f-valido">Válido até <span class="opt">opcional</span></label>
+        <label class="lbl" for="f-valido">${escapeHTML(T.quotes.validUntil)} <span class="opt">${escapeHTML(T.quotes.optional)}</span></label>
         <input class="inp inp--mono" id="f-valido" type="date" />
       </div>
     `,
     extraBottom: `
       <div class="form__row form__row--full">
-        <label class="lbl" for="f-notas">Notas <span class="opt">opcional</span></label>
-        <textarea class="txt" id="f-notas" placeholder="Notas internas, condições, prazos…"></textarea>
+        <label class="lbl" for="f-notas">${escapeHTML(T.quotes.notes)} <span class="opt">${escapeHTML(T.quotes.optional)}</span></label>
+        <textarea class="txt" id="f-notas" placeholder="${escapeHTML(T.quotes.notesPlaceholder)}"></textarea>
       </div>
     `,
   });
 
   openDrawer({
-    eyebrow: 'Orçamentos', title: 'Novo orçamento', body: node, wide: true, saveLabel: 'Criar orçamento',
+    eyebrow: T.quotes.eyebrow, title: T.quotes.formTitle, body: node, wide: true, saveLabel: T.quotes.saveLabel,
     async onSave() {
       const clientId = $('#f-cliente').value;
-      if (!clientId) { toast('Escolha um cliente'); return false; }
+      if (!clientId) { toast(T.quotes.chooseClient); return false; }
       const items = collectItems();
-      if (items.length === 0) { toast('Adicione pelo menos uma linha'); return false; }
+      if (items.length === 0) { toast(T.quotes.addLine); return false; }
       try {
         await api('/quotes', {
           method: 'POST',
@@ -528,8 +531,8 @@ function formQuote() {
         });
         await reloadQuotes();
         render();
-        toast('Orçamento criado');
-      } catch (e) { toast(`Erro: ${e.message}`); return false; }
+        toast(T.quotes.created);
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
     },
   });
 }
@@ -539,7 +542,7 @@ function formQuote() {
    ============================================================ */
 
 function renderFaturas(root) {
-  const t = TABS.faturas;
+  const t = T.tabs.faturas;
   const q = searchTerm.toLowerCase();
   const rows = state.invoices
     .filter(f => !filterInvoiceStatus || f.statusApi === filterInvoiceStatus)
@@ -557,46 +560,46 @@ function renderFaturas(root) {
         <p class="view__desc">${escapeHTML(t.desc)}</p>
       </div>
       <div class="view__stats">
-        <div class="stat"><div class="stat__label">Pago</div><div class="stat__value">${fmtEUR(pago)}</div></div>
-        <div class="stat"><div class="stat__label">Pendente</div><div class="stat__value">${fmtEUR(pend)}</div></div>
-        <div class="stat"><div class="stat__label">Vencido</div><div class="stat__value stat__value--accent">${fmtEUR(venc)}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.invoices.paid)}</div><div class="stat__value">${fmtEUR(pago)}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.invoices.pending)}</div><div class="stat__value">${fmtEUR(pend)}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.invoices.overdue)}</div><div class="stat__value stat__value--accent">${fmtEUR(venc)}</div></div>
       </div>
     </div>
     <div class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Documentos <span class="tag">${rows.length}</span></h2>
+        <h2 class="panel__title">${escapeHTML(T.invoices.documents)} <span class="tag">${rows.length}</span></h2>
         <div class="panel__tools">
-          <button class="chip ${!filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">Todos</button>
-          ${INVOICE_STATUS_LABELS.map(s => `<button class="chip ${filterInvoiceStatus === INVOICE_STATUS_API_MAP[s] ? 'is-on' : ''}" data-filter-inv="${INVOICE_STATUS_API_MAP[s]}">${s}</button>`).join('')}
+          <button class="chip ${!filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(T.invoices.filterAll)}</button>
+          ${INVOICE_STATUSES.map(s => `<button class="chip ${filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('')}
         </div>
       </div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>
-            <th style="width:13%">Número</th>
-            <th style="width:24%">Cliente</th>
-            <th style="width:13%">Status</th>
-            <th style="width:13%">Vencimento</th>
-            <th style="width:13%" class="right">Total</th>
-            <th style="width:24%" class="right">PDF · Acções</th>
+            <th style="width:13%">${escapeHTML(T.invoices.thNumber)}</th>
+            <th style="width:24%">${escapeHTML(T.invoices.thClient)}</th>
+            <th style="width:13%">${escapeHTML(T.invoices.thStatus)}</th>
+            <th style="width:13%">${escapeHTML(T.invoices.thDueDate)}</th>
+            <th style="width:13%" class="right">${escapeHTML(T.invoices.thTotal)}</th>
+            <th style="width:24%" class="right">${escapeHTML(T.invoices.thPdfActions)}</th>
           </tr></thead>
           <tbody>
             ${rows.length === 0 ? `
               <tr><td colspan="6"><div class="empty">
-                <p class="empty__title">Sem faturas</p>
-                <p class="empty__desc">Emita a primeira fatura com o botão acima.</p>
+                <p class="empty__title">${escapeHTML(T.invoices.emptyTitle)}</p>
+                <p class="empty__desc">${escapeHTML(T.invoices.emptyDesc)}</p>
               </div></td></tr>
             ` : rows.map(f => {
               const rowClass = f.statusApi === 'PAID' ? 'is-paid' : f.statusApi === 'OVERDUE' ? 'is-overdue' : f.statusApi === 'CANCELLED' ? 'is-draft' : '';
               return `<tr class="${rowClass}">
                 <td class="id">${escapeHTML(f.numero)}</td>
                 <td class="name">${escapeHTML(f.clienteNome)}</td>
-                <td>${pill(f.status)}</td>
+                <td>${pill(f.statusApi, f.status)}</td>
                 <td class="mono muted">${fmtDate(f.vencimento)}</td>
                 <td class="num">${fmtEUR(f.totalEur)}</td>
                 <td class="right">
                   <div class="actions">
-                    ${f.statusApi === 'PENDING' || f.statusApi === 'OVERDUE' ? `<button class="btn btn--sm btn--accent" data-mark-paid="${escapeHTML(f.id)}">Marcar pago</button>` : ''}
+                    ${f.statusApi === 'PENDING' || f.statusApi === 'OVERDUE' ? `<button class="btn btn--sm btn--accent" data-mark-paid="${escapeHTML(f.id)}">${escapeHTML(T.invoices.markPaid)}</button>` : ''}
                     ${pdfLink(f.id, 'invoices', f.hasPdf, f.numero)}
                   </div>
                 </td>
@@ -622,35 +625,35 @@ async function markPaid(id) {
     await reloadInvoices();
     render();
     const inv = state.invoices.find(i => i.id === id);
-    toast(`Fatura ${inv?.numero || ''} marcada como paga`);
-  } catch (e) { toast(`Erro: ${e.message}`); }
+    toast(T.invoices.markedPaid({ number: inv?.numero || '' }));
+  } catch (e) { toast(T.error({ msg: e.message })); }
 }
 
 function formInvoice() {
   const node = lineItemsForm({
     extraTop: `
       <div class="form__row">
-        <label class="lbl" for="f-venc">Vencimento <span class="req">●</span></label>
+        <label class="lbl" for="f-venc">${escapeHTML(T.invoices.dueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="f-venc" type="date" required />
       </div>
       <div class="form__row form__row--full">
-        <label class="lbl" for="f-orc">ID Orçamento <span class="opt">opcional</span></label>
-        <input class="inp inp--mono" id="f-orc" placeholder="ID do orçamento associado" />
+        <label class="lbl" for="f-orc">${escapeHTML(T.invoices.quoteId)} <span class="opt">${escapeHTML(T.quotes.optional)}</span></label>
+        <input class="inp inp--mono" id="f-orc" placeholder="${escapeHTML(T.invoices.quoteIdPlaceholder)}" />
       </div>
     `,
     extraBottom: '',
   });
 
   openDrawer({
-    eyebrow: 'Faturas', title: 'Nova fatura', body: node, wide: true, saveLabel: 'Emitir fatura',
+    eyebrow: T.invoices.eyebrow, title: T.invoices.formTitle, body: node, wide: true, saveLabel: T.invoices.saveLabel,
     async onSave() {
       const clientId = $('#f-cliente').value;
       const dueDate  = $('#f-venc').value;
       const quoteId  = ($('#f-orc').value || '').trim() || null;
-      if (!clientId) { toast('Escolha um cliente'); return false; }
-      if (!dueDate)  { toast('Indique a data de vencimento'); return false; }
+      if (!clientId) { toast(T.invoices.chooseClient); return false; }
+      if (!dueDate)  { toast(T.invoices.enterDueDate); return false; }
       const items = collectItems();
-      if (items.length === 0) { toast('Adicione pelo menos uma linha'); return false; }
+      if (items.length === 0) { toast(T.invoices.addLine); return false; }
       try {
         await api('/invoices', {
           method: 'POST',
@@ -658,8 +661,8 @@ function formInvoice() {
         });
         await reloadInvoices();
         render();
-        toast('Fatura emitida');
-      } catch (e) { toast(`Erro: ${e.message}`); return false; }
+        toast(T.invoices.issued);
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
     },
   });
 }
@@ -677,10 +680,10 @@ function lineItemsForm({ extraTop = '', extraBottom = '' } = {}) {
   const servicos  = state.catalog.filter(c => c.tipo === 'servico');
   const materiais = state.catalog.filter(c => c.tipo === 'material');
   const catalogOpts = `
-    <optgroup label="Serviços">
+    <optgroup label="${escapeHTML(T.lines.services)}">
       ${servicos.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.descricao)} · ${fmtEUR(c.preco)}/${c.unidade}</option>`).join('')}
     </optgroup>
-    <optgroup label="Materiais">
+    <optgroup label="${escapeHTML(T.lines.materials)}">
       ${materiais.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.descricao)} · ${fmtEUR(c.preco)}/${c.unidade}</option>`).join('')}
     </optgroup>
   `;
@@ -688,34 +691,34 @@ function lineItemsForm({ extraTop = '', extraBottom = '' } = {}) {
   wrap.innerHTML = `
     <div class="form__grid">
       <div class="form__row">
-        <label class="lbl" for="f-cliente">Cliente <span class="req">●</span></label>
+        <label class="lbl" for="f-cliente">${escapeHTML(T.lines.client)} <span class="req">●</span></label>
         <select class="sel" id="f-cliente" required>
-          <option value="">— Escolher cliente —</option>
+          <option value="">${escapeHTML(T.lines.chooseClient)}</option>
           ${clientOpts}
         </select>
       </div>
       ${extraTop}
     </div>
     <div>
-      <div class="lbl" style="margin-bottom:8px">Linhas <span class="req">●</span></div>
+      <div class="lbl" style="margin-bottom:8px">${escapeHTML(T.lines.label)} <span class="req">●</span></div>
       <div class="lines">
         <div class="lines__head">
-          <span>Descrição</span><span>Qtd</span><span>Unid.</span><span>Preço €</span><span></span>
+          <span>${escapeHTML(T.lines.colDescription)}</span><span>${escapeHTML(T.lines.colQty)}</span><span>${escapeHTML(T.lines.colUnit)}</span><span>${escapeHTML(T.lines.colPrice)}</span><span></span>
         </div>
         <div id="lines-body"></div>
         <div class="lines__foot">
           <div class="lines__left">
-            <button class="btn btn--sm btn--ghost" type="button" id="add-empty">+ Linha vazia</button>
+            <button class="btn btn--sm btn--ghost" type="button" id="add-empty">${escapeHTML(T.lines.addEmpty)}</button>
             <div class="lines__pick">
               <select class="sel" id="catalog-pick">
-                <option value="">Catálogo · Serviços / Materiais</option>
+                <option value="">${escapeHTML(T.lines.catalogPick)}</option>
                 ${catalogOpts}
               </select>
-              <button class="btn btn--sm" type="button" id="add-from-catalog">Adicionar</button>
+              <button class="btn btn--sm" type="button" id="add-from-catalog">${escapeHTML(T.lines.add)}</button>
             </div>
           </div>
           <div class="lines__total">
-            <span class="muted">Total</span>
+            <span class="muted">${escapeHTML(T.lines.total)}</span>
             <span class="v" id="lines-total">${fmtEUR(0)}</span>
           </div>
         </div>
@@ -735,11 +738,11 @@ function lineItemsForm({ extraTop = '', extraBottom = '' } = {}) {
     const row = document.createElement('div');
     row.className = 'line';
     row.innerHTML = `
-      <input type="text"   data-k="description"  placeholder="Descrição da linha…" value="${escapeHTML(preset.description || '')}" />
+      <input type="text"   data-k="description"  placeholder="${escapeHTML(T.lines.descPlaceholder)}" value="${escapeHTML(preset.description || '')}" />
       <input type="number" data-k="quantity"   class="num" min="0" step="0.01" placeholder="0"    value="${preset.quantity ?? ''}" />
-      <input type="text"   data-k="unit"       class="num" placeholder="un"          value="${escapeHTML(preset.unit || '')}" />
+      <input type="text"   data-k="unit"       class="num" placeholder="${escapeHTML(T.lines.unitPlaceholder)}"          value="${escapeHTML(preset.unit || '')}" />
       <input type="number" data-k="unitPriceEur" class="num" min="0" step="0.01" placeholder="0,00" value="${preset.unitPriceEur ?? ''}" />
-      <button type="button" class="l-rm" aria-label="Remover linha" title="Remover">
+      <button type="button" class="l-rm" aria-label="${escapeHTML(T.lines.removeLine)}" title="${escapeHTML(T.lines.removeLine)}">
         <svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
       </button>
     `;
@@ -754,7 +757,7 @@ function lineItemsForm({ extraTop = '', extraBottom = '' } = {}) {
   wrap.querySelector('#add-empty').addEventListener('click', () => addRow());
   wrap.querySelector('#add-from-catalog').addEventListener('click', () => {
     const id   = wrap.querySelector('#catalog-pick').value;
-    if (!id) { toast('Escolha um item do catálogo'); return; }
+    if (!id) { toast(T.lines.chooseCatalogItem); return; }
     const item = state.catalog.find(c => c.id === id);
     if (item) addRow({ description: item.descricao, quantity: 1, unit: item.unidade, unitPriceEur: item.preco });
   });
@@ -782,7 +785,7 @@ function collectItems() {
    ============================================================ */
 
 function renderItems(root) {
-  const t = TABS.items;
+  const t = T.tabs.items;
   const q = searchTerm.toLowerCase();
   const rows = state.catalog
     .filter(c => !q || (c.id + ' ' + c.descricao + ' ' + c.categoria).toLowerCase().includes(q))
@@ -798,33 +801,33 @@ function renderItems(root) {
         <p class="view__desc">${escapeHTML(t.desc)}</p>
       </div>
       <div class="view__stats">
-        <div class="stat"><div class="stat__label">Serviços</div><div class="stat__value">${nSrv}</div></div>
-        <div class="stat"><div class="stat__label">Materiais</div><div class="stat__value stat__value--accent">${nMat}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.items.services)}</div><div class="stat__value">${nSrv}</div></div>
+        <div class="stat"><div class="stat__label">${escapeHTML(T.items.materials)}</div><div class="stat__value stat__value--accent">${nMat}</div></div>
       </div>
     </div>
     <div class="panel">
       <div class="panel__head">
-        <h2 class="panel__title">Catálogo <span class="tag">${rows.length} itens</span></h2>
+        <h2 class="panel__title">${escapeHTML(T.items.catalogTitle)} <span class="tag">${escapeHTML(T.items.tag({ n: rows.length }))}</span></h2>
       </div>
       <div class="tbl-wrap">
         <table class="tbl">
           <thead><tr>
-            <th style="width:11%">Tipo</th>
-            <th style="width:17%">Categoria</th>
-            <th>Descrição</th>
-            <th style="width:9%">Unid.</th>
-            <th style="width:13%" class="right">Preço</th>
-            <th style="width:14%" class="right">Acções</th>
+            <th style="width:11%">${escapeHTML(T.items.thType)}</th>
+            <th style="width:17%">${escapeHTML(T.items.thCategory)}</th>
+            <th>${escapeHTML(T.items.thDescription)}</th>
+            <th style="width:9%">${escapeHTML(T.items.thUnit)}</th>
+            <th style="width:13%" class="right">${escapeHTML(T.items.thPrice)}</th>
+            <th style="width:14%" class="right">${escapeHTML(T.items.thActions)}</th>
           </tr></thead>
           <tbody>
             ${rows.length === 0 ? `
               <tr><td colspan="6"><div class="empty">
-                <p class="empty__title">Catálogo vazio</p>
-                <p class="empty__desc">Adicione serviços ou materiais para reutilizar em orçamentos.</p>
+                <p class="empty__title">${escapeHTML(T.items.emptyTitle)}</p>
+                <p class="empty__desc">${escapeHTML(T.items.emptyDesc)}</p>
               </div></td></tr>
             ` : rows.map(c => `
               <tr>
-                <td>${c.tipo === 'servico' ? '<span class="pill pill--accent">SERVIÇO</span>' : '<span class="pill pill--info">MATERIAL</span>'}</td>
+                <td>${c.tipo === 'servico' ? `<span class="pill pill--accent">${escapeHTML(T.items.pillService)}</span>` : `<span class="pill pill--info">${escapeHTML(T.items.pillMaterial)}</span>`}</td>
                 <td class="muted">${escapeHTML(c.categoria)}</td>
                 <td>
                   <div class="col">
@@ -836,10 +839,10 @@ function renderItems(root) {
                 <td class="num">${fmtEUR(c.preco)}</td>
                 <td class="right">
                   <div class="actions">
-                    <button class="iconbtn" title="Editar" data-edit-item="${escapeHTML(c.id)}">
+                    <button class="iconbtn" title="${escapeHTML(T.items.editTitle)}" data-edit-item="${escapeHTML(c.id)}">
                       <svg width="13" height="13" viewBox="0 0 16 16"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>
                     </button>
-                    <button class="iconbtn iconbtn--danger" title="Eliminar" data-delete-item="${escapeHTML(c.id)}">
+                    <button class="iconbtn iconbtn--danger" title="${escapeHTML(T.items.deleteTitle)}" data-delete-item="${escapeHTML(c.id)}">
                       <svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 5 L13 5 M6 5 L6 3 L10 3 L10 5 M5 5 L6 13 L10 13 L11 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </button>
                   </div>
@@ -867,34 +870,34 @@ function formItem(id) {
   wrap.innerHTML = `
     <div class="form__grid">
       <div class="form__row">
-        <label class="lbl" for="i-id">ID · slug <span class="req">●</span></label>
-        <input class="inp inp--mono" id="i-id" value="${escapeHTML(editing?.id || '')}" placeholder="ex: srv-pintura-interior" ${editing ? 'readonly' : ''} />
+        <label class="lbl" for="i-id">${escapeHTML(T.items.idLabel)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="i-id" value="${escapeHTML(editing?.id || '')}" placeholder="${escapeHTML(T.items.phId)}" ${editing ? 'readonly' : ''} />
       </div>
       <div class="form__row">
-        <label class="lbl" for="i-tipo">Tipo <span class="req">●</span></label>
+        <label class="lbl" for="i-tipo">${escapeHTML(T.items.typeLabel)} <span class="req">●</span></label>
         <select class="sel" id="i-tipo" required>
-          <option value="service"  ${editing?.tipo === 'servico'  ? 'selected' : ''}>Serviço</option>
-          <option value="material" ${editing?.tipo === 'material' ? 'selected' : ''}>Material</option>
+          <option value="service"  ${editing?.tipo === 'servico'  ? 'selected' : ''}>${escapeHTML(T.items.service)}</option>
+          <option value="material" ${editing?.tipo === 'material' ? 'selected' : ''}>${escapeHTML(T.items.material)}</option>
         </select>
       </div>
       <div class="form__row form__row--full">
-        <label class="lbl" for="i-cat">Categoria <span class="req">●</span></label>
-        <input class="inp" id="i-cat" value="${escapeHTML(editing?.categoria || '')}" placeholder="Ex: Pintura, Estruturais, Mão-de-obra…" required />
+        <label class="lbl" for="i-cat">${escapeHTML(T.items.categoryLabel)} <span class="req">●</span></label>
+        <input class="inp" id="i-cat" value="${escapeHTML(editing?.categoria || '')}" placeholder="${escapeHTML(T.items.phCategory)}" required />
       </div>
       <div class="form__row form__row--full">
-        <label class="lbl" for="i-desc">Descrição <span class="req">●</span></label>
-        <textarea class="txt" id="i-desc" required placeholder="Descrição visível em orçamentos">${escapeHTML(editing?.descricao || '')}</textarea>
+        <label class="lbl" for="i-desc">${escapeHTML(T.items.descLabel)} <span class="req">●</span></label>
+        <textarea class="txt" id="i-desc" required placeholder="${escapeHTML(T.items.phDesc)}">${escapeHTML(editing?.descricao || '')}</textarea>
       </div>
       <div class="form__row">
-        <label class="lbl" for="i-uni">Unidade <span class="req">●</span></label>
-        <input class="inp inp--mono" id="i-uni" value="${escapeHTML(editing?.unidade || '')}" placeholder="m², h, un, rl…" required />
+        <label class="lbl" for="i-uni">${escapeHTML(T.items.unitLabel)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="i-uni" value="${escapeHTML(editing?.unidade || '')}" placeholder="${escapeHTML(T.items.phUnit)}" required />
       </div>
       <div class="form__row">
-        <label class="lbl" for="i-preco">Preço (EUR) <span class="req">●</span></label>
+        <label class="lbl" for="i-preco">${escapeHTML(T.items.priceLabel)} <span class="req">●</span></label>
         <input class="inp inp--mono inp--right" id="i-preco" type="number" min="0" step="0.01" value="${editing?.preco ?? ''}" required placeholder="0,00" />
       </div>
     </div>
-    ${editing ? `<div class="hint">A editar <span style="color:var(--ink)">${escapeHTML(editing.id)}</span> — alterações aplicam-se a novos orçamentos.</div>` : ''}
+    ${editing ? `<div class="hint">${escapeHTML(T.items.editingHint({ id: editing.id }))}</div>` : ''}
   `;
 
   if (!editing) {
@@ -912,10 +915,10 @@ function formItem(id) {
   }
 
   openDrawer({
-    eyebrow: 'Items Padrão',
-    title: editing ? `Editar · ${editing.id}` : 'Novo item de catálogo',
+    eyebrow: T.items.eyebrow,
+    title: editing ? T.items.editTitleFull({ id: editing.id }) : T.items.newTitle,
     body: wrap,
-    saveLabel: editing ? 'Guardar alterações' : 'Criar item',
+    saveLabel: editing ? T.items.saveChanges : T.items.createItem,
     async onSave() {
       const itemId = $('#i-id', wrap).value.trim();
       const type   = $('#i-tipo', wrap).value;
@@ -923,15 +926,15 @@ function formItem(id) {
       const desc   = $('#i-desc', wrap).value.trim();
       const unit   = $('#i-uni', wrap).value.trim();
       const preco  = Number($('#i-preco', wrap).value || 0);
-      if (!itemId || !cat || !desc || !unit) { toast('Preencha todos os campos obrigatórios'); return false; }
+      if (!itemId || !cat || !desc || !unit) { toast(T.items.fillRequired); return false; }
       try {
         const payload = { id: itemId, type, category: cat, description: desc, unit, defaultUnitPriceEur: preco };
         const path = editing ? `/standard-items/${itemId}` : '/standard-items';
         await api(path, { method: 'POST', body: JSON.stringify(payload) });
         await reloadCatalog();
         render();
-        toast(editing ? `Item actualizado · ${itemId}` : `Item criado · ${itemId}`);
-      } catch (e) { toast(`Erro: ${e.message}`); return false; }
+        toast(editing ? T.items.updated({ id: itemId }) : T.items.created({ id: itemId }));
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
     },
   });
 }
@@ -940,17 +943,17 @@ async function deleteItem(id) {
   const item = state.catalog.find(c => c.id === id);
   if (!item) return;
   const ok = await confirmDialog({
-    title: 'Eliminar item do catálogo?',
-    body: `"${item.descricao}" será removido. Orçamentos já emitidos não serão afectados.`,
-    okLabel: 'Eliminar item',
+    title: T.items.confirmTitle,
+    body: T.items.confirmBody({ desc: item.descricao }),
+    okLabel: T.items.confirmOk,
   });
   if (!ok) return;
   try {
     await api(`/standard-items/${id}`, { method: 'DELETE' });
     await reloadCatalog();
     render();
-    toast(`Item eliminado · ${id}`);
-  } catch (e) { toast(`Erro: ${e.message}`); }
+    toast(T.items.deleted({ id }));
+  } catch (e) { toast(T.error({ msg: e.message })); }
 }
 
 /* ============================================================
@@ -960,12 +963,15 @@ async function deleteItem(id) {
 async function init() {
   try {
     const tenant = await api('');
-    document.title = `${tenant.name} · Painel de Gestão`;
+    // Adopt the tenant's language before any data normalization bakes in status labels.
+    I18N.applyTenantDefault(tenant.locale);
+    I18N.applyDom(document);
+    document.title = `${tenant.name} · ${T.titleSuffix}`;
     $('#brand-name').textContent = tenant.name;
     $('#brand-sub').textContent = `${tenant.slug} · CRM`;
   } catch (e) {
     if (!token) return;
-    $('#view').innerHTML = `<div class="empty"><p class="empty__title">Tenant inválido</p><p class="empty__desc">Volte ao backoffice e abra um CRM válido.</p></div>`;
+    $('#view').innerHTML = `<div class="empty"><p class="empty__title">${escapeHTML(T.invalidTenantTitle)}</p><p class="empty__desc">${escapeHTML(T.invalidTenantDesc)}</p></div>`;
     return;
   }
 
@@ -987,19 +993,19 @@ async function init() {
     }
   });
 
-  $('#btn-export').addEventListener('click', () => toast('Exportar · em breve'));
+  $('#btn-export').addEventListener('click', () => toast(T.exportSoon));
 
   setInterval(() => {
     const el = $('#meta-clock');
     if (el) el.textContent = new Date().toLocaleString('pt-PT', { hour: '2-digit', minute: '2-digit' });
   }, 30000);
 
-  $('#view').innerHTML = '<div class="empty"><p class="empty__title">A carregar…</p></div>';
+  $('#view').innerHTML = `<div class="empty"><p class="empty__title">${escapeHTML(T.loading)}</p></div>`;
 
   try {
     await loadAll();
   } catch (e) {
-    $('#view').innerHTML = `<div class="empty"><p class="empty__title">Erro ao carregar</p><p class="empty__desc">${escapeHTML(e.message)}</p></div>`;
+    $('#view').innerHTML = `<div class="empty"><p class="empty__title">${escapeHTML(T.loadError)}</p><p class="empty__desc">${escapeHTML(e.message)}</p></div>`;
     return;
   }
 

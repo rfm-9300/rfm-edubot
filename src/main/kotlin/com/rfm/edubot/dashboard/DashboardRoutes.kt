@@ -40,9 +40,13 @@ import com.rfm.edubot.persona.PersonaSource
 import com.rfm.edubot.persona.PersonaStatus
 import com.rfm.edubot.persona.SourceKind
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRepository
+import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
+import com.rfm.edubot.tenant.model.TenantLocales
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
@@ -104,6 +108,7 @@ fun Route.dashboardRoutes(
     personaCompiler: PersonaCompiler,
     aiClient: AiClient,
     appConfig: AppConfig,
+    channelBindingService: ChannelBindingService,
 ) {
     post("/app/auth/login") {
         val request = call.receive<DashboardLoginRequest>()
@@ -223,6 +228,47 @@ fun Route.dashboardRoutes(
                 if (history.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "messages are required"))
                 val reply = runPersonaTest(mongo, aiClient, ctx.tenant, history)
                 call.respond(PersonaTestResponse(reply))
+            }
+            get("/web-widget") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
+                call.respond(ctx.tenant.binding(Platform.WEB).toWebWidgetDto())
+            }
+            // Self-serve website-widget onboarding: create the WEB binding on first call (minting a
+            // public key) and update its origin allow-list on later calls — the key is preserved so a
+            // tenant's embedded snippet never breaks. ChannelBindingService re-indexes the registry and
+            // evicts the pipeline so the new channel is live without a restart.
+            post("/web-widget") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val request = runCatching { call.receive<WebWidgetRequest>() }.getOrDefault(WebWidgetRequest())
+                val existing = ctx.tenant.binding(Platform.WEB)
+                val publicKey = existing?.externalId ?: ("web_" + ObjectId().toHexString())
+                val origins = request.allowedOrigins.map { it.trim() }.filter { it.isNotBlank() }
+                val updated = channelBindingService.upsert(
+                    ctx.tenant.slug,
+                    ChannelBinding(
+                        platform = Platform.WEB,
+                        externalId = publicKey,
+                        displayName = existing?.displayName ?: "Website",
+                        source = existing?.source ?: "dashboard",
+                        allowedOrigins = origins,
+                    ),
+                ) ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.binding(Platform.WEB).toWebWidgetDto())
+            }
+            // Tenant-selectable UI language. Persisted on the tenant so it becomes the default for every
+            // dashboard session; the browser keeps a per-session override (localStorage.uiLocale).
+            post("/settings/locale") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val request = call.receive<LocaleRequest>()
+                if (request.locale !in TenantLocales.SUPPORTED) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "unsupported locale"))
+                }
+                val updated = tenantRepository.setLocale(ctx.tenant.slug, request.locale, SystemClock.now())
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(mapOf("locale" to updated.locale))
             }
             crmRoutes(mongo, tenantRepository, dashboardUsers, appConfig)
         }
@@ -519,7 +565,7 @@ private suspend fun runPersonaTest(
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
-@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val agentType: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val agentType: String, val locale: String, val channels: List<ChannelMeDto> = emptyList())
 @Serializable private data class ChannelMeDto(val platform: String, val externalId: String, val displayName: String? = null)
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
 @Serializable private data class OverviewDto(val users: Long, val conversations: Long, val messages: Long, val messagesToday: Long, val quotes: Long, val invoices: Long)
@@ -534,8 +580,13 @@ private suspend fun runPersonaTest(
 @Serializable private data class ContactDto(val id: String, val waId: String, val displayName: String?, val status: String, val lastSeenAt: String)
 @Serializable private data class ConversationDto(val id: String, val waId: String, val state: String, val lastMessageAt: String, val messageCount: Int)
 @Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val createdAt: String)
+@Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
+@Serializable private data class LocaleRequest(val locale: String)
+@Serializable private data class WebWidgetDto(val publicKey: String? = null, val allowedOrigins: List<String> = emptyList())
 
-private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, agentType, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
+private fun ChannelBinding?.toWebWidgetDto() = WebWidgetDto(publicKey = this?.externalId, allowedOrigins = this?.allowedOrigins ?: emptyList())
+
+private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, agentType, locale, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),

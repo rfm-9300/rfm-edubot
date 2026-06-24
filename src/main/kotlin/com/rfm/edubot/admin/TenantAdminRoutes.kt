@@ -79,6 +79,7 @@ fun Route.tenantAdminRoutes(
                     name = request.name.trim(),
                     channels = bindings,
                     agentType = request.agentType.ifBlank { "CRM_V1" },
+                    locale = com.rfm.edubot.tenant.model.TenantLocales.normalize(request.locale),
                     openrouterModel = request.openrouterModel?.trim()?.takeIf { it.isNotBlank() },
                     enabledModules = null,
                     rateLimitPerHour = request.rateLimitPerHour,
@@ -113,6 +114,7 @@ fun Route.tenantAdminRoutes(
                 )
                 val moduleTenant = current.copy(agentType = request.agentType.ifBlank { "CRM_V1" })
                 updates.add(Updates.set("enabledModules", DashboardModules.sanitizeForTenant(moduleTenant, request.enabledModules)))
+                request.locale?.let { updates.add(Updates.set("locale", com.rfm.edubot.tenant.model.TenantLocales.normalize(it))) }
                 request.channels?.let {
                     val bindings = it.toBindings(current.channels)
                     val validationError = validateBindings(bindings)
@@ -170,6 +172,28 @@ fun Route.tenantAdminRoutes(
                 }
                 val updated = bindingService.upsert(slug, binding) ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(updated.dto())
+            }
+
+            // Provision (or rotate) the public website-widget key for a tenant. Returns the key plus a
+            // ready-to-paste <script> snippet. WEB bindings carry no access token (the browser connects
+            // directly), so they skip the generic accessToken validation.
+            post("/tenants/{slug}/channels/web") {
+                val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                val request = runCatching { call.receive<WebProvisionRequest>() }.getOrDefault(WebProvisionRequest())
+                val existing = tenantRepository.findBySlug(slug)?.binding(Platform.WEB)
+                val publicKey = existing?.externalId ?: ("web_" + ObjectId().toHexString())
+                val binding = ChannelBinding(
+                    platform = Platform.WEB,
+                    externalId = publicKey,
+                    displayName = request.displayName,
+                    source = "admin",
+                    allowedOrigins = request.allowedOrigins,
+                )
+                val updated = bindingService.upsert(slug, binding) ?: return@post call.respond(HttpStatusCode.NotFound)
+                val host = call.request.headers["X-Forwarded-Host"] ?: call.request.headers["Host"] ?: "localhost:8080"
+                val scheme = call.request.headers["X-Forwarded-Proto"] ?: "https"
+                val snippet = "<script src=\"$scheme://$host/widget/widget.js\" data-key=\"$publicKey\" defer></script>"
+                call.respond(WebProvisionResponse(publicKey = publicKey, snippet = snippet, tenant = updated.dto()))
             }
 
             delete("/tenants/{slug}/channels/{platform}/{externalId}") {
@@ -349,6 +373,7 @@ private data class TenantCreateRequest(
     val slug: String,
     val phoneNumberId: String? = null,
     val agentType: String = "CRM_V1",
+    val locale: String? = null,
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
@@ -360,6 +385,7 @@ private data class TenantCreateRequest(
 private data class TenantUpdateRequest(
     val name: String,
     val agentType: String = "CRM_V1",
+    val locale: String? = null,
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
@@ -375,12 +401,26 @@ private data class ChannelBindingRequest(
 )
 
 @Serializable
+private data class WebProvisionRequest(
+    val displayName: String? = null,
+    val allowedOrigins: List<String> = emptyList(),
+)
+
+@Serializable
+private data class WebProvisionResponse(
+    val publicKey: String,
+    val snippet: String,
+    val tenant: TenantDto,
+)
+
+@Serializable
 private data class TenantDto(
     val id: String,
     val slug: String,
     val name: String,
     val phoneNumberId: String,
     val agentType: String,
+    val locale: String,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,
     val effectiveModules: List<String>,
@@ -419,6 +459,7 @@ private fun Tenant.dto() = TenantDto(
     name = name,
     phoneNumberId = phoneNumberId,
     agentType = agentType,
+    locale = locale,
     openrouterModel = openrouterModel,
     enabledModules = enabledModules,
     effectiveModules = DashboardModules.effectiveFor(this),
@@ -465,6 +506,7 @@ private fun ChannelBinding.toDocument(): Document = Document("platform", platfor
     .appendIfNotNull("wabaId", wabaId)
     .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
     .appendIfNotNull("source", source)
+    .append("allowedOrigins", allowedOrigins)
 
 private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =
     bindings.firstOrNull { it.platform == Platform.WHATSAPP }?.externalId?.takeIf { it.isNotBlank() }

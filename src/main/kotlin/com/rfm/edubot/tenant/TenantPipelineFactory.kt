@@ -20,6 +20,8 @@ import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.instagram.InstagramClient
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
+import com.rfm.edubot.web.WebChannelRegistry
+import com.rfm.edubot.web.WebChatOutboundClient
 import com.rfm.edubot.whatsapp.WhatsAppClient
 import io.ktor.client.HttpClient
 import kotlinx.coroutines.runBlocking
@@ -32,6 +34,7 @@ class TenantPipelineFactory(
     private val deduplicationService: DeduplicationService,
     private val whatsappHttpClient: HttpClient,
     private val appConfig: AppConfig,
+    private val webChannelRegistry: WebChannelRegistry,
 ) {
     private val pipelines = ConcurrentHashMap<ObjectId, MessagePipeline>()
 
@@ -56,6 +59,7 @@ class TenantPipelineFactory(
                 apiVersion = appConfig.instagram.graphVersion,
                 httpClient = whatsappHttpClient,
             )
+            Platform.WEB -> WebChatOutboundClient(webChannelRegistry)
         }
     }
 

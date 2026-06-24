@@ -1,64 +1,13 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
-let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], search: '', active: 'overview' };
+let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], webWidget: null, search: '', active: 'overview' };
 let personaChatBusy = false;
 
-const labels = { overview: 'Overview', conversations: 'Conversations', contacts: 'Contacts', clients: 'Clients', quotes: 'Quotes', invoices: 'Invoices', catalog: 'Catalog', persona: 'Persona', settings: 'Settings' };
-// User-facing copy (en). Single source for translatable strings — a future i18n layer swaps this map per locale.
-const STR = {
-  settingsDesc: 'Connected channels and bot configuration.',
-  channelsTitle: 'Channels',
-  channelsDesc: 'Accounts where the assistant replies to your customers.',
-  colChannel: 'Channel', colAccount: 'Account', colStatus: 'Status', colActions: 'Actions',
-  connected: 'Connected', notConnected: 'Not connected',
-  igConnect: 'Connect Instagram', igReconnect: 'Reconnect Instagram',
-  igHint: 'Connecting Instagram opens a Meta window to authorize your professional account. The account must be Business or Creator.',
-  moreSettingsTitle: 'More settings coming soon',
-  moreSettingsDesc: 'Team members are managed in the backoffice for now. Business profile / PDF branding still pending.',
-  sessionExpired: 'Session expired',
-  igUnavailable: 'Instagram connection is not available',
-  igAllowPopups: 'Allow popups to connect Instagram',
-  igConnected: 'Instagram connected ✓',
-  igFailed: reason => `Could not connect Instagram${reason ? ` (${reason})` : ''}`,
-  quickCreateSoon: 'Quick create for this module is coming soon.',
-  loginEyebrow: 'thebots.lab / tenant',
-  loginTitle: 'Sign in to the dashboard',
-  loginDesc: 'Access your chatbot data, conversations and CRM.',
-  loginEmail: 'Email', loginPassword: 'Password', loginSubmit: 'Sign in', loginInvalid: 'Invalid login',
-  newPrefix: 'New',
-  noData: 'No data',
-  overviewDesc: 'Chatbot status and recent activity.',
-  statMessages24h: 'Messages 24h', statMessages: 'Messages', statContacts: 'Contacts', statConversations: 'Conversations', statQuotes: 'Quotes', statInvoices: 'Invoices',
-  contactsDesc: 'End-users who talked to the bot.',
-  thName: 'Name', thStatus: 'Status', thLastSeen: 'Last seen', thActions: 'Actions',
-  conversationsDesc: 'Read-only conversation history.',
-  thState: 'State', thMsgs: 'Msgs', thLast: 'Last',
-  threadTitle: 'Conversation', noMessages: 'No messages',
-  clientsDesc: 'CRM · Clients.', thPhone: 'Phone', thAddress: 'Address', thNo: 'No.',
-  quotesDesc: 'CRM · Commercial proposals.', thNumber: 'Number', thClient: 'Client', thTotal: 'Total',
-  invoicesDesc: 'CRM · Issued invoices.', thDueDate: 'Due date',
-  catalogDesc: 'CRM · Standard services and materials.', thType: 'Type', thCategory: 'Category', thDescription: 'Description', thUnit: 'Unit', thPrice: 'Price',
-  personaDesc: 'Bot personality — synthesized from notes and files you upload.',
-  personaCompiling: 'Synthesizing…', statVersion: 'Version', statTokens: 'Tokens est.', statUpdated: 'Updated',
-  testBotTitle: 'Test the bot', clear: 'Clear',
-  testBotDesc: 'Chat with the bot using the current persona to test tone and replies. Test messages are not saved and do not create clients, quotes or invoices.',
-  chatPlaceholder: 'Type a test message…', send: 'Send',
-  chatEmpty: 'Send a message to test the bot persona.', typing: 'typing…', chatError: '⚠️ Error contacting the bot. Please try again.',
-  addInfoTitle: 'Add information',
-  addInfoDesc: 'Write a note or upload a file (PDF, TXT, MD). It is synthesized into the instructions file below.',
-  noteLabel: 'Note', notePlaceholder: "E.g.: We are a dental clinic in Lisbon. Warm tone, formal address...", addNote: 'Add note',
-  fileLabel: 'File', fileHint: 'PDF, TXT or Markdown. The text is extracted and synthesized.',
-  sourcesTitle: 'Sources', sourcesDesc: 'Raw material feeding the synthesis.', rebuildAll: 'Recompile all',
-  sourceSynced: 'synced', sourcePending: 'pending', remove: 'Remove',
-  thSource: 'Source', thCreated: 'Created',
-  noSourcesTitle: 'No sources yet', noSourcesDesc: 'Add a note or file above.',
-  compiledTitle: 'Compiled instructions file',
-  compiledDesc: 'Synthesis result. You can edit it manually; the next synthesis will review it.',
-  compiledPlaceholder: 'Still empty — add information above to give the bot personality.',
-  saveManual: 'Save manual edit',
-  personaSaved: 'Persona saved', noteAdded: 'Note added — synthesizing', fileUploaded: 'File uploaded — synthesizing', rebuildStarted: 'Recompilation started', uploadFailed: 'Upload failed',
-};
+// Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
+// `labels`/`STR` are live proxies over the active locale, so every render() reads the current language.
+const labels = I18N.section('common.nav');
+const STR = I18N.section('app');
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const fmtEUR = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
@@ -87,6 +36,10 @@ function renderLogin() {
 
 async function bootAuthed() {
   state.me = await api('/app/api/me');
+  // Adopt the tenant's language (unless the user picked an explicit override this session), then
+  // refresh the static chrome that was rendered before /me resolved.
+  I18N.applyTenantDefault(state.me.tenant.locale);
+  I18N.applyDom(document);
   $('#brand-name').textContent = state.me.tenant.name;
   $('#brand-sub').textContent = `${state.me.tenant.agentType} · ${state.me.tenant.slug}`;
   $('#principal-type').textContent = state.me.principalType;
@@ -112,6 +65,7 @@ async function loadModule(tab) {
   if (tab === 'invoices') state.invoices = await api('/app/api/crm/invoices');
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
   if (tab === 'persona') state.persona = await api('/app/api/persona');
+  if (tab === 'settings') state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
 }
 
 function render() {
@@ -138,7 +92,7 @@ function hero(title, desc) { return `<div class="view__hero"><div><h1 class="vie
 function panelTable(head, rows, empty = STR.noData) { return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="8"><div class="empty"><p class="empty__title">${empty}</p></div></td></tr>`}</tbody></table></div></div>`; }
 
 function renderOverview(root) { const o = state.overview || {}; root.innerHTML = `${hero(labels.overview, STR.overviewDesc)}<div class="view__stats" style="margin-bottom:22px"><div class="stat"><div class="stat__label">${STR.statMessages24h}</div><div class="stat__value">${o.messagesToday || 0}</div></div><div class="stat"><div class="stat__label">${STR.statMessages}</div><div class="stat__value">${o.messages || 0}</div></div><div class="stat"><div class="stat__label">${STR.statContacts}</div><div class="stat__value">${o.users || 0}</div></div><div class="stat"><div class="stat__label">${STR.statConversations}</div><div class="stat__value">${o.conversations || 0}</div></div><div class="stat"><div class="stat__label">${STR.statQuotes}</div><div class="stat__value">${o.quotes || 0}</div></div><div class="stat"><div class="stat__label">${STR.statInvoices}</div><div class="stat__value">${o.invoices || 0}</div></div></div>`; }
-function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? 'Unblock' : 'Block'}</button></td></tr>`).join(''); root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>WhatsApp</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
+function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? STR.unblock : STR.block}</button></td></tr>`).join(''); root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>WhatsApp</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
 function renderConversations(root) { const rows = state.conversations.map(c => `<tr data-conversation="${c.id}"><td class="mono">${escapeHTML(c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td></tr>`).join(''); root.innerHTML = hero(labels.conversations, STR.conversationsDesc) + panelTable(`<tr><th>WhatsApp</th><th>${STR.thState}</th><th>${STR.thMsgs}</th><th>${STR.thLast}</th></tr>`, rows); $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation))); }
 async function openThread(id) { const msgs = await api(`/app/api/conversations/${id}/messages`); const body = document.createElement('div'); body.className = 'form'; body.innerHTML = msgs.map(m => `<div class="panel" style="padding:12px"><div class="mono muted">${m.role} · ${fmtDate(m.createdAt)}</div><div>${escapeHTML(m.text)}</div></div>`).join('') || `<div class="empty">${STR.noMessages}</div>`; openDrawer(STR.threadTitle, body); }
 function renderClients(root) { const rows = state.clients.map(c => `<tr><td class="name">${escapeHTML(c.name)}</td><td class="mono">${escapeHTML(c.phone)}</td><td>${escapeHTML(c.address || '')}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`).join(''); root.innerHTML = hero(labels.clients, STR.clientsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.thPhone}</th><th>${STR.thAddress}</th><th class="right">${STR.thNo}</th></tr>`, rows); }
@@ -300,10 +254,13 @@ async function uploadPersonaFile(file) {
   if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
   return res.json();
 }
+function widgetSnippet(key) { return `<script src="${location.origin}/widget/widget.js" data-key="${key}" defer><\/script>`; }
+
 function renderSettings(root) {
   const channels = state.me?.tenant?.channels || [];
   const wa = channels.find(c => c.platform === 'WHATSAPP');
   const ig = channels.find(c => c.platform === 'INSTAGRAM');
+  const web = state.webWidget || { publicKey: null, allowedOrigins: [] };
   root.innerHTML = `${hero(labels.settings, STR.settingsDesc)}
     <div class="panel" style="padding:18px;margin-bottom:18px">
       <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.channelsTitle)}</h2>
@@ -314,12 +271,75 @@ function renderSettings(root) {
           <tr><td class="name">WhatsApp</td><td class="mono">${escapeHTML(wa?.displayName || wa?.externalId || '—')}</td><td>${wa ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td><td class="right"></td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button></td></tr>
+          <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
+            <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
       </table></div>
       <div class="hint" style="margin-top:10px">${escapeHTML(STR.igHint)}</div>
     </div>
+
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.webTitle)}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.webDesc)}</p>
+      ${web.publicKey ? `
+        <div class="form__row form__row--full">
+          <textarea class="txt mono" id="web-snippet" rows="2" readonly style="resize:none">${escapeHTML(widgetSnippet(web.publicKey))}</textarea>
+        </div>
+        <button class="btn btn--primary" id="web-copy" type="button" style="margin-top:10px">${escapeHTML(STR.webCopy)}</button>
+        <form class="form" id="web-origins-form" style="margin-top:18px">
+          <div class="form__row form__row--full">
+            <label class="lbl" for="web-origins">${escapeHTML(STR.webOriginsLabel)}</label>
+            <textarea class="txt mono" id="web-origins" rows="3" placeholder="https://www.yoursite.com">${escapeHTML((web.allowedOrigins || []).join('\n'))}</textarea>
+            <div class="hint">${escapeHTML(STR.webOriginsHint)}</div>
+          </div>
+          <button class="btn btn--ghost" type="submit">${escapeHTML(STR.webOriginsSave)}</button>
+        </form>
+      ` : `<button class="btn btn--primary" id="web-generate-2" type="button">${escapeHTML(STR.webGenerate)}</button>`}
+    </div>
+
+    <div class="panel" style="padding:18px;margin-bottom:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(I18N.t('common.lang.title'))}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(I18N.t('common.lang.desc'))}</p>
+      <div class="form__row" style="max-width:280px">
+        <label class="lbl" for="ui-locale">${escapeHTML(I18N.t('common.lang.label'))}</label>
+        <select class="sel" id="ui-locale">${I18N.SUPPORTED.map(l => `<option value="${l}" ${l === I18N.locale() ? 'selected' : ''}>${escapeHTML(I18N.LANG_NAMES[l] || l)}</option>`).join('')}</select>
+      </div>
+    </div>
+
     <div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.moreSettingsTitle)}</p><p class="empty__desc">${escapeHTML(STR.moreSettingsDesc)}</p></div></div>`;
   $('#ig-connect').addEventListener('click', connectInstagram);
+  const localeSel = $('#ui-locale');
+  if (localeSel) localeSel.addEventListener('change', async () => {
+    const locale = localeSel.value;
+    I18N.choose(locale);
+    I18N.applyDom(document);
+    try { await api('/app/api/settings/locale', { method: 'POST', body: JSON.stringify({ locale }) }); toast(I18N.t('common.lang.saved')); }
+    catch { toast(I18N.t('common.lang.saveFailed')); }
+    renderNav();
+    render();
+  });
+  $$('#web-generate, #web-generate-2').forEach(b => b.addEventListener('click', generateWebWidget));
+  const copyBtn = $('#web-copy');
+  if (copyBtn) copyBtn.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(widgetSnippet(web.publicKey)); toast(STR.webCopied); }
+    catch { const t = $('#web-snippet'); t.select(); document.execCommand('copy'); toast(STR.webCopied); }
+  });
+  const originsForm = $('#web-origins-form');
+  if (originsForm) originsForm.addEventListener('submit', async e => {
+    e.preventDefault();
+    const allowedOrigins = $('#web-origins').value.split('\n').map(s => s.trim()).filter(Boolean);
+    try { state.webWidget = await api('/app/api/web-widget', { method: 'POST', body: JSON.stringify({ allowedOrigins }) }); toast(STR.webOriginsSaved); render(); }
+    catch { toast(STR.webGenerateFailed); }
+  });
+}
+
+async function generateWebWidget() {
+  try {
+    state.webWidget = await api('/app/api/web-widget', { method: 'POST', body: JSON.stringify({ allowedOrigins: [] }) });
+    state.me = await api('/app/api/me');
+    toast(STR.webGenerated);
+    render();
+  } catch { toast(STR.webGenerateFailed); }
 }
 
 async function connectInstagram() {
@@ -357,6 +377,7 @@ function openDrawer(title, body) { const root = $('#drawer'); $('#drawer-title')
 
 async function init() {
   if (handleOAuthPopup()) return;
+  I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => toast(STR.quickCreateSoon));
