@@ -9,6 +9,7 @@ let personaChatBusy = false;
 const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const slugify = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const fmtEUR = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
@@ -96,6 +97,220 @@ function renderContacts(root) { const q = state.search.toLowerCase(); const rows
 function renderConversations(root) { const rows = state.conversations.map(c => `<tr data-conversation="${c.id}"><td class="mono">${escapeHTML(c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td></tr>`).join(''); root.innerHTML = hero(labels.conversations, STR.conversationsDesc) + panelTable(`<tr><th>WhatsApp</th><th>${STR.thState}</th><th>${STR.thMsgs}</th><th>${STR.thLast}</th></tr>`, rows); $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation))); }
 async function openThread(id) { const msgs = await api(`/app/api/conversations/${id}/messages`); const body = document.createElement('div'); body.className = 'form'; body.innerHTML = msgs.map(m => `<div class="panel" style="padding:12px"><div class="mono muted">${m.role} · ${fmtDate(m.createdAt)}</div><div>${escapeHTML(m.text)}</div></div>`).join('') || `<div class="empty">${STR.noMessages}</div>`; openDrawer(STR.threadTitle, body); }
 function renderClients(root) { const rows = state.clients.map(c => `<tr><td class="name">${escapeHTML(c.name)}</td><td class="mono">${escapeHTML(c.phone)}</td><td>${escapeHTML(c.address || '')}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`).join(''); root.innerHTML = hero(labels.clients, STR.clientsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.thPhone}</th><th>${STR.thAddress}</th><th class="right">${STR.thNo}</th></tr>`, rows); }
+function openClientForm() {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row"><label class="lbl" for="cf-name">${escapeHTML(STR.clientFormName)} <span class="req">●</span></label>
+      <input class="inp" id="cf-name" required placeholder="${escapeHTML(STR.clientPhName)}" /></div>
+    <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
+      <input class="inp inp--mono" id="cf-phone" required placeholder="${escapeHTML(STR.clientPhPhone)}" /></div>
+    <div class="form__row"><label class="lbl" for="cf-address">${escapeHTML(STR.clientFormAddress)}</label>
+      <input class="inp" id="cf-address" placeholder="${escapeHTML(STR.clientPhAddress)}" /></div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(STR.clientSave)}</button>`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('#cf-name', form).value.trim();
+    const phone = $('#cf-phone', form).value.trim();
+    const address = $('#cf-address', form).value.trim() || undefined;
+    if (!name || !phone) return toast(STR.clientValidate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/crm/clients', { method: 'POST', body: JSON.stringify({ name, phone, address }) });
+      $('#drawer').hidden = true;
+      await loadModule('clients');
+      render();
+      toast(STR.clientCreated({ name }));
+    } catch { btn.disabled = false; toast(STR.clientCreateFailed); }
+  });
+  openDrawer(STR.clientFormTitle, form);
+}
+
+function openCatalogForm() {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__grid">
+      <div class="form__row"><label class="lbl" for="cat-id">${escapeHTML(STR.catalogId)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="cat-id" required placeholder="${escapeHTML(STR.catalogPhId)}" /></div>
+      <div class="form__row"><label class="lbl" for="cat-type">${escapeHTML(STR.catalogType)} <span class="req">●</span></label>
+        <select class="sel" id="cat-type" required><option value="service">${escapeHTML(STR.catalogService)}</option><option value="material">${escapeHTML(STR.catalogMaterial)}</option></select></div>
+      <div class="form__row form__row--full"><label class="lbl" for="cat-cat">${escapeHTML(STR.catalogCategory)} <span class="req">●</span></label>
+        <input class="inp" id="cat-cat" required placeholder="${escapeHTML(STR.catalogPhCategory)}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="cat-desc">${escapeHTML(STR.catalogDesc)} <span class="req">●</span></label>
+        <textarea class="txt" id="cat-desc" required placeholder="${escapeHTML(STR.catalogPhDesc)}"></textarea></div>
+      <div class="form__row"><label class="lbl" for="cat-unit">${escapeHTML(STR.catalogUnit)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="cat-unit" required placeholder="${escapeHTML(STR.catalogPhUnit)}" /></div>
+      <div class="form__row"><label class="lbl" for="cat-price">${escapeHTML(STR.catalogPrice)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="cat-price" type="number" min="0" step="0.01" required placeholder="0.00" /></div>
+    </div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(STR.catalogSave)}</button>`;
+  const idEl = $('#cat-id', form), descEl = $('#cat-desc', form), typeEl = $('#cat-type', form);
+  let touched = false;
+  idEl.addEventListener('input', () => { touched = true; });
+  const refresh = () => { if (!touched) idEl.value = (typeEl.value === 'service' ? 'srv-' : 'mat-') + slugify(descEl.value).slice(0, 40); };
+  descEl.addEventListener('input', refresh);
+  typeEl.addEventListener('change', refresh);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const id = idEl.value.trim(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
+    const type = typeEl.value, defaultUnitPriceEur = Number($('#cat-price', form).value || 0);
+    if (!id || !category || !description || !unit) return toast(STR.catalogValidate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/crm/standard-items', { method: 'POST', body: JSON.stringify({ id, type, category, description, unit, defaultUnitPriceEur }) });
+      $('#drawer').hidden = true;
+      await loadModule('catalog');
+      render();
+      toast(STR.catalogCreated({ id }));
+    } catch { btn.disabled = false; toast(STR.catalogCreateFailed); }
+  });
+  openDrawer(STR.catalogFormTitle, form);
+}
+
+// Shared client picker + line-items editor for quotes and invoices.
+function clientSelect(clients) {
+  return `<div class="form__row"><label class="lbl" for="f-client">${escapeHTML(STR.lineClient)} <span class="req">●</span></label>
+    <select class="sel" id="f-client" required><option value="">${escapeHTML(STR.lineChooseClient)}</option>
+    ${clients.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
+}
+
+function lineItemsField(catalog) {
+  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.description)} · ${fmtEUR(c.defaultUnitPriceEur)}/${escapeHTML(c.unit)}</option>`;
+  const services = catalog.filter(c => c.type === 'service');
+  const materials = catalog.filter(c => c.type === 'material');
+  const html = `
+    <div>
+      <div class="lbl" style="margin-bottom:8px">${escapeHTML(STR.lineItemsLabel)} <span class="req">●</span></div>
+      <div class="lines">
+        <div class="lines__head"><span>${escapeHTML(STR.lineColDesc)}</span><span>${escapeHTML(STR.lineColQty)}</span><span>${escapeHTML(STR.lineColUnit)}</span><span>${escapeHTML(STR.lineColPrice)}</span><span></span></div>
+        <div id="lines-body"></div>
+        <div class="lines__foot">
+          <div class="lines__left">
+            <button class="btn btn--sm btn--ghost" type="button" id="add-empty">${escapeHTML(STR.lineAddEmpty)}</button>
+            <div class="lines__pick">
+              <select class="sel" id="catalog-pick"><option value="">${escapeHTML(STR.lineCatalogPick)}</option>
+                <optgroup label="${escapeHTML(STR.catalogService)}">${services.map(opt).join('')}</optgroup>
+                <optgroup label="${escapeHTML(STR.catalogMaterial)}">${materials.map(opt).join('')}</optgroup>
+              </select>
+              <button class="btn btn--sm" type="button" id="add-from-catalog">${escapeHTML(STR.lineAdd)}</button>
+            </div>
+          </div>
+          <div class="lines__total"><span class="muted">${escapeHTML(STR.lineTotal)}</span><span class="v" id="lines-total">${fmtEUR(0)}</span></div>
+        </div>
+      </div>
+    </div>`;
+  const collect = form => [...$$('.line', form)].map(row => {
+    const get = k => $(`[data-k="${k}"]`, row).value;
+    return { description: get('description').trim(), quantity: Number(get('quantity') || 0), unit: get('unit').trim(), unitPriceEur: Number(get('unitPriceEur') || 0) };
+  }).filter(it => it.description && (it.quantity > 0 || it.unitPriceEur > 0));
+  const wire = form => {
+    const body = $('#lines-body', form);
+    const recalc = () => { $('#lines-total', form).textContent = fmtEUR(collect(form).reduce((t, it) => t + it.quantity * it.unitPriceEur, 0)); };
+    const addRow = (preset = {}) => {
+      const row = document.createElement('div');
+      row.className = 'line';
+      row.innerHTML = `
+        <input type="text" data-k="description" placeholder="${escapeHTML(STR.lineDescPh)}" value="${escapeHTML(preset.description || '')}" />
+        <input type="number" data-k="quantity" class="num" min="0" step="0.01" placeholder="0" value="${preset.quantity ?? ''}" />
+        <input type="text" data-k="unit" class="num" placeholder="${escapeHTML(STR.lineUnitPh)}" value="${escapeHTML(preset.unit || '')}" />
+        <input type="number" data-k="unitPriceEur" class="num" min="0" step="0.01" placeholder="0.00" value="${preset.unitPriceEur ?? ''}" />
+        <button type="button" class="l-rm" title="${escapeHTML(STR.lineRemove)}"><svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>`;
+      row.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
+      row.querySelector('.l-rm').addEventListener('click', () => { row.remove(); recalc(); });
+      body.appendChild(row);
+      recalc();
+    };
+    addRow();
+    $('#add-empty', form).addEventListener('click', () => addRow());
+    $('#add-from-catalog', form).addEventListener('click', () => {
+      const id = $('#catalog-pick', form).value;
+      if (!id) return toast(STR.lineChooseCatalog);
+      const it = catalog.find(c => c.id === id);
+      if (it) addRow({ description: it.description, quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur });
+    });
+  };
+  return { html, wire, collect };
+}
+
+async function openQuoteForm() {
+  let clients, catalog;
+  try { [clients, catalog] = await Promise.all([api('/app/api/crm/clients'), api('/app/api/crm/standard-items')]); }
+  catch { return toast(STR.quoteCreateFailed); }
+  const li = lineItemsField(catalog);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__grid">
+      ${clientSelect(clients)}
+      <div class="form__row"><label class="lbl" for="q-valid">${escapeHTML(STR.quoteValidUntil)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <input class="inp inp--mono" id="q-valid" type="date" /></div>
+    </div>
+    ${li.html}
+    <div class="form__row form__row--full"><label class="lbl" for="q-notes">${escapeHTML(STR.quoteNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <textarea class="txt" id="q-notes" placeholder="${escapeHTML(STR.quoteNotesPh)}"></textarea></div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(STR.quoteSave)}</button>`;
+  li.wire(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const clientId = $('#f-client', form).value;
+    if (!clientId) return toast(STR.quoteChooseClient);
+    const items = li.collect(form);
+    if (!items.length) return toast(STR.quoteAddLine);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/crm/quotes', { method: 'POST', body: JSON.stringify({ clientId, items, notes: $('#q-notes', form).value.trim() || null, validUntil: $('#q-valid', form).value || null }) });
+      $('#drawer').hidden = true;
+      await loadModule('quotes');
+      render();
+      toast(STR.quoteCreated);
+    } catch { btn.disabled = false; toast(STR.quoteCreateFailed); }
+  });
+  openDrawer(STR.quoteFormTitle, form, true);
+}
+
+async function openInvoiceForm() {
+  let clients, catalog;
+  try { [clients, catalog] = await Promise.all([api('/app/api/crm/clients'), api('/app/api/crm/standard-items')]); }
+  catch { return toast(STR.invoiceCreateFailed); }
+  const li = lineItemsField(catalog);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__grid">
+      ${clientSelect(clients)}
+      <div class="form__row"><label class="lbl" for="i-due">${escapeHTML(STR.invoiceDueDate)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="i-due" type="date" required /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="i-quote">${escapeHTML(STR.invoiceQuoteId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <input class="inp inp--mono" id="i-quote" placeholder="${escapeHTML(STR.invoiceQuoteIdPh)}" /></div>
+    </div>
+    ${li.html}
+    <button class="btn btn--primary" type="submit">${escapeHTML(STR.invoiceSave)}</button>`;
+  li.wire(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const clientId = $('#f-client', form).value;
+    const dueDate = $('#i-due', form).value;
+    if (!clientId) return toast(STR.invoiceChooseClient);
+    if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    const items = li.collect(form);
+    if (!items.length) return toast(STR.invoiceAddLine);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/crm/invoices', { method: 'POST', body: JSON.stringify({ clientId, quoteId: $('#i-quote', form).value.trim() || null, items, dueDate }) });
+      $('#drawer').hidden = true;
+      await loadModule('invoices');
+      render();
+      toast(STR.invoiceCreated);
+    } catch { btn.disabled = false; toast(STR.invoiceCreateFailed); }
+  });
+  openDrawer(STR.invoiceFormTitle, form, true);
+}
+
 function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.quotes, STR.quotesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
 function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.invoices, STR.invoicesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th>${STR.thDueDate}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
 function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.catalog, STR.catalogDesc) + panelTable(`<tr><th>${STR.thType}</th><th>${STR.thCategory}</th><th>${STR.thDescription}</th><th>${STR.thUnit}</th><th class="right">${STR.thPrice}</th></tr>`, rows); }
@@ -373,14 +588,20 @@ function handleOAuthPopup() {
   return true;
 }
 
-function openDrawer(title, body) { const root = $('#drawer'); $('#drawer-title').textContent = title; $('#drawer-body').innerHTML = ''; $('#drawer-body').appendChild(body); root.hidden = false; const close = () => { root.hidden = true; }; $$('[data-close]', root).forEach(b => b.onclick = close); }
+function openDrawer(title, body, wide = false) { const root = $('#drawer'); $('.drawer__panel', root).classList.toggle('drawer__panel--wide', wide); $('#drawer-title').textContent = title; $('#drawer-body').innerHTML = ''; $('#drawer-body').appendChild(body); root.hidden = false; const close = () => { root.hidden = true; }; $$('[data-close]', root).forEach(b => b.onclick = close); }
 
 async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
-  $('#btn-new').addEventListener('click', () => toast(STR.quickCreateSoon));
+  $('#btn-new').addEventListener('click', () => {
+    if (state.active === 'clients') return openClientForm();
+    if (state.active === 'catalog') return openCatalogForm();
+    if (state.active === 'quotes') return openQuoteForm();
+    if (state.active === 'invoices') return openInvoiceForm();
+    toast(STR.quickCreateSoon);
+  });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });
   if (!token) return renderLogin();
   state.active = (location.hash || '').replace('#', '') || 'overview';
