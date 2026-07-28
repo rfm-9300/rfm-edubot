@@ -20,6 +20,9 @@ import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.MessageContent
+import com.rfm.edubot.conversation.model.Message
+import com.rfm.edubot.conversation.model.MessageStatus
+import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
@@ -148,13 +151,55 @@ fun Route.dashboardRoutes(
             get("/conversations") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
-                call.respond(ConversationRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"]).map { it.dto() })
+                val conversations = ConversationRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"])
+                val displayNames = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(conversations.map { it.userId })
+                call.respond(conversations.map { it.dto(displayNames[it.userId]) })
             }
             get("/conversations/{id}/messages") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
                 val convo = ConversationRepository(mongo, ctx.tenant.id).findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                 call.respond(MessageRepository(mongo, ctx.tenant.id).threadByConversation(convo.id).map { it.dto() })
+            }
+            post("/conversations/{id}/messages") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
+                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
+                val conversation = ConversationRepository(mongo, ctx.tenant.id).findById(conversationId)
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                val request = call.receive<OutboundMessageRequest>()
+                val text = request.text.trim()
+                if (text.isBlank() || text.length > 1000) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "message must contain 1 to 1000 characters"))
+                }
+                if (conversation.channel == Platform.WEB) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "website conversations do not support operator messages"))
+                }
+                val binding = ctx.tenant.binding(conversation.channel)
+                if (binding == null || binding.externalId != request.assetExternalId) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "selected asset does not match this conversation"))
+                }
+
+                try {
+                    pipelineFactory.responderFor(ctx.tenant, conversation.channel).sendText(conversation.waId, text)
+                } catch (e: Exception) {
+                    return@post call.respond(HttpStatusCode.BadGateway, mapOf("error" to (e.message ?: "message delivery failed")))
+                }
+
+                val message = Message(
+                    tenantId = ctx.tenant.id,
+                    conversationId = conversation.id,
+                    channel = conversation.channel,
+                    waId = conversation.waId,
+                    role = UserRole.ASSISTANT,
+                    content = MessageContent.Text(text),
+                    status = MessageStatus.DELIVERED,
+                    createdAt = SystemClock.now(),
+                )
+                MessageRepository(mongo, ctx.tenant.id).insert(message)
+                ConversationRepository(mongo, ctx.tenant.id).bumpActivity(conversation.id)
+                call.respond(HttpStatusCode.Created, message.dto())
             }
             get("/persona") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
@@ -577,9 +622,10 @@ private suspend fun runPersonaTest(
 @Serializable private data class PersonaTestResponse(val reply: String)
 @Serializable private data class PersonaSourceDto(val id: String, val kind: String, val label: String, val compiled: Boolean, val createdAt: String)
 @Serializable private data class PersonaDto(val compiledInstructions: String, val version: Int, val tokenEstimate: Int, val status: String, val updatedAt: String?, val sources: List<PersonaSourceDto>)
-@Serializable private data class ContactDto(val id: String, val waId: String, val displayName: String?, val status: String, val lastSeenAt: String)
-@Serializable private data class ConversationDto(val id: String, val waId: String, val state: String, val lastMessageAt: String, val messageCount: Int)
-@Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val createdAt: String)
+@Serializable private data class ContactDto(val id: String, val waId: String, val channel: String, val displayName: String?, val status: String, val lastSeenAt: String)
+@Serializable private data class ConversationDto(val id: String, val waId: String, val channel: String, val displayName: String?, val state: String, val lastMessageAt: String, val messageCount: Int)
+@Serializable private data class OutboundMessageRequest(val text: String, val assetExternalId: String)
+@Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val status: String, val createdAt: String)
 @Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
 @Serializable private data class LocaleRequest(val locale: String)
 @Serializable private data class WebWidgetDto(val publicKey: String? = null, val allowedOrigins: List<String> = emptyList())
@@ -596,6 +642,6 @@ private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: 
     updatedAt = persona?.updatedAt?.toString(),
     sources = sources.map { PersonaSourceDto(it.id.toHexString(), it.kind.name, it.label, it.compiledIntoVersion != null, it.createdAt.toString()) },
 )
-private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, displayName, status.name, lastSeenAt.toString())
-private fun com.rfm.edubot.conversation.model.Conversation.dto() = ConversationDto(id.toHexString(), waId, state.name, lastMessageAt.toString(), messageCount)
-private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(id.toHexString(), role.name, (content as? MessageContent.Text)?.body ?: "", createdAt.toString())
+private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, channel.name, displayName, status.name, lastSeenAt.toString())
+private fun com.rfm.edubot.conversation.model.Conversation.dto(displayName: String?) = ConversationDto(id.toHexString(), waId, channel.name, displayName, state.name, lastMessageAt.toString(), messageCount)
+private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(id.toHexString(), role.name, (content as? MessageContent.Text)?.body ?: "", status.name, createdAt.toString())

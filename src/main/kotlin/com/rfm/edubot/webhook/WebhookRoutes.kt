@@ -158,7 +158,6 @@ private suspend fun handleInstagramWebhook(
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
 ) {
-    log.info("Instagram raw payload: {}", body) // TEMP debug: capture exact webhook shape
     val payload = try {
         json.decodeFromString(InstagramPayload.serializer(), body)
     } catch (e: Exception) {
@@ -172,11 +171,14 @@ private suspend fun handleInstagramWebhook(
         val tenant = activeTenant(tenantRegistry.byExternalId(Platform.INSTAGRAM, instagramAccountId), Platform.INSTAGRAM, instagramAccountId) ?: continue
         for (messaging in entry.events) {
             val message = messaging.message ?: continue
-            if (message.isEcho) {
+            if (message.isEcho && !message.isSelf) {
                 log.debug("Skipping Instagram echo message: mid={}", message.mid)
                 continue
             }
-            val sender = messaging.sender?.id?.takeIf { it.isNotBlank() } ?: continue
+            // Self Messaging lets a professional account message itself for previews. Meta sends
+            // the self IGSID as the recipient; register it without invoking the bot to avoid an
+            // echo loop when operators subsequently send from the dashboard.
+            val sender = (if (message.isSelf) messaging.recipient else messaging.sender)?.id?.takeIf { it.isNotBlank() } ?: continue
             val mid = message.mid?.takeIf { it.isNotBlank() } ?: continue
             val text = message.text?.takeIf { it.isNotBlank() } ?: continue
             if (deduplicationService.isDuplicate(mid, body, tenant.id)) {
@@ -195,9 +197,10 @@ private suspend fun handleInstagramWebhook(
                     messageText = text,
                     timestamp = entry.time?.toString().orEmpty(),
                     eventId = mid,
+                    registerOnly = message.isSelf,
                 )
             )
-            log.info("Enqueued Instagram message: tenant={} from={} mid={}", tenant.slug, sender, mid)
+            log.info("Enqueued Instagram message: tenant={} from={} mid={} self={}", tenant.slug, sender, mid, message.isSelf)
         }
     }
 }

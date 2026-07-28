@@ -15,6 +15,7 @@ data class InboundMessage(
     val messageText: String,
     val timestamp: String,
     val eventId: String,
+    val registerOnly: Boolean = false,
 )
 
 class MessageQueue(capacity: Int = Channel.UNLIMITED) {

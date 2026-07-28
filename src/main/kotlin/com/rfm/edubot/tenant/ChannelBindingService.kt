@@ -20,10 +20,10 @@ class ChannelBindingService(
     private val tenantRegistry: TenantRegistry,
     private val pipelineFactory: TenantPipelineFactory,
 ) {
-    /** Add or replace the binding for [binding].platform + [binding].externalId on [slug]. */
+    /** Add or replace the binding for [binding].platform on [slug]. */
     suspend fun upsert(slug: String, binding: ChannelBinding): Tenant? {
         val tenant = tenantRepository.findBySlug(slug) ?: return null
-        val next = tenant.channels.filterNot { it.platform == binding.platform && it.externalId == binding.externalId } + binding
+        val next = tenant.channels.filterNot { it.platform == binding.platform } + binding
         return persist(slug, tenant, next)
     }
 

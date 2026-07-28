@@ -40,7 +40,7 @@ data class AppConfig(
         val appId: String = "",
         val appSecret: String = "",
         val redirectUri: String = "",
-        val graphVersion: String = "v21.0",
+        val graphVersion: String = "v25.0",
     ) {
         val oauthEnabled: Boolean get() = appId.isNotBlank() && appSecret.isNotBlank() && redirectUri.isNotBlank()
     }
@@ -93,7 +93,7 @@ data class AppConfig(
                 appId = getOptional(config, "app.instagram.appId"),
                 appSecret = getOptional(config, "app.instagram.appSecret"),
                 redirectUri = getOptional(config, "app.instagram.redirectUri"),
-                graphVersion = if (config.hasPath("app.instagram.graphVersion")) config.getString("app.instagram.graphVersion") else "v21.0",
+                graphVersion = if (config.hasPath("app.instagram.graphVersion")) config.getString("app.instagram.graphVersion") else "v25.0",
             )
 
             val openRouterConfig = OpenRouterConfig(

@@ -5,6 +5,7 @@ import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.channel.OutboundClient
+import com.rfm.edubot.channel.ProfileLookupClient
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
@@ -57,10 +58,35 @@ class MessagePipeline(
         try {
             log.info("Processing message: platform={}, waId={}, id={}", inbound.platform, inbound.waId, inbound.waMessageId)
 
-            val user = users.findOrCreate(inbound.waId, inbound.profileName, inbound.platform)
+            val profileName = inbound.profileName ?: (responder as? ProfileLookupClient)?.profileName(inbound.waId)
+            val user = users.findOrCreate(inbound.waId, profileName, inbound.platform)
 
             if (user.status == com.rfm.edubot.conversation.model.UserStatus.BLOCKED) {
                 log.warn("Blocked user attempted message: waId={}", inbound.waId)
+                deduplicationService.markProcessed(inbound.eventId)
+                return
+            }
+
+            if (inbound.registerOnly) {
+                val existing = conversations.findByWaId(inbound.waId, inbound.platform)
+                if (existing == null) {
+                    val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
+                    messages.insert(
+                        Message(
+                            tenantId = inbound.tenantId,
+                            conversationId = conversation.id,
+                            channel = inbound.platform,
+                            waId = user.waId,
+                            role = UserRole.USER,
+                            waMessageId = inbound.waMessageId,
+                            content = MessageContent.Text(inbound.messageText),
+                            status = MessageStatus.RECEIVED,
+                            createdAt = SystemClock.now(),
+                        )
+                    )
+                    conversations.bumpActivity(conversation.id)
+                    log.info("Registered conversation without automatic reply: platform={}, waId={}", inbound.platform, inbound.waId)
+                }
                 deduplicationService.markProcessed(inbound.eventId)
                 return
             }

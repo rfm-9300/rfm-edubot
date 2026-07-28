@@ -1,7 +1,7 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
-let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], webWidget: null, search: '', active: 'overview' };
+let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], webWidget: null, search: '', active: 'overview', selectedAsset: '' };
 let personaChatBusy = false;
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
@@ -93,9 +93,48 @@ function hero(title, desc) { return `<div class="view__hero"><div><h1 class="vie
 function panelTable(head, rows, empty = STR.noData) { return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || `<tr><td colspan="8"><div class="empty"><p class="empty__title">${empty}</p></div></td></tr>`}</tbody></table></div></div>`; }
 
 function renderOverview(root) { const o = state.overview || {}; root.innerHTML = `${hero(labels.overview, STR.overviewDesc)}<div class="view__stats" style="margin-bottom:22px"><div class="stat"><div class="stat__label">${STR.statMessages24h}</div><div class="stat__value">${o.messagesToday || 0}</div></div><div class="stat"><div class="stat__label">${STR.statMessages}</div><div class="stat__value">${o.messages || 0}</div></div><div class="stat"><div class="stat__label">${STR.statContacts}</div><div class="stat__value">${o.users || 0}</div></div><div class="stat"><div class="stat__label">${STR.statConversations}</div><div class="stat__value">${o.conversations || 0}</div></div><div class="stat"><div class="stat__label">${STR.statQuotes}</div><div class="stat__value">${o.quotes || 0}</div></div><div class="stat"><div class="stat__label">${STR.statInvoices}</div><div class="stat__value">${o.invoices || 0}</div></div></div>`; }
-function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? STR.unblock : STR.block}</button></td></tr>`).join(''); root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>WhatsApp</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
-function renderConversations(root) { const rows = state.conversations.map(c => `<tr data-conversation="${c.id}"><td class="mono">${escapeHTML(c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td></tr>`).join(''); root.innerHTML = hero(labels.conversations, STR.conversationsDesc) + panelTable(`<tr><th>WhatsApp</th><th>${STR.thState}</th><th>${STR.thMsgs}</th><th>${STR.thLast}</th></tr>`, rows); $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation))); }
-async function openThread(id) { const msgs = await api(`/app/api/conversations/${id}/messages`); const body = document.createElement('div'); body.className = 'form'; body.innerHTML = msgs.map(m => `<div class="panel" style="padding:12px"><div class="mono muted">${m.role} · ${fmtDate(m.createdAt)}</div><div>${escapeHTML(m.text)}</div></div>`).join('') || `<div class="empty">${STR.noMessages}</div>`; openDrawer(STR.threadTitle, body); }
+function renderContacts(root) { const q = state.search.toLowerCase(); const rows = state.contacts.filter(c => !q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)).map(c => `<tr><td class="name">${escapeHTML(c.displayName || '—')}</td><td>${escapeHTML(c.channel)}</td><td class="mono">${escapeHTML(c.waId)}</td><td>${c.status}</td><td class="mono muted">${fmtDate(c.lastSeenAt)}</td><td class="right"><button class="btn btn--sm" data-contact-status="${c.id}" data-status="${c.status === 'BLOCKED' ? 'ACTIVE' : 'BLOCKED'}">${c.status === 'BLOCKED' ? STR.unblock : STR.block}</button></td></tr>`).join(''); root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.colChannel}</th><th>${STR.colAccount}</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows); $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); })); }
+function assetLabel(asset) { return `${asset.platform} · ${asset.displayName || STR.unnamedAsset} · ${asset.externalId}`; }
+function renderConversations(root) {
+  const assets = (state.me?.tenant.channels || []).filter(a => a.platform !== 'WEB');
+  if (!assets.some(a => a.externalId === state.selectedAsset)) state.selectedAsset = assets[0]?.externalId || '';
+  const selected = assets.find(a => a.externalId === state.selectedAsset);
+  const q = state.search.toLowerCase();
+  const conversations = state.conversations.filter(c => (!selected || c.channel === selected.platform) && (!q || `${c.displayName || ''} ${c.waId}`.toLowerCase().includes(q)));
+  const rows = conversations.map(c => `<tr class="conversation-row" data-conversation="${c.id}"><td>${escapeHTML(c.channel)}</td><td>${escapeHTML(c.displayName || c.waId)}</td><td>${c.state}</td><td class="num">${c.messageCount}</td><td class="mono muted">${fmtDate(c.lastMessageAt)}</td><td class="right"><button class="btn btn--sm" type="button">${escapeHTML(STR.openChat)}</button></td></tr>`).join('');
+  const picker = `<div class="asset-picker panel"><div><div class="lbl">${escapeHTML(STR.assetLabel)}</div><p class="hint">${escapeHTML(STR.assetHint)}</p></div><select class="sel asset-picker__select" id="conversation-asset">${assets.map(a => `<option value="${escapeHTML(a.externalId)}" ${a.externalId === state.selectedAsset ? 'selected' : ''}>${escapeHTML(assetLabel(a))}</option>`).join('')}</select></div>`;
+  root.innerHTML = hero(labels.conversations, STR.conversationsDesc) + picker + panelTable(`<tr><th>${STR.colChannel}</th><th>${STR.recipient}</th><th>${STR.thState}</th><th>${STR.thMsgs}</th><th>${STR.thLast}</th><th class="right">${STR.thActions}</th></tr>`, rows, assets.length ? STR.noAssetConversations : STR.noMessagingAssets);
+  $('#conversation-asset')?.addEventListener('change', e => { state.selectedAsset = e.target.value; renderConversations(root); });
+  $$('[data-conversation]').forEach(r => r.addEventListener('click', () => openThread(r.dataset.conversation)));
+}
+async function openThread(id) {
+  const conversation = state.conversations.find(c => c.id === id);
+  const asset = (state.me?.tenant.channels || []).find(a => a.platform === conversation?.channel && a.externalId === state.selectedAsset);
+  const msgs = await api(`/app/api/conversations/${id}/messages`);
+  const body = document.createElement('div');
+  body.className = 'thread';
+  const recipient = conversation?.displayName || conversation?.waId || '';
+  body.innerHTML = `<div class="thread__asset"><span class="lbl">${escapeHTML(STR.sendingFrom)}</span><strong>${escapeHTML(asset ? assetLabel(asset) : conversation?.channel || '')}</strong><span class="mono muted">${escapeHTML(STR.sendingTo)} ${escapeHTML(recipient)}</span></div><div class="chat__log thread__log" id="thread-log"></div>${asset ? `<form class="chat__form" id="thread-form"><input class="inp chat__input" id="thread-input" maxlength="1000" required placeholder="${escapeHTML(STR.messagePlaceholder)}" autocomplete="off" /><button class="btn btn--primary" type="submit">${escapeHTML(STR.send)}</button></form>` : `<p class="hint">${escapeHTML(STR.sendUnavailable)}</p>`}`;
+  const renderMessages = () => {
+    const log = $('#thread-log', body);
+    log.innerHTML = msgs.map(m => `<div class="chat__msg ${m.role === 'USER' ? 'chat__msg--bot' : 'chat__msg--user'}"><div>${escapeHTML(m.text)}</div><span class="thread__meta">${escapeHTML(m.role === 'USER' ? STR.customer : STR.operator)} · ${escapeHTML(m.status)} · ${fmtDate(m.createdAt)}</span></div>`).join('') || `<div class="chat__empty">${escapeHTML(STR.noMessages)}</div>`;
+    log.scrollTop = log.scrollHeight;
+  };
+  renderMessages();
+  $('#thread-form', body)?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = $('#thread-input', body), button = $('button[type=submit]', e.currentTarget), text = input.value.trim();
+    if (!text) return;
+    button.disabled = true;
+    try {
+      const sent = await api(`/app/api/conversations/${id}/messages`, { method: 'POST', body: JSON.stringify({ text, assetExternalId: asset.externalId }) });
+      msgs.push(sent); input.value = ''; renderMessages(); toast(STR.messageDelivered);
+      state.conversations = await api('/app/api/conversations');
+    } catch { toast(STR.messageFailed); }
+    finally { button.disabled = false; input.focus(); }
+  });
+  openDrawer(`${STR.threadTitle} · ${recipient}`, body);
+}
 function renderClients(root) { const rows = state.clients.map(c => `<tr><td class="name">${escapeHTML(c.name)}</td><td class="mono">${escapeHTML(c.phone)}</td><td>${escapeHTML(c.address || '')}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`).join(''); root.innerHTML = hero(labels.clients, STR.clientsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.thPhone}</th><th>${STR.thAddress}</th><th class="right">${STR.thNo}</th></tr>`, rows); }
 function openClientForm() {
   const form = document.createElement('form');

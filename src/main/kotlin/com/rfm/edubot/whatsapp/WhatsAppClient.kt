@@ -2,6 +2,7 @@ package com.rfm.edubot.whatsapp
 
 import com.rfm.edubot.channel.ChannelCapabilities
 import com.rfm.edubot.channel.OutboundClient
+import com.rfm.edubot.channel.OutboundDeliveryException
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.*
@@ -83,7 +84,7 @@ class WhatsAppClient(
                         throw RuntimeException("WhatsApp API error: ${response.status.value} - $errorBody")
                     }
                     log.error("Permanent WhatsApp error (attempt {}): {} - {}", attempt, response.status.value, errorBody)
-                    return
+                    throw OutboundDeliveryException("WhatsApp API error: ${response.status.value} - $errorBody")
                 }
 
                 log.info("Message sent to WhatsApp: to={}", to)
@@ -91,6 +92,7 @@ class WhatsAppClient(
             } catch (e: Exception) {
                 lastException = e
                 log.warn("WhatsApp send failed (attempt {}/{}): {}", attempt, maxRetries, e.message)
+                if (e is OutboundDeliveryException) throw e
                 if (attempt < maxRetries) {
                     delay(500L * (1L shl (attempt - 1)))
                 }

@@ -49,6 +49,7 @@ data class InstagramMessage(
     val mid: String? = null,
     val text: String? = null,
     @SerialName("is_echo") val isEcho: Boolean = false,
+    @SerialName("is_self") val isSelf: Boolean = false,
 )
 
 @Serializable

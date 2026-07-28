@@ -77,6 +77,12 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         return collection.find(filter).sort(Document("lastSeenAt", -1)).limit(limit).toList().map { it.toUser() }
     }
 
+    suspend fun displayNamesByIds(ids: Collection<ObjectId>): Map<ObjectId, String?> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids))).toList()
+            .associate { it.getObjectId("_id") to it.getString("displayName") }
+    }
+
     suspend fun setStatus(id: ObjectId, status: UserStatus): User? {
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
