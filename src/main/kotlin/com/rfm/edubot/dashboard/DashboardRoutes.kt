@@ -315,6 +315,7 @@ fun Route.dashboardRoutes(
                     ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(mapOf("locale" to updated.locale))
             }
+            dashboardAssistantRoutes(mongo, tenantRepository, dashboardUsers, aiClient)
             crmRoutes(mongo, tenantRepository, dashboardUsers, appConfig)
         }
     }
@@ -476,7 +477,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
     }
 }
 
-private suspend fun io.ktor.server.application.ApplicationCall.dashboardContext(tenantRepository: TenantRepository, users: DashboardUserRepository): DashboardContext? {
+internal suspend fun io.ktor.server.application.ApplicationCall.dashboardContext(tenantRepository: TenantRepository, users: DashboardUserRepository): DashboardContext? {
     val principal = this.principal<JWTPrincipal>() ?: return null
     val tenantId = ObjectId(principal.payload.getClaim("tenantId").asString())
     val tenant = tenantRepository.findById(tenantId) ?: run { respond(HttpStatusCode.NotFound); return null }
@@ -485,9 +486,9 @@ private suspend fun io.ktor.server.application.ApplicationCall.dashboardContext(
     return DashboardContext(tenant, user, typ)
 }
 
-private data class DashboardContext(val tenant: Tenant, val user: DashboardUser?, val principalType: String)
+internal data class DashboardContext(val tenant: Tenant, val user: DashboardUser?, val principalType: String)
 
-private fun DashboardContext.requireModule(id: String): Boolean = id in DashboardModules.effectiveFor(tenant)
+internal fun DashboardContext.requireModule(id: String): Boolean = id in DashboardModules.effectiveFor(tenant)
 
 private data class CrmDeps(
     val clients: ClientRepository,
@@ -551,15 +552,13 @@ private suspend fun runPersonaTest(
         context.add(ChatMessage(role = role, content = msg.content))
     }
 
-    val crmTools = if (tenant.agentType == "CRM_V1") {
-        CrmTools(
-            ClientRepository(mongo, tenant.id),
-            QuoteRepository(mongo, tenant.id),
-            InvoiceRepository(mongo, tenant.id),
-            StandardItemRepository(mongo, tenant.id),
-        )
-    } else null
-    val toolDefs = crmTools?.readOnlyDefinitions.orEmpty()
+    val crmTools = CrmTools(
+        ClientRepository(mongo, tenant.id),
+        QuoteRepository(mongo, tenant.id),
+        InvoiceRepository(mongo, tenant.id),
+        StandardItemRepository(mongo, tenant.id),
+    )
+    val toolDefs = crmTools.readOnlyDefinitions
     val allowedTools = toolDefs.map { it.name }.toSet()
 
     var reply = "Desculpe, não consegui processar isso."
@@ -575,7 +574,7 @@ private suspend fun runPersonaTest(
             is AiResponse.ToolUse -> {
                 context.add(response.message)
                 for (call in response.calls) {
-                    val result = if (call.name in allowedTools && crmTools != null) {
+                    val result = if (call.name in allowedTools) {
                         try {
                             crmTools.execute(call)
                         } catch (e: Exception) {
@@ -610,7 +609,7 @@ private suspend fun runPersonaTest(
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
-@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val agentType: String, val locale: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val channels: List<ChannelMeDto> = emptyList())
 @Serializable private data class ChannelMeDto(val platform: String, val externalId: String, val displayName: String? = null)
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
 @Serializable private data class OverviewDto(val users: Long, val conversations: Long, val messages: Long, val messagesToday: Long, val quotes: Long, val invoices: Long)
@@ -632,7 +631,7 @@ private suspend fun runPersonaTest(
 
 private fun ChannelBinding?.toWebWidgetDto() = WebWidgetDto(publicKey = this?.externalId, allowedOrigins = this?.allowedOrigins ?: emptyList())
 
-private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, agentType, locale, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
+private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, locale, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),

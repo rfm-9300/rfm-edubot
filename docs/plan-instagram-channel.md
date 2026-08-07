@@ -245,7 +245,7 @@ The current tenant admin is single-channel. Adding an IG account needs:
 paste IG account id + Page token → Save. The registry re-indexes and the next IG DM to that
 account is handled by the same agent. No redeploy.
 
-> Note: the `agentType` / `openrouterModel` / rate-limit fields stay tenant-level and shared
+> Note: the `openrouterModel` / rate-limit fields stay tenant-level and shared
 > across that tenant's channels — i.e. the operator configures the bot once, not per channel.
 
 ## 9. Open decisions

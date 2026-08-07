@@ -1,8 +1,9 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
-let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], webWidget: null, search: '', active: 'overview', selectedAsset: '' };
+let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, search: '', active: 'overview', selectedAsset: '' };
 let personaChatBusy = false;
+let assistantBusy = false;
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
 // `labels`/`STR` are live proxies over the active locale, so every render() reads the current language.
@@ -42,7 +43,7 @@ async function bootAuthed() {
   I18N.applyTenantDefault(state.me.tenant.locale);
   I18N.applyDom(document);
   $('#brand-name').textContent = state.me.tenant.name;
-  $('#brand-sub').textContent = `${state.me.tenant.agentType} · ${state.me.tenant.slug}`;
+  $('#brand-sub').textContent = state.me.tenant.slug;
   $('#principal-type').textContent = state.me.principalType;
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
   renderNav();
@@ -66,6 +67,11 @@ async function loadModule(tab) {
   if (tab === 'invoices') state.invoices = await api('/app/api/crm/invoices');
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
   if (tab === 'persona') state.persona = await api('/app/api/persona');
+  if (tab === 'ai-assistant') {
+    state.assistantThreads = await api('/app/api/assistant/threads');
+    if (state.assistantThread && !state.assistantThreads.some(t => t.id === state.assistantThread.thread.id)) state.assistantThread = null;
+    if (!state.assistantThread && state.assistantThreads.length) state.assistantThread = await api(`/app/api/assistant/threads/${state.assistantThreads[0].id}`);
+  }
   if (tab === 'settings') state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
 }
 
@@ -86,6 +92,7 @@ function render() {
   if (state.active === 'invoices') return renderInvoices(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
+  if (state.active === 'ai-assistant') return renderAssistant(root);
   renderSettings(root);
 }
 
@@ -353,6 +360,102 @@ async function openInvoiceForm() {
 function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.quotes, STR.quotesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
 function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.invoices, STR.invoicesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th>${STR.thDueDate}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
 function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.catalog, STR.catalogDesc) + panelTable(`<tr><th>${STR.thType}</th><th>${STR.thCategory}</th><th>${STR.thDescription}</th><th>${STR.thUnit}</th><th class="right">${STR.thPrice}</th></tr>`, rows); }
+
+function assistantActionLabel(action) {
+  const args = action.arguments || {};
+  if (action.toolName === 'create_client') return STR.assistantCreateClient({ name: args.name || '' });
+  if (action.toolName === 'create_quote') return STR.assistantCreateQuote;
+  if (action.toolName === 'update_quote') return STR.assistantUpdateQuote({ id: args.quote_id || '' });
+  if (action.toolName === 'create_invoice') return STR.assistantCreateInvoice;
+  if (action.toolName === 'mark_invoice_paid') return STR.assistantMarkPaid({ id: args.invoice_id || '' });
+  return STR.assistantChangeData;
+}
+
+function assistantActionDetails(action) {
+  const args = action.arguments || {};
+  const details = [];
+  if (args.name) details.push(`${STR.thName}: ${args.name}`);
+  if (args.phone) details.push(`${STR.thPhone}: ${args.phone}`);
+  if (args.address) details.push(`${STR.thAddress}: ${args.address}`);
+  if (args.client_id) details.push(STR.assistantClientRef({ id: args.client_id }));
+  if (args.quote_id) details.push(STR.assistantQuoteRef({ id: args.quote_id }));
+  if (args.invoice_id) details.push(STR.assistantInvoiceRef({ id: args.invoice_id }));
+  if (args.valid_until) details.push(STR.assistantValidUntil({ date: args.valid_until }));
+  if (args.due_date) details.push(STR.assistantDueDate({ date: args.due_date }));
+  if (args.status) details.push(STR.assistantNewStatus({ status: args.status }));
+  if (args.notes) details.push(`${STR.quoteNotes}: ${args.notes}`);
+  (args.items || []).forEach(item => details.push(`${item.description} · ${item.quantity || 1} × ${fmtEUR(item.price_eur)}`));
+  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
+}
+
+async function openAssistantThread(id) {
+  state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
+  render();
+}
+
+async function createAssistantThread() {
+  const thread = await api('/app/api/assistant/threads', { method: 'POST', body: JSON.stringify({ title: STR.assistantNewThread }) });
+  state.assistantThreads.unshift(thread);
+  state.assistantThread = { thread, messages: [] };
+  render();
+}
+
+function renderAssistant(root) {
+  const current = state.assistantThread;
+  const threadRows = state.assistantThreads.map(t => `<button class="assistant__thread ${current?.thread.id === t.id ? 'is-active' : ''}" data-assistant-thread="${t.id}" type="button"><strong>${escapeHTML(t.title)}</strong><span>${escapeHTML(fmtDate(t.updatedAt))}</span></button>`).join('');
+  const messages = (current?.messages || []).map(m => {
+    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>` : '';
+    if (!m.action) return bubble;
+    const pending = m.action.status === 'PENDING';
+    const details = assistantActionDetails(m.action);
+    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}</div>`;
+  }).join('');
+  root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
+  $('#assistant-new').addEventListener('click', createAssistantThread);
+  $$('[data-assistant-thread]').forEach(b => b.addEventListener('click', () => openAssistantThread(b.dataset.assistantThread)));
+  const log = $('#assistant-log'); log.scrollTop = log.scrollHeight;
+  const composer = $('#assistant-input');
+  const resizeComposer = () => {
+    composer.style.height = 'auto';
+    composer.style.height = `${Math.min(composer.scrollHeight, 140)}px`;
+  };
+  composer.addEventListener('input', resizeComposer);
+  resizeComposer();
+  composer.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+      e.preventDefault();
+      $('#assistant-form').requestSubmit();
+    }
+  });
+  $('#assistant-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (!current || assistantBusy) return;
+    const input = $('#assistant-input'), content = input.value.trim();
+    if (!content) return;
+    input.value = '';
+    assistantBusy = true;
+    current.messages.push({ role: 'user', content });
+    renderAssistant(root);
+    try {
+      state.assistantThread = await api(`/app/api/assistant/threads/${current.thread.id}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
+      state.assistantThreads = await api('/app/api/assistant/threads');
+    } catch { toast(STR.assistantError); }
+    finally { assistantBusy = false; render(); }
+  });
+  $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
+  $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
+}
+
+async function updateAssistantAction(threadId, actionId, decision) {
+  if (assistantBusy) return;
+  assistantBusy = true;
+  render();
+  try {
+    state.assistantThread = await api(`/app/api/assistant/threads/${threadId}/actions/${encodeURIComponent(actionId)}/${decision}`, { method: 'POST', body: '{}' });
+    state.assistantThreads = await api('/app/api/assistant/threads');
+  } catch { toast(STR.assistantActionError); }
+  finally { assistantBusy = false; render(); }
+}
 let personaPollTimer;
 async function refreshPersona() {
   state.persona = await api('/app/api/persona');

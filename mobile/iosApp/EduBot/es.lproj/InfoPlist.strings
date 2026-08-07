@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Permite el acceso al micrófono para dictar mensajes al asistente de IA.";
+"NSSpeechRecognitionUsageDescription" = "Permite el reconocimiento de voz para convertir tu voz en un mensaje editable.";

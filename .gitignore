@@ -2,9 +2,14 @@
 *.class
 *.jar
 *.log
+*.hprof
 build/
 .gradle/
 .idea/
+mobile/local.properties
+mobile/build/
+mobile/.kotlin
+
 *.iml
 .DS_Store
 /.env.example

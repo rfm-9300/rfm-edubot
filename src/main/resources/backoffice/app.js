@@ -2,7 +2,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 let token = localStorage.getItem('adminToken') || '';
-let state = { tenants: [], stats: {}, agentTypes: ['CRM_V1'], search: '', whatsAppSignup: { enabled: false } };
+let state = { tenants: [], stats: {}, search: '', whatsAppSignup: { enabled: false } };
 let fbSdkPromise;
 
 // Backoffice copy comes from the shared i18n catalogs (admin/catalog.*.js). Locale follows the
@@ -16,10 +16,11 @@ const MODULES = [
   { id: 'contacts', always: true },
   { id: 'settings', always: true },
   { id: 'persona' },
-  { id: 'clients', crm: true },
-  { id: 'quotes', crm: true },
-  { id: 'invoices', crm: true },
-  { id: 'catalog', crm: true },
+  { id: 'clients' },
+  { id: 'quotes' },
+  { id: 'invoices' },
+  { id: 'catalog' },
+  { id: 'ai-assistant' },
 ];
 
 async function api(path, options = {}) {
@@ -119,12 +120,10 @@ function renderLogin() {
 }
 
 async function loadAll() {
-  const [agentTypes, tenants, whatsAppSignup] = await Promise.all([
-    api('/admin/api/agent-types'),
+  const [tenants, whatsAppSignup] = await Promise.all([
     api('/admin/api/tenants'),
     api('/admin/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false })),
   ]);
-  state.agentTypes = agentTypes;
   state.tenants = tenants;
   state.whatsAppSignup = whatsAppSignup;
   const stats = await Promise.all(state.tenants.map(t => api(`/admin/api/tenants/${encodeURIComponent(t.slug)}/stats`).catch(() => null)));
@@ -142,16 +141,15 @@ function renderTenants() {
     <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
     <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thAgent)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
+        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
-      ${rows.length === 0 ? `<tr><td colspan="8"><div class="empty"><p class="empty__title">${escapeHTML(T.emptyTenants)}</p></div></td></tr>` : rows.map(t => {
+      ${rows.length === 0 ? `<tr><td colspan="7"><div class="empty"><p class="empty__title">${escapeHTML(T.emptyTenants)}</p></div></td></tr>` : rows.map(t => {
         const s = state.stats[t.slug] || {};
         const pillClass = t.status === 'ACTIVE' ? 'pill--ok' : t.status === 'SUSPENDED' ? 'pill--warn' : 'pill--bad';
         return `<tr>
           <td class="name">${escapeHTML(t.name)}</td>
           <td class="id">${escapeHTML(t.slug)}</td>
           <td>${channelBadges(t.channels)}</td>
-          <td>${escapeHTML(t.agentType)}</td>
           <td><span class="pill ${pillClass}">${escapeHTML(t.status)}</span></td>
           <td class="num">${s.messages || 0}</td>
           <td class="mono muted">${fmtDate(s.lastMessageAt)}</td>
@@ -237,7 +235,6 @@ function tenantForm(editing) {
     <div class="form__grid">
       <div class="form__row form__row--full"><label class="lbl">${escapeHTML(T.tenantNameLabel)}</label><input class="inp" id="t-name" value="${escapeHTML(editing?.name || '')}" /></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.tenantSlugLabel)}</label><input class="inp inp--mono" id="t-slug" value="${escapeHTML(editing?.slug || '')}" ${editing ? 'readonly' : ''} /></div>
-      <div class="form__row"><label class="lbl">${escapeHTML(T.agentTypeLabel)}</label><select class="sel" id="t-agent">${state.agentTypes.map(a => `<option value="${a}" ${editing?.agentType === a ? 'selected' : ''}>${a}</option>`).join('')}</select></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.languageLabel)}</label><select class="sel" id="t-locale">${I18N.SUPPORTED.map(l => `<option value="${l}" ${(editing?.locale || I18N.DEFAULT) === l ? 'selected' : ''}>${escapeHTML(I18N.LANG_NAMES[l] || l)}</option>`).join('')}</select></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.modelOverride)}</label><input class="inp inp--mono" id="t-model" value="${escapeHTML(editing?.openrouterModel || '')}" placeholder="${escapeHTML(T.modelPlaceholder)}" /></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerHour)}</label><input class="inp inp--mono" id="t-hour" type="number" value="${editing?.rateLimitPerHour || 30}" /></div>
@@ -269,7 +266,6 @@ function tenantForm(editing) {
   $('#add-channel', wrap).addEventListener('click', () => addChannelRow(wrap));
   $('#wa-connect', wrap)?.addEventListener('click', () => connectWhatsApp(editing.slug));
   $('#ig-connect', wrap)?.addEventListener('click', () => connectInstagram(editing.slug));
-  $('#t-agent', wrap).addEventListener('change', () => renderModulesBox(wrap, editing));
   if (!editing) {
     let touched = false;
     $('#t-slug', wrap).addEventListener('input', () => { touched = true; });
@@ -282,7 +278,6 @@ function tenantForm(editing) {
     async onSave() {
       const payload = {
         name: $('#t-name', wrap).value.trim(),
-        agentType: $('#t-agent', wrap).value,
         locale: $('#t-locale', wrap).value,
         openrouterModel: $('#t-model', wrap).value.trim() || null,
         rateLimitPerHour: Number($('#t-hour', wrap).value || 30),
@@ -308,20 +303,15 @@ function tenantForm(editing) {
   });
 }
 
-function modulesForAgent(agentType) {
-  return MODULES.filter(m => !m.crm || agentType === 'CRM_V1');
-}
-
-function selectedModulesFor(editing, agentType) {
-  const selected = new Set(editing?.effectiveModules || ['overview', 'conversations', 'contacts', 'settings', 'clients', 'quotes', 'invoices', 'catalog']);
-  return modulesForAgent(agentType).filter(m => m.always || selected.has(m.id)).map(m => m.id);
+function selectedModulesFor(editing) {
+  const selected = new Set(editing?.effectiveModules || MODULES.map(m => m.id));
+  return MODULES.filter(m => m.always || selected.has(m.id)).map(m => m.id);
 }
 
 function renderModulesBox(root, editing) {
-  const agentType = $('#t-agent', root).value;
-  const selected = new Set(selectedModulesFor(editing, agentType));
+  const selected = new Set(selectedModulesFor(editing));
   $('#modules-box', root).innerHTML = `<div class="row" style="gap:10px; flex-wrap:wrap">
-    ${modulesForAgent(agentType).map(m => `<label class="pill ${m.always ? 'pill--ok' : 'pill--info'}" style="cursor:${m.always ? 'not-allowed' : 'pointer'}">
+    ${MODULES.map(m => `<label class="pill ${m.always ? 'pill--ok' : 'pill--info'}" style="cursor:${m.always ? 'not-allowed' : 'pointer'}">
       <input type="checkbox" data-module="${m.id}" ${selected.has(m.id) ? 'checked' : ''} ${m.always ? 'disabled' : ''} /> ${escapeHTML(I18N.t('common.nav.' + m.id))}
     </label>`).join('')}
   </div>`;

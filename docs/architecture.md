@@ -71,6 +71,7 @@ graph TD
         MR[MessageRepository]
         CRM[CRM repositories<br/>clients quotes invoices]
         RL[RateLimiter<br/>token bucket]
+        DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
     end
 
     subgraph External
@@ -92,6 +93,8 @@ graph TD
     MP --> OC
     MP --> PDF
     AR --> CRM
+    AR --> DA
+    DA --> AI & CRM & Mongo
     UR & CR & MR & CRM & DS --> Mongo
     Health --> Mongo
 ```
@@ -114,6 +117,23 @@ graph TD
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes |
 | `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages |
 
+## Tenant Module Access
+
+`Tenant.enabledModules` is the only tenant-level dashboard capability control. The canonical
+catalog lives in `DashboardModules`:
+
+- Always enabled and not admin-disableable: `overview`, `conversations`, `contacts`, `settings`.
+- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`.
+
+The server sanitizes explicit selections against this catalog and force-adds the always-on
+modules. A missing Mongo `enabledModules` field maps to `null`, which preserves legacy behavior by
+enabling the full catalog. Legacy Mongo `agentType` fields are ignored by the tenant mapper and do
+not require a data migration.
+
+`GET /app/api/me` returns the effective module list for navigation, but navigation is not the
+security boundary. Every dashboard module route and tenant-scoped admin CRM route checks the same
+effective module list and returns `403 Forbidden` when its module is disabled.
+
 ## MongoDB Collections
 
 | Collection | Purpose | Key Index |
@@ -126,6 +146,20 @@ graph TD
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
 | `crm.sequences` | Atomic quote/invoice numbering counters | unique on `name` |
+| `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
+| `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+
+## Dashboard AI Assistant
+
+The optional `ai-assistant` module uses the same `AiClient` and `CrmTools` implementations as the
+messaging pipeline, but applies the signed-in tenant's enabled modules as a second capability filter.
+Read tools execute during the chat turn. Write tool calls are persisted as `PENDING` actions and are
+not executed until the owning dashboard user confirms the exact payload shown in the UI. Confirmation
+atomically claims the action before execution, preventing duplicate writes from repeated requests.
+
+Threads and messages are scoped by both `tenantId` and an owner key derived from the dashboard user,
+so users cannot open or confirm another user's assistant actions. Every assistant endpoint is also
+protected by dashboard JWT authentication and the normal server-side module gate.
 
 ## Context Building
 
@@ -160,3 +194,19 @@ cloudflared tunnel → Caddy (TLS) → Ktor :8080
 - **Dev**: `docker compose up` starts app + mongo:7 + mongo-express (:8081)
 - **Prod**: `docker-compose.prod.yml` — app + mongo + Caddy reverse proxy with TLS
 - **Image**: multi-stage Dockerfile → fat JAR at `build/libs/app.jar`, distroless-style runtime
+
+## Mobile Frontend Foundation
+
+The `mobile/` directory is an independent Kotlin Multiplatform build that consumes the tenant
+dashboard HTTP API. It deliberately remains separate from the server's Gradle build so the mobile
+toolchain can evolve independently of the Ktor runtime.
+
+- `mobile/shared` is a KMP library targeting Android, iOS devices, and iOS simulators. It owns
+  Compose Multiplatform UI, dashboard DTOs, Ktor networking, session state, and shared tests.
+- `mobile/androidApp` is the thin Android entry point (`com.rfm.edubot`) and persists the dashboard
+  access token using Android Keystore-backed encrypted preferences.
+- The shared iOS target exports a static `EduBotShared` framework with bundle ID
+  `com.rfm.edubot.shared`, ready for an Xcode host app.
+- The first executable slice supports tenant login, secure Android token restoration, dynamic
+  module navigation from `GET /app/api/me`, and the overview endpoint. Further feature modules
+  build on the same tenant-scoped API contract.

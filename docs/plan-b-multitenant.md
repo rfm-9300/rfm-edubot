@@ -69,8 +69,7 @@ MongoDB "wabot"  — no tenantId anywhere
 
 ### Reality check on the pipeline (important)
 
-The previous draft assumed `MessagePipeline` only needed to swap `CrmTools` for an
-`AgentDefinition` — "minor change". **That is not true.** The pipeline is deeply CRM-aware:
+The pipeline is deeply CRM-aware:
 
 - Hardcodes `SystemPrompts.CRM_V1` in `buildContext` (`MessagePipeline.kt:264`).
 - Owns PDF generation + WhatsApp document upload: `sendCreatedDocuments`,
@@ -81,12 +80,9 @@ The previous draft assumed `MessagePipeline` only needed to swap `CrmTools` for 
 - Holds `clientRepository`/`quoteRepository`/`invoiceRepository` directly to fetch documents
   for PDF rendering.
 
-So "make the bot pluggable per tenant" is really two separable goals:
-1. **Multi-tenancy** (isolation + routing) — mechanical, low-risk, high-value.
-2. **Multi-agent** (different behaviours per tenant) — a real refactor of the pipeline.
-
-The recommendation is to **ship multi-tenancy first with the CRM behaviour as the only agent
-type**, then extract the agent abstraction. The phase order below reflects that.
+The multi-tenant implementation keeps this single CRM behavior and the
+`SystemPrompts.CRM_V1` base prompt. Tenant capabilities are controlled only through dashboard
+module selection; no per-tenant behavior/profile abstraction is planned here.
 
 ---
 
@@ -128,10 +124,6 @@ com/rfm/edubot/
     TenantSeeder.kt              NEW  seed first tenant from env on empty collection
     TenantPipelineFactory.kt     NEW  build + cache MessagePipeline per tenant
     TenantContext.kt             NEW  small holder: tenantId passed through the queue
-  agent/                          (Phase 5 — multi-agent, optional / later)
-    AgentDefinition.kt           NEW  interface: systemPrompt + tools + execute + post-processing
-    CrmAgent.kt                  NEW  wraps current CRM behaviour extracted from the pipeline
-    AgentRegistry.kt             NEW  "CRM_V1" → factory(mongo, tenantId, deps)
   admin/
     auth/JwtConfig.kt            NEW  sign/verify JWT
     auth/AuthRoutes.kt           NEW  POST /admin/auth/login
@@ -142,7 +134,7 @@ com/rfm/edubot/
   conversation/Repositories.kt   CHANGED  tenantId in ctor + every filter
   crm/CrmRepositories.kt         CHANGED  tenantId in ctor + every filter + aggregation $match
   messaging/MessageQueue.kt      CHANGED  InboundMessage carries tenantId + phoneNumberId
-  messaging/MessagePipeline.kt   CHANGED  tenant-scoped deps (Phase 2); agent-driven (Phase 5)
+  messaging/MessagePipeline.kt   CHANGED  tenant-scoped deps (Phase 2)
   webhook/WebhookRoutes.kt       CHANGED  route by phone_number_id; per-tenant signature
   Application.kt                 CHANGED  wire registry + factory + dispatch loop
 ```
@@ -163,7 +155,7 @@ data class Tenant(
     val slug: String,                     // "construcoes-silva" — unique, URL-safe
     val name: String,                     // "Construções Silva Lda"
     val phoneNumberId: String,            // Meta phone number id — the ONLY per-tenant WA field; unique
-    val agentType: String = "CRM_V1",     // selects behaviour (Phase 5)
+    val enabledModules: List<String>? = null, // null preserves full module access
     val openrouterModel: String? = null,  // optional per-tenant model override
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
@@ -499,54 +491,6 @@ Creating a tenant: insert → `registry.put` → pipeline builds lazily on first
 
 ---
 
-## Phase 5 — Multi-agent abstraction (do this LAST, only when a 2nd behaviour exists)
-
-**Goal:** let different tenants run different bot behaviours, not just the CRM bot. Until you
-actually have a second agent type, this phase is pure refactor with no user-visible value —
-defer it.
-
-### 5.1 The honest scope
-
-Because the pipeline owns CRM specifics (system prompt, PDF sending, all the
-confirmation/keyword heuristics — see "Reality check" above), an `AgentDefinition` that is more
-than a thin tool-bag must capture:
-- `systemPrompt` (replaces the hardcoded `SystemPrompts.CRM_V1` at `MessagePipeline.kt:264`),
-- `toolDefinitions` + `executeTool(call)`,
-- **pre-flight hooks**: "should tools be available for this message?", "is this an explicit
-  confirmation?" (`shouldUseCrmTools`, `isConfirmationReply*`, `requiresExplicitConfirmation`),
-- **post-flight hook**: "given tool results, are there documents/attachments to send?"
-  (`sendCreatedDocuments`, `sendLatestQuotePdf`).
-
-```kotlin
-interface AgentDefinition {
-    val systemPrompt: String
-    val toolDefinitions: List<ToolDefinition>
-    suspend fun executeTool(call: ToolCall): JsonObject
-    fun toolsRelevant(message: String, context: List<ChatMessage>): Boolean
-    fun requiresConfirmation(toolName: String): Boolean
-    suspend fun afterReply(waId: String, toolResults: List<JsonObject>, wa: WhatsAppClient)
-}
-```
-
-### 5.2 `CrmAgent` + `AgentRegistry`
-
-Move the CRM heuristics and PDF/document logic out of `MessagePipeline` into `CrmAgent`
-(constructed with the tenant-scoped repos + `PdfGenerator` + `pdfStoragePath`). `MessagePipeline`
-becomes generic: it orchestrates the AI loop and delegates the CRM-specific decisions to
-`agent`. `AgentRegistry` maps `tenant.agentType` ("CRM_V1") → factory, and
-`TenantPipelineFactory.build` calls `AgentRegistry.build(t.agentType, mongo, t.id, ...)` instead
-of hardcoding `CrmTools`.
-
-### 5.3 Adding a future agent then costs
-
-1. `agent/SupportAgent.kt : AgentDefinition`
-2. `AgentRegistry.register("SUPPORT_V1") { ... }`
-3. create the tenant with `agentType = "SUPPORT_V1"`
-
-No pipeline/webhook/infra changes.
-
----
-
 ## Implementation order (revised)
 
 ```
@@ -554,7 +498,6 @@ Phase 1  tenantId on all models + repos + indexes + migration script   (invisibl
 Phase 2  build pipeline from a Tenant (factory) + model override + shared HTTP engine
 Phase 3  TenantRegistry + TenantSeeder + multi-tenant webhook + dispatch loop   ← goes multi-tenant
 Phase 4  Admin: tenant CRUD + JWT auth + tenant-scoped CRM admin
-Phase 5  (later) AgentDefinition extraction — only when a 2nd behaviour is needed
 AppConfig cleanup  — keep whatsapp{verifyToken,appSecret,apiVersion} app-level; add admin block (Phase 4)
 ```
 

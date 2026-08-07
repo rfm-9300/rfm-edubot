@@ -60,7 +60,6 @@ class TenantRepository(mongoModule: MongoModule) {
         slug = getString("slug"),
         name = getString("name"),
         channels = getChannels(),
-        agentType = getString("agentType") ?: "CRM_V1",
         locale = com.rfm.edubot.tenant.model.TenantLocales.normalize(getString("locale")),
         openrouterModel = getString("openrouterModel"),
         enabledModules = getList("enabledModules", String::class.java),
@@ -76,7 +75,6 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("slug", slug)
             .append("name", name)
             .append("channels", channels.map { it.toDocument() })
-            .append("agentType", agentType)
             .append("locale", locale)
             .append("openrouterModel", openrouterModel)
             .append("enabledModules", enabledModules)

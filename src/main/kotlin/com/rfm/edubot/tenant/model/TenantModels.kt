@@ -9,7 +9,6 @@ data class Tenant(
     val slug: String,
     val name: String,
     val channels: List<ChannelBinding>,
-    val agentType: String = "CRM_V1",
     val locale: String = TenantLocales.DEFAULT,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,

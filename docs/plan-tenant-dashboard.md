@@ -16,8 +16,8 @@
   backoffice via impersonation.
 - **Scope: Overview, Conversations, Contacts, CRM, Bot self-service settings.**
 - **Structure: the dashboard is the container; CRM is one module inside it.** The chatbot is the
-  product; conversations/contacts/metrics are universal to every tenant. CRM (clients/quotes/
-  invoices/catalog) is specific to `agentType = CRM_V1`. Modules light up based on agent type.
+  product; conversations/contacts/metrics are universal to every tenant. Persona and CRM modules
+  are enabled per tenant by the operator.
 
 ---
 
@@ -105,17 +105,17 @@ The SPA needs no special-casing. Flag `operator-imp` for audit / optional read-o
 
 ## 3. Module architecture
 
-Shell (login, nav, tenant name/branding) + modules. Visibility driven by `agentType`:
+Shell (login, nav, tenant name/branding) + modules. Visibility is driven by the tenant's effective
+`enabledModules`:
 
 ```
-core (every tenant):       Overview · Conversations · Contacts · Settings
-CRM (agentType=CRM_V1):    Clients · Quotes · Invoices · Catalog
+core (every tenant):  Overview · Conversations · Contacts · Settings
+optional:             Persona · Clients · Quotes · Invoices · Catalog
 ```
 
-Forward hook: `AgentDefinition.dashboardModules: List<String>` (ties into MT Phase 5). Until then
-a `when (agentType)` map. Backend exposes enabled modules via `GET /app/api/me` →
-`{ tenant:{name,agentType,branding}, user:{email,role}, modules:[...] }`. Server still enforces
-gating per route — don't trust the client nav.
+The backend exposes effective modules via `GET /app/api/me` →
+`{ tenant:{name,branding}, user:{email,role}, modules:[...] }`. The server still enforces gating
+per route; client navigation visibility is not an authorization boundary.
 
 ---
 
@@ -146,8 +146,8 @@ today's repos only support the bot's hot path (findByWaId / findOrCreate / lastN
 
 ### 4.4 CRM module (mostly exists — rescope + gate)
 - Existing clients/quotes/invoices/catalog views, unchanged in function.
-- Changes: (a) drop slug from API base — tenant from token (§1); (b) mount only when
-  `agentType == CRM_V1`; (c) branding from tenant profile (§5).
+- Changes: (a) drop slug from API base — tenant from token (§1); (b) require the matching enabled
+  module on every route; (c) branding from tenant profile (§5).
 
 ### 4.5 Settings (self-service)
 - **Business profile** → name, email, phone, address, tax id, logo. **Feeds PDF generation.**
@@ -205,7 +205,7 @@ profile.
 | Conversations | `ConversationRepository.list()`; `MessageRepository.threadByConversation()`; routes |
 | Contacts | `UserRepository.list()` + `setStatus()`; routes |
 | Settings | tenant business profile storage + CRUD; `PdfGenerator` takes profile; team CRUD |
-| CRM | rescope existing routes to tenant-from-token; gate by agentType |
+| CRM | rescope existing routes to tenant-from-token; gate by effective modules |
 
 ---
 
@@ -214,8 +214,8 @@ profile.
 ```
 DASH-0  Prereqs: MT Phase 1 (tenantId isolation) + MT Phase 4 (JWT/auth infra)
 DASH-1  Auth: dashboard_users + tenant login + tenantId-from-token scoping + impersonation
-DASH-2  Shell: SPA shell (login, nav, module router) + /app/api/me + agentType→modules
-DASH-3  CRM module: rescope existing CRM to tenant-from-token, gate by agentType   ← reuses most code
+DASH-2  Shell: SPA shell (login, nav, module router) + /app/api/me + effective modules
+DASH-3  CRM module: rescope existing CRM to tenant-from-token, gate by module   ← reuses most code
 DASH-4  Overview module + /overview
 DASH-5  Conversations module (read) + repo list/thread methods
 DASH-6  Contacts module + user list/setStatus
@@ -235,8 +235,7 @@ DASH-1→3 to get clients logging into their CRM, then layer 4→7.
   backoffice still creates tenants and now also creates the first tenant admin user.
 - **Depends on** `plan-b-multitenant.md`: Phase 1 (isolation — mandatory for client login),
   Phase 4 (JWT machinery, extended with a tenant principal).
-- **Feeds** MT Phase 5: `AgentDefinition.dashboardModules` decides which modules each agent type
-  exposes.
+- **Capability source:** the operator-managed `Tenant.enabledModules` selection.
 
 ---
 
@@ -257,4 +256,4 @@ DASH-1→3 to get clients logging into their CRM, then layer 4→7.
 - A Tenant A token returns 404/empty for any id belonging to Tenant B — test cross-tenant ids.
 - Impersonation tokens short-lived and flagged (`operator-imp`).
 - Passwords bcrypt-hashed; login rate-limited; generic error on bad credentials.
-- Server enforces module/agentType gating on every route (don't trust client nav).
+- Server enforces effective-module gating on every route (don't trust client nav).

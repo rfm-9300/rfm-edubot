@@ -1,0 +1,31 @@
+name: EduBot
+options:
+  bundleIdPrefix: pt.thebotslab
+settings:
+  base:
+    SWIFT_VERSION: 5.0
+    IPHONEOS_DEPLOYMENT_TARGET: 16.0
+targets:
+  EduBot:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: EduBot
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: pt.thebotslab.edubot
+        PRODUCT_NAME: thebots.lab
+        DEVELOPMENT_TEAM: FRC8G7J7D5
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: thebots.lab
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: Allow microphone access to dictate messages to the AI assistant.
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: Allow speech recognition to turn your voice into an editable message.
+        TARGETED_DEVICE_FAMILY: "1,2"
+    preBuildScripts:
+      - name: Build shared Kotlin framework
+        basedOnDependencyAnalysis: false
+        script: |
+          cd "$SRCROOT/.."
+          ./gradlew :shared:embedAndSignAppleFrameworkForXcode

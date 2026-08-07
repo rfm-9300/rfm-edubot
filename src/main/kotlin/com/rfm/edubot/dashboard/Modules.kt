@@ -12,35 +12,21 @@ object DashboardModules {
     const val QUOTES = "quotes"
     const val INVOICES = "invoices"
     const val CATALOG = "catalog"
+    const val AI_ASSISTANT = "ai-assistant"
 
-    val alwaysOn = setOf(OVERVIEW, CONVERSATIONS, CONTACTS, SETTINGS)
-    private val optional = setOf(PERSONA)
-    private val crm = setOf(CLIENTS, QUOTES, INVOICES, CATALOG)
-    private val legacyBase = listOf(OVERVIEW, CONVERSATIONS, CONTACTS, SETTINGS)
-    private val legacyCrm = listOf(CLIENTS, QUOTES, INVOICES, CATALOG)
+    val alwaysOn = listOf(OVERVIEW, CONVERSATIONS, CONTACTS, SETTINGS)
+    val optional = listOf(PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG, AI_ASSISTANT)
+    val catalog = alwaysOn + optional
 
-    fun availableFor(tenant: Tenant): Set<String> = buildSet {
-        addAll(alwaysOn)
-        addAll(optional)
-        if (tenant.agentType == "CRM_V1") addAll(crm)
-    }
+    fun availableFor(): List<String> = catalog
 
     fun effectiveFor(tenant: Tenant): List<String> {
-        val available = availableFor(tenant)
-        val selected = tenant.enabledModules ?: legacyFor(tenant)
-        return selected.filter { it in available }.let { modules ->
-            (alwaysOn.filter { it in available } + modules).distinct()
-        }
+        val selected = tenant.enabledModules ?: catalog
+        return (alwaysOn + selected).filter { it in catalog }.distinct()
     }
 
-    fun sanitizeForTenant(tenant: Tenant, requested: List<String>?): List<String>? {
+    fun sanitize(requested: List<String>?): List<String>? {
         if (requested == null) return null
-        val available = availableFor(tenant)
-        return (alwaysOn + requested).filter { it in available }.distinct()
-    }
-
-    private fun legacyFor(tenant: Tenant): List<String> = buildList {
-        addAll(legacyBase)
-        if (tenant.agentType == "CRM_V1") addAll(legacyCrm)
+        return (alwaysOn + requested).filter { it in catalog }.distinct()
     }
 }

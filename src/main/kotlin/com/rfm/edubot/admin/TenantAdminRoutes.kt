@@ -51,8 +51,6 @@ fun Route.tenantAdminRoutes(
     val bindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
     authenticate("admin-jwt") {
         route("/admin/api") {
-            get("/agent-types") { call.respond(listOf("CRM_V1")) }
-
             get("/tenants") {
                 call.respond(tenantRepository.findAll().map { it.dto() })
             }
@@ -78,20 +76,18 @@ fun Route.tenantAdminRoutes(
                     slug = request.slug.trim(),
                     name = request.name.trim(),
                     channels = bindings,
-                    agentType = request.agentType.ifBlank { "CRM_V1" },
                     locale = com.rfm.edubot.tenant.model.TenantLocales.normalize(request.locale),
                     openrouterModel = request.openrouterModel?.trim()?.takeIf { it.isNotBlank() },
-                    enabledModules = null,
+                    enabledModules = DashboardModules.sanitize(request.enabledModules),
                     rateLimitPerHour = request.rateLimitPerHour,
                     rateLimitPerDay = request.rateLimitPerDay,
                     createdAt = now,
                     updatedAt = now,
                 )
-                val tenantWithModules = tenant.copy(enabledModules = DashboardModules.sanitizeForTenant(tenant, request.enabledModules))
-                tenantRepository.create(tenantWithModules)
+                tenantRepository.create(tenant)
                 StandardItemRepository(mongo, tenant.id).seedDefaults()
-                tenantRegistry.put(tenantWithModules)
-                call.respond(HttpStatusCode.Created, tenantWithModules.dto())
+                tenantRegistry.put(tenant)
+                call.respond(HttpStatusCode.Created, tenant.dto())
             }
 
             get("/tenants/{slug}") {
@@ -106,14 +102,12 @@ fun Route.tenantAdminRoutes(
                 val now = SystemClock.now()
                 val updates = mutableListOf(
                     Updates.set("name", request.name.trim()),
-                    Updates.set("agentType", request.agentType.ifBlank { "CRM_V1" }),
                     Updates.set("openrouterModel", request.openrouterModel?.trim()?.takeIf { it.isNotBlank() }),
                     Updates.set("rateLimitPerHour", request.rateLimitPerHour),
                     Updates.set("rateLimitPerDay", request.rateLimitPerDay),
                     Updates.set("updatedAt", now.toDate()),
                 )
-                val moduleTenant = current.copy(agentType = request.agentType.ifBlank { "CRM_V1" })
-                updates.add(Updates.set("enabledModules", DashboardModules.sanitizeForTenant(moduleTenant, request.enabledModules)))
+                updates.add(Updates.set("enabledModules", DashboardModules.sanitize(request.enabledModules)))
                 request.locale?.let { updates.add(Updates.set("locale", com.rfm.edubot.tenant.model.TenantLocales.normalize(it))) }
                 request.channels?.let {
                     val bindings = it.toBindings(current.channels)
@@ -212,44 +206,44 @@ fun Route.tenantAdminRoutes(
 
             route("/tenants/{slug}") {
                 get("/clients") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CLIENTS) ?: return@get
                     call.respond(deps.clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
                 }
                 get("/standard-items") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CATALOG) ?: return@get
                     call.respond(deps.standardItems.search(call.request.queryParameters["q"], call.request.queryParameters["type"]))
                 }
                 post("/standard-items") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CATALOG) ?: return@post
                     val request = call.receive<StandardItemRequest>()
                     call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
                 }
                 post("/standard-items/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CATALOG) ?: return@post
                     val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val request = call.receive<StandardItemRequest>()
                     val item = deps.standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound)
                     call.respond(item)
                 }
                 delete("/standard-items/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@delete
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CATALOG) ?: return@delete
                     val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
                     if (!deps.standardItems.delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
                     call.respond(mapOf("deleted" to true))
                 }
                 get("/clients/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CLIENTS) ?: return@get
                     val client = deps.clients.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(client.dto())
                 }
                 post("/clients") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                     call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
                 }
                 get("/quotes") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.QUOTES) ?: return@get
                     val result = deps.quotes.list(
                         clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
                         status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { QuoteStatus.valueOf(it.uppercase()) },
@@ -257,7 +251,7 @@ fun Route.tenantAdminRoutes(
                     call.respond(result.map { it.dto(deps.clients.findById(it.clientId)) })
                 }
                 post("/quotes") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.QUOTES) ?: return@post
                     val request = call.receive<CreateQuoteRequest>()
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val quote = deps.quotes.create(ObjectId(request.clientId), request.items.map { it.toLineItem() }, request.notes, request.validUntil?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) })
@@ -267,17 +261,17 @@ fun Route.tenantAdminRoutes(
                     call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
                 }
                 get("/quotes/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.QUOTES) ?: return@get
                     val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(quote.dto(deps.clients.findById(quote.clientId)))
                 }
                 get("/quotes/{id}/pdf") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.QUOTES) ?: return@get
                     val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respondPdf(quote.pdfPath)
                 }
                 get("/invoices") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.INVOICES) ?: return@get
                     val result = deps.invoices.list(
                         clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
                         status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { InvoiceStatus.valueOf(it.uppercase()) },
@@ -285,7 +279,7 @@ fun Route.tenantAdminRoutes(
                     call.respond(result.map { it.dto(deps.clients.findById(it.clientId)) })
                 }
                 post("/invoices") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.INVOICES) ?: return@post
                     val request = call.receive<CreateInvoiceRequest>()
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
@@ -295,17 +289,17 @@ fun Route.tenantAdminRoutes(
                     call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
                 }
                 get("/invoices/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.INVOICES) ?: return@get
                     val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
                 }
                 get("/invoices/{id}/pdf") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.INVOICES) ?: return@get
                     val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respondPdf(invoice.pdfPath)
                 }
                 patch("/invoices/{id}/paid") {
-                    val deps = call.crmDeps(mongo, tenantRepository, appConfig) ?: return@patch
+                    val deps = call.crmDeps(mongo, tenantRepository, appConfig, DashboardModules.INVOICES) ?: return@patch
                     val invoice = deps.invoices.markPaid(ObjectId(call.parameters["id"])) ?: return@patch call.respond(HttpStatusCode.NotFound)
                     call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
                 }
@@ -332,8 +326,12 @@ private suspend fun ApplicationCall.resolveTenant(repo: TenantRepository): Tenan
     return tenant
 }
 
-private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepository, appConfig: AppConfig): CrmDeps? {
+private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepository, appConfig: AppConfig, module: String): CrmDeps? {
     val tenant = resolveTenant(repo) ?: return null
+    if (module !in DashboardModules.effectiveFor(tenant)) {
+        respond(HttpStatusCode.Forbidden)
+        return null
+    }
     return CrmDeps(
         clients = ClientRepository(mongo, tenant.id),
         quotes = QuoteRepository(mongo, tenant.id),
@@ -372,7 +370,6 @@ private data class TenantCreateRequest(
     val name: String,
     val slug: String,
     val phoneNumberId: String? = null,
-    val agentType: String = "CRM_V1",
     val locale: String? = null,
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
@@ -384,7 +381,6 @@ private data class TenantCreateRequest(
 @Serializable
 private data class TenantUpdateRequest(
     val name: String,
-    val agentType: String = "CRM_V1",
     val locale: String? = null,
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
@@ -419,7 +415,6 @@ private data class TenantDto(
     val slug: String,
     val name: String,
     val phoneNumberId: String,
-    val agentType: String,
     val locale: String,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,
@@ -458,12 +453,11 @@ private fun Tenant.dto() = TenantDto(
     slug = slug,
     name = name,
     phoneNumberId = phoneNumberId,
-    agentType = agentType,
     locale = locale,
     openrouterModel = openrouterModel,
     enabledModules = enabledModules,
     effectiveModules = DashboardModules.effectiveFor(this),
-    availableModules = DashboardModules.availableFor(this).toList(),
+    availableModules = DashboardModules.availableFor(),
     rateLimitPerHour = rateLimitPerHour,
     rateLimitPerDay = rateLimitPerDay,
     status = status.name,

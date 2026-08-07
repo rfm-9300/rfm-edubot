@@ -1,0 +1,2 @@
+"NSMicrophoneUsageDescription" = "Allow microphone access to dictate messages to the AI assistant.";
+"NSSpeechRecognitionUsageDescription" = "Allow speech recognition to turn your voice into an editable message.";

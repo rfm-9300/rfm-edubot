@@ -78,13 +78,11 @@ start until these exist:
 | `GET/POST/PUT/DELETE /admin/api/tenants` + suspend/activate/reload | Phase 4 |
 | Tenant-scoped CRM API `/admin/api/tenants/{slug}/...` | Phase 4 |
 
-This plan **adds two backend pieces** the MT plan didn't strictly need:
+This plan **adds one backend piece** the MT plan didn't strictly need:
 
 - **`GET /admin/api/tenants/{slug}/stats`** — lightweight per-tenant counts for the dashboard:
   `{ users, conversations, messages, quotes, invoices, lastMessageAt }`. Implemented with
   `countDocuments(tenantId filter)` on each collection — no new storage.
-- **Agent type catalog** — `GET /admin/api/agent-types` returning the registered agent types
-  (just `["CRM_V1"]` until Phase 5) so the "create tenant" form's dropdown isn't hardcoded.
 
 ---
 
@@ -103,7 +101,6 @@ Table, one row per tenant:
 | Name | `tenant.name` |
 | Slug | `tenant.slug` |
 | Phone number ID | `tenant.phoneNumberId` |
-| Agent | `tenant.agentType` |
 | Status | pill: ACTIVE / SUSPENDED / DELETED (reuse `.pill` styles) |
 | Messages / Last active | `stats.messages` / `stats.lastMessageAt` |
 | Actions | Open CRM · Edit · Suspend/Activate · Reload |
@@ -116,7 +113,7 @@ Fields:
 - **Name** (free text) → `name`
 - **Slug** (auto-suggested from name via the existing `slugify()` at `app.js:101`, editable)
 - **Phone number ID** (the one per-tenant WhatsApp value) → `phoneNumberId`
-- **Agent type** (dropdown from `/admin/api/agent-types`, default `CRM_V1`)
+- **Modules** (Persona, Clients, Quotes, Invoices, Catalog; core modules remain checked)
 - **Rate limits** (per hour / per day, prefilled 30 / 200)
 - **Model override** (optional; blank = use platform default)
 
@@ -126,7 +123,7 @@ tenant's first inbound message (no restart). Show a toast with the next step:
 > an automated step — linking the number in Meta is manual.)
 
 ### 4.3 Edit tenant (drawer form)
-- Editable: name, agent type, rate limits, model override.
+- Editable: name, enabled modules, rate limits, model override.
 - `phoneNumberId` and `slug` shown read-only (changing them is effectively a new bot — avoid
   foot-guns; if ever needed, do it deliberately, not in the common edit path).
 - Submit → `PUT /admin/api/tenants/{slug}` → registry refresh + pipeline evict (per MT Phase 4).
@@ -179,7 +176,7 @@ src/main/resources/admin/
 
 src/main/kotlin/com/rfm/edubot/admin/
   BackofficeRoutes.kt   NEW  GET /backoffice, /backoffice/{asset}  (mirror AdminRoutes.kt:43-58, behind auth)
-  TenantAdminRoutes.kt  NEW  (from MT Phase 4) tenant CRUD + /stats + /agent-types
+  TenantAdminRoutes.kt  NEW  (from MT Phase 4) tenant CRUD + /stats
   AuthRoutes.kt         NEW  (from MT Phase 4) login
 ```
 
@@ -191,7 +188,7 @@ src/main/kotlin/com/rfm/edubot/admin/
 BO-0  Prereqs: MT Phase 1 (tenant model) + Phase 3 (registry/routing) + Phase 4 (auth + tenant CRUD API)
 BO-1  Login screen + JWT plumbing in api(); guard /backoffice route
 BO-2  Tenants list (read-only) + /stats endpoint           ← first useful screen
-BO-3  Create tenant form (+ /agent-types)                  ← onboarding without curl
+BO-3  Create tenant form + module selection                ← onboarding without curl
 BO-4  Edit + lifecycle (suspend/activate/delete/reload)
 BO-5  Retarget existing admin to tenant scope + "Open CRM" bridge + dynamic branding
 ```

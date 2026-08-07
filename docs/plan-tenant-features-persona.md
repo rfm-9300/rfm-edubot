@@ -28,22 +28,16 @@ The good news: both have clean seams in the current code (see §2.1 and §3.3).
 
 ### 2.1 Current state (the seam already exists)
 
-`dashboard/DashboardRoutes.kt:305` already computes the visible module list, hardcoded from
-`agentType`:
+`dashboard/Modules.kt` computes the visible module list from the tenant's persisted selection.
 
 ```kotlin
-private fun modulesFor(tenant: Tenant): List<String> = buildList {
-    addAll(listOf("overview", "conversations", "contacts", "settings"))
-    if (tenant.agentType == "CRM_V1") addAll(listOf("clients", "quotes", "invoices", "catalog"))
-}
+DashboardModules.effectiveFor(tenant)
 ```
 
-It's returned by `GET /app/api/me` (`:98`) as `modules`, and the `/app` frontend hides nav
-sections accordingly. The CRM routes additionally **enforce** access with
-`?.takeIf { it.tenant.agentType == "CRM_V1" } ?: Forbidden` (e.g. `:194`).
+It's returned by `GET /app/api/me` as `modules`, and the `/app` frontend hides nav sections
+accordingly. Every module route also enforces the same effective selection server-side.
 
-So the work is: make this a **persisted, operator-editable per-tenant set**, and make the
-enforcement read it (not just `agentType`).
+The capability is a **persisted, operator-editable per-tenant set**.
 
 ### 2.2 Module catalog
 
@@ -56,43 +50,39 @@ Canonical module ids (single source of truth, new `dashboard/Modules.kt`):
 | `contacts` | yes | — |
 | `settings` | yes (so persona/account stay reachable) | — |
 | `persona` | optional | — (new, see Feature 2) |
-| `clients` `quotes` `invoices` `catalog` | optional | `agentType == "CRM_V1"` |
+| `clients` `quotes` `invoices` `catalog` | optional | — |
 
-**Effective modules = `enabledModules ∩ availableForAgentType`.** A module can't be enabled if the
-tenant's `agentType` doesn't support it. Recommend keeping `settings` un-disableable so the
-tenant can always reach account/persona config (Decision D1).
+**Effective modules = always-on modules + (`enabledModules ∩ catalog`).** `settings` remains
+un-disableable so the tenant can always reach account configuration (Decision D1).
 
 ### 2.3 Data model
 
 `tenant/model/TenantModels.kt` — add:
 
 ```kotlin
-val enabledModules: List<String>? = null,   // null = legacy default (derive from agentType)
+val enabledModules: List<String>? = null,   // null = migration default (full catalog)
 ```
 
-- `null` → fall back to the current `modulesFor` behavior (back-compat; no migration needed for
-  existing tenants).
-- non-null → the operator-chosen set, intersected with the catalog + agentType availability.
+- `null` → enable the full catalog (back-compat; no migration needed for existing tenants).
+- non-null → the operator-chosen set, intersected with the catalog and combined with always-on modules.
 
 `TenantRepository` read/write mapping updated; `TenantDto` (admin) exposes `enabledModules`.
 
 ### 2.4 Backend changes
 
-- `modulesFor(tenant)` → reads `enabledModules` when present, else legacy; always intersects with
-  the catalog and agentType availability.
+- `effectiveFor(tenant)` → reads `enabledModules` when present, else the full catalog; always
+  sanitizes against the known catalog and adds always-on modules.
 - **Enforcement helper** in `DashboardRoutes.kt`:
   ```kotlin
   fun DashboardContext.requireModule(id: String): Boolean   // false ⇒ caller responds 403
   ```
-  Replace the scattered `takeIf { agentType == "CRM_V1" }` guards with `requireModule("quotes")`
-  etc., so disabling a module blocks the API, not just the nav. (Keep the agentType check folded
-  into availability.)
+  Use `requireModule("quotes")` etc., so disabling a module blocks the API, not just the nav.
 - Apply guards to `conversations`, `contacts`, and each `crm/*` route.
 
 ### 2.5 Operator UI (`/admin` — `index.html` + `app.js`)
 
-- In the tenant create/edit form, add a **Modules** checklist. Only show toggles for modules the
-  tenant's `agentType` supports; always-on modules render as disabled/checked.
+- In the tenant create/edit form, add a **Modules** checklist. Always-on modules render as
+  disabled/checked; all five optional modules are selectable.
 - Persist via the existing `POST/PUT /admin/api/tenants` (extend `TenantCreateRequest` /
   `TenantUpdateRequest` with `enabledModules`), or a focused `PUT /admin/api/tenants/{slug}/modules`.
 - On save, the code already calls `tenantRegistry.put` + `pipelineFactory.evict`; the next
