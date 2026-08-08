@@ -5,8 +5,12 @@ import com.rfm.edubot.admin.adminRoutes
 import com.rfm.edubot.admin.authRoutes
 import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
+import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.config.PlatformSettingsRepository
+import com.rfm.edubot.config.PlatformSettingsService
+import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
@@ -53,15 +57,19 @@ import kotlinx.datetime.Clock
 import org.slf4j.LoggerFactory
 
 fun main(args: Array<String>) {
-    val appConfig = AppConfig.load()
-    val mongoModule = MongoModule(appConfig.mongo)
+    val baseConfig = AppConfig.load()
+    val mongoModule = MongoModule(baseConfig.mongo)
     mongoModule.initialize()
+    val runtimeConfig = RuntimeConfig(baseConfig)
+    kotlinx.coroutines.runBlocking {
+        PlatformSettingsService(PlatformSettingsRepository(mongoModule), runtimeConfig).initialize()
+    }
 
     val log = LoggerFactory.getLogger("Application")
-    log.info("Starting WhatsApp AI Bot on port {}", appConfig.port)
+    log.info("Starting WhatsApp AI Bot on port {}", runtimeConfig.get().port)
 
-    embeddedServer(Netty, port = appConfig.port, host = "0.0.0.0") {
-        bootstrapModule(appConfig, mongoModule)
+    embeddedServer(Netty, port = runtimeConfig.get().port, host = "0.0.0.0") {
+        bootstrapModule(runtimeConfig, mongoModule)
     }.start(wait = true)
 
     Runtime.getRuntime().addShutdownHook(Thread {
@@ -71,26 +79,28 @@ fun main(args: Array<String>) {
 }
 
 fun Application.module() {
-    val appConfig = AppConfig.load()
-    val mongoModule = MongoModule(appConfig.mongo)
+    val baseConfig = AppConfig.load()
+    val mongoModule = MongoModule(baseConfig.mongo)
     mongoModule.initialize()
-    bootstrapModule(appConfig, mongoModule)
+    val runtimeConfig = RuntimeConfig(baseConfig)
+    kotlinx.coroutines.runBlocking {
+        PlatformSettingsService(PlatformSettingsRepository(mongoModule), runtimeConfig).initialize()
+    }
+    bootstrapModule(runtimeConfig, mongoModule)
 }
 
-private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: MongoModule) {
+private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModule: MongoModule) {
+    val appConfig = runtimeConfig.get()
     val tenantRepository = TenantRepository(mongoModule)
     val dashboardUserRepository = DashboardUserRepository(mongoModule)
     val defaultTenant = kotlinx.coroutines.runBlocking { TenantSeeder(mongoModule, tenantRepository, appConfig).run() }
     val tenantRegistry = TenantRegistry(tenantRepository)
     kotlinx.coroutines.runBlocking { tenantRegistry.initialize() }
 
+    val platformSettingsService = PlatformSettingsService(PlatformSettingsRepository(mongoModule), runtimeConfig)
+
     val deduplicationService = DeduplicationService(mongoModule)
-    val aiClient = AiClient(
-        apiKey = appConfig.openrouter.apiKey,
-        primaryModel = appConfig.openrouter.primaryModel,
-        fallbackModel = appConfig.openrouter.fallbackModel,
-        maxTokens = appConfig.openrouter.maxTokens,
-    )
+    val aiClient = AiClient(openRouter = { runtimeConfig.get().openrouter })
     val whatsappHttpClient = HttpClient(CIO) {
         install(HttpTimeout) {
             requestTimeoutMillis = 15000
@@ -104,14 +114,14 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
         aiClient = aiClient,
         deduplicationService = deduplicationService,
         whatsappHttpClient = whatsappHttpClient,
-        appConfig = appConfig,
+        runtimeConfig = runtimeConfig,
         webChannelRegistry = webChannelRegistry,
     )
 
     val channelBindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
-    val oauthState = OAuthState(secret = appConfig.admin.jwtSecret)
-    val instagramOAuthClient = InstagramOAuthClient(appConfig.instagram, whatsappHttpClient)
-    val whatsAppSignupClient = WhatsAppSignupClient(appConfig.whatsapp, whatsappHttpClient)
+    val oauthState = OAuthState(secretProvider = { runtimeConfig.get().admin.jwtSecret })
+    val instagramOAuthClient = InstagramOAuthClient({ runtimeConfig.get().instagram }, whatsappHttpClient)
+    val whatsAppSignupClient = WhatsAppSignupClient({ runtimeConfig.get().whatsapp }, whatsappHttpClient)
 
     val pipelineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -156,7 +166,7 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
     configureSerialization()
     configureStatusPages()
     configureWebSockets()
-    configureAdminAuth(appConfig.admin)
+    configureAdminAuth(runtimeConfig)
 
     routing {
         get("/health") {
@@ -178,13 +188,14 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
         }
 
         webhookRoutes(
-            config = appConfig.whatsapp,
-            instagramAppSecret = appConfig.instagram.appSecret,
+            configProvider = { runtimeConfig.get().whatsapp },
+            instagramAppSecretProvider = { runtimeConfig.get().instagram.appSecret },
             messageQueue = messageQueue,
             deduplicationService = deduplicationService,
             tenantRegistry = tenantRegistry,
         )
-        authRoutes(appConfig.admin)
+        authRoutes(runtimeConfig)
+        platformSettingsRoutes(platformSettingsService)
         backofficeRoutes()
         dashboardStaticRoutes()
         dashboardRoutes(
@@ -194,13 +205,13 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             pipelineFactory = pipelineFactory,
             personaCompiler = personaCompiler,
             aiClient = aiClient,
-            appConfig = appConfig,
+            runtimeConfig = runtimeConfig,
             channelBindingService = channelBindingService,
         )
         dashboardImpersonationRoute(
             tenantRepository = tenantRepository,
             dashboardUsers = dashboardUserRepository,
-            appConfig = appConfig,
+            runtimeConfig = runtimeConfig,
         )
         adminRoutes()
         tenantAdminRoutes(
@@ -208,23 +219,23 @@ private fun Application.bootstrapModule(appConfig: AppConfig, mongoModule: Mongo
             tenantRepository = tenantRepository,
             tenantRegistry = tenantRegistry,
             pipelineFactory = pipelineFactory,
-            appConfig = appConfig,
+            runtimeConfig = runtimeConfig,
         )
         instagramOAuthRoutes(
-            config = appConfig.instagram,
+            configProvider = { runtimeConfig.get().instagram },
             oauthState = oauthState,
             oauthClient = instagramOAuthClient,
             bindingService = channelBindingService,
             tenantRepository = tenantRepository,
         )
         whatsAppSignupRoutes(
-            config = appConfig.whatsapp,
+            configProvider = { runtimeConfig.get().whatsapp },
             signupClient = whatsAppSignupClient,
             bindingService = channelBindingService,
             tenantRepository = tenantRepository,
         )
         instagramMetaCallbacks(
-            config = appConfig.instagram,
+            configProvider = { runtimeConfig.get().instagram },
             tenantRegistry = tenantRegistry,
             bindingService = channelBindingService,
         )

@@ -42,6 +42,15 @@ class DashboardModulesTest {
         )
     }
 
+    @Test
+    fun `bookings is an optional tenant module`() {
+        assertEquals(true, DashboardModules.BOOKINGS in DashboardModules.optional)
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.BOOKINGS,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.BOOKINGS))),
+        )
+    }
+
     private fun tenant(enabledModules: List<String>?) = Tenant(
         slug = "test",
         name = "Test",

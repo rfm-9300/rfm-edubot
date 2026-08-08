@@ -1,10 +1,10 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.feature.persona
 
-import com.rfm.edubot.mobile.data.DashboardApi
-import com.rfm.edubot.mobile.data.Persona
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.model.Persona
+import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,11 +17,12 @@ data class PersonaUiState(
     val error: Boolean = false,
 )
 
-class PersonaController(
+class PersonaViewModel(
     private val api: DashboardApi,
     private val token: String,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+    scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
+    private val scope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow(PersonaUiState())
     val state: StateFlow<PersonaUiState> = mutableState.asStateFlow()
 

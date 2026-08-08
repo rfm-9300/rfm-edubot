@@ -30,7 +30,7 @@ private val log = LoggerFactory.getLogger("InstagramOAuthRoutes")
  * callback can land the popup back on the page that opened it.
  */
 fun Route.instagramOAuthRoutes(
-    config: AppConfig.InstagramConfig,
+    configProvider: () -> AppConfig.InstagramConfig,
     oauthState: OAuthState,
     oauthClient: InstagramOAuthClient,
     bindingService: ChannelBindingService,
@@ -38,6 +38,7 @@ fun Route.instagramOAuthRoutes(
 ) {
     authenticate("admin-jwt") {
         get("/admin/api/tenants/{slug}/instagram/connect") {
+            val config = configProvider()
             if (!config.oauthEnabled) {
                 call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "Instagram OAuth not configured"))
                 return@get
@@ -52,6 +53,7 @@ fun Route.instagramOAuthRoutes(
     authenticate("dashboard") {
         // Tenant-scoped: the slug comes from the JWT, so a client can only ever link their own tenant.
         get("/app/api/instagram/connect") {
+            val config = configProvider()
             if (!config.oauthEnabled) {
                 call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "Instagram OAuth not configured"))
                 return@get

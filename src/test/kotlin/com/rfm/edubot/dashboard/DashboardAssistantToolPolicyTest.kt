@@ -28,4 +28,15 @@ class DashboardAssistantToolPolicyTest {
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("list_invoices", listOf(DashboardModules.INVOICES)))
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("unknown", DashboardModules.catalog))
     }
+
+    @Test
+    fun `booking tools are gated by the bookings module`() {
+        val definitions = listOf("list_bookings", "create_booking", "search_clients")
+            .map { ToolDefinition(it, it, buildJsonObject {}) }
+        val filtered = DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(DashboardModules.BOOKINGS))
+        assertEquals(listOf("list_bookings", "create_booking"), filtered.map { it.name })
+        assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("create_booking", listOf(DashboardModules.BOOKINGS)))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("list_bookings", listOf(DashboardModules.BOOKINGS)))
+        assertTrue(DashboardAssistantToolPolicy.isReadOnly("list_available_slots"))
+    }
 }

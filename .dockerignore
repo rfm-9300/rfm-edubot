@@ -2,8 +2,14 @@
 .gradle
 .idea
 .kotlin
+.gitnexus
+.claude
 build
 data
+mobile
+mocks
+docs
+*.md
 .env
 *.log
 *.iml

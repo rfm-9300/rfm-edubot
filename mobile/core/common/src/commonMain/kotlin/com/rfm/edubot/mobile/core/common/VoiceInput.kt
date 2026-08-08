@@ -1,4 +1,4 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.core.common
 
 import kotlinx.coroutines.flow.StateFlow
 

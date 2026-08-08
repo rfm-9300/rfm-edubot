@@ -2,9 +2,9 @@
 
 package com.rfm.edubot.mobile
 
-import com.rfm.edubot.mobile.app.VoiceInput
-import com.rfm.edubot.mobile.app.VoiceInputError
-import com.rfm.edubot.mobile.app.VoiceInputState
+import com.rfm.edubot.mobile.core.common.VoiceInput
+import com.rfm.edubot.mobile.core.common.VoiceInputError
+import com.rfm.edubot.mobile.core.common.VoiceInputState
 import kotlinx.cinterop.BetaInteropApi
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow

@@ -2,8 +2,8 @@ package com.rfm.edubot.mobile
 
 import androidx.compose.ui.window.ComposeUIViewController
 import com.rfm.edubot.mobile.app.DashboardApp
-import com.rfm.edubot.mobile.data.KtorDashboardApi
-import com.rfm.edubot.mobile.data.TokenStore
+import com.rfm.edubot.mobile.core.common.TokenStore
+import com.rfm.edubot.mobile.core.network.KtorDashboardApi
 import platform.Foundation.NSUserDefaults
 import platform.UIKit.UIViewController
 

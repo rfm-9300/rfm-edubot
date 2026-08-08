@@ -3,7 +3,10 @@ package com.rfm.edubot.admin
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.auth0.jwt.interfaces.DecodedJWT
+import com.auth0.jwt.interfaces.JWTVerifier
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.config.RuntimeConfig
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.application.install
@@ -18,25 +21,20 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import java.util.Date
 
-fun Application.configureAdminAuth(config: AppConfig.AdminConfig) {
-    val algorithm = Algorithm.HMAC256(config.jwtSecret)
+fun Application.configureAdminAuth(runtime: RuntimeConfig) {
+    val dynamicVerifier = object : JWTVerifier {
+        override fun verify(token: String): DecodedJWT = verifierFor(runtime.get().admin).verify(token)
+        override fun verify(jwt: DecodedJWT): DecodedJWT = verifierFor(runtime.get().admin).verify(jwt)
+    }
     install(Authentication) {
         jwt("admin-jwt") {
-            verifier(
-                JWT.require(algorithm)
-                    .withIssuer(config.jwtIssuer)
-                    .build()
-            )
+            verifier(dynamicVerifier)
             validate { credential ->
                 if (credential.payload.subject == "admin") JWTPrincipal(credential.payload) else null
             }
         }
         jwt("dashboard") {
-            verifier(
-                JWT.require(algorithm)
-                    .withIssuer(config.jwtIssuer)
-                    .build()
-            )
+            verifier(dynamicVerifier)
             validate { credential ->
                 val typ = credential.payload.getClaim("typ").asString()
                 val tenantId = credential.payload.getClaim("tenantId").asString()
@@ -46,8 +44,9 @@ fun Application.configureAdminAuth(config: AppConfig.AdminConfig) {
     }
 }
 
-fun Route.authRoutes(config: AppConfig.AdminConfig) {
+fun Route.authRoutes(runtime: RuntimeConfig) {
     post("/admin/auth/login") {
+        val config = runtime.get().admin
         val request = call.receive<LoginRequest>()
         val verified = BCrypt.verifyer().verify(request.password.toCharArray(), config.adminPasswordHash).verified
         if (!verified) {
@@ -64,6 +63,11 @@ fun Route.authRoutes(config: AppConfig.AdminConfig) {
         call.respond(LoginResponse(token = token, expiresAt = Date(expiresAtMillis).toInstant().toString()))
     }
 }
+
+private fun verifierFor(config: AppConfig.AdminConfig): JWTVerifier =
+    JWT.require(Algorithm.HMAC256(config.jwtSecret))
+        .withIssuer(config.jwtIssuer)
+        .build()
 
 @Serializable
 private data class LoginRequest(val password: String)

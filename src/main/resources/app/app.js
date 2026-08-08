@@ -1,9 +1,16 @@
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
-let state = { me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [], persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, search: '', active: 'overview', selectedAsset: '' };
+let state = {
+  me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
+  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null,
+  bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
+  search: '', active: 'overview', selectedAsset: '',
+  whatsAppSignup: { enabled: false },
+};
 let personaChatBusy = false;
 let assistantBusy = false;
+let fbSdkPromise = null;
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
 // `labels`/`STR` are live proxies over the active locale, so every render() reads the current language.
@@ -12,7 +19,27 @@ const STR = I18N.section('app');
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const slugify = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const fmtEUR = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
-const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+const tenantTz = () => state.me?.tenant?.timezone || 'Europe/Lisbon';
+const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short', timeZone: tenantTz() }) : '—';
+const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit', timeZone: tenantTz() }) : '';
+const startOfWeek = (d = new Date()) => {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - day);
+  return x;
+};
+const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const toIso = d => d.toISOString();
+const toLocalInputValue = iso => {
+  if (!iso) return '';
+  const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: tenantTz(), year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  }).formatToParts(new Date(iso)).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+};
+const bookingStatusLabel = s => STR[`bookingStatus${s}`] || s;
 
 async function api(path, options = {}) {
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
@@ -72,7 +99,23 @@ async function loadModule(tab) {
     if (state.assistantThread && !state.assistantThreads.some(t => t.id === state.assistantThread.thread.id)) state.assistantThread = null;
     if (!state.assistantThread && state.assistantThreads.length) state.assistantThread = await api(`/app/api/assistant/threads/${state.assistantThreads[0].id}`);
   }
-  if (tab === 'settings') state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
+  if (tab === 'settings') {
+    state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
+    state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
+  }
+  if (tab === 'bookings') {
+    if (!state.bookingWeekStart) state.bookingWeekStart = startOfWeek();
+    const from = toIso(state.bookingWeekStart);
+    const to = toIso(addDays(state.bookingWeekStart, 7));
+    const [bookings, services, availability] = await Promise.all([
+      api(`/app/api/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+      api('/app/api/bookings/services'),
+      api('/app/api/bookings/availability'),
+    ]);
+    state.bookings = bookings;
+    state.bookingServices = services;
+    state.bookingAvailability = availability;
+  }
 }
 
 function render() {
@@ -81,8 +124,8 @@ function render() {
   $('#meta-clock').textContent = new Date().toLocaleString('pt-PT', { hour: '2-digit', minute: '2-digit' });
   $('#kpi-messages').textContent = state.overview?.messages ?? '—';
   $('#kpi-users').textContent = state.overview?.users ?? '—';
-  $('#btn-new').hidden = !['clients', 'quotes', 'invoices', 'catalog'].includes(state.active);
-  $('#btn-new').textContent = `${STR.newPrefix} ${labels[state.active] || ''}`;
+  $('#btn-new').hidden = !['clients', 'quotes', 'invoices', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').textContent = state.active === 'bookings' ? STR.bookingsNew : `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
   if (state.active === 'overview') return renderOverview(root);
   if (state.active === 'contacts') return renderContacts(root);
@@ -93,6 +136,7 @@ function render() {
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
   if (state.active === 'ai-assistant') return renderAssistant(root);
+  if (state.active === 'bookings') return renderBookings(root);
   renderSettings(root);
 }
 
@@ -625,14 +669,15 @@ function renderSettings(root) {
       <div class="tbl-wrap"><table class="tbl">
         <thead><tr><th>${escapeHTML(STR.colChannel)}</th><th>${escapeHTML(STR.colAccount)}</th><th>${escapeHTML(STR.colStatus)}</th><th class="right">${escapeHTML(STR.colActions)}</th></tr></thead>
         <tbody>
-          <tr><td class="name">WhatsApp</td><td class="mono">${escapeHTML(wa?.displayName || wa?.externalId || '—')}</td><td>${wa ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td><td class="right"></td></tr>
+          <tr><td class="name">WhatsApp</td><td class="mono">${escapeHTML(wa?.displayName || wa?.externalId || '—')}</td><td>${wa ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
+            <td class="right">${state.whatsAppSignup?.enabled ? `<button class="btn btn--sm" id="wa-connect">${escapeHTML(wa ? STR.waReconnect : STR.waConnect)}</button>` : ''}</td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button></td></tr>
           <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
       </table></div>
-      <div class="hint" style="margin-top:10px">${escapeHTML(STR.igHint)}</div>
+      <div class="hint" style="margin-top:10px">${escapeHTML(STR.channelsHint)}</div>
     </div>
 
     <div class="panel" style="padding:18px;margin-bottom:18px">
@@ -664,6 +709,7 @@ function renderSettings(root) {
     </div>
 
     <div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.moreSettingsTitle)}</p><p class="empty__desc">${escapeHTML(STR.moreSettingsDesc)}</p></div></div>`;
+  $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect').addEventListener('click', connectInstagram);
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
@@ -719,6 +765,101 @@ async function connectInstagram() {
   window.addEventListener('message', onMsg);
 }
 
+function loadFacebookSdk(appId, graphVersion) {
+  if (window.FB) {
+    window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
+    return Promise.resolve(window.FB);
+  }
+  if (fbSdkPromise) return fbSdkPromise;
+  fbSdkPromise = new Promise((resolve, reject) => {
+    window.fbAsyncInit = () => {
+      window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
+      resolve(window.FB);
+    };
+    const script = document.createElement('script');
+    script.id = 'facebook-jssdk';
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.async = true;
+    script.defer = true;
+    script.onerror = () => reject(new Error('facebook_sdk_load_failed'));
+    document.body.appendChild(script);
+  });
+  return fbSdkPromise;
+}
+
+function waitForWhatsAppSignupMessage() {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      window.removeEventListener('message', onMessage);
+      reject(new Error('signup_message_timeout'));
+    }, 5 * 60 * 1000);
+    const onMessage = ev => {
+      if (!['https://www.facebook.com', 'https://web.facebook.com'].includes(ev.origin)) return;
+      const data = typeof ev.data === 'string' ? (() => { try { return JSON.parse(ev.data); } catch (_) { return null; } })() : ev.data;
+      if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
+      if (data.event && data.event !== 'FINISH') {
+        clearTimeout(timer);
+        window.removeEventListener('message', onMessage);
+        reject(new Error(data.event === 'CANCEL' ? 'signup_cancelled' : 'signup_not_finished'));
+        return;
+      }
+      const wabaId = data.data?.waba_id || data.data?.wabaId;
+      const phoneNumberId = data.data?.phone_number_id || data.data?.phoneNumberId;
+      if (!wabaId || !phoneNumberId) return;
+      clearTimeout(timer);
+      window.removeEventListener('message', onMessage);
+      resolve({ wabaId, phoneNumberId });
+    };
+    window.addEventListener('message', onMessage);
+  });
+}
+
+function facebookLoginForBusiness(FB, configId) {
+  return new Promise((resolve, reject) => {
+    FB.login(response => {
+      const code = response?.authResponse?.code;
+      if (!code) {
+        reject(new Error(response?.status === 'not_authorized' ? 'not_authorized' : 'missing_code'));
+        return;
+      }
+      resolve(code);
+    }, {
+      config_id: configId,
+      response_type: 'code',
+      override_default_response_type: true,
+      extras: { setup: {} },
+    });
+  });
+}
+
+async function connectWhatsApp() {
+  const cfg = state.whatsAppSignup;
+  if (!cfg?.enabled) { toast(STR.waNotConfigured); return; }
+  try {
+    const FB = await loadFacebookSdk(cfg.appId, cfg.graphVersion || 'v21.0');
+    toast(STR.waOpenPopup);
+    const sessionPromise = waitForWhatsAppSignupMessage();
+    const codePromise = facebookLoginForBusiness(FB, cfg.configId);
+    const [session, code] = await Promise.all([sessionPromise, codePromise]);
+    await api('/app/api/whatsapp/connect', {
+      method: 'POST',
+      body: JSON.stringify({ code, wabaId: session.wabaId, phoneNumberId: session.phoneNumberId }),
+    });
+    toast(STR.waConnected);
+    state.me = await api('/app/api/me');
+    if (state.active === 'settings') render();
+  } catch (e) {
+    const messages = {
+      signup_cancelled: STR.waCancelled,
+      missing_code: STR.waMissingCode,
+      signup_message_timeout: STR.waTimeout,
+      facebook_sdk_load_failed: STR.waSdkFailed,
+      unauthorized: STR.sessionExpired,
+    };
+    toast(messages[e.message] || STR.waFailed({ msg: e.message }));
+  }
+}
+
 // When the OAuth popup lands back on /app/?ig=..., relay the outcome to the opener and close.
 // Returns true if this load was an OAuth popup (so the normal app boot is skipped).
 function handleOAuthPopup() {
@@ -732,6 +873,180 @@ function handleOAuthPopup() {
 
 function openDrawer(title, body, wide = false) { const root = $('#drawer'); $('.drawer__panel', root).classList.toggle('drawer__panel--wide', wide); $('#drawer-title').textContent = title; $('#drawer-body').innerHTML = ''; $('#drawer-body').appendChild(body); root.hidden = false; const close = () => { root.hidden = true; }; $$('[data-close]', root).forEach(b => b.onclick = close); }
 
+function serviceName(id) { return state.bookingServices.find(s => s.id === id)?.name || id; }
+
+function renderBookings(root) {
+  const weekStart = state.bookingWeekStart || startOfWeek();
+  const weekLabel = `${weekStart.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })} – ${addDays(weekStart, 6).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  const toolbar = `<div class="booking-toolbar">
+    <div class="booking-toolbar__views">
+      <button type="button" class="btn btn--sm ${state.bookingView === 'week' ? 'btn--primary' : ''}" data-booking-view="week">${escapeHTML(STR.bookingsWeek)}</button>
+      <button type="button" class="btn btn--sm ${state.bookingView === 'list' ? 'btn--primary' : ''}" data-booking-view="list">${escapeHTML(STR.bookingsList)}</button>
+    </div>
+    <div class="booking-toolbar__nav">
+      <button type="button" class="btn btn--sm" data-week-shift="-7">${escapeHTML(STR.bookingsPrev)}</button>
+      <button type="button" class="btn btn--sm" data-week-shift="0">${escapeHTML(STR.bookingsToday)}</button>
+      <button type="button" class="btn btn--sm" data-week-shift="7">${escapeHTML(STR.bookingsNext)}</button>
+      <span class="booking-toolbar__label mono">${escapeHTML(weekLabel)}</span>
+    </div>
+    <div class="booking-toolbar__actions">
+      <button type="button" class="btn btn--sm" data-booking-services>${escapeHTML(STR.bookingsManageServices)}</button>
+      <button type="button" class="btn btn--sm" data-booking-availability>${escapeHTML(STR.bookingsManageAvailability)}</button>
+    </div>
+  </div>`;
+  const body = state.bookingView === 'list' ? bookingListHtml() : bookingWeekHtml(weekStart);
+  root.innerHTML = hero(labels.bookings, STR.bookingsDesc) + toolbar + body;
+  $$('[data-booking-view]').forEach(b => b.addEventListener('click', () => { state.bookingView = b.dataset.bookingView; render(); }));
+  $$('[data-week-shift]').forEach(b => b.addEventListener('click', async () => {
+    const shift = Number(b.dataset.weekShift);
+    state.bookingWeekStart = shift === 0 ? startOfWeek() : addDays(state.bookingWeekStart || startOfWeek(), shift);
+    await loadModule('bookings');
+    render();
+  }));
+  $('[data-booking-services]')?.addEventListener('click', openBookingServicesForm);
+  $('[data-booking-availability]')?.addEventListener('click', openBookingAvailabilityForm);
+  $$('[data-booking-id]').forEach(el => el.addEventListener('click', () => openBookingForm(state.bookings.find(x => x.id === el.dataset.bookingId))));
+  $$('[data-booking-slot]').forEach(el => el.addEventListener('click', () => openBookingForm(null, el.dataset.bookingSlot)));
+}
+
+function bookingWeekHtml(weekStart) {
+  const hours = Array.from({ length: 12 }, (_, i) => i + 8);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
+  const head = `<div class="cal-grid__corner"></div>${days.map((d, i) => `<div class="cal-grid__dayhead"><div>${escapeHTML(STR[`weekday${i + 1}`])}</div><div class="mono muted">${d.toLocaleDateString('pt-PT', { day: '2-digit', month: '2-digit' })}</div></div>`).join('')}`;
+  const rows = hours.map(hour => {
+    const cells = days.map((day, di) => {
+      const slotStart = new Date(day); slotStart.setHours(hour, 0, 0, 0);
+      const slotEnd = new Date(day); slotEnd.setHours(hour + 1, 0, 0, 0);
+      const events = state.bookings.filter(b => {
+        const t = new Date(b.startAt).getTime();
+        return t >= slotStart.getTime() && t < slotEnd.getTime();
+      });
+      const chips = events.map(b => `<button type="button" class="cal-event cal-event--${b.status.toLowerCase()}" data-booking-id="${b.id}"><span>${escapeHTML(fmtTime(b.startAt))} · ${escapeHTML(b.contactName)}</span></button>`).join('');
+      return `<div class="cal-grid__cell" data-booking-slot="${toLocalInputValue(slotStart.toISOString())}">${chips || ''}</div>`;
+    }).join('');
+    return `<div class="cal-grid__hour mono muted">${String(hour).padStart(2, '0')}:00</div>${cells}`;
+  }).join('');
+  return `<div class="panel cal-wrap"><div class="cal-grid">${head}${rows}</div></div>`;
+}
+
+function bookingListHtml() {
+  const q = state.search.toLowerCase();
+  const rows = state.bookings
+    .filter(b => !q || `${b.contactName} ${b.contactPhone} ${serviceName(b.serviceId)}`.toLowerCase().includes(q))
+    .map(b => `<tr data-booking-id="${b.id}" class="conversation-row"><td class="mono">${escapeHTML(fmtDate(b.startAt))}</td><td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td><td>${escapeHTML(serviceName(b.serviceId))}</td><td>${escapeHTML(bookingStatusLabel(b.status))}</td></tr>`)
+    .join('');
+  return panelTable(`<tr><th>${STR.bookingsThWhen}</th><th>${STR.bookingsThContact}</th><th>${STR.bookingsThService}</th><th>${STR.bookingsThStatus}</th></tr>`, rows, STR.bookingsEmptyList);
+}
+
+function openBookingForm(booking = null, slotLocal = '') {
+  const body = document.createElement('form');
+  body.className = 'form';
+  const services = state.bookingServices.filter(s => s.active || s.id === booking?.serviceId);
+  body.innerHTML = `
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsContactName)}</label><input class="inp" name="contactName" required value="${escapeHTML(booking?.contactName || '')}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsContactPhone)}</label><input class="inp" name="contactPhone" required value="${escapeHTML(booking?.contactPhone || '')}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsService)}</label><select class="sel" name="serviceId" required>
+      <option value="">${escapeHTML(STR.bookingsChooseService)}</option>
+      ${services.map(s => `<option value="${s.id}" ${booking?.serviceId === s.id ? 'selected' : ''}>${escapeHTML(s.name)} (${s.durationMinutes}m)</option>`).join('')}
+    </select></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsStart)}</label><input class="inp" type="datetime-local" name="startAt" required value="${escapeHTML(booking ? toLocalInputValue(booking.startAt) : slotLocal)}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsStatus)}</label><select class="sel" name="status">
+      ${['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'].map(s => `<option value="${s}" ${(booking?.status || 'CONFIRMED') === s ? 'selected' : ''}>${escapeHTML(bookingStatusLabel(s))}</option>`).join('')}
+    </select></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsNotes)}</label><textarea class="inp" name="notes" rows="3">${escapeHTML(booking?.notes || '')}</textarea></div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsSave)}</button>`;
+  body.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(body);
+    const payload = {
+      contactName: String(fd.get('contactName') || '').trim(),
+      contactPhone: String(fd.get('contactPhone') || '').trim(),
+      serviceId: String(fd.get('serviceId') || ''),
+      startAt: String(fd.get('startAt') || ''),
+      status: String(fd.get('status') || 'CONFIRMED'),
+      notes: String(fd.get('notes') || ''),
+    };
+    if (!payload.contactName || !payload.contactPhone || !payload.serviceId || !payload.startAt) return toast(STR.bookingsValidate);
+    try {
+      if (booking) await api(`/app/api/bookings/${booking.id}`, { method: 'POST', body: JSON.stringify(payload) });
+      else await api('/app/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
+      $('#drawer').hidden = true;
+      toast(booking ? STR.bookingsUpdated : STR.bookingsCreated);
+      await loadModule('bookings');
+      render();
+    } catch (err) {
+      toast(String(err.message || '').includes('409') ? STR.bookingsConflict : STR.bookingsValidate);
+    }
+  });
+  openDrawer(booking ? STR.bookingsEdit : STR.bookingsNew, body);
+}
+
+function openBookingServicesForm() {
+  const body = document.createElement('div');
+  body.className = 'form';
+  const list = state.bookingServices.map(s => `<tr><td class="name">${escapeHTML(s.name)}</td><td class="mono">${s.durationMinutes}m</td><td>${s.active ? '✓' : '—'}</td><td class="right"><button type="button" class="btn btn--sm" data-edit-service="${s.id}">${escapeHTML(STR.bookingsEdit)}</button></td></tr>`).join('');
+  body.innerHTML = `${panelTable(`<tr><th>${STR.bookingsServiceName}</th><th>${STR.bookingsDuration}</th><th>${STR.bookingsActive}</th><th></th></tr>`, list)}
+    <form id="service-create" class="form" style="margin-top:16px">
+      <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsServiceName)}</label><input class="inp" name="name" required /></div>
+      <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsDuration)}</label><input class="inp" type="number" min="5" name="durationMinutes" value="30" required /></div>
+      <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsSave)}</button>
+    </form>`;
+  body.querySelector('#service-create').addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    await api('/app/api/bookings/services', { method: 'POST', body: JSON.stringify({ name: fd.get('name'), durationMinutes: Number(fd.get('durationMinutes') || 30) }) });
+    toast(STR.bookingsServiceSaved);
+    await loadModule('bookings');
+    openBookingServicesForm();
+  });
+  $$('[data-edit-service]', body).forEach(b => b.addEventListener('click', async () => {
+    const service = state.bookingServices.find(s => s.id === b.dataset.editService);
+    if (!service) return;
+    const active = !service.active;
+    await api(`/app/api/bookings/services/${service.id}`, { method: 'POST', body: JSON.stringify({ active }) });
+    toast(STR.bookingsServiceSaved);
+    await loadModule('bookings');
+    openBookingServicesForm();
+  }));
+  openDrawer(STR.bookingsManageServices, body, true);
+}
+
+function openBookingAvailabilityForm() {
+  const body = document.createElement('form');
+  body.className = 'form';
+  const rows = (state.bookingAvailability.length ? state.bookingAvailability : [{ dayOfWeek: 1, startLocal: '09:00', endLocal: '17:00' }])
+    .map((r, idx) => `<div class="form__row booking-avail-row" data-idx="${idx}">
+      <select class="sel" name="dayOfWeek">${[1,2,3,4,5,6,7].map(d => `<option value="${d}" ${r.dayOfWeek === d ? 'selected' : ''}>${escapeHTML(STR[`weekday${d}`])}</option>`).join('')}</select>
+      <input class="inp" type="time" name="startLocal" value="${escapeHTML(r.startLocal)}" />
+      <input class="inp" type="time" name="endLocal" value="${escapeHTML(r.endLocal)}" />
+    </div>`).join('');
+  body.innerHTML = `<p class="hint">${escapeHTML(STR.bookingsManageAvailability)}</p>${rows}
+    <button type="button" class="btn btn--sm" id="add-avail">${escapeHTML(STR.bookingsAddWindow)}</button>
+    <button class="btn btn--primary" type="submit" style="margin-top:12px">${escapeHTML(STR.bookingsSave)}</button>`;
+  $('#add-avail', body).addEventListener('click', () => {
+    const row = document.createElement('div');
+    row.className = 'form__row booking-avail-row';
+    row.innerHTML = `<select class="sel" name="dayOfWeek">${[1,2,3,4,5,6,7].map(d => `<option value="${d}">${escapeHTML(STR[`weekday${d}`])}</option>`).join('')}</select>
+      <input class="inp" type="time" name="startLocal" value="09:00" />
+      <input class="inp" type="time" name="endLocal" value="17:00" />`;
+    body.insertBefore(row, $('#add-avail', body));
+  });
+  body.addEventListener('submit', async e => {
+    e.preventDefault();
+    const rules = $$('.booking-avail-row', body).map(row => ({
+      dayOfWeek: Number($('[name=dayOfWeek]', row).value),
+      startLocal: $('[name=startLocal]', row).value,
+      endLocal: $('[name=endLocal]', row).value,
+    }));
+    await api('/app/api/bookings/availability', { method: 'PUT', body: JSON.stringify({ rules }) });
+    toast(STR.bookingsAvailabilitySaved);
+    $('#drawer').hidden = true;
+    await loadModule('bookings');
+    render();
+  });
+  openDrawer(STR.bookingsManageAvailability, body, true);
+}
+
 async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
@@ -742,6 +1057,7 @@ async function init() {
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();
+    if (state.active === 'bookings') return openBookingForm();
     toast(STR.quickCreateSoon);
   });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });

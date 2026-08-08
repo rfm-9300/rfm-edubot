@@ -95,12 +95,27 @@ data class ChatResponse(
 )
 
 class AiClient(
-    private val apiKey: String,
-    private val primaryModel: String,
-    private val fallbackModel: String,
-    private val maxTokens: Int = 1024,
+    private val openRouter: () -> com.rfm.edubot.config.AppConfig.OpenRouterConfig,
     private val maxRetries: Int = 3,
 ) {
+    constructor(
+        apiKey: String,
+        primaryModel: String,
+        fallbackModel: String,
+        maxTokens: Int = 1024,
+        maxRetries: Int = 3,
+    ) : this(
+        openRouter = {
+            com.rfm.edubot.config.AppConfig.OpenRouterConfig(
+                apiKey = apiKey,
+                primaryModel = primaryModel,
+                fallbackModel = fallbackModel,
+                maxTokens = maxTokens,
+            )
+        },
+        maxRetries = maxRetries,
+    )
+
     private val client = HttpClient(CIO) {
         install(ContentNegotiation) {
             json(Json { ignoreUnknownKeys = true; explicitNulls = false; encodeDefaults = true })
@@ -117,11 +132,12 @@ class AiClient(
 
     suspend fun complete(messages: List<ChatMessage>, tools: List<ToolDefinition> = emptyList(), forceToolUse: Boolean = false, modelOverride: String? = null): AiResponse {
         var lastException: Exception? = null
+        val cfg = openRouter()
 
         for (attempt in 1..maxRetries) {
             try {
-                val model = modelOverride?.takeIf { it.isNotBlank() } ?: if (attempt > 1) fallbackModel else primaryModel
-                return executeRequest(model, messages, tools, forceToolUse).toAiResponse()
+                val model = modelOverride?.takeIf { it.isNotBlank() } ?: if (attempt > 1) cfg.fallbackModel else cfg.primaryModel
+                return executeRequest(model, messages, tools, forceToolUse, cfg).toAiResponse()
             } catch (e: Exception) {
                 lastException = e
                 log.warn("AI request failed (attempt {}/{}): {}", attempt, maxRetries, e.message)
@@ -134,19 +150,25 @@ class AiClient(
         throw lastException ?: RuntimeException("AI request failed after $maxRetries attempts")
     }
 
-    private suspend fun executeRequest(model: String, messages: List<ChatMessage>, tools: List<ToolDefinition>, forceToolUse: Boolean = false): ChatResponse {
+    private suspend fun executeRequest(
+        model: String,
+        messages: List<ChatMessage>,
+        tools: List<ToolDefinition>,
+        forceToolUse: Boolean = false,
+        cfg: com.rfm.edubot.config.AppConfig.OpenRouterConfig = openRouter(),
+    ): ChatResponse {
         val toolSpecs = tools.takeIf { it.isNotEmpty() }?.map { ToolSpec(function = it) }
         val request = ChatRequest(
             model = model,
             messages = messages,
-            maxTokens = maxTokens,
+            maxTokens = cfg.maxTokens,
             tools = toolSpecs,
             toolChoice = if (forceToolUse && toolSpecs != null) "required" else null,
         )
 
         val response: HttpResponse = client.post("https://openrouter.ai/api/v1/chat/completions") {
             headers {
-                append("Authorization", "Bearer $apiKey")
+                append("Authorization", "Bearer ${cfg.apiKey}")
                 append("HTTP-Referer", "https://github.com/rfm/whatsapp-bot")
                 append("X-Title", "WhatsApp AI Bot")
             }

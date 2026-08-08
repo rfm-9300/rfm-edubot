@@ -16,10 +16,15 @@ import javax.crypto.spec.SecretKeySpec
  * an expiry, and a nonce that is consumed on first verify to block replay.
  */
 class OAuthState(
-    private val secret: String,
+    private val secretProvider: () -> String,
     private val ttlMillis: Long = 10 * 60 * 1000,
     private val now: () -> Long = System::currentTimeMillis,
 ) {
+    constructor(
+        secret: String,
+        ttlMillis: Long = 10 * 60 * 1000,
+        now: () -> Long = System::currentTimeMillis,
+    ) : this(secretProvider = { secret }, ttlMillis = ttlMillis, now = now)
     @Serializable
     private data class Payload(val slug: String, val nonce: String, val exp: Long, val origin: String = ORIGIN_BACKOFFICE)
 
@@ -62,7 +67,7 @@ class OAuthState(
 
     private fun sign(body: String): String {
         val mac = Mac.getInstance("HmacSHA256")
-        mac.init(SecretKeySpec(secret.toByteArray(), "HmacSHA256"))
+        mac.init(SecretKeySpec(secretProvider().toByteArray(), "HmacSHA256"))
         return encoder.encodeToString(mac.doFinal(body.toByteArray()))
     }
 

@@ -3,7 +3,7 @@ package com.rfm.edubot.mobile
 import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
-import com.rfm.edubot.mobile.data.TokenStore
+import com.rfm.edubot.mobile.core.common.TokenStore
 
 class AndroidTokenStore(context: Context) : TokenStore {
     private val preferences = EncryptedSharedPreferences.create(

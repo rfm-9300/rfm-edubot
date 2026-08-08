@@ -4,7 +4,7 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import com.rfm.edubot.mobile.app.DashboardApp
-import com.rfm.edubot.mobile.data.KtorDashboardApi
+import com.rfm.edubot.mobile.core.network.KtorDashboardApi
 
 class MainActivity : ComponentActivity() {
     private lateinit var voiceInput: AndroidVoiceInput

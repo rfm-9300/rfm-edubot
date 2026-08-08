@@ -31,13 +31,12 @@ private val log = LoggerFactory.getLogger("InstagramMetaCallbacks")
  * can track the request; `url` points at the public /data-deletion status page.
  */
 fun Route.instagramMetaCallbacks(
-    config: AppConfig.InstagramConfig,
+    configProvider: () -> AppConfig.InstagramConfig,
     tenantRegistry: TenantRegistry,
     bindingService: ChannelBindingService,
 ) {
-    val statusBaseUrl = config.redirectUri.substringBefore("/admin/api/instagram/callback")
-
     post("/admin/api/instagram/deauthorize") {
+        val config = configProvider()
         val payload = verify(call.receiveParameters()["signed_request"], config.appSecret)
             ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid signed_request"))
         payload.user_id?.let { evictInstagram(it, tenantRegistry, bindingService) }
@@ -46,6 +45,8 @@ fun Route.instagramMetaCallbacks(
     }
 
     post("/admin/api/instagram/data-deletion") {
+        val config = configProvider()
+        val statusBaseUrl = config.redirectUri.substringBefore("/admin/api/instagram/callback")
         val payload = verify(call.receiveParameters()["signed_request"], config.appSecret)
             ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid signed_request"))
         val igId = payload.user_id

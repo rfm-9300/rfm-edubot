@@ -21,9 +21,12 @@ import org.slf4j.LoggerFactory
 import java.security.SecureRandom
 
 class WhatsAppSignupClient(
-    private val config: AppConfig.WhatsAppConfig,
+    private val configProvider: () -> AppConfig.WhatsAppConfig,
     private val httpClient: HttpClient,
 ) {
+    constructor(config: AppConfig.WhatsAppConfig, httpClient: HttpClient) : this({ config }, httpClient)
+
+    private val config: AppConfig.WhatsAppConfig get() = configProvider()
     private val json = Json { ignoreUnknownKeys = true }
     private val log = LoggerFactory.getLogger("WhatsAppSignupClient")
     private val random = SecureRandom()

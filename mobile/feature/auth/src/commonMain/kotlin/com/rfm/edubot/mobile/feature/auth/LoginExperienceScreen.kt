@@ -1,4 +1,4 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.feature.auth
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -37,9 +37,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.rfm.edubot.mobile.core.ui.BotColor
 
 @Composable
-internal fun LoginExperienceScreen(
+fun LoginExperienceScreen(
     initialEmail: String,
     initialPassword: String,
     errorMessage: String?,

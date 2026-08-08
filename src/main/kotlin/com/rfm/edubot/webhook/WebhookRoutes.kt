@@ -29,14 +29,15 @@ private val log = LoggerFactory.getLogger("WebhookRoutes")
 private val json = Json { ignoreUnknownKeys = true }
 
 fun Routing.webhookRoutes(
-    config: AppConfig.WhatsAppConfig,
-    instagramAppSecret: String,
+    configProvider: () -> AppConfig.WhatsAppConfig,
+    instagramAppSecretProvider: () -> String,
     messageQueue: MessageQueue,
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
 ) {
     route("/webhook") {
         get {
+            val config = configProvider()
             val mode = call.request.queryParameters["hub.mode"]
             val token = call.request.queryParameters["hub.verify_token"]
             val challenge = call.request.queryParameters["hub.challenge"]
@@ -51,6 +52,7 @@ fun Routing.webhookRoutes(
         }
 
         post {
+            val config = configProvider()
             val signature = call.request.headers["X-Hub-Signature-256"]?.removePrefix("sha256=")
             if (signature.isNullOrBlank()) {
                 log.warn("Missing X-Hub-Signature-256 header")
@@ -72,7 +74,7 @@ fun Routing.webhookRoutes(
             // the WhatsApp/Facebook app secret. Pick the secret by object before verifying. Falls back
             // to the WhatsApp secret when no Instagram secret is configured (e.g. Facebook-Login setup).
             val appSecret = when (objectType) {
-                "instagram" -> instagramAppSecret.ifBlank { config.appSecret }
+                "instagram" -> instagramAppSecretProvider().ifBlank { config.appSecret }
                 else -> config.appSecret
             }
             if (!WebhookVerifier.verifySignature(body, signature, appSecret)) {

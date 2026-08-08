@@ -33,6 +33,14 @@ const ids = {
     i2: oid("665f40000000000000000002"),
     i3: oid("665f40000000000000000003"),
   },
+  bookingServices: {
+    consult: oid("665f60000000000000000001"),
+    visit: oid("665f60000000000000000002"),
+  },
+  bookings: {
+    b1: oid("665f70000000000000000001"),
+    b2: oid("665f70000000000000000002"),
+  },
 };
 
 const line = (description, quantity, unit, unitPriceEur) => {
@@ -319,6 +327,71 @@ const webhookEvents = [
   },
 ];
 
+const seedTenant = target.tenants.findOne({}) || null;
+const seedTenantId = seedTenant ? seedTenant._id : null;
+
+const bookingServices = seedTenantId ? [
+  {
+    _id: ids.bookingServices.consult,
+    tenantId: seedTenantId,
+    name: "Consultation",
+    durationMinutes: 60,
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    _id: ids.bookingServices.visit,
+    tenantId: seedTenantId,
+    name: "Site visit",
+    durationMinutes: 90,
+    active: true,
+    createdAt: now,
+    updatedAt: now,
+  },
+] : [];
+
+const bookingAvailability = seedTenantId ? [
+  { _id: oid("665f61000000000000000001"), tenantId: seedTenantId, dayOfWeek: 1, startLocal: "09:00", endLocal: "17:00" },
+  { _id: oid("665f61000000000000000002"), tenantId: seedTenantId, dayOfWeek: 2, startLocal: "09:00", endLocal: "17:00" },
+  { _id: oid("665f61000000000000000003"), tenantId: seedTenantId, dayOfWeek: 3, startLocal: "09:00", endLocal: "17:00" },
+  { _id: oid("665f61000000000000000004"), tenantId: seedTenantId, dayOfWeek: 4, startLocal: "09:00", endLocal: "17:00" },
+  { _id: oid("665f61000000000000000005"), tenantId: seedTenantId, dayOfWeek: 5, startLocal: "09:00", endLocal: "13:00" },
+] : [];
+
+const bookingAppointments = seedTenantId ? [
+  {
+    _id: ids.bookings.b1,
+    tenantId: seedTenantId,
+    serviceId: ids.bookingServices.consult,
+    clientId: ids.clients.hillsong,
+    contactName: "Maria Silva",
+    contactPhone: "+351910000002",
+    startAt: date("2026-05-21T09:00:00.000Z"),
+    endAt: date("2026-05-21T10:00:00.000Z"),
+    status: "CONFIRMED",
+    notes: "Initial consultation",
+    source: "DASHBOARD",
+    createdAt: now,
+    updatedAt: now,
+  },
+  {
+    _id: ids.bookings.b2,
+    tenantId: seedTenantId,
+    serviceId: ids.bookingServices.visit,
+    clientId: ids.clients.martins,
+    contactName: "Joao Costa",
+    contactPhone: "+351910000003",
+    startAt: date("2026-05-22T14:00:00.000Z"),
+    endAt: date("2026-05-22T15:30:00.000Z"),
+    status: "PENDING",
+    notes: null,
+    source: "WHATSAPP",
+    createdAt: now,
+    updatedAt: now,
+  },
+] : [];
+
 function removeSeedConflicts() {
   target.users.deleteMany({ $or: [{ _id: { $in: users.map((item) => item._id) } }, { waId: { $in: users.map((item) => item.waId) } }, { "metadata.mockSeed": "create-mocks" }] });
   target.conversations.deleteMany({ $or: [{ _id: { $in: conversations.map((item) => item._id) } }, { waId: { $in: conversations.map((item) => item.waId) } }] });
@@ -329,6 +402,9 @@ function removeSeedConflicts() {
   target.getCollection("crm.invoices").deleteMany({ $or: [{ _id: { $in: invoices.map((item) => item._id) } }, { number: { $in: invoices.map((item) => item.number) } }] });
   target.getCollection("crm.standard_items").deleteMany({ id: { $in: standardItems.map((item) => item.id) } });
   target.getCollection("crm.sequences").deleteMany({ name: { $in: ["client_number", "quote_number", "invoice_number"] } });
+  target.getCollection("bookings.services").deleteMany({ _id: { $in: Object.values(ids.bookingServices) } });
+  target.getCollection("bookings.availability").deleteMany({ _id: { $in: bookingAvailability.map((item) => item._id) } });
+  target.getCollection("bookings.appointments").deleteMany({ _id: { $in: Object.values(ids.bookings) } });
 }
 
 function insertMany(collectionName, docs) {
@@ -350,6 +426,9 @@ insertMany("crm.sequences", [
   { name: "quote_number", value: 3 },
   { name: "invoice_number", value: 3 },
 ]);
+insertMany("bookings.services", bookingServices);
+insertMany("bookings.availability", bookingAvailability);
+insertMany("bookings.appointments", bookingAppointments);
 
 const summary = {
   database: dbName,
@@ -362,6 +441,9 @@ const summary = {
   crm_invoices: target.getCollection("crm.invoices").countDocuments({ _id: { $in: invoices.map((item) => item._id) } }),
   crm_standard_items: target.getCollection("crm.standard_items").countDocuments({ id: { $in: standardItems.map((item) => item.id) } }),
   crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: ["client_number", "quote_number", "invoice_number"] } }),
+  booking_services: target.getCollection("bookings.services").countDocuments({ _id: { $in: Object.values(ids.bookingServices) } }),
+  booking_availability: target.getCollection("bookings.availability").countDocuments({ _id: { $in: bookingAvailability.map((item) => item._id) } }),
+  booking_appointments: target.getCollection("bookings.appointments").countDocuments({ _id: { $in: Object.values(ids.bookings) } }),
 };
 
 printjson(summary);

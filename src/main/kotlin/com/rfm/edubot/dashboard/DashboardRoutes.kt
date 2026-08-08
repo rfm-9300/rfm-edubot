@@ -15,7 +15,11 @@ import com.rfm.edubot.admin.StandardItemRequest
 import com.rfm.edubot.admin.dto
 import com.rfm.edubot.admin.respondPdf
 import com.rfm.edubot.admin.savePdf
+import com.rfm.edubot.bookings.bookingDeps
+import com.rfm.edubot.bookings.installBookingRoutes
+import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
@@ -110,7 +114,7 @@ fun Route.dashboardRoutes(
     pipelineFactory: TenantPipelineFactory,
     personaCompiler: PersonaCompiler,
     aiClient: AiClient,
-    appConfig: AppConfig,
+    runtimeConfig: RuntimeConfig,
     channelBindingService: ChannelBindingService,
 ) {
     post("/app/auth/login") {
@@ -121,7 +125,8 @@ fun Route.dashboardRoutes(
             return@post
         }
         dashboardUsers.markLogin(user.id, SystemClock.now())
-        call.respond(DashboardLoginResponse(token = dashboardToken(appConfig.admin, user, "tenant", appConfig.admin.jwtExpiryHours)))
+        val admin = runtimeConfig.get().admin
+        call.respond(DashboardLoginResponse(token = dashboardToken(admin, user, "tenant", admin.jwtExpiryHours)))
     }
 
     authenticate("dashboard") {
@@ -316,7 +321,15 @@ fun Route.dashboardRoutes(
                 call.respond(mapOf("locale" to updated.locale))
             }
             dashboardAssistantRoutes(mongo, tenantRepository, dashboardUsers, aiClient)
-            crmRoutes(mongo, tenantRepository, dashboardUsers, appConfig)
+            crmRoutes(mongo, tenantRepository, dashboardUsers, runtimeConfig)
+            installBookingRoutes {
+                val ctx = dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
+                    ?: run {
+                        respond(HttpStatusCode.Forbidden)
+                        return@installBookingRoutes null
+                    }
+                bookingDeps(mongo, ctx.tenant, BookingSource.DASHBOARD)
+            }
         }
     }
 }
@@ -324,7 +337,7 @@ fun Route.dashboardRoutes(
 fun Route.dashboardImpersonationRoute(
     tenantRepository: TenantRepository,
     dashboardUsers: DashboardUserRepository,
-    appConfig: AppConfig,
+    runtimeConfig: RuntimeConfig,
 ) {
     authenticate("admin-jwt") {
         get("/admin/api/tenants/{slug}/dashboard-users") {
@@ -369,19 +382,19 @@ fun Route.dashboardImpersonationRoute(
         post("/admin/api/tenants/{slug}/impersonate") {
             val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val tenant = tenantRepository.findBySlug(slug) ?: return@post call.respond(HttpStatusCode.NotFound)
-            call.respond(DashboardLoginResponse(token = dashboardToken(appConfig.admin, tenant, "operator-imp", 1)))
+            call.respond(DashboardLoginResponse(token = dashboardToken(runtimeConfig.get().admin, tenant, "operator-imp", 1)))
         }
     }
 }
 
-private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantRepository, dashboardUsers: DashboardUserRepository, appConfig: AppConfig) {
+private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantRepository, dashboardUsers: DashboardUserRepository, runtimeConfig: RuntimeConfig) {
     fun tenantDeps(ctx: DashboardContext): CrmDeps = CrmDeps(
         clients = ClientRepository(mongo, ctx.tenant.id),
         quotes = QuoteRepository(mongo, ctx.tenant.id),
         invoices = InvoiceRepository(mongo, ctx.tenant.id),
         standardItems = StandardItemRepository(mongo, ctx.tenant.id),
         pdfGenerator = PdfGenerator(),
-        pdfStoragePath = "${appConfig.pdfStoragePath}/${ctx.tenant.slug}",
+        pdfStoragePath = "${runtimeConfig.get().pdfStoragePath}/${ctx.tenant.slug}",
     )
 
     route("/crm") {
@@ -609,7 +622,7 @@ private suspend fun runPersonaTest(
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
-@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
 @Serializable private data class ChannelMeDto(val platform: String, val externalId: String, val displayName: String? = null)
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
 @Serializable private data class OverviewDto(val users: Long, val conversations: Long, val messages: Long, val messagesToday: Long, val quotes: Long, val invoices: Long)
@@ -631,7 +644,7 @@ private suspend fun runPersonaTest(
 
 private fun ChannelBinding?.toWebWidgetDto() = WebWidgetDto(publicKey = this?.externalId, allowedOrigins = this?.allowedOrigins ?: emptyList())
 
-private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, locale, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
+private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, locale, timezone, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),

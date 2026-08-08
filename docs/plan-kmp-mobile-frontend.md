@@ -248,41 +248,40 @@ Leave Instagram connection web-only until this is implemented securely.
 
 ## 4. KMP Architecture
 
-Use shared-everything Compose Multiplatform.
+Use shared-everything Compose Multiplatform, modularized nowinandroid-style with convention
+plugins in `build-logic/` (`edubot.kmp.library`, `edubot.kmp.compose.library`).
 
 ```text
 mobile/
-├── shared/
-│   └── src/
-│       ├── commonMain/kotlin/
-│       │   ├── app/
-│       │   ├── core/
-│       │   │   ├── designsystem/
-│       │   │   ├── network/
-│       │   │   ├── database/
-│       │   │   ├── auth/
-│       │   │   ├── localization/
-│       │   │   └── telemetry/
-│       │   └── feature/
-│       │       ├── login/
-│       │       ├── overview/
-│       │       ├── conversations/
-│       │       ├── contacts/
-│       │       ├── assistant/
-│       │       ├── crm/
-│       │       ├── persona/
-│       │       └── settings/
-│       ├── commonTest/kotlin/
-│       ├── androidMain/kotlin/
-│       └── iosMain/kotlin/
+├── build-logic/          # Convention plugins (KMP + Android library + Compose setup)
+├── core/
+│   ├── model/            # API DTOs, pure kotlinx.serialization (no Ktor/Compose)
+│   ├── network/          # DashboardApi + KtorDashboardApi (OkHttp on Android, Darwin on iOS)
+│   ├── common/           # TokenStore, VoiceInput, SessionError
+│   ├── localization/     # MobileCopy + MobileStrings (en/pt/es)
+│   ├── ui/               # BotTheme, BotColor, shared Compose components
+│   └── testing/          # FakeDashboardApi, FakeVoiceInput for commonTest
+├── feature/
+│   ├── auth/             # LoginExperienceScreen
+│   ├── overview/         # OverviewScreen
+│   ├── inbox/            # InboxScreen + InboxController
+│   ├── contacts/         # ContactsScreen + ContactsController
+│   ├── assistant/        # AssistantScreen + AssistantController (voice input)
+│   ├── crm/              # CrmScreen + CrmController
+│   ├── persona/          # PersonaScreen + PersonaController
+│   └── settings/         # SettingsScreen + SettingsController
+├── shared/               # App shell: DashboardApp, session state machine, root navigation;
+│                         # also the iOS framework umbrella (exports all core/feature modules)
 ├── androidApp/
 ├── iosApp/
-├── build-logic/
 └── gradle/libs.versions.toml
 ```
 
-Start with one `shared` module. The package boundaries above are logical packages, not separate
-Gradle modules. Split modules only when compilation or team ownership justifies it.
+Dependency rule: `androidApp`/`iosApp` → `shared` → `feature:*` → `core:*`. Features never
+depend on each other or on `shared`; `core` modules only point downward
+(`core:localization → core:common`, `core:network → core:model`). Feature screens take the
+narrow state they need (token, tenant, strings) instead of the session state machine, so the
+shell in `:shared` is the only place that knows about `DashboardSessionState`.
 
 ### 4.1 Dependency direction
 

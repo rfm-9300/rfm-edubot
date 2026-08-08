@@ -6,6 +6,7 @@ import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.ProfileLookupClient
+import com.rfm.edubot.bookings.BookingTools
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
@@ -43,6 +44,7 @@ class MessagePipeline(
     private val aiClient: AiClient,
     private val deduplicationService: DeduplicationService,
     private val crmTools: CrmTools,
+    private val bookingTools: BookingTools? = null,
     private val clientRepository: ClientRepository,
     private val quoteRepository: QuoteRepository,
     private val invoiceRepository: InvoiceRepository,
@@ -172,8 +174,18 @@ class MessagePipeline(
             var completed = false
             var iterations = 0
             // Tools must be available when confirmed, plus whenever message has CRM keywords or mid-flow.
-            var useTools = shouldUseCrmTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
+            var useTools = shouldUseCrmTools(inbound.messageText) || shouldUseBookingTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
             var feedbackSent = false
+            val toolDefinitions = crmTools.definitions + (bookingTools?.definitions ?: emptyList())
+            if (bookingTools != null) {
+                contextMessages.add(
+                    1,
+                    ChatMessage(
+                        role = "system",
+                        content = "Booking tools are enabled for this tenant. Use list_booking_services and list_available_slots before create_booking. Summarize the proposed appointment and wait for explicit confirmation before write tools.",
+                    ),
+                )
+            }
 
             // Send immediate feedback before the first AI call when we know tools will run,
             // so the user doesn't wait in silence during the ~4-5s model latency.
@@ -186,7 +198,7 @@ class MessagePipeline(
                 iterations += 1
                 val forceTools = useTools && isConfirmedCrmAction && iterations == 1
                 val aiResponse = try {
-                    aiClient.complete(contextMessages, if (useTools) crmTools.definitions else emptyList(), forceToolUse = forceTools, modelOverride = openrouterModel)
+                    aiClient.complete(contextMessages, if (useTools) toolDefinitions else emptyList(), forceToolUse = forceTools, modelOverride = openrouterModel)
                 } catch (e: Exception) {
                     if (useTools && e.message?.contains("tool", ignoreCase = true) == true) {
                         log.warn("AI model rejected tool use; retrying without tools: {}", e.message)
@@ -214,18 +226,20 @@ class MessagePipeline(
                         responseId = aiResponse.responseId
                         contextMessages.add(aiResponse.message)
                         for (call in aiResponse.calls) {
-                            log.info("Executing CRM tool: name={}, id={}", call.name, call.id)
+                            log.info("Executing tool: name={}, id={}", call.name, call.id)
                             val result = try {
                                 if (requiresExplicitConfirmation(call.name) && !isConfirmedCrmAction && !hasExplicitConfirmation(inbound.messageText, contextMessages)) {
                                     buildJsonObject {
                                         put("error", "confirmation_required")
                                         put("message", "Before creating or updating records, summarize the proposed data and ask the user to confirm with 'pode gerar' or 'confirmo'.")
                                     }
+                                } else if (bookingTools?.knows(call.name) == true) {
+                                    bookingTools.execute(call)
                                 } else {
                                     crmTools.execute(call)
                                 }
                             } catch (e: Exception) {
-                                log.error("CRM tool failed: name={}, error={}", call.name, e.message, e)
+                                log.error("Tool failed: name={}, error={}", call.name, e.message, e)
                                 buildJsonObject {
                                     put("error", "tool_failed")
                                     put("tool", call.name)
@@ -451,12 +465,37 @@ class MessagePipeline(
         ).any { it in text }
     }
 
+    private fun shouldUseBookingTools(message: String): Boolean {
+        if (bookingTools == null) return false
+        val text = message.lowercase()
+        return listOf(
+            "agendar",
+            "agenda",
+            "marcar",
+            "marcação",
+            "marcacao",
+            "booking",
+            "appointment",
+            "consulta",
+            "disponib",
+            "horario",
+            "horário",
+            "slot",
+            "reserv",
+            "cancelar marc",
+            "cancelar agend",
+        ).any { it in text }
+    }
+
     private fun requiresExplicitConfirmation(toolName: String): Boolean = toolName in setOf(
         "create_client",
         "create_quote",
         "update_quote",
         "create_invoice",
         "mark_invoice_paid",
+        "create_booking",
+        "cancel_booking",
+        "confirm_booking",
     )
 
     private fun hasExplicitConfirmation(message: String, contextMessages: List<ChatMessage>): Boolean {

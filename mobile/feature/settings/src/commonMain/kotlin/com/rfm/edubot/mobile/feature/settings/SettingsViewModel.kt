@@ -1,10 +1,10 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.feature.settings
 
-import com.rfm.edubot.mobile.data.DashboardApi
-import com.rfm.edubot.mobile.data.WebWidget
+import com.rfm.edubot.mobile.core.model.WebWidget
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -18,13 +18,14 @@ data class SettingsUiState(
     val error: Boolean = false,
 )
 
-class SettingsController(
+class SettingsViewModel(
     private val api: DashboardApi,
     private val token: String,
     initialLocale: String,
     private val onLocaleUpdated: (String) -> Unit,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+    scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
+    private val scope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow(SettingsUiState(selectedLocale = initialLocale))
     val state: StateFlow<SettingsUiState> = mutableState.asStateFlow()
 

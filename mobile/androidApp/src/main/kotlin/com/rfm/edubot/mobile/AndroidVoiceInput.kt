@@ -12,9 +12,9 @@ import android.speech.SpeechRecognizer
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
-import com.rfm.edubot.mobile.app.VoiceInput
-import com.rfm.edubot.mobile.app.VoiceInputError
-import com.rfm.edubot.mobile.app.VoiceInputState
+import com.rfm.edubot.mobile.core.common.VoiceInput
+import com.rfm.edubot.mobile.core.common.VoiceInputError
+import com.rfm.edubot.mobile.core.common.VoiceInputState
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow

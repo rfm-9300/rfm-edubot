@@ -120,6 +120,18 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmStandardItems.dropIndexIfExists("id_1")
             crmStandardItems.createIndex(Document("tenantId", 1).append("id", 1), IndexOptions().unique(true))
             crmStandardItems.createIndex(Document("tenantId", 1).append("type", 1).append("category", 1))
+
+            val bookingServices = db.getCollection<Document>("bookings.services")
+            bookingServices.createIndex(Document("tenantId", 1).append("active", 1))
+            bookingServices.createIndex(Document("tenantId", 1).append("name", 1))
+
+            val bookingAvailability = db.getCollection<Document>("bookings.availability")
+            bookingAvailability.createIndex(Document("tenantId", 1).append("dayOfWeek", 1))
+
+            val bookingAppointments = db.getCollection<Document>("bookings.appointments")
+            bookingAppointments.createIndex(Document("tenantId", 1).append("startAt", 1))
+            bookingAppointments.createIndex(Document("tenantId", 1).append("status", 1).append("startAt", 1))
+            bookingAppointments.createIndex(Document("tenantId", 1).append("clientId", 1))
         }
         log.info("MongoDB indexes initialized")
     }

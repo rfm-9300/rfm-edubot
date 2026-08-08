@@ -1,13 +1,14 @@
 package com.rfm.edubot.mobile.app
 
-import com.rfm.edubot.mobile.data.DashboardApi
-import com.rfm.edubot.mobile.data.DashboardApiException
-import com.rfm.edubot.mobile.data.DashboardIdentity
-import com.rfm.edubot.mobile.data.Overview
-import com.rfm.edubot.mobile.data.TokenStore
+import com.rfm.edubot.mobile.core.common.SessionError
+import com.rfm.edubot.mobile.core.common.TokenStore
+import com.rfm.edubot.mobile.core.model.DashboardIdentity
+import com.rfm.edubot.mobile.core.model.Overview
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.network.DashboardApi
+import com.rfm.edubot.mobile.core.network.DashboardApiException
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,18 +25,12 @@ sealed interface DashboardSessionState {
     ) : DashboardSessionState
 }
 
-enum class SessionError {
-    MISSING_CREDENTIALS,
-    INVALID_CREDENTIALS,
-    SESSION_EXPIRED,
-    CONNECTION_FAILED,
-}
-
-class DashboardSessionController(
+class DashboardSessionViewModel(
     private val api: DashboardApi,
     private val tokenStore: TokenStore,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+    scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
+    private val scope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow<DashboardSessionState>(DashboardSessionState.Restoring)
     val state: StateFlow<DashboardSessionState> = mutableState.asStateFlow()
 

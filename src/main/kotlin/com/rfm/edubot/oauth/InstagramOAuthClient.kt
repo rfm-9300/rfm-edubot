@@ -21,9 +21,12 @@ import org.slf4j.LoggerFactory
  * partial binding. Logs ids/usernames only, never token bodies.
  */
 class InstagramOAuthClient(
-    private val config: AppConfig.InstagramConfig,
+    private val configProvider: () -> AppConfig.InstagramConfig,
     private val httpClient: HttpClient,
 ) {
+    constructor(config: AppConfig.InstagramConfig, httpClient: HttpClient) : this({ config }, httpClient)
+
+    private val config: AppConfig.InstagramConfig get() = configProvider()
     private val json = Json { ignoreUnknownKeys = true }
     private val log = LoggerFactory.getLogger("InstagramOAuthClient")
 

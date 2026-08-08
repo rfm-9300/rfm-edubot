@@ -107,6 +107,7 @@ graph TD
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
 | `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation |
+| `bookings/` | Bookable services, weekly availability, appointments, slot engine, booking tools |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
 | `channel/` | `OutboundClient` interface and per-channel capability flags used by the pipeline |
@@ -114,6 +115,7 @@ graph TD
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
 | `persistence/` | MongoDB wiring, index creation at startup |
+| `config/` | `AppConfig` (env/HOCON), `RuntimeConfig` + Mongo `platform_settings` overrides |
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes |
 | `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages |
 
@@ -123,7 +125,7 @@ graph TD
 catalog lives in `DashboardModules`:
 
 - Always enabled and not admin-disableable: `overview`, `conversations`, `contacts`, `settings`.
-- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`.
+- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`.
 
 The server sanitizes explicit selections against this catalog and force-adds the always-on
 modules. A missing Mongo `enabledModules` field maps to `null`, which preserves legacy behavior by
@@ -133,6 +135,13 @@ not require a data migration.
 `GET /app/api/me` returns the effective module list for navigation, but navigation is not the
 security boundary. Every dashboard module route and tenant-scoped admin CRM route checks the same
 effective module list and returns `403 Forbidden` when its module is disabled.
+
+### Bookings
+
+Optional `bookings` module: weekly availability, bookable services, conflict-checked appointments.
+Instants are stored in UTC; wall times use `Tenant.timezone` (IANA, default `Europe/Lisbon`).
+Surfaces: `/app/api/bookings/*`, admin mirror `/admin/api/tenants/{slug}/bookings/*`, WhatsApp
+`BookingTools` (only when the module is enabled), and dashboard assistant tools mapped to `bookings`.
 
 ## MongoDB Collections
 
@@ -148,10 +157,14 @@ effective module list and returns `403 Forbidden` when its module is disabled.
 | `crm.sequences` | Atomic quote/invoice numbering counters | unique on `name` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+| `bookings.services` | Bookable services (name, duration, active) | `tenantId`, `active` |
+| `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
+| `bookings.appointments` | Bookings with UTC start/end and status | `tenantId`, `startAt` |
+| `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
 
 ## Dashboard AI Assistant
 
-The optional `ai-assistant` module uses the same `AiClient` and `CrmTools` implementations as the
+The optional `ai-assistant` module uses the same `AiClient` plus CRM/`BookingTools` implementations as the
 messaging pipeline, but applies the signed-in tenant's enabled modules as a second capability filter.
 Read tools execute during the chat turn. Write tool calls are persisted as `PENDING` actions and are
 not executed until the owning dashboard user confirms the exact payload shown in the UI. Confirmation
@@ -182,6 +195,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
 - **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath`, then uploaded to WhatsApp as documents and linked from admin APIs.
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
+- **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
 
 ## Infrastructure
 
@@ -201,12 +215,28 @@ The `mobile/` directory is an independent Kotlin Multiplatform build that consum
 dashboard HTTP API. It deliberately remains separate from the server's Gradle build so the mobile
 toolchain can evolve independently of the Ktor runtime.
 
-- `mobile/shared` is a KMP library targeting Android, iOS devices, and iOS simulators. It owns
-  Compose Multiplatform UI, dashboard DTOs, Ktor networking, session state, and shared tests.
+The build is modularized nowinandroid-style. Dependency direction: `androidApp`/`iosApp` →
+`shared` → `feature:*` → `core:*`. Features never depend on each other; `core` modules only point
+downward.
+
+- `mobile/build-logic` hosts Gradle convention plugins (`edubot.kmp.library`,
+  `edubot.kmp.compose.library`) that apply the shared KMP + Android library + Compose setup.
+- `mobile/core/*` holds the downward-only shared modules: `model` (dashboard DTOs), `network`
+  (`DashboardApi` + Ktor client), `common` (`TokenStore`, `VoiceInput`, `SessionError`),
+  `localization` (en/pt/es catalogs), `ui` (theme + shared Compose components), and `testing`
+  (fakes for `commonTest`).
+- `mobile/feature/*` holds one module per screen (`auth`, `overview`, `inbox`, `contacts`,
+  `assistant`, `crm`, `persona`, `settings`). Each stateful feature pairs a stateless composable
+  with an androidx.lifecycle `ViewModel` (KMP) exposing an immutable `StateFlow<UiState>`; screens
+  obtain it via keyed `viewModel(factory)` calls and take narrow state (token, tenant, strings)
+  instead of the session state machine.
+- `mobile/shared` is the app shell: `DashboardApp`, the `DashboardSessionViewModel` state
+  machine, and root navigation. `DashboardApp` also provides a fallback `ViewModelStoreOwner` for
+  iOS (Android uses the activity-scoped owner). The module is also the iOS umbrella, exporting all
+  core/feature modules as the static `EduBotShared` framework (bundle ID `com.rfm.edubot.shared`)
+  for the Xcode host app.
 - `mobile/androidApp` is the thin Android entry point (`com.rfm.edubot`) and persists the dashboard
   access token using Android Keystore-backed encrypted preferences.
-- The shared iOS target exports a static `EduBotShared` framework with bundle ID
-  `com.rfm.edubot.shared`, ready for an Xcode host app.
-- The first executable slice supports tenant login, secure Android token restoration, dynamic
-  module navigation from `GET /app/api/me`, and the overview endpoint. Further feature modules
-  build on the same tenant-scoped API contract.
+- The app supports tenant login, secure token restoration, dynamic module navigation from
+  `GET /app/api/me`, overview, inbox with operator replies, contacts with block/unblock, the AI
+  assistant with voice input, CRM, persona, and settings — all on the tenant-scoped API contract.

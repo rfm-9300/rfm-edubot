@@ -13,9 +13,10 @@ object DashboardModules {
     const val INVOICES = "invoices"
     const val CATALOG = "catalog"
     const val AI_ASSISTANT = "ai-assistant"
+    const val BOOKINGS = "bookings"
 
     val alwaysOn = listOf(OVERVIEW, CONVERSATIONS, CONTACTS, SETTINGS)
-    val optional = listOf(PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG, AI_ASSISTANT)
+    val optional = listOf(PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG, AI_ASSISTANT, BOOKINGS)
     val catalog = alwaysOn + optional
 
     fun availableFor(): List<String> = catalog

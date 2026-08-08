@@ -1,15 +1,17 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.feature.assistant
 
-import com.rfm.edubot.mobile.data.AssistantThread
-import com.rfm.edubot.mobile.data.AssistantThreadDetail
-import com.rfm.edubot.mobile.data.DashboardApi
+import com.rfm.edubot.mobile.core.common.VoiceInput
+import com.rfm.edubot.mobile.core.common.VoiceInputError
+import com.rfm.edubot.mobile.core.common.VoiceInputState
+import com.rfm.edubot.mobile.core.model.AssistantThread
+import com.rfm.edubot.mobile.core.model.AssistantThreadDetail
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 
 data class AssistantUiState(
@@ -23,13 +25,14 @@ data class AssistantUiState(
     val voiceError: VoiceInputError? = null,
 )
 
-class AssistantController(
+class AssistantViewModel(
     private val api: DashboardApi,
     private val token: String,
     private val locale: String,
     private val voiceInput: VoiceInput,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+    scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
+    private val scope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow(AssistantUiState())
     val state: StateFlow<AssistantUiState> = mutableState.asStateFlow()
     private var voiceDraftPrefix = ""
@@ -126,9 +129,8 @@ class AssistantController(
         }
     }
 
-    fun close() {
+    override fun onCleared() {
         voiceInput.cancel()
-        scope.cancel()
     }
 }
 

@@ -10,6 +10,7 @@ data class Tenant(
     val name: String,
     val channels: List<ChannelBinding>,
     val locale: String = TenantLocales.DEFAULT,
+    val timezone: String = TenantTimeZones.DEFAULT,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,
     val rateLimitPerHour: Int = 30,
@@ -29,6 +30,18 @@ object TenantLocales {
     const val DEFAULT = "pt-PT"
     val SUPPORTED = setOf("en", "pt-PT", "es")
     fun normalize(value: String?): String = value?.takeIf { it in SUPPORTED } ?: DEFAULT
+}
+
+/** IANA timezones for booking scheduling. Invalid values fall back to the default. */
+object TenantTimeZones {
+    const val DEFAULT = "Europe/Lisbon"
+    fun normalize(value: String?): String {
+        val candidate = value?.trim()?.takeIf { it.isNotBlank() } ?: return DEFAULT
+        return runCatching {
+            kotlinx.datetime.TimeZone.of(candidate)
+            candidate
+        }.getOrDefault(DEFAULT)
+    }
 }
 
 enum class Platform { WHATSAPP, INSTAGRAM, WEB }

@@ -24,7 +24,7 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ../gradlew :shared:testDebugUnitTest :androidApp:assembleDebug
+      - run: ./gradlew :shared:testDebugUnitTest :feature:assistant:testDebugUnitTest :feature:settings:testDebugUnitTest :androidApp:assembleDebug
 
   ios-framework:
     runs-on: macos-latest
@@ -38,4 +38,4 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
-      - run: ../gradlew :shared:iosSimulatorArm64Test :shared:linkDebugFrameworkIosSimulatorArm64
+      - run: ./gradlew :shared:iosSimulatorArm64Test :feature:assistant:iosSimulatorArm64Test :feature:settings:iosSimulatorArm64Test :shared:linkDebugFrameworkIosSimulatorArm64

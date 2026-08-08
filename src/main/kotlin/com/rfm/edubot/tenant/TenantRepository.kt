@@ -61,6 +61,7 @@ class TenantRepository(mongoModule: MongoModule) {
         name = getString("name"),
         channels = getChannels(),
         locale = com.rfm.edubot.tenant.model.TenantLocales.normalize(getString("locale")),
+        timezone = com.rfm.edubot.tenant.model.TenantTimeZones.normalize(getString("timezone")),
         openrouterModel = getString("openrouterModel"),
         enabledModules = getList("enabledModules", String::class.java),
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
@@ -76,6 +77,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("name", name)
             .append("channels", channels.map { it.toDocument() })
             .append("locale", locale)
+            .append("timezone", timezone)
             .append("openrouterModel", openrouterModel)
             .append("enabledModules", enabledModules)
             .append("rateLimitPerHour", rateLimitPerHour)

@@ -1,4 +1,4 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.core.ui
 
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
@@ -11,7 +11,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.sp
 
-internal object BotColor {
+object BotColor {
     val Background = Color(0xFF08090B)
     val Surface = Color(0xFF0F1216)
     val Panel = Color(0xFF14181D)
@@ -55,6 +55,6 @@ private val botTypography = Typography(
 )
 
 @Composable
-internal fun BotTheme(content: @Composable () -> Unit) {
+fun BotTheme(content: @Composable () -> Unit) {
     MaterialTheme(colorScheme = botScheme, typography = botTypography, content = content)
 }

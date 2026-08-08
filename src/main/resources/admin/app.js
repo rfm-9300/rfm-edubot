@@ -15,6 +15,7 @@ const API_BASE = `/admin/api/tenants/${encodeURIComponent(tenantSlug)}`;
 // CRM copy comes from the shared i18n catalogs (catalog.*.js). Locale follows the tenant (resolved
 // in init() from the tenant API), with the usual localStorage/browser fallbacks. `T` is a live proxy.
 const T = I18N.section('admin');
+const APP = I18N.section('app');
 
 async function api(path, options = {}) {
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), Authorization: `Bearer ${token}` };
@@ -43,7 +44,11 @@ const invoiceStatusLabel = code => (T.invoiceStatus && T.invoiceStatus[code]) ||
 
 /* ----------  STATE (client-side cache)  ---------- */
 
-let state = { clients: [], catalog: [], quotes: [], invoices: [] };
+let state = {
+  clients: [], catalog: [], quotes: [], invoices: [],
+  bookings: [], bookingServices: [], bookingAvailability: [],
+  bookingWeekStart: null, tenantTimezone: 'Europe/Lisbon',
+};
 
 /* ----------  NORMALIZE  ---------- */
 
@@ -93,12 +98,30 @@ async function loadAll() {
   state.catalog  = catalog.map(normalizeCatalogItem);
   state.quotes   = quotes.map(normalizeQuote);
   state.invoices = invoices.map(normalizeInvoice);
+  await reloadBookings().catch(() => {
+    state.bookings = [];
+    state.bookingServices = [];
+    state.bookingAvailability = [];
+  });
 }
 
 async function reloadClients()  { state.clients  = (await api('/clients')).map(normalizeClient); }
 async function reloadCatalog()  { state.catalog  = (await api('/standard-items')).map(normalizeCatalogItem); }
 async function reloadQuotes()   { state.quotes   = (await api('/quotes')).map(normalizeQuote); }
 async function reloadInvoices() { state.invoices = (await api('/invoices')).map(normalizeInvoice); }
+async function reloadBookings() {
+  if (!state.bookingWeekStart) state.bookingWeekStart = startOfWeekAdmin();
+  const from = state.bookingWeekStart.toISOString();
+  const to = addDaysAdmin(state.bookingWeekStart, 7).toISOString();
+  const [bookings, services, availability] = await Promise.all([
+    api(`/bookings?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`),
+    api('/bookings/services'),
+    api('/bookings/availability'),
+  ]);
+  state.bookings = bookings;
+  state.bookingServices = services;
+  state.bookingAvailability = availability;
+}
 
 /* ----------  HELPERS  ---------- */
 
@@ -277,6 +300,7 @@ const TABS = {
   orcamentos: { render: renderOrcamentos, onNew: () => formQuote()   },
   faturas:    { render: renderFaturas,    onNew: () => formInvoice() },
   items:      { render: renderItems,      onNew: () => formItem()    },
+  bookings:   { render: renderBookingsAdmin, onNew: () => formBookingAdmin() },
 };
 
 let activeTab           = 'clientes';
@@ -303,6 +327,7 @@ function render() {
   $('[data-count="orcamentos"]').textContent = state.quotes.length;
   $('[data-count="faturas"]').textContent    = state.invoices.length;
   $('[data-count="items"]').textContent      = state.catalog.length;
+  $('[data-count="bookings"]').textContent   = state.bookings.length;
 
   const pending = state.invoices
     .filter(i => i.statusApi === 'PENDING' || i.statusApi === 'OVERDUE')
@@ -957,6 +982,168 @@ async function deleteItem(id) {
 }
 
 /* ============================================================
+   PAGE: BOOKINGS
+   ============================================================ */
+
+const startOfWeekAdmin = (d = new Date()) => {
+  const x = new Date(d);
+  const day = (x.getDay() + 6) % 7;
+  x.setHours(0, 0, 0, 0);
+  x.setDate(x.getDate() - day);
+  return x;
+};
+const addDaysAdmin = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const fmtBookingWhen = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short', timeZone: state.tenantTimezone }) : '—';
+const bookingStatusLabelAdmin = s => APP[`bookingStatus${s}`] || s;
+const serviceNameAdmin = id => state.bookingServices.find(s => s.id === id)?.name || id;
+
+function renderBookingsAdmin(root) {
+  const t = T.tabs.bookings;
+  const weekStart = state.bookingWeekStart || startOfWeekAdmin();
+  const weekLabel = `${weekStart.toLocaleDateString('pt-PT', { day: '2-digit', month: 'short' })} – ${addDaysAdmin(weekStart, 6).toLocaleDateString('pt-PT', { day: '2-digit', month: 'short', year: 'numeric' })}`;
+  const q = searchTerm.toLowerCase();
+  const rows = state.bookings
+    .filter(b => !q || `${b.contactName} ${b.contactPhone} ${serviceNameAdmin(b.serviceId)}`.toLowerCase().includes(q))
+    .map(b => `<tr data-edit-booking="${b.id}"><td class="mono">${escapeHTML(fmtBookingWhen(b.startAt))}</td><td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td><td>${escapeHTML(serviceNameAdmin(b.serviceId))}</td><td>${escapeHTML(bookingStatusLabelAdmin(b.status))}</td></tr>`)
+    .join('');
+  root.innerHTML = `
+    <div class="view__hero"><div><h1 class="view__title">${escapeHTML(t.title)}</h1><p class="view__desc">${escapeHTML(t.desc)}</p></div></div>
+    <div class="booking-toolbar">
+      <div class="booking-toolbar__nav">
+        <button type="button" class="btn btn--sm" data-week-shift="-7">${escapeHTML(APP.bookingsPrev)}</button>
+        <button type="button" class="btn btn--sm" data-week-shift="0">${escapeHTML(APP.bookingsToday)}</button>
+        <button type="button" class="btn btn--sm" data-week-shift="7">${escapeHTML(APP.bookingsNext)}</button>
+        <span class="booking-toolbar__label mono">${escapeHTML(weekLabel)}</span>
+      </div>
+      <div class="booking-toolbar__actions">
+        <button type="button" class="btn btn--sm" data-manage-services>${escapeHTML(APP.bookingsManageServices)}</button>
+        <button type="button" class="btn btn--sm" data-manage-availability>${escapeHTML(APP.bookingsManageAvailability)}</button>
+      </div>
+    </div>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(APP.bookingsThWhen)}</th><th>${escapeHTML(APP.bookingsThContact)}</th><th>${escapeHTML(APP.bookingsThService)}</th><th>${escapeHTML(APP.bookingsThStatus)}</th></tr></thead>
+    <tbody>${rows || `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(APP.bookingsEmptyList)}</p></div></td></tr>`}</tbody></table></div></div>`;
+  $$('[data-week-shift]', root).forEach(b => b.addEventListener('click', async () => {
+    const shift = Number(b.dataset.weekShift);
+    state.bookingWeekStart = shift === 0 ? startOfWeekAdmin() : addDaysAdmin(state.bookingWeekStart || startOfWeekAdmin(), shift);
+    await reloadBookings();
+    render();
+  }));
+  $('[data-manage-services]', root)?.addEventListener('click', formBookingServicesAdmin);
+  $('[data-manage-availability]', root)?.addEventListener('click', formBookingAvailabilityAdmin);
+  $$('[data-edit-booking]', root).forEach(r => r.addEventListener('click', () => formBookingAdmin(state.bookings.find(b => b.id === r.dataset.editBooking))));
+}
+
+function formBookingAdmin(booking = null) {
+  const body = document.createElement('form');
+  body.className = 'form';
+  const services = state.bookingServices.filter(s => s.active || s.id === booking?.serviceId);
+  const toLocal = iso => {
+    if (!iso) return '';
+    const parts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+      timeZone: state.tenantTimezone, year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).formatToParts(new Date(iso)).filter(p => p.type !== 'literal').map(p => [p.type, p.value]));
+    return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+  };
+  body.innerHTML = `
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsContactName)}</label><input class="inp" name="contactName" required value="${escapeHTML(booking?.contactName || '')}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsContactPhone)}</label><input class="inp" name="contactPhone" required value="${escapeHTML(booking?.contactPhone || '')}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsService)}</label><select class="sel" name="serviceId" required>
+      <option value="">${escapeHTML(APP.bookingsChooseService)}</option>
+      ${services.map(s => `<option value="${s.id}" ${booking?.serviceId === s.id ? 'selected' : ''}>${escapeHTML(s.name)}</option>`).join('')}
+    </select></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsStart)}</label><input class="inp" type="datetime-local" name="startAt" required value="${escapeHTML(toLocal(booking?.startAt))}" /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsStatus)}</label><select class="sel" name="status">
+      ${['PENDING', 'CONFIRMED', 'CANCELLED', 'COMPLETED'].map(s => `<option value="${s}" ${(booking?.status || 'CONFIRMED') === s ? 'selected' : ''}>${escapeHTML(bookingStatusLabelAdmin(s))}</option>`).join('')}
+    </select></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsNotes)}</label><textarea class="inp" name="notes" rows="3">${escapeHTML(booking?.notes || '')}</textarea></div>`;
+  openDrawer({
+    eyebrow: T.tabs.bookings.title,
+    title: booking ? APP.bookingsEdit : APP.bookingsNew,
+    body,
+    saveLabel: APP.bookingsSave,
+    onSave: async () => {
+      const fd = new FormData(body);
+      const payload = {
+        contactName: String(fd.get('contactName') || '').trim(),
+        contactPhone: String(fd.get('contactPhone') || '').trim(),
+        serviceId: String(fd.get('serviceId') || ''),
+        startAt: String(fd.get('startAt') || ''),
+        status: String(fd.get('status') || 'CONFIRMED'),
+        notes: String(fd.get('notes') || ''),
+      };
+      if (!payload.contactName || !payload.contactPhone || !payload.serviceId || !payload.startAt) {
+        toast(APP.bookingsValidate);
+        return false;
+      }
+      try {
+        if (booking) await api(`/bookings/${booking.id}`, { method: 'POST', body: JSON.stringify(payload) });
+        else await api('/bookings', { method: 'POST', body: JSON.stringify(payload) });
+        toast(booking ? APP.bookingsUpdated : APP.bookingsCreated);
+        await reloadBookings();
+        render();
+        return true;
+      } catch (e) {
+        toast(String(e.message || '').includes('409') ? APP.bookingsConflict : T.error({ msg: e.message }));
+        return false;
+      }
+    },
+  });
+}
+
+function formBookingServicesAdmin() {
+  const body = document.createElement('form');
+  body.className = 'form';
+  body.innerHTML = `
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsServiceName)}</label><input class="inp" name="name" required /></div>
+    <div class="form__row"><label class="lbl">${escapeHTML(APP.bookingsDuration)}</label><input class="inp" type="number" min="5" name="durationMinutes" value="30" required /></div>
+    <p class="hint">${state.bookingServices.map(s => `${escapeHTML(s.name)} · ${s.durationMinutes}m`).join(' · ') || '—'}</p>`;
+  openDrawer({
+    eyebrow: T.tabs.bookings.title,
+    title: APP.bookingsManageServices,
+    body,
+    saveLabel: APP.bookingsSave,
+    onSave: async () => {
+      const fd = new FormData(body);
+      await api('/bookings/services', { method: 'POST', body: JSON.stringify({ name: fd.get('name'), durationMinutes: Number(fd.get('durationMinutes') || 30) }) });
+      toast(APP.bookingsServiceSaved);
+      await reloadBookings();
+      render();
+      return true;
+    },
+  });
+}
+
+function formBookingAvailabilityAdmin() {
+  const body = document.createElement('form');
+  body.className = 'form';
+  const rules = state.bookingAvailability.length ? state.bookingAvailability : [{ dayOfWeek: 1, startLocal: '09:00', endLocal: '17:00' }];
+  body.innerHTML = rules.map(r => `<div class="form__row booking-avail-row">
+    <select class="sel" name="dayOfWeek">${[1,2,3,4,5,6,7].map(d => `<option value="${d}" ${r.dayOfWeek === d ? 'selected' : ''}>${escapeHTML(APP[`weekday${d}`])}</option>`).join('')}</select>
+    <input class="inp" type="time" name="startLocal" value="${escapeHTML(r.startLocal)}" />
+    <input class="inp" type="time" name="endLocal" value="${escapeHTML(r.endLocal)}" />
+  </div>`).join('');
+  openDrawer({
+    eyebrow: T.tabs.bookings.title,
+    title: APP.bookingsManageAvailability,
+    body,
+    saveLabel: APP.bookingsSave,
+    onSave: async () => {
+      const next = $$('.booking-avail-row', body).map(row => ({
+        dayOfWeek: Number($('[name=dayOfWeek]', row).value),
+        startLocal: $('[name=startLocal]', row).value,
+        endLocal: $('[name=endLocal]', row).value,
+      }));
+      await api('/bookings/availability', { method: 'PUT', body: JSON.stringify({ rules: next }) });
+      toast(APP.bookingsAvailabilitySaved);
+      await reloadBookings();
+      render();
+      return true;
+    },
+  });
+}
+
+/* ============================================================
    BOOTSTRAP
    ============================================================ */
 
@@ -966,6 +1153,7 @@ async function init() {
     // Adopt the tenant's language before any data normalization bakes in status labels.
     I18N.applyTenantDefault(tenant.locale);
     I18N.applyDom(document);
+    state.tenantTimezone = tenant.timezone || 'Europe/Lisbon';
     document.title = `${tenant.name} · ${T.titleSuffix}`;
     $('#brand-name').textContent = tenant.name;
     $('#brand-sub').textContent = `${tenant.slug} · CRM`;

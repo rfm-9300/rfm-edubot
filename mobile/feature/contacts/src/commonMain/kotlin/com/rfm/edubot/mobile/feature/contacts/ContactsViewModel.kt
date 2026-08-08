@@ -1,10 +1,10 @@
-package com.rfm.edubot.mobile.app
+package com.rfm.edubot.mobile.feature.contacts
 
-import com.rfm.edubot.mobile.data.Contact
-import com.rfm.edubot.mobile.data.DashboardApi
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.model.Contact
+import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -17,11 +17,12 @@ data class ContactsUiState(
     val error: String? = null,
 )
 
-class ContactsController(
+class ContactsViewModel(
     private val api: DashboardApi,
     private val token: String,
-    private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Default),
-) {
+    scopeOverride: CoroutineScope? = null,
+) : ViewModel() {
+    private val scope = scopeOverride ?: viewModelScope
     private val mutableState = MutableStateFlow(ContactsUiState())
     val state: StateFlow<ContactsUiState> = mutableState.asStateFlow()
 
