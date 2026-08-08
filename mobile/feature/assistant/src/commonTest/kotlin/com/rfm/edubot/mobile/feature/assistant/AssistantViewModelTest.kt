@@ -16,6 +16,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withTimeout
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class AssistantViewModelTest {
     private fun testScope() = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -42,14 +43,66 @@ class AssistantViewModelTest {
         assertEquals(emptyList(), api.sentAssistantMessages)
         controller.updateDraft("Create a quote for Acme tomorrow")
         controller.send()
-        // send() updates detail and busy atomically after the API call, so observing the
-        // appended message with busy=false guarantees sentAssistantMessages was recorded.
         controller.state.awaitFirst { state ->
             !state.busy && state.detail?.messages?.any { it.content == "Create a quote for Acme tomorrow" } == true
         }
 
         assertEquals(listOf("Create a quote for Acme tomorrow"), api.sentAssistantMessages)
         assertEquals("", controller.state.value.draft)
+        scope.cancel()
+    }
+
+    @Test
+    fun `user message appears in chat before the assistant reply arrives`() = runBlocking {
+        val thread = AssistantThread("thread-1", "Chat", "now", "now")
+        val api = FakeDashboardApi(
+            assistantDetail = AssistantThreadDetail(thread, emptyList()),
+            assistantSendDelay = 150,
+        )
+        val scope = testScope()
+        val controller = AssistantViewModel(api, "token", "en", FakeVoiceInput(), scopeOverride = scope)
+
+        controller.load()
+        controller.state.awaitFirst { it.detail != null }
+        controller.updateDraft("Hello assistant")
+        controller.send()
+
+        val optimistic = controller.state.awaitFirst { state ->
+            state.busy &&
+                state.draft.isEmpty() &&
+                state.detail?.messages?.singleOrNull()?.let { it.role == "user" && it.content == "Hello assistant" } == true
+        }
+        assertEquals(1, optimistic.detail!!.messages.size)
+        assertTrue(optimistic.detail!!.messages.first().id.startsWith("local-"))
+
+        controller.state.awaitFirst { state ->
+            !state.busy &&
+                state.detail?.messages?.any { it.role == "assistant" && it.content == "ok" } == true
+        }
+        assertEquals(2, controller.state.value.detail!!.messages.size)
+        assertEquals(listOf("Hello assistant"), api.sentAssistantMessages)
+        scope.cancel()
+    }
+
+    @Test
+    fun `failed send restores draft and rolls back optimistic message`() = runBlocking {
+        val thread = AssistantThread("thread-1", "Chat", "now", "now")
+        val api = FakeDashboardApi(
+            assistantDetail = AssistantThreadDetail(thread, emptyList()),
+            assistantSendError = true,
+        )
+        val scope = testScope()
+        val controller = AssistantViewModel(api, "token", "en", FakeVoiceInput(), scopeOverride = scope)
+
+        controller.load()
+        controller.state.awaitFirst { it.detail != null }
+        controller.updateDraft("Retry me")
+        controller.send()
+
+        controller.state.awaitFirst { state -> state.error && !state.busy }
+        assertEquals("Retry me", controller.state.value.draft)
+        assertEquals(emptyList(), controller.state.value.detail!!.messages)
+        assertEquals(emptyList(), api.sentAssistantMessages)
         scope.cancel()
     }
 
@@ -66,7 +119,6 @@ class AssistantViewModelTest {
         scope.cancel()
     }
 
-    private suspend fun <T> StateFlow<T>.awaitFirst(predicate: (T) -> Boolean) {
+    private suspend fun <T> StateFlow<T>.awaitFirst(predicate: (T) -> Boolean): T =
         withTimeout(10_000) { first(predicate) }
-    }
 }

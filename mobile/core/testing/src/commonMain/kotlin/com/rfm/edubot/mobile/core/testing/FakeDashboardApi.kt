@@ -26,6 +26,8 @@ import kotlinx.coroutines.delay
 class FakeDashboardApi(
     private val assistantDetail: AssistantThreadDetail? = null,
     private val localeUpdateDelay: Long = 0,
+    private val assistantSendDelay: Long = 0,
+    private val assistantSendError: Boolean = false,
 ) : DashboardApi {
     val sentAssistantMessages = mutableListOf<String>()
     override suspend fun login(email: String, password: String): Session = Session("new-token")
@@ -65,9 +67,16 @@ class FakeDashboardApi(
     override suspend fun assistantThread(token: String, threadId: String): AssistantThreadDetail = requireNotNull(assistantDetail)
 
     override suspend fun sendAssistantMessage(token: String, threadId: String, content: String): AssistantThreadDetail {
+        if (assistantSendDelay > 0) delay(assistantSendDelay)
+        if (assistantSendError) error("assistant send failed")
         sentAssistantMessages += content
         val detail = requireNotNull(assistantDetail)
-        return detail.copy(messages = detail.messages + AssistantMessage("message-1", "user", content, "now"))
+        return detail.copy(
+            messages = detail.messages + listOf(
+                AssistantMessage("message-user", "user", content, "now"),
+                AssistantMessage("message-assistant", "assistant", "ok", "now"),
+            ),
+        )
     }
 
     override suspend fun decideAssistantAction(token: String, threadId: String, actionId: String, decision: String): AssistantThreadDetail =
