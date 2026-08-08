@@ -51,6 +51,7 @@ import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantLocales
@@ -78,6 +79,8 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import kotlinx.coroutines.flow.firstOrNull
+import java.nio.file.Files
+import java.nio.file.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -320,6 +323,73 @@ fun Route.dashboardRoutes(
                     ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(mapOf("locale" to updated.locale))
             }
+            get("/settings/document-template") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
+                call.respond(ctx.tenant.documentTemplate.dto(ctx.tenant.name))
+            }
+            put("/settings/document-template") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@put call.respond(HttpStatusCode.Forbidden)
+                val request = call.receive<DocumentTemplateRequest>()
+                val next = request.toTemplate(existingLogoPath = ctx.tenant.documentTemplate.logoPath)
+                val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
+                    ?: return@put call.respond(HttpStatusCode.NotFound)
+                pipelineFactory.evict(updated.id)
+                call.respond(updated.documentTemplate.dto(updated.name))
+            }
+            post("/settings/document-template/logo") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
+                var filename: String? = null
+                var bytes: ByteArray? = null
+                call.receiveMultipart().forEachPart { part ->
+                    if (part is PartData.FileItem) {
+                        filename = part.originalFileName
+                        bytes = part.provider().readRemaining().readByteArray()
+                    }
+                    part.dispose()
+                }
+                val name = filename?.takeIf { it.isNotBlank() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no file provided"))
+                val data = bytes?.takeIf { it.isNotEmpty() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty file"))
+                if (data.size > MAX_LOGO_BYTES) return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "logo too large"))
+                val ext = logoExtension(name) ?: return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "logo must be png, jpg, or webp"))
+                val brandingDir = Path.of(runtimeConfig.get().pdfStoragePath, ctx.tenant.slug, "branding")
+                Files.createDirectories(brandingDir)
+                val logoPath = brandingDir.resolve("logo.$ext")
+                Files.write(logoPath, data)
+                ctx.tenant.documentTemplate.logoPath?.takeIf { it != logoPath.toString() }?.let { old ->
+                    runCatching { Files.deleteIfExists(Path.of(old)) }
+                }
+                val next = ctx.tenant.documentTemplate.copy(logoPath = logoPath.toString())
+                val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                pipelineFactory.evict(updated.id)
+                call.respond(updated.documentTemplate.dto(updated.name))
+            }
+            delete("/settings/document-template/logo") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
+                ctx.tenant.documentTemplate.logoPath?.let { runCatching { Files.deleteIfExists(Path.of(it)) } }
+                val next = ctx.tenant.documentTemplate.copy(logoPath = null)
+                val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
+                    ?: return@delete call.respond(HttpStatusCode.NotFound)
+                pipelineFactory.evict(updated.id)
+                call.respond(updated.documentTemplate.dto(updated.name))
+            }
+            get("/settings/document-template/logo") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
+                val path = ctx.tenant.documentTemplate.logoPath?.let(Path::of)
+                    ?: return@get call.respond(HttpStatusCode.NotFound)
+                if (!Files.isRegularFile(path)) return@get call.respond(HttpStatusCode.NotFound)
+                val contentType = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+                    "png" -> ContentType.Image.PNG
+                    "webp" -> ContentType("image", "webp")
+                    else -> ContentType.Image.JPEG
+                }
+                call.respondBytes(Files.readAllBytes(path), contentType)
+            }
             dashboardAssistantRoutes(mongo, tenantRepository, dashboardUsers, aiClient)
             crmRoutes(mongo, tenantRepository, dashboardUsers, runtimeConfig)
             installBookingRoutes {
@@ -395,6 +465,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
         standardItems = StandardItemRepository(mongo, ctx.tenant.id),
         pdfGenerator = PdfGenerator(),
         pdfStoragePath = "${runtimeConfig.get().pdfStoragePath}/${ctx.tenant.slug}",
+        documentTemplate = ctx.tenant.documentTemplate.withCompanyFallback(ctx.tenant.name),
     )
 
     route("/crm") {
@@ -448,7 +519,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
             val quote = deps.quotes.create(ObjectId(request.clientId), request.items.map { it.toLineItem() }, request.notes, request.validUntil?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) })
             val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client))
+            val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate))
             deps.quotes.setPdfPath(quote.id, path.toString())
             call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
         }
@@ -471,7 +542,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
             val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
             val client = deps.clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client))
+            val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate))
             deps.invoices.setPdfPath(invoice.id, path.toString())
             call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
         }
@@ -510,7 +581,93 @@ private data class CrmDeps(
     val standardItems: StandardItemRepository,
     val pdfGenerator: PdfGenerator,
     val pdfStoragePath: String,
+    val documentTemplate: DocumentTemplate,
 )
+
+private const val MAX_LOGO_BYTES = 2 * 1024 * 1024
+
+@Serializable
+private data class DocumentTemplateRequest(
+    val companyName: String = "",
+    val tagline: String = "",
+    val taxId: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val quoteTitle: String = "",
+    val invoiceTitle: String = "",
+    val quotePaymentTerms: String = "",
+    val invoicePaymentTerms: String = "",
+    val termsText: String = "",
+    val footerText: String = "",
+)
+
+@Serializable
+private data class DocumentTemplateDto(
+    val companyName: String,
+    val tagline: String,
+    val taxId: String,
+    val email: String,
+    val phone: String,
+    val address: String,
+    val quoteTitle: String,
+    val invoiceTitle: String,
+    val quotePaymentTerms: String,
+    val invoicePaymentTerms: String,
+    val termsText: String,
+    val footerText: String,
+    val hasLogo: Boolean,
+    val defaults: DocumentTemplateDefaultsDto,
+)
+
+@Serializable
+private data class DocumentTemplateDefaultsDto(
+    val quoteTitle: String = "ORÇAMENTO",
+    val invoiceTitle: String = "FATURA",
+    val paymentTerms: String = PdfGenerator.DEFAULT_PAYMENT_TERMS,
+    val termsText: String = PdfGenerator.DEFAULT_TERMS,
+    val footerText: String = PdfGenerator.DEFAULT_FOOTER,
+)
+
+private fun DocumentTemplateRequest.toTemplate(existingLogoPath: String?): DocumentTemplate = DocumentTemplate(
+    companyName = companyName.trim(),
+    tagline = tagline.trim(),
+    taxId = taxId.trim(),
+    email = email.trim(),
+    phone = phone.trim(),
+    address = address.trim(),
+    quoteTitle = quoteTitle.trim(),
+    invoiceTitle = invoiceTitle.trim(),
+    quotePaymentTerms = quotePaymentTerms.trim(),
+    invoicePaymentTerms = invoicePaymentTerms.trim(),
+    termsText = termsText.trim(),
+    footerText = footerText.trim(),
+    logoPath = existingLogoPath,
+)
+
+private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
+    companyName = companyName.ifBlank { tenantName },
+    tagline = tagline,
+    taxId = taxId,
+    email = email,
+    phone = phone,
+    address = address,
+    quoteTitle = quoteTitle,
+    invoiceTitle = invoiceTitle,
+    quotePaymentTerms = quotePaymentTerms,
+    invoicePaymentTerms = invoicePaymentTerms,
+    termsText = termsText,
+    footerText = footerText,
+    hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
+    defaults = DocumentTemplateDefaultsDto(),
+)
+
+private fun logoExtension(filename: String): String? = when (filename.substringAfterLast('.', "").lowercase()) {
+    "png" -> "png"
+    "jpg", "jpeg" -> "jpg"
+    "webp" -> "webp"
+    else -> null
+}
 
 private fun dashboardToken(config: AppConfig.AdminConfig, user: DashboardUser, typ: String, expiryHours: Int): String = JWT.create()
     .withIssuer(config.jwtIssuer)

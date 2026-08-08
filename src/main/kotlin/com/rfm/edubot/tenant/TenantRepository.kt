@@ -6,6 +6,7 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
@@ -55,6 +56,15 @@ class TenantRepository(mongoModule: MongoModule) {
     suspend fun setLocale(slug: String, locale: String, updatedAt: Instant): Tenant? =
         update(slug, Updates.combine(Updates.set("locale", locale), Updates.set("updatedAt", updatedAt.toDate())))
 
+    suspend fun setDocumentTemplate(slug: String, template: DocumentTemplate, updatedAt: Instant): Tenant? =
+        update(
+            slug,
+            Updates.combine(
+                Updates.set("documentTemplate", template.toDocument()),
+                Updates.set("updatedAt", updatedAt.toDate()),
+            ),
+        )
+
     private fun Document.toTenant() = Tenant(
         id = getObjectId("_id"),
         slug = getString("slug"),
@@ -67,6 +77,7 @@ class TenantRepository(mongoModule: MongoModule) {
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
+        documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
     )
@@ -83,12 +94,44 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("rateLimitPerHour", rateLimitPerHour)
             .append("rateLimitPerDay", rateLimitPerDay)
             .append("status", status.name)
+            .append("documentTemplate", documentTemplate.toDocument())
             .append("createdAt", createdAt.toDate())
             .append("updatedAt", updatedAt.toDate())
         if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
         return doc
     }
 }
+
+private fun DocumentTemplate.toDocument(): Document = Document()
+    .append("companyName", companyName)
+    .append("tagline", tagline)
+    .append("taxId", taxId)
+    .append("email", email)
+    .append("phone", phone)
+    .append("address", address)
+    .append("quoteTitle", quoteTitle)
+    .append("invoiceTitle", invoiceTitle)
+    .append("quotePaymentTerms", quotePaymentTerms)
+    .append("invoicePaymentTerms", invoicePaymentTerms)
+    .append("termsText", termsText)
+    .append("footerText", footerText)
+    .appendIfNotNull("logoPath", logoPath)
+
+private fun Document.toDocumentTemplate() = DocumentTemplate(
+    companyName = getString("companyName").orEmpty(),
+    tagline = getString("tagline").orEmpty(),
+    taxId = getString("taxId").orEmpty(),
+    email = getString("email").orEmpty(),
+    phone = getString("phone").orEmpty(),
+    address = getString("address").orEmpty(),
+    quoteTitle = getString("quoteTitle").orEmpty(),
+    invoiceTitle = getString("invoiceTitle").orEmpty(),
+    quotePaymentTerms = getString("quotePaymentTerms").orEmpty(),
+    invoicePaymentTerms = getString("invoicePaymentTerms").orEmpty(),
+    termsText = getString("termsText").orEmpty(),
+    footerText = getString("footerText").orEmpty(),
+    logoPath = getString("logoPath"),
+)
 
 private fun Document.getChannels(): List<ChannelBinding> {
     val raw = getList("channels", Document::class.java).orEmpty()

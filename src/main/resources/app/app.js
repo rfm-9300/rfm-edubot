@@ -3,7 +3,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
-  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null,
+  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, documentTemplate: null,
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   search: '', active: 'overview', selectedAsset: '',
   whatsAppSignup: { enabled: false },
@@ -83,7 +83,18 @@ function renderNav() {
   $$('.nav__item').forEach(a => a.addEventListener('click', async e => { e.preventDefault(); await setActive(a.dataset.tab); }));
 }
 
-async function setActive(tab) { state.active = tab; location.hash = tab; $('#search').value = ''; state.search = ''; await loadModule(tab); render(); }
+async function setActive(tab) {
+  state.active = tab;
+  location.hash = tab;
+  $('#search').value = '';
+  state.search = '';
+  try {
+    await loadModule(tab);
+    render();
+  } catch {
+    toast(STR.loadFailed);
+  }
+}
 
 async function loadModule(tab) {
   if (tab === 'overview') state.overview = await api('/app/api/overview');
@@ -102,6 +113,7 @@ async function loadModule(tab) {
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
+    state.documentTemplate = await api('/app/api/settings/document-template').catch(() => null);
   }
   if (tab === 'bookings') {
     if (!state.bookingWeekStart) state.bookingWeekStart = startOfWeek();
@@ -325,10 +337,43 @@ function lineItemsField(catalog) {
   return { html, wire, collect };
 }
 
+async function openPdf(url) {
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  window.open(objectUrl, '_blank');
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
+}
+
+function pdfButton(id, type, hasPdf, label) {
+  if (!hasPdf) {
+    return `<span class="pdf pdf--ghost" title="${escapeHTML(STR.pdfPending)}">
+      <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
+      ${escapeHTML(STR.pdfPending)}</span>`;
+  }
+  return `<button class="pdf" type="button" data-pdf-url="/app/api/crm/${type}/${encodeURIComponent(id)}/pdf" title="${escapeHTML(STR.viewPdf)}">
+    <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="5.5" y="10" font-family="monospace" font-size="3.6" text-anchor="middle" fill="currentColor">PDF</text></svg>
+    ${escapeHTML(label || STR.viewPdf)}</button>`;
+}
+
+function wirePdfButtons(root) {
+  $$('[data-pdf-url]', root).forEach(btn => {
+    btn.addEventListener('click', async e => {
+      e.stopPropagation();
+      try { await openPdf(btn.dataset.pdfUrl); }
+      catch (err) { toast(STR.errorPdf({ msg: err.message })); }
+    });
+  });
+}
+
 async function openQuoteForm() {
   let clients, catalog;
-  try { [clients, catalog] = await Promise.all([api('/app/api/crm/clients'), api('/app/api/crm/standard-items')]); }
-  catch { return toast(STR.quoteCreateFailed); }
+  try {
+    clients = await api('/app/api/crm/clients');
+    catalog = await api('/app/api/crm/standard-items').catch(() => []);
+  } catch { return toast(STR.quoteCreateFailed); }
   const li = lineItemsField(catalog);
   const form = document.createElement('form');
   form.className = 'form';
@@ -352,11 +397,15 @@ async function openQuoteForm() {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      await api('/app/api/crm/quotes', { method: 'POST', body: JSON.stringify({ clientId, items, notes: $('#q-notes', form).value.trim() || null, validUntil: $('#q-valid', form).value || null }) });
+      const created = await api('/app/api/crm/quotes', { method: 'POST', body: JSON.stringify({ clientId, items, notes: $('#q-notes', form).value.trim() || null, validUntil: $('#q-valid', form).value || null }) });
       $('#drawer').hidden = true;
       await loadModule('quotes');
       render();
       toast(STR.quoteCreated);
+      if (created?.id && created.hasPdf) {
+        try { await openPdf(`/app/api/crm/quotes/${encodeURIComponent(created.id)}/pdf`); }
+        catch (err) { toast(STR.errorPdf({ msg: err.message })); }
+      }
     } catch { btn.disabled = false; toast(STR.quoteCreateFailed); }
   });
   openDrawer(STR.quoteFormTitle, form, true);
@@ -364,8 +413,10 @@ async function openQuoteForm() {
 
 async function openInvoiceForm() {
   let clients, catalog;
-  try { [clients, catalog] = await Promise.all([api('/app/api/crm/clients'), api('/app/api/crm/standard-items')]); }
-  catch { return toast(STR.invoiceCreateFailed); }
+  try {
+    clients = await api('/app/api/crm/clients');
+    catalog = await api('/app/api/crm/standard-items').catch(() => []);
+  } catch { return toast(STR.invoiceCreateFailed); }
   const li = lineItemsField(catalog);
   const form = document.createElement('form');
   form.className = 'form';
@@ -391,18 +442,73 @@ async function openInvoiceForm() {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      await api('/app/api/crm/invoices', { method: 'POST', body: JSON.stringify({ clientId, quoteId: $('#i-quote', form).value.trim() || null, items, dueDate }) });
+      const created = await api('/app/api/crm/invoices', { method: 'POST', body: JSON.stringify({ clientId, quoteId: $('#i-quote', form).value.trim() || null, items, dueDate }) });
       $('#drawer').hidden = true;
       await loadModule('invoices');
       render();
       toast(STR.invoiceCreated);
+      if (created?.id && created.hasPdf) {
+        try { await openPdf(`/app/api/crm/invoices/${encodeURIComponent(created.id)}/pdf`); }
+        catch (err) { toast(STR.errorPdf({ msg: err.message })); }
+      }
     } catch { btn.disabled = false; toast(STR.invoiceCreateFailed); }
   });
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
-function renderQuotes(root) { const rows = state.quotes.map(q => `<tr><td class="id">${escapeHTML(q.number)}</td><td>${escapeHTML(q.clientName || '')}</td><td>${q.status}</td><td class="num">${fmtEUR(q.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.quotes, STR.quotesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
-function renderInvoices(root) { const rows = state.invoices.map(i => `<tr><td class="id">${escapeHTML(i.number)}</td><td>${escapeHTML(i.clientName || '')}</td><td>${i.status}</td><td class="mono">${i.dueDate}</td><td class="num">${fmtEUR(i.totalEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.invoices, STR.invoicesDesc) + panelTable(`<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th>${STR.thDueDate}</th><th class="right">${STR.thTotal}</th></tr>`, rows); }
+function renderQuotes(root) {
+  const q = state.search.toLowerCase();
+  const rows = state.quotes
+    .filter(quote => !q || `${quote.number} ${quote.clientName || ''} ${quote.status}`.toLowerCase().includes(q))
+    .map(quote => `<tr>
+      <td class="id">${escapeHTML(quote.number)}</td>
+      <td class="name">${escapeHTML(quote.clientName || '')}</td>
+      <td>${escapeHTML(quote.status)}</td>
+      <td class="num">${fmtEUR(quote.totalEur)}</td>
+      <td class="right"><div class="actions">${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}</div></td>
+    </tr>`).join('');
+  root.innerHTML = hero(labels.quotes, STR.quotesDesc) + panelTable(
+    `<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th class="right">${STR.thTotal}</th><th class="right">${STR.thPdf}</th></tr>`,
+    rows,
+  );
+  wirePdfButtons(root);
+}
+
+function renderInvoices(root) {
+  const q = state.search.toLowerCase();
+  const rows = state.invoices
+    .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${inv.status}`.toLowerCase().includes(q))
+    .map(inv => {
+      const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+      return `<tr>
+        <td class="id">${escapeHTML(inv.number)}</td>
+        <td class="name">${escapeHTML(inv.clientName || '')}</td>
+        <td>${escapeHTML(inv.status)}</td>
+        <td class="mono">${escapeHTML(inv.dueDate || '')}</td>
+        <td class="num">${fmtEUR(inv.totalEur)}</td>
+        <td class="right"><div class="actions">
+          ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-paid="${escapeHTML(inv.id)}">${escapeHTML(STR.markPaid)}</button>` : ''}
+          ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
+        </div></td>
+      </tr>`;
+    }).join('');
+  root.innerHTML = hero(labels.invoices, STR.invoicesDesc) + panelTable(
+    `<tr><th>${STR.thNumber}</th><th>${STR.thClient}</th><th>${STR.thStatus}</th><th>${STR.thDueDate}</th><th class="right">${STR.thTotal}</th><th class="right">${STR.thPdfActions}</th></tr>`,
+    rows,
+  );
+  wirePdfButtons(root);
+  $$('[data-mark-paid]', root).forEach(btn => {
+    btn.addEventListener('click', async () => {
+      try {
+        await api(`/app/api/crm/invoices/${btn.dataset.markPaid}/paid`, { method: 'PATCH' });
+        await loadModule('invoices');
+        render();
+        const inv = state.invoices.find(i => i.id === btn.dataset.markPaid);
+        toast(STR.markedPaid({ number: inv?.number || '' }));
+      } catch { toast(STR.markPaidFailed); }
+    });
+  });
+}
 function renderCatalog(root) { const rows = state.catalog.map(i => `<tr><td>${i.type}</td><td>${escapeHTML(i.category)}</td><td class="name">${escapeHTML(i.description)}</td><td>${escapeHTML(i.unit)}</td><td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td></tr>`).join(''); root.innerHTML = hero(labels.catalog, STR.catalogDesc) + panelTable(`<tr><th>${STR.thType}</th><th>${STR.thCategory}</th><th>${STR.thDescription}</th><th>${STR.thUnit}</th><th class="right">${STR.thPrice}</th></tr>`, rows); }
 
 function assistantActionLabel(action) {
@@ -708,6 +814,8 @@ function renderSettings(root) {
       </div>
     </div>
 
+    ${renderDocumentTemplatePanel()}
+
     <div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.moreSettingsTitle)}</p><p class="empty__desc">${escapeHTML(STR.moreSettingsDesc)}</p></div></div>`;
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect').addEventListener('click', connectInstagram);
@@ -733,6 +841,129 @@ function renderSettings(root) {
     const allowedOrigins = $('#web-origins').value.split('\n').map(s => s.trim()).filter(Boolean);
     try { state.webWidget = await api('/app/api/web-widget', { method: 'POST', body: JSON.stringify({ allowedOrigins }) }); toast(STR.webOriginsSaved); render(); }
     catch { toast(STR.webGenerateFailed); }
+  });
+  wireDocumentTemplateForm();
+}
+
+function renderDocumentTemplatePanel() {
+  const t = state.documentTemplate || {
+    companyName: state.me?.tenant?.name || '', tagline: '', taxId: '', email: '', phone: '', address: '',
+    quoteTitle: '', invoiceTitle: '', quotePaymentTerms: '', invoicePaymentTerms: '', termsText: '', footerText: '',
+    hasLogo: false, defaults: {},
+  };
+  const d = t.defaults || {};
+  return `<div class="panel" style="padding:18px;margin-bottom:18px">
+      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.docTemplateTitle)}</h2>
+      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.docTemplateDesc)}</p>
+      <form class="form" id="doc-template-form">
+        <div class="form__grid">
+          <div class="form__row"><label class="lbl" for="dt-company">${escapeHTML(STR.docCompanyName)}</label>
+            <input class="inp" id="dt-company" value="${escapeHTML(t.companyName || '')}" placeholder="${escapeHTML(state.me?.tenant?.name || '')}" /></div>
+          <div class="form__row"><label class="lbl" for="dt-tagline">${escapeHTML(STR.docTagline)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+            <input class="inp" id="dt-tagline" value="${escapeHTML(t.tagline || '')}" placeholder="${escapeHTML(STR.docTaglinePh)}" /></div>
+          <div class="form__row"><label class="lbl" for="dt-tax">${escapeHTML(STR.docTaxId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+            <input class="inp inp--mono" id="dt-tax" value="${escapeHTML(t.taxId || '')}" placeholder="${escapeHTML(STR.docTaxIdPh)}" /></div>
+          <div class="form__row"><label class="lbl" for="dt-email">${escapeHTML(STR.docEmail)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+            <input class="inp" id="dt-email" type="email" value="${escapeHTML(t.email || '')}" placeholder="geral@empresa.pt" /></div>
+          <div class="form__row"><label class="lbl" for="dt-phone">${escapeHTML(STR.docPhone)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+            <input class="inp inp--mono" id="dt-phone" value="${escapeHTML(t.phone || '')}" placeholder="+351 …" /></div>
+          <div class="form__row"><label class="lbl" for="dt-address">${escapeHTML(STR.docAddress)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+            <input class="inp" id="dt-address" value="${escapeHTML(t.address || '')}" /></div>
+          <div class="form__row"><label class="lbl" for="dt-quote-title">${escapeHTML(STR.docQuoteTitle)}</label>
+            <input class="inp" id="dt-quote-title" value="${escapeHTML(t.quoteTitle || '')}" placeholder="${escapeHTML(d.quoteTitle || 'ORÇAMENTO')}" /></div>
+          <div class="form__row"><label class="lbl" for="dt-invoice-title">${escapeHTML(STR.docInvoiceTitle)}</label>
+            <input class="inp" id="dt-invoice-title" value="${escapeHTML(t.invoiceTitle || '')}" placeholder="${escapeHTML(d.invoiceTitle || 'FATURA')}" /></div>
+        </div>
+        <div class="form__row form__row--full"><label class="lbl" for="dt-quote-pay">${escapeHTML(STR.docQuotePayment)}</label>
+          <textarea class="txt" id="dt-quote-pay" rows="3" placeholder="${escapeHTML(d.paymentTerms || '')}">${escapeHTML(t.quotePaymentTerms || '')}</textarea></div>
+        <div class="form__row form__row--full"><label class="lbl" for="dt-invoice-pay">${escapeHTML(STR.docInvoicePayment)}</label>
+          <textarea class="txt" id="dt-invoice-pay" rows="3" placeholder="${escapeHTML(d.paymentTerms || '')}">${escapeHTML(t.invoicePaymentTerms || '')}</textarea></div>
+        <div class="form__row form__row--full"><label class="lbl" for="dt-terms">${escapeHTML(STR.docTerms)}</label>
+          <textarea class="txt" id="dt-terms" rows="2" placeholder="${escapeHTML(d.termsText || '')}">${escapeHTML(t.termsText || '')}</textarea></div>
+        <div class="form__row form__row--full"><label class="lbl" for="dt-footer">${escapeHTML(STR.docFooter)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+          <input class="inp" id="dt-footer" value="${escapeHTML(t.footerText || '')}" placeholder="${escapeHTML(d.footerText || '')}" /></div>
+        <div class="form__row form__row--full" style="margin-top:8px">
+          <label class="lbl">${escapeHTML(STR.docLogo)}</label>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px">
+            ${t.hasLogo ? `<img id="dt-logo-preview" alt="" hidden style="height:48px;max-width:160px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:4px" /><span class="muted" id="dt-logo-loading">${escapeHTML(STR.docLogoLoading)}</span>` : `<span class="muted">${escapeHTML(STR.docLogoNone)}</span>`}
+            <label class="btn btn--sm" style="cursor:pointer"><input type="file" id="dt-logo" accept="image/png,image/jpeg,image/webp" hidden />${escapeHTML(STR.docLogoUpload)}</label>
+            ${t.hasLogo ? `<button class="btn btn--sm btn--ghost" type="button" id="dt-logo-remove">${escapeHTML(STR.docLogoRemove)}</button>` : ''}
+          </div>
+          <div class="hint" style="margin-top:6px">${escapeHTML(STR.docLogoHint)}</div>
+        </div>
+        <button class="btn btn--primary" type="submit" style="margin-top:14px">${escapeHTML(STR.docTemplateSave)}</button>
+      </form>
+    </div>`;
+}
+
+async function loadDocumentLogoPreview() {
+  const img = $('#dt-logo-preview');
+  if (!img || !state.documentTemplate?.hasLogo) return;
+  try {
+    const res = await fetch('/app/api/settings/document-template/logo', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+    if (!res.ok) return;
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    img.src = url;
+    img.hidden = false;
+    $('#dt-logo-loading')?.remove();
+    img.onload = () => setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch { /* keep loading label */ }
+}
+
+function wireDocumentTemplateForm() {
+  const form = $('#doc-template-form');
+  if (!form) return;
+  loadDocumentLogoPreview();
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const body = {
+      companyName: $('#dt-company').value.trim(),
+      tagline: $('#dt-tagline').value.trim(),
+      taxId: $('#dt-tax').value.trim(),
+      email: $('#dt-email').value.trim(),
+      phone: $('#dt-phone').value.trim(),
+      address: $('#dt-address').value.trim(),
+      quoteTitle: $('#dt-quote-title').value.trim(),
+      invoiceTitle: $('#dt-invoice-title').value.trim(),
+      quotePaymentTerms: $('#dt-quote-pay').value.trim(),
+      invoicePaymentTerms: $('#dt-invoice-pay').value.trim(),
+      termsText: $('#dt-terms').value.trim(),
+      footerText: $('#dt-footer').value.trim(),
+    };
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      state.documentTemplate = await api('/app/api/settings/document-template', { method: 'PUT', body: JSON.stringify(body) });
+      toast(STR.docTemplateSaved);
+      render();
+    } catch { toast(STR.docTemplateSaveFailed); btn.disabled = false; }
+  });
+  $('#dt-logo')?.addEventListener('change', async e => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const fd = new FormData();
+    fd.append('file', file);
+    try {
+      const res = await fetch('/app/api/settings/document-template/logo', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); return; }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      state.documentTemplate = await res.json();
+      toast(STR.docLogoUploaded);
+      render();
+    } catch { toast(STR.docLogoUploadFailed); }
+    e.target.value = '';
+  });
+  $('#dt-logo-remove')?.addEventListener('click', async () => {
+    try {
+      state.documentTemplate = await api('/app/api/settings/document-template/logo', { method: 'DELETE' });
+      toast(STR.docLogoRemoved);
+      render();
+    } catch { toast(STR.docLogoUploadFailed); }
   });
 }
 

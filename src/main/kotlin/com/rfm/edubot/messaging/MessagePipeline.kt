@@ -11,6 +11,7 @@ import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
@@ -50,6 +51,7 @@ class MessagePipeline(
     private val invoiceRepository: InvoiceRepository,
     private val pdfGenerator: PdfGenerator,
     private val pdfStoragePath: String,
+    private val documentTemplate: DocumentTemplate = DocumentTemplate(),
     private val openrouterModel: String? = null,
     private val compiledPersona: String? = null,
 ) {
@@ -349,7 +351,7 @@ class MessagePipeline(
                 "quote" -> {
                     val quote = quoteRepository.findById(ObjectId(created.id)) ?: continue
                     val client = clientRepository.findById(quote.clientId) ?: continue
-                    val bytes = pdfGenerator.generateQuote(quote, client)
+                    val bytes = pdfGenerator.generateQuote(quote, client, documentTemplate)
                     val filename = "Orcamento ${quote.number}.pdf"
                     val path = savePdf("quotes", filename, bytes)
                     quoteRepository.setPdfPath(quote.id, path.toString())
@@ -362,7 +364,7 @@ class MessagePipeline(
                 "invoice" -> {
                     val invoice = invoiceRepository.findById(ObjectId(created.id)) ?: continue
                     val client = clientRepository.findById(invoice.clientId) ?: continue
-                    val bytes = pdfGenerator.generateInvoice(invoice, client)
+                    val bytes = pdfGenerator.generateInvoice(invoice, client, documentTemplate)
                     val filename = "Fatura ${invoice.number}.pdf"
                     val path = savePdf("invoices", filename, bytes)
                     invoiceRepository.setPdfPath(invoice.id, path.toString())
@@ -387,7 +389,7 @@ class MessagePipeline(
     private suspend fun sendLatestQuotePdf(waId: String, contextMessages: List<ChatMessage>, responder: OutboundClient): String? {
         val client = inferClientFromContext(contextMessages) ?: return null
         val quote = quoteRepository.list(client.id).firstOrNull() ?: return null
-        val bytes = pdfGenerator.generateQuote(quote, client)
+        val bytes = pdfGenerator.generateQuote(quote, client, documentTemplate)
         val filename = "Orcamento ${quote.number}.pdf"
         val path = savePdf("quotes", filename, bytes)
         quoteRepository.setPdfPath(quote.id, path.toString())

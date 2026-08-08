@@ -170,9 +170,9 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         clientId = getObjectId("clientId"),
         items = getList("items", Document::class.java).map { it.toLineItem() },
         notes = getString("notes"),
-        status = QuoteStatus.valueOf(getString("status")),
+        status = parseQuoteStatus(getString("status")),
         totalCents = getLongValue("totalCents"),
-        validUntil = getString("validUntil")?.let { LocalDate.parse(it) },
+        validUntil = getString("validUntil")?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) },
         pdfPath = getString("pdfPath"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
@@ -280,7 +280,7 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         clientId = getObjectId("clientId"),
         quoteId = get("quoteId", ObjectId::class.java),
         items = getList("items", Document::class.java).map { it.toLineItem() },
-        status = InvoiceStatus.valueOf(getString("status")),
+        status = parseInvoiceStatus(getString("status")),
         dueDate = LocalDate.parse(getString("dueDate")),
         paidAt = getDate("paidAt")?.toInstantValue(),
         totalCents = getLongValue("totalCents"),
@@ -400,10 +400,16 @@ fun lineItem(description: String, quantity: Double = 1.0, unitPriceEur: Double):
     )
 }
 
+private fun parseQuoteStatus(raw: String?): QuoteStatus =
+    runCatching { QuoteStatus.valueOf(raw?.trim()?.uppercase().orEmpty()) }.getOrDefault(QuoteStatus.PENDENTE)
+
+private fun parseInvoiceStatus(raw: String?): InvoiceStatus =
+    runCatching { InvoiceStatus.valueOf(raw?.trim()?.uppercase().orEmpty()) }.getOrDefault(InvoiceStatus.PENDING)
+
 private fun Document.toLineItem() = LineItem(
     description = getString("description"),
     quantity = getDoubleValue("quantity"),
-    unit = getString("unit"),
+    unit = getString("unit") ?: "",
     unitPriceCents = getLongValue("unitPriceCents"),
     totalCents = getLongValue("totalCents"),
 )

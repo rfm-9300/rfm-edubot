@@ -37,7 +37,7 @@ async function api(path, options = {}) {
 /* ----------  STATUS MAPS  ---------- */
 
 // API status codes (never translated — the labels come from the catalog: T.quoteStatus / T.invoiceStatus).
-const QUOTE_STATUSES   = ['PENDENTE', 'ACEITO'];
+const QUOTE_STATUSES   = ['PENDENTE', 'SENT', 'ACEITO'];
 const INVOICE_STATUSES = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED'];
 const quoteStatusLabel   = code => (T.quoteStatus && T.quoteStatus[code]) || code;
 const invoiceStatusLabel = code => (T.invoiceStatus && T.invoiceStatus[code]) || code;
@@ -153,7 +153,7 @@ function escapeHTML(s = '') {
 // Color is driven by the API status code; the visible text is the already-localized label.
 function pill(statusApi, label) {
   const map = {
-    PENDENTE: 'pill--warn', ACEITO: 'pill--ok',
+    PENDENTE: 'pill--warn', SENT: 'pill--warn', ACEITO: 'pill--ok',
     PENDING: 'pill--warn', PAID: 'pill--ok', OVERDUE: 'pill--bad', CANCELLED: '',
   };
   return `<span class="pill ${map[statusApi] || ''}">${escapeHTML(label)}</span>`;
@@ -461,7 +461,7 @@ function renderOrcamentos(root) {
     .sort((a, b) => (b.criadoEm || '').localeCompare(a.criadoEm || ''));
 
   const totalAceite  = state.quotes.filter(o => o.statusApi === 'ACEITO').reduce((t, o) => t + o.totalEur, 0);
-  const totalEnviado = state.quotes.filter(o => o.statusApi === 'PENDENTE').reduce((t, o) => t + o.totalEur, 0);
+  const totalEnviado = state.quotes.filter(o => o.statusApi === 'PENDENTE' || o.statusApi === 'SENT').reduce((t, o) => t + o.totalEur, 0);
 
   root.innerHTML = `
     <div class="view__hero">

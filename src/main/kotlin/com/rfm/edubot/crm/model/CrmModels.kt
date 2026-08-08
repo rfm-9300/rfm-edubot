@@ -24,7 +24,7 @@ data class LineItem(
     val totalCents: Long,
 )
 
-enum class QuoteStatus { PENDENTE, ACEITO }
+enum class QuoteStatus { PENDENTE, SENT, ACEITO }
 
 enum class InvoiceStatus { PENDING, PAID, OVERDUE, CANCELLED }
 

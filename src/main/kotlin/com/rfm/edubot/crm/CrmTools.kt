@@ -30,7 +30,7 @@ class CrmTools(
         tool("list_standard_items", "List standard quote/invoice line items split by service or material", obj("query" to "string", "type" to "string")),
         tool("create_client", "Create a new client", obj("name" to "string", "phone" to "string", "address" to "string"), listOf("name", "phone")),
         tool("create_quote", "Create a quote for a client", createDocumentSchema(false), listOf("client_id", "items")),
-        tool("update_quote", "Update an existing quote: replace items, change status (PENDENTE/ACEITO), update notes or valid_until. Pass only the fields to change.", updateQuoteSchema(), listOf("quote_id")),
+        tool("update_quote", "Update an existing quote: replace items, change status (PENDENTE/SENT/ACEITO), update notes or valid_until. Pass only the fields to change.", updateQuoteSchema(), listOf("quote_id")),
         tool("list_quotes", "List quotes, optionally filtered by client_id or status", obj("client_id" to "string", "status" to "string")),
         tool("create_invoice", "Create an invoice for a client", createDocumentSchema(true), listOf("client_id", "items", "due_date")),
         tool("list_invoices", "List invoices, optionally filtered by client_id or status", obj("client_id" to "string", "status" to "string")),
@@ -317,7 +317,7 @@ class CrmTools(
 
     private fun updateQuoteSchema() = buildJsonObject {
         put("quote_id", buildJsonObject { put("type", "string"); put("description", "Quote ObjectId hex or number e.g. ORC-001") })
-        put("status", buildJsonObject { put("type", "string"); put("description", "PENDENTE or ACEITO") })
+        put("status", buildJsonObject { put("type", "string"); put("description", "PENDENTE, SENT, or ACEITO") })
         put("notes", buildJsonObject { put("type", "string") })
         put("valid_until", buildJsonObject { put("type", "string"); put("description", "YYYY-MM-DD") })
         put("items", buildJsonObject {

@@ -3,6 +3,7 @@ package com.rfm.edubot.crm
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.apache.pdfbox.Loader
@@ -54,6 +55,24 @@ class PdfGeneratorTest {
         val many = quote((1..12).map { i -> item("Servico $i longa descricao adicional para forcar overflow", 300.0 * i) })
         assertTrue(generator.generateQuote(few, client).isNotEmpty())
         assertTrue(generator.generateQuote(many, client).isNotEmpty())
+    }
+
+    @Test
+    fun `custom document template still produces a valid pdf`() {
+        val template = DocumentTemplate(
+            companyName = "Acme Lda",
+            tagline = "Obras e remodelacoes",
+            taxId = "123456789",
+            email = "geral@acme.pt",
+            phone = "+351 210 000 000",
+            quoteTitle = "PROPOSTA",
+            quotePaymentTerms = "50% adiantamento, 50% na entrega.",
+            termsText = "Valido por 15 dias.",
+            footerText = "acme.pt",
+        )
+        val bytes = generator.generateQuote(quote(listOf(item("Pintura", 1000.0))), client, template)
+        assertTrue(bytes.isNotEmpty())
+        assertEquals(1, pageCount(bytes))
     }
 
     private fun quote(items: List<com.rfm.edubot.crm.model.LineItem>) = Quote(

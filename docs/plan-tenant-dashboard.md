@@ -159,16 +159,13 @@ today's repos only support the bot's hot path (findByWaId / findOrCreate / lastN
 
 ---
 
-## 5. Business profile + PDF branding (a real dependency)
+## 5. Business profile + PDF branding ✅
 
-Code finding: `PdfGenerator` hardcodes ISAL branding — `"ISAL"`, `"geral@isal.pt"`,
-`"CONSTRUCAO E GESTAO"`, fixed logo (`PdfGenerator.kt:215,380-381,52`). In a client-facing
-product, every tenant's quotes/invoices must show **their own** company.
-
-So: a per-tenant **business profile** (on the `Tenant` doc or a `tenant_profiles` collection:
-companyName, email, phone, address, taxId, logo), and `PdfGenerator` takes that profile as input
-instead of constants. Required for CRM tenants to be correct; edited via Settings → Business
-profile.
+Per-tenant `DocumentTemplate` on the `Tenant` document (company name, tagline, tax ID, email,
+phone, address, quote/invoice titles, payment terms, terms text, footer, logo path). Edited in
+Dashboard → Settings → Quote & invoice template (`GET/PUT /app/api/settings/document-template`,
+logo upload/delete). `PdfGenerator` accepts the template for all quote/invoice PDFs (dashboard,
+admin CRM, WhatsApp pipeline).
 
 ---
 

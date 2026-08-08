@@ -8,6 +8,7 @@ import io.ktor.http.*
 fun Application.configureStatusPages() {
     install(StatusPages) {
         exception<Throwable> { call, cause ->
+            call.application.environment.log.error("Unhandled error on ${call.request.local.uri}", cause)
             call.respond(
                 HttpStatusCode.InternalServerError,
                 mapOf("error" to "Internal server error")

@@ -106,7 +106,7 @@ graph TD
 | `webhook/` | HTTP edge: HMAC signature verification, GET challenge + POST routing |
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
-| `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation |
+| `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`) |
 | `bookings/` | Bookable services, weekly availability, appointments, slot engine, booking tools |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |

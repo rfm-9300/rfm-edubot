@@ -16,6 +16,8 @@ data class Tenant(
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
     val status: TenantStatus = TenantStatus.ACTIVE,
+    /** Branding + copy used when generating quote/invoice PDFs. */
+    val documentTemplate: DocumentTemplate = DocumentTemplate(),
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -23,6 +25,30 @@ data class Tenant(
         get() = binding(Platform.WHATSAPP)?.externalId.orEmpty()
 
     fun binding(platform: Platform): ChannelBinding? = channels.firstOrNull { it.platform == platform }
+}
+
+/**
+ * Per-tenant quote/invoice PDF template.
+ * Blank fields fall back to built-in defaults in [com.rfm.edubot.crm.PdfGenerator].
+ */
+data class DocumentTemplate(
+    val companyName: String = "",
+    val tagline: String = "",
+    val taxId: String = "",
+    val email: String = "",
+    val phone: String = "",
+    val address: String = "",
+    val quoteTitle: String = "",
+    val invoiceTitle: String = "",
+    val quotePaymentTerms: String = "",
+    val invoicePaymentTerms: String = "",
+    val termsText: String = "",
+    val footerText: String = "",
+    /** Absolute filesystem path to an uploaded logo image, if any. */
+    val logoPath: String? = null,
+) {
+    fun withCompanyFallback(tenantName: String): DocumentTemplate =
+        if (companyName.isNotBlank()) this else copy(companyName = tenantName)
 }
 
 /** Supported UI languages. Mirrors the locales shipped to the web frontends (admin/catalog.*.js). */

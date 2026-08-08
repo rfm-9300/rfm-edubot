@@ -4,6 +4,7 @@ import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import org.apache.pdfbox.pdmodel.PDDocument
 import org.apache.pdfbox.pdmodel.PDPage
 import org.apache.pdfbox.pdmodel.PDPageContentStream
@@ -15,6 +16,8 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject
 import java.awt.Color
 import java.io.ByteArrayOutputStream
+import java.nio.file.Files
+import java.nio.file.Path
 
 class PdfGenerator {
 
@@ -66,28 +69,42 @@ class PdfGenerator {
 
     // ── Public entry points ───────────────────────────────────────────
 
-    fun generateQuote(quote: Quote, client: Client): ByteArray = buildDocument(
-        docType    = "ORÇAMENTO",
-        number     = quote.number,
-        client     = client,
-        items      = quote.items,
-        totalCents = quote.totalCents,
-        notes      = quote.notes,
-        meta       = listOfNotNull(
-            "Estado: ${ptStatus(quote.status.name)}",
-            quote.validUntil?.let { "Valido ate: ${fmtDate(it.toString())}" },
-            "Emitido em: ${fmtDate(quote.createdAt.toString().take(10))}",
-        ),
-    )
+    fun generateQuote(
+        quote: Quote,
+        client: Client,
+        template: DocumentTemplate = DocumentTemplate(),
+    ): ByteArray {
+        val payment = quote.notes?.takeIf { it.isNotBlank() }
+            ?: template.quotePaymentTerms.takeIf { it.isNotBlank() }
+        return buildDocument(
+            docType = template.quoteTitle.ifBlank { "ORÇAMENTO" },
+            number = quote.number,
+            client = client,
+            items = quote.items,
+            totalCents = quote.totalCents,
+            paymentTerms = payment,
+            template = template,
+            meta = listOfNotNull(
+                "Estado: ${ptStatus(quote.status.name)}",
+                quote.validUntil?.let { "Valido ate: ${fmtDate(it.toString())}" },
+                "Emitido em: ${fmtDate(quote.createdAt.toString().take(10))}",
+            ),
+        )
+    }
 
-    fun generateInvoice(invoice: Invoice, client: Client): ByteArray = buildDocument(
-        docType    = "FATURA",
-        number     = invoice.number,
-        client     = client,
-        items      = invoice.items,
+    fun generateInvoice(
+        invoice: Invoice,
+        client: Client,
+        template: DocumentTemplate = DocumentTemplate(),
+    ): ByteArray = buildDocument(
+        docType = template.invoiceTitle.ifBlank { "FATURA" },
+        number = invoice.number,
+        client = client,
+        items = invoice.items,
         totalCents = invoice.totalCents,
-        notes      = null,
-        meta       = listOf(
+        paymentTerms = template.invoicePaymentTerms.takeIf { it.isNotBlank() },
+        template = template,
+        meta = listOf(
             "Estado: ${ptStatus(invoice.status.name)}",
             "Vencimento: ${fmtDate(invoice.dueDate.toString())}",
             "Emitido em: ${fmtDate(invoice.createdAt.toString().take(10))}",
@@ -97,19 +114,20 @@ class PdfGenerator {
     // ── Document assembly ─────────────────────────────────────────────
 
     private fun buildDocument(
-        docType:    String,
-        number:     String,
-        client:     Client,
-        items:      List<LineItem>,
+        docType: String,
+        number: String,
+        client: Client,
+        items: List<LineItem>,
         totalCents: Long,
-        notes:      String?,
-        meta:       List<String>,
+        paymentTerms: String?,
+        template: DocumentTemplate,
+        meta: List<String>,
     ): ByteArray {
         PDDocument().use { doc ->
             loadFonts(doc)
 
             // Pre-calculate row heights and page breaks (two-pass layout).
-            val rowHeights   = items.map { rowHeightFor(it) }
+            val rowHeights = items.map { rowHeightFor(it) }
             val pageBreakSet = layoutItems(rowHeights).drop(1).toSet()
 
             // ── Page 1 ──
@@ -118,7 +136,7 @@ class PdfGenerator {
             var cs = PDPageContentStream(doc, page)
             fillRect(cs, pageBg, 0f, 0f, W, H)
             drawDecor(cs)
-            drawHeader(doc, cs)
+            drawHeader(doc, cs, template)
             drawDocumentInfo(cs, docType, number, client, meta)
 
             var rowY = drawTableHeader(cs, H - 320f)
@@ -127,7 +145,7 @@ class PdfGenerator {
             for ((idx, item) in items.withIndex()) {
                 val (service, description) = splitItem(item)
                 val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE - 32f).take(4)
-                val descLines    = wrap(description, regular, 8f, COL_DESC - 24f).take(6)
+                val descLines = wrap(description, regular, 8f, COL_DESC - 24f).take(6)
                 val rowH = rowHeights[idx]
 
                 if (idx in pageBreakSet) {
@@ -147,8 +165,8 @@ class PdfGenerator {
             }
 
             drawTotals(cs, totalCents, rowY - 12f)
-            drawPaymentAndTerms(cs, notes)
-            drawFooter(cs)
+            drawPaymentAndTerms(cs, paymentTerms, template)
+            drawFooter(cs, template)
             cs.close()
 
             return ByteArrayOutputStream().also { doc.save(it) }.toByteArray()
@@ -209,16 +227,23 @@ class PdfGenerator {
 
     // ── Header ────────────────────────────────────────────────────────
 
-    private fun drawHeader(doc: PDDocument, cs: PDPageContentStream) {
+    private fun drawHeader(doc: PDDocument, cs: PDPageContentStream, template: DocumentTemplate) {
         fillRect(cs, Color(210, 218, 223), 0f, H - 83f, W, 1.2f)
-        text(cs, "999999999", MARGIN + 50f, H - 58f, 8f, bold, ink)
-        text(cs, "geral@isal.pt", W / 2f - 22f, H - 58f, 8f, bold, ink)
-        fillCircle(cs, brand, MARGIN + 80f, H - 83f, 9f)
-        fillCircle(cs, brand, W / 2f + 18f, H - 83f, 9f)
-        // ASCII alternatives — ☎ and ✉ are outside Latin-1 and won't render in Type1 Helvetica
-        textCentered(cs, "T", MARGIN + 80f, H - 86.5f, 7.5f, bold, Color.WHITE)
-        textCentered(cs, "@", W / 2f + 18f, H - 86.5f, 7f, bold, Color.WHITE)
-        drawLogo(doc, cs, W - MARGIN - 150f, H - 112f, 150f, 52f)
+        val taxId = template.taxId.trim()
+        val email = template.email.trim()
+        val phone = template.phone.trim()
+        if (taxId.isNotBlank()) text(cs, taxId, MARGIN + 50f, H - 58f, 8f, bold, ink)
+        val contact = email.ifBlank { phone }
+        if (contact.isNotBlank()) text(cs, contact, W / 2f - 22f, H - 58f, 8f, bold, ink)
+        if (phone.isNotBlank() || taxId.isNotBlank()) {
+            fillCircle(cs, brand, MARGIN + 80f, H - 83f, 9f)
+            textCentered(cs, "T", MARGIN + 80f, H - 86.5f, 7.5f, bold, Color.WHITE)
+        }
+        if (email.isNotBlank() || contact.isNotBlank()) {
+            fillCircle(cs, brand, W / 2f + 18f, H - 83f, 9f)
+            textCentered(cs, "@", W / 2f + 18f, H - 86.5f, 7f, bold, Color.WHITE)
+        }
+        drawLogo(doc, cs, W - MARGIN - 150f, H - 112f, 150f, 52f, template)
     }
 
     private fun drawDocumentInfo(cs: PDPageContentStream, docType: String, number: String, client: Client, meta: List<String>) {
@@ -229,7 +254,18 @@ class PdfGenerator {
         text(cs, "CLIENTE", MARGIN, H - 228f, 11f, bold, brand)
         text(cs, sanitize(client.name).uppercase(), MARGIN, H - 246f, 12f, bold, ink)
         text(cs, sanitize(client.phone), MARGIN, H - 263f, 10f, regular, inkMuted)
-        if (client.number.isNotBlank()) text(cs, sanitize(client.number), MARGIN, H - 279f, 9f, regular, inkMuted)
+        var clientY = H - 279f
+        if (client.number.isNotBlank()) {
+            text(cs, sanitize(client.number), MARGIN, clientY, 9f, regular, inkMuted)
+            clientY -= 16f
+        }
+        val address = client.address?.takeIf { it.isNotBlank() }
+        if (address != null) {
+            wrap(address, regular, 9f, 240f).take(2).forEach { line ->
+                text(cs, line, MARGIN, clientY, 9f, regular, inkMuted)
+                clientY -= 12f
+            }
+        }
     }
 
     // ── Items table ───────────────────────────────────────────────────
@@ -292,9 +328,10 @@ class PdfGenerator {
 
     // ── Notes ─────────────────────────────────────────────────────────
 
-    private fun drawPaymentAndTerms(cs: PDPageContentStream, notes: String?) {
-        val payment = notes?.takeIf { it.isNotBlank() }
-            ?: "15% na adjudicacao, 70% a meio da execucao da obra e os restantes 15% apos a sua conclusao."
+    private fun drawPaymentAndTerms(cs: PDPageContentStream, paymentTerms: String?, template: DocumentTemplate) {
+        val payment = paymentTerms?.takeIf { it.isNotBlank() }
+            ?: DEFAULT_PAYMENT_TERMS
+        val terms = template.termsText.takeIf { it.isNotBlank() } ?: DEFAULT_TERMS
         text(cs, spaced("FORMA DE PAGAMENTO"), MARGIN + 8f, 122f, 11f, bold, brand)
         var y = 101f
         wrap(payment, regular, 9f, 315f).take(4).forEach { line ->
@@ -302,13 +339,16 @@ class PdfGenerator {
             y -= 13f
         }
         text(cs, spaced("TERMOS E CONDIÇÕES"), MARGIN + 8f, 63f, 11f, bold, brand)
-        text(cs, "Este documento e valido por 30 dias.", MARGIN + 8f, 47f, 9f, regular, ink)
+        wrap(terms, regular, 9f, 315f).take(2).forEachIndexed { idx, line ->
+            text(cs, line, MARGIN + 8f, 47f - idx * 12f, 9f, regular, ink)
+        }
     }
 
     // ── Footer ────────────────────────────────────────────────────────
 
-    private fun drawFooter(cs: PDPageContentStream) {
-        textR(cs, "gerado por thebotslab.pt", W - MARGIN, 22f, 7.5f, regular, Color(130, 130, 130))
+    private fun drawFooter(cs: PDPageContentStream, template: DocumentTemplate) {
+        val footer = template.footerText.takeIf { it.isNotBlank() } ?: DEFAULT_FOOTER
+        textR(cs, footer, W - MARGIN, 22f, 7.5f, regular, Color(130, 130, 130))
     }
 
     // ── Primitives ────────────────────────────────────────────────────
@@ -363,12 +403,24 @@ class PdfGenerator {
         }
     }
 
-    private fun drawLogo(doc: PDDocument, cs: PDPageContentStream, x: Float, y: Float, w: Float, h: Float) {
-        val logoBytes = logoResources.firstNotNullOfOrNull { resource ->
-            this::class.java.classLoader.getResource(resource)?.readBytes()
+    private fun drawLogo(
+        doc: PDDocument,
+        cs: PDPageContentStream,
+        x: Float,
+        y: Float,
+        w: Float,
+        h: Float,
+        template: DocumentTemplate,
+    ) {
+        val uploaded = template.logoPath?.takeIf { it.isNotBlank() }?.let { path ->
+            runCatching { Files.readAllBytes(Path.of(path)) }.getOrNull()
         }
+        val logoBytes = uploaded ?: logoResources.firstNotNullOfOrNull { resource ->
+            this::class.java.classLoader.getResource(resource)?.readBytes()
+        }?.takeIf { template.companyName.isBlank() && template.logoPath.isNullOrBlank() }
+
         if (logoBytes != null) {
-            val image = PDImageXObject.createFromByteArray(doc, logoBytes, "ropaint-logo")
+            val image = PDImageXObject.createFromByteArray(doc, logoBytes, "logo")
             val scale = minOf(w / image.width, h / image.height)
             val imageW = image.width * scale
             val imageH = image.height * scale
@@ -376,10 +428,20 @@ class PdfGenerator {
             return
         }
 
+        val company = template.companyName.takeIf { it.isNotBlank() } ?: "EMPRESA"
+        val tagline = template.tagline.takeIf { it.isNotBlank() } ?: ""
         fillRect(cs, brandDark, x, y, w, h)
-        text(cs, "ISAL", x + 16f, y + 21f, 22f, bold, Color.WHITE)
-        text(cs, "CONSTRUCAO E GESTAO", x + 68f, y + 28f, 7f, bold, Color.WHITE)
-        text(cs, "ORCAMENTOS", x + 68f, y + 17f, 6.5f, regular, Color.WHITE)
+        text(cs, sanitize(company).uppercase().take(18), x + 12f, y + (if (tagline.isBlank()) 20f else 26f), 14f, bold, Color.WHITE)
+        if (tagline.isNotBlank()) {
+            text(cs, sanitize(tagline).uppercase().take(28), x + 12f, y + 12f, 7f, regular, Color.WHITE)
+        }
+    }
+
+    companion object {
+        const val DEFAULT_PAYMENT_TERMS =
+            "15% na adjudicacao, 70% a meio da execucao da obra e os restantes 15% apos a sua conclusao."
+        const val DEFAULT_TERMS = "Este documento e valido por 30 dias."
+        const val DEFAULT_FOOTER = "gerado por thebotslab.pt"
     }
 
     private fun textCentered(cs: PDPageContentStream, value: String, xCenter: Float, y: Float, size: Float, font: PDFont, color: Color) {
@@ -464,6 +526,7 @@ class PdfGenerator {
 
     private fun ptStatus(status: String) = when (status) {
         "PENDENTE"  -> "Pendente"
+        "SENT"      -> "Enviado"
         "ACEITO"    -> "Aceito"
         "PENDING"   -> "Pendente"
         "PAID"      -> "Pago"

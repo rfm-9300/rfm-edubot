@@ -108,6 +108,7 @@ class TenantPipelineFactory(
             invoiceRepository = invoices,
             pdfGenerator = PdfGenerator(),
             pdfStoragePath = "${runtimeConfig.get().pdfStoragePath}/${tenant.slug}",
+            documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
             openrouterModel = tenant.openrouterModel,
             compiledPersona = compiledPersona,
         )

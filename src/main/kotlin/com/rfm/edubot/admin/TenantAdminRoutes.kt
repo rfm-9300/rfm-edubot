@@ -23,6 +23,7 @@ import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
@@ -262,7 +263,7 @@ fun Route.tenantAdminRoutes(
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val quote = deps.quotes.create(ObjectId(request.clientId), request.items.map { it.toLineItem() }, request.notes, request.validUntil?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) })
                     val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                    val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client))
+                    val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate))
                     deps.quotes.setPdfPath(quote.id, path.toString())
                     call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
                 }
@@ -290,7 +291,7 @@ fun Route.tenantAdminRoutes(
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
                     val client = deps.clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                    val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client))
+                    val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate))
                     deps.invoices.setPdfPath(invoice.id, path.toString())
                     call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
                 }
@@ -353,6 +354,7 @@ private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepo
         standardItems = StandardItemRepository(mongo, tenant.id),
         pdfGenerator = PdfGenerator(),
         pdfStoragePath = "${appConfig.pdfStoragePath}/${tenant.slug}",
+        documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
     )
 }
 
@@ -363,6 +365,7 @@ private data class CrmDeps(
     val standardItems: StandardItemRepository,
     val pdfGenerator: PdfGenerator,
     val pdfStoragePath: String,
+    val documentTemplate: DocumentTemplate,
 )
 
 private suspend fun tenantStats(mongo: MongoModule, tenantId: ObjectId): TenantStatsDto {
