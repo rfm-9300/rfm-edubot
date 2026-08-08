@@ -3,6 +3,7 @@ package com.rfm.edubot.mobile.feature.assistant
 import com.rfm.edubot.mobile.core.common.VoiceInput
 import com.rfm.edubot.mobile.core.common.VoiceInputError
 import com.rfm.edubot.mobile.core.common.VoiceInputState
+import com.rfm.edubot.mobile.core.model.AssistantMessage
 import com.rfm.edubot.mobile.core.model.AssistantThread
 import com.rfm.edubot.mobile.core.model.AssistantThreadDetail
 import androidx.lifecycle.ViewModel
@@ -13,6 +14,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlin.random.Random
 
 data class AssistantUiState(
     val threads: List<AssistantThread> = emptyList(),
@@ -101,20 +103,35 @@ class AssistantViewModel(
 
     fun send() = scope.launch {
         val detail = mutableState.value.detail ?: return@launch
-        val content = mutableState.value.draft
+        val content = mutableState.value.draft.trim()
         if (content.isBlank() || mutableState.value.busy) return@launch
         voiceInput.cancel()
-        mutableState.value = mutableState.value.copy(busy = true)
+        val optimistic = AssistantMessage(
+            id = "local-${Random.nextLong()}",
+            role = "user",
+            content = content,
+            createdAt = "",
+        )
+        mutableState.value = mutableState.value.copy(
+            busy = true,
+            error = false,
+            draft = "",
+            voiceState = VoiceInputState.Idle,
+            voiceError = null,
+            detail = detail.copy(messages = detail.messages + optimistic),
+        )
         try {
             mutableState.value = mutableState.value.copy(
-                detail = api.sendAssistantMessage(token, detail.thread.id, content.trim()),
+                detail = api.sendAssistantMessage(token, detail.thread.id, content),
                 busy = false,
-                draft = "",
-                voiceState = VoiceInputState.Idle,
-                voiceError = null,
             )
         } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(busy = false, error = true)
+            mutableState.value = mutableState.value.copy(
+                detail = detail,
+                draft = content,
+                busy = false,
+                error = true,
+            )
         }
     }
 
