@@ -291,7 +291,7 @@ html[data-theme="dark"] .nav__item[data-tab="overview"] { --tab: #ffd60a; }
   min-width: 0;
 }
 
-.iconbtn--menu {
+.iconbtn.iconbtn--menu {
   display: none;
   width: 40px;
   height: 40px;
@@ -771,7 +771,7 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
   body { grid-template-columns: minmax(0, 1fr); }
   body.nav-open { overflow: hidden; }
 
-  .iconbtn--menu { display: grid; }
+  .iconbtn.iconbtn--menu { display: grid; }
 
   .sidebar {
     position: fixed;
