@@ -12,6 +12,8 @@ window.__I18N_CATALOGS['en'] = {
       title: 'Language', desc: 'Language used across this dashboard.', label: 'Language',
       saved: 'Language updated ✓', saveFailed: 'Could not update language',
     },
+    menuOpenAria: 'Open menu',
+    menuCloseAria: 'Close menu',
   },
 
   app: {

@@ -284,7 +284,57 @@ html[data-theme="dark"] .nav__item[data-tab="overview"] { --tab: #ffd60a; }
   border-bottom: 1px solid var(--line-soft);
 }
 
-.crumb { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.01em; }
+.topbar__lead {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.iconbtn--menu {
+  display: none;
+  width: 40px;
+  height: 40px;
+  border-radius: 12px;
+  flex-shrink: 0;
+}
+.iconbtn--menu .menu-bars {
+  display: grid;
+  gap: 5px;
+  width: 16px;
+}
+.iconbtn--menu .menu-bars span {
+  display: block;
+  height: 2px;
+  border-radius: 999px;
+  background: currentColor;
+  transition: transform 180ms ease, opacity 180ms ease, width 180ms ease;
+  transform-origin: center;
+}
+.iconbtn--menu .menu-bars span:nth-child(2) { width: 12px; }
+body.nav-open .iconbtn--menu .menu-bars span:nth-child(1) { transform: translateY(7px) rotate(45deg); }
+body.nav-open .iconbtn--menu .menu-bars span:nth-child(2) { opacity: 0; transform: scaleX(0.4); }
+body.nav-open .iconbtn--menu .menu-bars span:nth-child(3) { transform: translateY(-7px) rotate(-45deg); }
+
+.nav-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  background: rgba(15, 18, 22, 0.42);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.nav-scrim[hidden] { display: none; }
+body.nav-open .nav-scrim {
+  display: block;
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.crumb { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; letter-spacing: 0.01em; min-width: 0; }
 .crumb__root { color: var(--ink-mute); }
 .crumb__sep  { color: var(--ink-faint); }
 .crumb__leaf { color: var(--ink); font-weight: 800; }
@@ -719,19 +769,65 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
 
 @media (max-width: 920px) {
   body { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: relative; min-width: 0; height: auto; flex-direction: column; align-items: stretch; gap: 12px; padding: 12px; }
-  .sidebar__foot, .brand__sub { display: none; }
-  .nav { flex-direction: row; flex-wrap: nowrap; width: 100%; overflow-x: auto; padding-bottom: 2px; }
-  .nav__item { flex: 0 0 auto; grid-template-columns: 30px auto; }
-  .nav__count { display: none; }
-  .topbar { grid-template-columns: 1fr auto; padding: 12px 16px; }
+  body.nav-open { overflow: hidden; }
+
+  .iconbtn--menu { display: grid; }
+
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: min(300px, 86vw);
+    height: 100vh;
+    height: 100dvh;
+    min-width: 0;
+    padding: 18px 14px 14px;
+    gap: 22px;
+    border-right: 1px solid var(--line);
+    box-shadow: var(--shadow-lg);
+    transform: translateX(-105%);
+    transition: transform 220ms ease;
+    z-index: 40;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.nav-open .sidebar { transform: translateX(0); }
+
+  .sidebar__foot { display: flex; }
+  .brand__sub { display: block; }
+  .nav { flex-direction: column; flex-wrap: nowrap; width: 100%; overflow: visible; padding-bottom: 0; }
+  .nav__item { flex: none; grid-template-columns: 30px 1fr auto; }
+  .nav__item:hover { transform: none; }
+  .nav__count { display: inline-block; }
+
+  .topbar {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    padding: 12px 16px;
+  }
   .topbar__search { display: none; }
+  .topbar__actions { gap: 6px; }
+  .crumb__root, .crumb__sep { display: none; }
+  .crumb__leaf {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 42vw;
+  }
+
   .view { padding: 16px; }
   .view__hero { grid-template-columns: 1fr; }
   .drawer__panel { width: 100%; border-radius: 0; }
   .drawer__head { border-radius: 0; }
   .auth { min-height: auto; padding: 32px 0; }
   .auth__card { padding: 24px; }
+}
+
+@media (max-width: 620px) {
+  .topbar__actions a.btn--ghost,
+  .topbar__actions #btn-export { display: none; }
+  .topbar__actions #btn-logout { padding: 0 12px; }
 }
 
 /* ── Persona test chat ─────────────────────────────────────── */
