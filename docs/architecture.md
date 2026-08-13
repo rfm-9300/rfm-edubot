@@ -200,13 +200,16 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 ## Infrastructure
 
 ```
-cloudflared tunnel → Caddy (TLS) → Ktor :8080
-                                         ↓
-                                    MongoDB :27017
+GitHub Actions (merge to main) → GHCR image
+                                      ↓
+thebotslab.eu → websites-thebots Caddy (TLS) → whatsapp-bot app :8080
+                                                    ↓
+                                               MongoDB :27017
 ```
 
 - **Dev**: `docker compose up` starts app + mongo:7 + mongo-express (:8081)
-- **Prod**: `docker-compose.prod.yml` — app + mongo + Caddy reverse proxy with TLS
+- **Prod**: `docker-compose.prod.yml` — app + mongo on the VPS. Public TLS stays on the existing `websites-thebots` Caddy container (`web_proxy` network). `/admin`, `/app`, and `/backoffice` are static resources inside the app image, not separate services.
+- **CI/CD**: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) tests, publishes `ghcr.io/rfm-9300/whatsapp-bot`, and SSHs `scripts/remote-deploy.sh`. Mobile stays on [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) (no store deploy). See [DEPLOYMENT_RUNBOOK.md](../DEPLOYMENT_RUNBOOK.md).
 - **Image**: multi-stage Dockerfile → fat JAR at `build/libs/app.jar`, distroless-style runtime
 
 ## Mobile Frontend Foundation

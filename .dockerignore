@@ -1,4 +1,5 @@
 .git
+.github
 .gradle
 .idea
 .kotlin
@@ -9,6 +10,7 @@ data
 mobile
 mocks
 docs
+scripts
 *.md
 .env
 *.log
