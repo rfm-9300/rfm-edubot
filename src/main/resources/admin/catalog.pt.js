@@ -11,6 +11,8 @@ window.__I18N_CATALOGS['pt-PT'] = {
       title: 'Idioma', desc: 'Idioma usado neste painel.', label: 'Idioma',
       saved: 'Idioma atualizado ✓', saveFailed: 'Não foi possível atualizar o idioma',
     },
+    menuOpenAria: 'Abrir menu',
+    menuCloseAria: 'Fechar menu',
   },
 
   app: {

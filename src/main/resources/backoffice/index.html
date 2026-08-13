@@ -15,7 +15,7 @@
 <script src="/admin/i18n.js"></script>
 </head>
 <body>
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar">
     <div class="brand">
       <div class="brand__mark" aria-hidden="true">BO</div>
       <div class="brand__text">
@@ -43,7 +43,12 @@
 
   <main class="main">
     <header class="topbar">
-      <div class="crumb"><span class="crumb__root" data-i18n="backoffice.crumbRoot">Platform</span><span class="crumb__sep">/</span><span class="crumb__leaf" data-i18n="backoffice.heroTitle">Tenants</span></div>
+      <div class="topbar__lead">
+        <button class="iconbtn iconbtn--menu" id="btn-nav" type="button" data-i18n-aria-label="common.menuOpenAria" aria-label="Open menu" aria-controls="app-sidebar" aria-expanded="false">
+          <span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <div class="crumb"><span class="crumb__root" data-i18n="backoffice.crumbRoot">Platform</span><span class="crumb__sep">/</span><span class="crumb__leaf" data-i18n="backoffice.heroTitle">Tenants</span></div>
+      </div>
       <div class="topbar__search">
         <input type="text" id="search" data-i18n-placeholder="backoffice.searchPlaceholder" placeholder="Procurar tenant…" autocomplete="off" />
         <kbd>/</kbd>

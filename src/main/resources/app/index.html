@@ -15,7 +15,7 @@
 <script src="/admin/i18n.js"></script>
 </head>
 <body>
-  <aside class="sidebar">
+  <aside class="sidebar" id="app-sidebar">
     <div class="brand">
       <div class="brand__mark" aria-hidden="true">AI</div>
       <div class="brand__text"><div class="brand__name" id="brand-name">Dashboard</div><div class="brand__sub" id="brand-sub">Chatbot · Data</div></div>
@@ -29,7 +29,12 @@
   </aside>
   <main class="main">
     <header class="topbar">
-      <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
+      <div class="topbar__lead">
+        <button class="iconbtn iconbtn--menu" id="btn-nav" type="button" data-i18n-aria-label="common.menuOpenAria" aria-label="Open menu" aria-controls="app-sidebar" aria-expanded="false">
+          <span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
+        </button>
+        <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
+      </div>
       <div class="topbar__search"><input type="text" id="search" data-i18n-placeholder="app.searchPlaceholder" placeholder="Search…" autocomplete="off" /><kbd>/</kbd></div>
       <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" data-i18n="app.newPrefix" hidden>New</button></div>
     </header>
