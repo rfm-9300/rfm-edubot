@@ -14,7 +14,8 @@ docker push "${FULL_IMAGE_NAME}"
 
 echo "Image pushed: ${FULL_IMAGE_NAME}"
 echo
-echo "Next deploy steps:"
+echo "Production deploys normally run from GitHub Actions on merge to main."
+echo "Manual VPS steps (emergency fallback):"
 echo "  ssh hillsong-vps 'mkdir -p ~/whatsapp-bot'"
-echo "  scp docker-compose.prod.yml hillsong-vps:~/whatsapp-bot/"
-echo "  ssh hillsong-vps 'cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml down && docker compose -f docker-compose.prod.yml up -d'"
+echo "  scp docker-compose.prod.yml scripts/remote-deploy.sh hillsong-vps:~/whatsapp-bot/"
+echo "  ssh hillsong-vps 'chmod +x ~/whatsapp-bot/remote-deploy.sh && TAG=${TAG} ~/whatsapp-bot/remote-deploy.sh'"
