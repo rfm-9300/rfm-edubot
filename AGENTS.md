@@ -36,7 +36,9 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-When Rodrigo says any of the following, treat it as permission to execute the full production deployment workflow for this project:
+Merges to `main` deploy the Ktor app (including `/admin`, `/app`, and `/backoffice`) via GitHub Actions. See [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project and is not part of this pipeline.
+
+When Rodrigo says any of the following, treat it as permission to ship this WhatsApp bot to production:
 
 - "make deploy"
 - "make deployment"
@@ -45,7 +47,7 @@ When Rodrigo says any of the following, treat it as permission to execute the fu
 - "deploy"
 - any close variant that clearly means deploying this WhatsApp bot to production
 
-Use [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md) as the source of truth.
+Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (or re-run it). Use the laptop `./deploy.sh` + SSH fallback in the runbook only if CI cannot publish or SSH.
 
 ## Production Host
 
@@ -57,9 +59,9 @@ Use [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md) as the source of truth.
 
 ## Deployment Rules
 
-- Use the existing `./deploy.sh` script from the repo root to build and push the Docker image.
-- Use `docker compose -f docker-compose.prod.yml` on the VPS.
-- Prefer the safe deploy sequence: `pull`, `down`, `up -d`.
+- Prefer GitHub Actions on `main` over a local Docker build.
+- On the VPS, use `docker compose -f docker-compose.prod.yml` and `scripts/remote-deploy.sh`.
+- Prefer recreating the app with `up -d` after `pull`; do not `down` the whole stack (that bounces Mongo) unless recovery requires it.
 - After deploying, check container state, health endpoints, and logs before reporting success.
 - If deployment fails, diagnose the concrete failure, apply the smallest safe fix, then redeploy.
 - Do not reset MongoDB volumes, delete data, rotate secrets, or run destructive cleanup unless Rodrigo explicitly asks.

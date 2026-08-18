@@ -1,6 +1,7 @@
 .env
 *.class
 *.jar
+!**/gradle-wrapper.jar
 *.log
 *.hprof
 build/

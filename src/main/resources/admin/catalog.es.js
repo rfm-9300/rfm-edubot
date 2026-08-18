@@ -11,6 +11,8 @@ window.__I18N_CATALOGS['es'] = {
       title: 'Idioma', desc: 'Idioma usado en este panel.', label: 'Idioma',
       saved: 'Idioma actualizado ✓', saveFailed: 'No se pudo actualizar el idioma',
     },
+    menuOpenAria: 'Abrir menú',
+    menuCloseAria: 'Cerrar menú',
   },
 
   app: {

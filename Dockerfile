@@ -1,7 +1,8 @@
 FROM eclipse-temurin:20-jdk AS build
 WORKDIR /app
 COPY . .
-RUN ./gradlew buildFatJar --no-daemon
+# Tests run in CI (`./gradlew test`) before this image is built.
+RUN ./gradlew buildFatJar --no-daemon -x test
 
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app

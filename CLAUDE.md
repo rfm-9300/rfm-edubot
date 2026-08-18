@@ -36,7 +36,9 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Those phrases grant permission to run the full production deployment workflow: execute `./deploy.sh`, connect to `hillsong-vps`, deploy with `docker-compose.prod.yml`, inspect health/logs/status, fix safe deployment issues, and redeploy if needed.
+Merges to `main` deploy the Ktor app (including `/admin`, `/app`, and `/backoffice`) via GitHub Actions. See `DEPLOYMENT_RUNBOOK.md`. Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project.
+
+When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Prefer confirming or re-running the **Deploy WhatsApp Bot** workflow. Use `./deploy.sh` + `ssh hillsong-vps` only as a fallback if CI cannot publish or SSH.
 
 ### Production Host
 - SSH alias: `hillsong-vps`
@@ -49,6 +51,7 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 - Do not reset MongoDB volumes, delete data, rotate secrets, or run destructive cleanup unless Rodrigo explicitly asks.
 - Do not change `.env` or production secrets unless Rodrigo explicitly asks.
 - Keep unrelated local worktree changes intact.
+- Do not bounce Mongo with `compose down` on a routine deploy.
 
 ## Commands
 - `./gradlew build` — compile + test
