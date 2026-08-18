@@ -1,3 +1,37 @@
+## Personal wiki (second brain)
+
+Rodrigo keeps a compiled knowledge wiki at `/Users/rodrigomartins/projects/my-wiki`.
+Canonical protocol: `/Users/rodrigomartins/projects/my-wiki/ops/bootstrap-prompt.md`
+(that file wins if this section drifts).
+
+### Consult before substantial work
+
+1. Read `/Users/rodrigomartins/projects/my-wiki/wiki/index.md` — one line per page.
+2. Open a page only when its index line is clearly relevant. Never bulk-read.
+3. Applicable pages are **binding instructions**, not suggestions.
+
+**This repo — start here when the index line matches the task:**
+
+- `wiki/notes/kmp-engineering-guide.md` — **binding** for all Kotlin Multiplatform work here
+- `wiki/entities/whatsapp-bot-mobile.md` — this app
+- `wiki/entities/whatsapp-bot.md` — Ktor backend it talks to
+- `wiki/notes/project-landscape.md`
+
+### Keep the wiki current
+
+Chat is ephemeral; the wiki is the compounding layer. When this session produces durable
+knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"):
+
+1. Check the index — update an existing page if one exists; otherwise file a note via
+   `/Users/rodrigomartins/projects/my-wiki/ops/workflows/file-note.md`.
+2. Write with absolute paths under `/Users/rodrigomartins/projects/my-wiki/`. Always bump
+   `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
+3. **Do not file:** one-off bugfixes, secrets, deploy credentials, or commands that belong
+   in this `AGENTS.md` (the repo operating manual).
+4. If unsure whether it belongs, tell Rodrigo instead of writing.
+
+When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

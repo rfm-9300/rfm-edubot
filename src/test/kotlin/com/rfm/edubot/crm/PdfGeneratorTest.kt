@@ -75,6 +75,21 @@ class PdfGeneratorTest {
         assertEquals(1, pageCount(bytes))
     }
 
+    @Test
+    fun `custom layout and accent still produce a valid pdf`() {
+        val template = DocumentTemplate(
+            companyName = "Studio Norte",
+            accentColor = "#2F6FED",
+            showDecor = false,
+            layout = com.rfm.edubot.tenant.model.DocumentLayouts.DEFAULT.map { block ->
+                if (block.id == "logo") block.copy(x = 42f, y = 28f) else block
+            },
+        )
+        val bytes = generator.generateQuote(quote(listOf(item("Pintura", 1000.0))), client, template)
+        assertTrue(bytes.isNotEmpty())
+        assertEquals(1, pageCount(bytes))
+    }
+
     private fun quote(items: List<com.rfm.edubot.crm.model.LineItem>) = Quote(
         id = ObjectId(),
         tenantId = tenantId,

@@ -846,124 +846,21 @@ function renderSettings(root) {
 }
 
 function renderDocumentTemplatePanel() {
-  const t = state.documentTemplate || {
-    companyName: state.me?.tenant?.name || '', tagline: '', taxId: '', email: '', phone: '', address: '',
-    quoteTitle: '', invoiceTitle: '', quotePaymentTerms: '', invoicePaymentTerms: '', termsText: '', footerText: '',
-    hasLogo: false, defaults: {},
-  };
-  const d = t.defaults || {};
-  return `<div class="panel" style="padding:18px;margin-bottom:18px">
-      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.docTemplateTitle)}</h2>
-      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.docTemplateDesc)}</p>
-      <form class="form" id="doc-template-form">
-        <div class="form__grid">
-          <div class="form__row"><label class="lbl" for="dt-company">${escapeHTML(STR.docCompanyName)}</label>
-            <input class="inp" id="dt-company" value="${escapeHTML(t.companyName || '')}" placeholder="${escapeHTML(state.me?.tenant?.name || '')}" /></div>
-          <div class="form__row"><label class="lbl" for="dt-tagline">${escapeHTML(STR.docTagline)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-            <input class="inp" id="dt-tagline" value="${escapeHTML(t.tagline || '')}" placeholder="${escapeHTML(STR.docTaglinePh)}" /></div>
-          <div class="form__row"><label class="lbl" for="dt-tax">${escapeHTML(STR.docTaxId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-            <input class="inp inp--mono" id="dt-tax" value="${escapeHTML(t.taxId || '')}" placeholder="${escapeHTML(STR.docTaxIdPh)}" /></div>
-          <div class="form__row"><label class="lbl" for="dt-email">${escapeHTML(STR.docEmail)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-            <input class="inp" id="dt-email" type="email" value="${escapeHTML(t.email || '')}" placeholder="geral@empresa.pt" /></div>
-          <div class="form__row"><label class="lbl" for="dt-phone">${escapeHTML(STR.docPhone)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-            <input class="inp inp--mono" id="dt-phone" value="${escapeHTML(t.phone || '')}" placeholder="+351 …" /></div>
-          <div class="form__row"><label class="lbl" for="dt-address">${escapeHTML(STR.docAddress)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-            <input class="inp" id="dt-address" value="${escapeHTML(t.address || '')}" /></div>
-          <div class="form__row"><label class="lbl" for="dt-quote-title">${escapeHTML(STR.docQuoteTitle)}</label>
-            <input class="inp" id="dt-quote-title" value="${escapeHTML(t.quoteTitle || '')}" placeholder="${escapeHTML(d.quoteTitle || 'ORÇAMENTO')}" /></div>
-          <div class="form__row"><label class="lbl" for="dt-invoice-title">${escapeHTML(STR.docInvoiceTitle)}</label>
-            <input class="inp" id="dt-invoice-title" value="${escapeHTML(t.invoiceTitle || '')}" placeholder="${escapeHTML(d.invoiceTitle || 'FATURA')}" /></div>
-        </div>
-        <div class="form__row form__row--full"><label class="lbl" for="dt-quote-pay">${escapeHTML(STR.docQuotePayment)}</label>
-          <textarea class="txt" id="dt-quote-pay" rows="3" placeholder="${escapeHTML(d.paymentTerms || '')}">${escapeHTML(t.quotePaymentTerms || '')}</textarea></div>
-        <div class="form__row form__row--full"><label class="lbl" for="dt-invoice-pay">${escapeHTML(STR.docInvoicePayment)}</label>
-          <textarea class="txt" id="dt-invoice-pay" rows="3" placeholder="${escapeHTML(d.paymentTerms || '')}">${escapeHTML(t.invoicePaymentTerms || '')}</textarea></div>
-        <div class="form__row form__row--full"><label class="lbl" for="dt-terms">${escapeHTML(STR.docTerms)}</label>
-          <textarea class="txt" id="dt-terms" rows="2" placeholder="${escapeHTML(d.termsText || '')}">${escapeHTML(t.termsText || '')}</textarea></div>
-        <div class="form__row form__row--full"><label class="lbl" for="dt-footer">${escapeHTML(STR.docFooter)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-          <input class="inp" id="dt-footer" value="${escapeHTML(t.footerText || '')}" placeholder="${escapeHTML(d.footerText || '')}" /></div>
-        <div class="form__row form__row--full" style="margin-top:8px">
-          <label class="lbl">${escapeHTML(STR.docLogo)}</label>
-          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:6px">
-            ${t.hasLogo ? `<img id="dt-logo-preview" alt="" hidden style="height:48px;max-width:160px;object-fit:contain;border:1px solid var(--line);border-radius:8px;background:var(--surface-2);padding:4px" /><span class="muted" id="dt-logo-loading">${escapeHTML(STR.docLogoLoading)}</span>` : `<span class="muted">${escapeHTML(STR.docLogoNone)}</span>`}
-            <label class="btn btn--sm" style="cursor:pointer"><input type="file" id="dt-logo" accept="image/png,image/jpeg,image/webp" hidden />${escapeHTML(STR.docLogoUpload)}</label>
-            ${t.hasLogo ? `<button class="btn btn--sm btn--ghost" type="button" id="dt-logo-remove">${escapeHTML(STR.docLogoRemove)}</button>` : ''}
-          </div>
-          <div class="hint" style="margin-top:6px">${escapeHTML(STR.docLogoHint)}</div>
-        </div>
-        <button class="btn btn--primary" type="submit" style="margin-top:14px">${escapeHTML(STR.docTemplateSave)}</button>
-      </form>
-    </div>`;
-}
-
-async function loadDocumentLogoPreview() {
-  const img = $('#dt-logo-preview');
-  if (!img || !state.documentTemplate?.hasLogo) return;
-  try {
-    const res = await fetch('/app/api/settings/document-template/logo', { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-    if (!res.ok) return;
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    img.src = url;
-    img.hidden = false;
-    $('#dt-logo-loading')?.remove();
-    img.onload = () => setTimeout(() => URL.revokeObjectURL(url), 60000);
-  } catch { /* keep loading label */ }
+  return `<div id="doc-template-panel"></div>`;
 }
 
 function wireDocumentTemplateForm() {
-  const form = $('#doc-template-form');
-  if (!form) return;
-  loadDocumentLogoPreview();
-  form.addEventListener('submit', async e => {
-    e.preventDefault();
-    const body = {
-      companyName: $('#dt-company').value.trim(),
-      tagline: $('#dt-tagline').value.trim(),
-      taxId: $('#dt-tax').value.trim(),
-      email: $('#dt-email').value.trim(),
-      phone: $('#dt-phone').value.trim(),
-      address: $('#dt-address').value.trim(),
-      quoteTitle: $('#dt-quote-title').value.trim(),
-      invoiceTitle: $('#dt-invoice-title').value.trim(),
-      quotePaymentTerms: $('#dt-quote-pay').value.trim(),
-      invoicePaymentTerms: $('#dt-invoice-pay').value.trim(),
-      termsText: $('#dt-terms').value.trim(),
-      footerText: $('#dt-footer').value.trim(),
-    };
-    const btn = $('button[type=submit]', form);
-    btn.disabled = true;
-    try {
-      state.documentTemplate = await api('/app/api/settings/document-template', { method: 'PUT', body: JSON.stringify(body) });
-      toast(STR.docTemplateSaved);
-      render();
-    } catch { toast(STR.docTemplateSaveFailed); btn.disabled = false; }
-  });
-  $('#dt-logo')?.addEventListener('change', async e => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const fd = new FormData();
-    fd.append('file', file);
-    try {
-      const res = await fetch('/app/api/settings/document-template/logo', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
-      });
-      if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); return; }
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      state.documentTemplate = await res.json();
-      toast(STR.docLogoUploaded);
-      render();
-    } catch { toast(STR.docLogoUploadFailed); }
-    e.target.value = '';
-  });
-  $('#dt-logo-remove')?.addEventListener('click', async () => {
-    try {
-      state.documentTemplate = await api('/app/api/settings/document-template/logo', { method: 'DELETE' });
-      toast(STR.docLogoRemoved);
-      render();
-    } catch { toast(STR.docLogoUploadFailed); }
+  const host = $('#doc-template-panel');
+  if (!host || !window.DocTemplate) return;
+  DocTemplate.mount(host, {
+    getTemplate: () => state.documentTemplate,
+    setTemplate: next => { state.documentTemplate = next; },
+    tenantName: () => state.me?.tenant?.name || '',
+    api,
+    getToken: () => token,
+    toast,
+    STR,
+    escapeHTML,
   });
 }
 

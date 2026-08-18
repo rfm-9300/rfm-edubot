@@ -162,10 +162,11 @@ today's repos only support the bot's hot path (findByWaId / findOrCreate / lastN
 ## 5. Business profile + PDF branding ✅
 
 Per-tenant `DocumentTemplate` on the `Tenant` document (company name, tagline, tax ID, email,
-phone, address, quote/invoice titles, payment terms, terms text, footer, logo path). Edited in
-Dashboard → Settings → Quote & invoice template (`GET/PUT /app/api/settings/document-template`,
-logo upload/delete). `PdfGenerator` accepts the template for all quote/invoice PDFs (dashboard,
-admin CRM, WhatsApp pipeline).
+phone, address, quote/invoice titles, payment terms, terms text, footer, logo path, accent,
+optional A4 `layout` blocks). Edited in Dashboard → Settings → Quote & invoice template
+(`GET/PUT /app/api/settings/document-template`, logo upload/delete) with a live drag/resize
+studio. `PdfGenerator` accepts the template for all quote/invoice PDFs (dashboard, admin CRM,
+WhatsApp pipeline). Empty `layout` keeps the original hardcoded page.
 
 ---
 

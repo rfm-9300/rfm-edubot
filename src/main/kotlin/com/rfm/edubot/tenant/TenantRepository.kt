@@ -6,6 +6,8 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentLayoutBlock
+import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
@@ -116,6 +118,9 @@ private fun DocumentTemplate.toDocument(): Document = Document()
     .append("termsText", termsText)
     .append("footerText", footerText)
     .appendIfNotNull("logoPath", logoPath)
+    .append("accentColor", accentColor)
+    .append("showDecor", showDecor)
+    .append("layout", layout.map { it.toDocument() })
 
 private fun Document.toDocumentTemplate() = DocumentTemplate(
     companyName = getString("companyName").orEmpty(),
@@ -131,7 +136,39 @@ private fun Document.toDocumentTemplate() = DocumentTemplate(
     termsText = getString("termsText").orEmpty(),
     footerText = getString("footerText").orEmpty(),
     logoPath = getString("logoPath"),
+    accentColor = DocumentLayouts.sanitizeAccent(getString("accentColor").orEmpty()),
+    showDecor = bool("showDecor", true),
+    layout = DocumentLayouts.sanitize(
+        getList("layout", Document::class.java).orEmpty().mapNotNull { it.toLayoutBlock() },
+    ),
 )
+
+private fun DocumentLayoutBlock.toDocument(): Document = Document()
+    .append("id", id)
+    .append("x", x.toDouble())
+    .append("y", y.toDouble())
+    .append("w", w.toDouble())
+    .append("h", h.toDouble())
+    .append("visible", visible)
+
+private fun Document.toLayoutBlock(): DocumentLayoutBlock? {
+    val id = getString("id")?.takeIf { it.isNotBlank() } ?: return null
+    return DocumentLayoutBlock(
+        id = id,
+        x = number("x") ?: return null,
+        y = number("y") ?: return null,
+        w = number("w") ?: return null,
+        h = number("h") ?: return null,
+        visible = bool("visible", true),
+    )
+}
+
+private fun Document.number(key: String): Float? = (get(key) as? Number)?.toFloat()
+
+private fun Document.bool(key: String, default: Boolean): Boolean = when (val value = get(key)) {
+    is Boolean -> value
+    else -> default
+}
 
 private fun Document.getChannels(): List<ChannelBinding> {
     val raw = getList("channels", Document::class.java).orEmpty()

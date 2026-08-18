@@ -51,6 +51,8 @@ import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentLayoutBlock
+import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
@@ -332,7 +334,7 @@ fun Route.dashboardRoutes(
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@put call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<DocumentTemplateRequest>()
-                val next = request.toTemplate(existingLogoPath = ctx.tenant.documentTemplate.logoPath)
+                val next = request.toTemplate(ctx.tenant.documentTemplate)
                 val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
                     ?: return@put call.respond(HttpStatusCode.NotFound)
                 pipelineFactory.evict(updated.id)
@@ -600,6 +602,9 @@ private data class DocumentTemplateRequest(
     val invoicePaymentTerms: String = "",
     val termsText: String = "",
     val footerText: String = "",
+    val accentColor: String? = null,
+    val showDecor: Boolean? = null,
+    val layout: List<DocumentLayoutBlockDto>? = null,
 )
 
 @Serializable
@@ -616,8 +621,21 @@ private data class DocumentTemplateDto(
     val invoicePaymentTerms: String,
     val termsText: String,
     val footerText: String,
+    val accentColor: String,
+    val showDecor: Boolean,
+    val layout: List<DocumentLayoutBlockDto>,
     val hasLogo: Boolean,
     val defaults: DocumentTemplateDefaultsDto,
+)
+
+@Serializable
+private data class DocumentLayoutBlockDto(
+    val id: String,
+    val x: Float,
+    val y: Float,
+    val w: Float,
+    val h: Float,
+    val visible: Boolean = true,
 )
 
 @Serializable
@@ -627,9 +645,11 @@ private data class DocumentTemplateDefaultsDto(
     val paymentTerms: String = PdfGenerator.DEFAULT_PAYMENT_TERMS,
     val termsText: String = PdfGenerator.DEFAULT_TERMS,
     val footerText: String = PdfGenerator.DEFAULT_FOOTER,
+    val accentColor: String = DocumentLayouts.DEFAULT_ACCENT,
+    val layout: List<DocumentLayoutBlockDto> = DocumentLayouts.DEFAULT.map { it.dto() },
 )
 
-private fun DocumentTemplateRequest.toTemplate(existingLogoPath: String?): DocumentTemplate = DocumentTemplate(
+private fun DocumentTemplateRequest.toTemplate(existing: DocumentTemplate): DocumentTemplate = DocumentTemplate(
     companyName = companyName.trim(),
     tagline = tagline.trim(),
     taxId = taxId.trim(),
@@ -642,7 +662,10 @@ private fun DocumentTemplateRequest.toTemplate(existingLogoPath: String?): Docum
     invoicePaymentTerms = invoicePaymentTerms.trim(),
     termsText = termsText.trim(),
     footerText = footerText.trim(),
-    logoPath = existingLogoPath,
+    logoPath = existing.logoPath,
+    accentColor = accentColor?.let(DocumentLayouts::sanitizeAccent) ?: existing.accentColor,
+    showDecor = showDecor ?: existing.showDecor,
+    layout = layout?.let { DocumentLayouts.sanitize(it.map { block -> block.toModel() }) } ?: existing.layout,
 )
 
 private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
@@ -658,9 +681,16 @@ private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
     invoicePaymentTerms = invoicePaymentTerms,
     termsText = termsText,
     footerText = footerText,
+    accentColor = accentColor,
+    showDecor = showDecor,
+    layout = layout.map { it.dto() },
     hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
     defaults = DocumentTemplateDefaultsDto(),
 )
+
+private fun DocumentLayoutBlock.dto() = DocumentLayoutBlockDto(id, x, y, w, h, visible)
+
+private fun DocumentLayoutBlockDto.toModel() = DocumentLayoutBlock(id, x, y, w, h, visible)
 
 private fun logoExtension(filename: String): String? = when (filename.substringAfterLast('.', "").lowercase()) {
     "png" -> "png"

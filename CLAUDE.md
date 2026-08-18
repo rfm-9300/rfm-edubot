@@ -1,5 +1,39 @@
 # CLAUDE.md
 
+## Personal wiki (second brain)
+
+Rodrigo keeps a compiled knowledge wiki at `/Users/rodrigomartins/projects/my-wiki`.
+Canonical protocol: `/Users/rodrigomartins/projects/my-wiki/ops/bootstrap-prompt.md`
+(that file wins if this section drifts).
+
+### Consult before substantial work
+
+1. Read `/Users/rodrigomartins/projects/my-wiki/wiki/index.md` — one line per page.
+2. Open a page only when its index line is clearly relevant. Never bulk-read.
+3. Applicable pages are **binding instructions**, not suggestions.
+
+**This repo — start here when the index line matches the task:**
+
+- `wiki/entities/whatsapp-bot.md` — this product (Ktor JVM server + web UI)
+- `wiki/entities/whatsapp-bot-mobile.md` and `wiki/notes/kmp-engineering-guide.md` — **binding** when touching `mobile/`
+- `wiki/concepts/thebots-design-system.md` — admin/app/backoffice CSS
+- `wiki/notes/project-landscape.md` — shared `hillsong-vps`
+
+### Keep the wiki current
+
+Chat is ephemeral; the wiki is the compounding layer. When this session produces durable
+knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"):
+
+1. Check the index — update an existing page if one exists; otherwise file a note via
+   `/Users/rodrigomartins/projects/my-wiki/ops/workflows/file-note.md`.
+2. Write with absolute paths under `/Users/rodrigomartins/projects/my-wiki/`. Always bump
+   `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
+3. **Do not file:** one-off bugfixes, secrets, deploy credentials, or commands that belong
+   in this `AGENTS.md` (the repo operating manual).
+4. If unsure whether it belongs, tell Rodrigo instead of writing.
+
+When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
+
 ## Deployment Intent
 
 When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Those phrases grant permission to run the full production deployment workflow: execute `./deploy.sh`, connect to `hillsong-vps`, deploy with `docker-compose.prod.yml`, inspect health/logs/status, fix safe deployment issues, and redeploy if needed.
@@ -61,6 +95,18 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - Config via HOCON (`application.conf`) with `${?ENV_VAR}` fallbacks
 - Fat JAR output: `build/libs/app.jar` (Dockerfile multi-stage, distroless-style)
 - MongoDB indexes created at startup in `MongoModule.initialize()`
+
+## UI Design System
+
+When adding or changing web UI (`src/main/resources/admin/`, `app/`, `backoffice/`), follow [`design-system/AGENTS.md`](design-system/AGENTS.md). Admin, app, and backoffice share one stylesheet (`admin/style.css`) and one token/component vocabulary. Do not invent a parallel visual language.
+
+## Frontend UI Strings
+
+The product is intended to be multi-language. Do not hardcode user-facing strings — especially not Portuguese-only text — directly in markup or JS render functions. Details: [`design-system/i18n.md`](design-system/i18n.md).
+
+- New user-facing strings in the frontends (`src/main/resources/app/`, `backoffice/`, `admin/`) must go through the shared catalogs (`admin/catalog.en.js`, `catalog.pt.js`, `catalog.es.js`) and `I18N`, not inline literals.
+- When touching code near existing hardcoded strings, prefer lifting them into the catalogs rather than adding more inline text.
+- Placeholder/"coming soon" copy counts as a user-facing string — same rules apply.
 
 ## Documentation
 

@@ -1,0 +1,16 @@
+---
+description: Follow the thebots.lab UI design system for dashboard, widget, and legal web UIs.
+globs: src/main/resources/{admin,app,backoffice,widget,legal}/**/*.{html,css,js}
+alwaysApply: false
+---
+
+# UI Design System
+
+Before changing HTML, CSS, or frontend JS, read `design-system/AGENTS.md`.
+
+- Dashboards (`admin`, `app`, `backoffice`) share `src/main/resources/admin/style.css`. Extend that file; do not add a second stylesheet.
+- Use existing classes and tokens (`design-system/components.md`, `design-system/tokens.md`).
+- User-facing copy goes through `admin/catalog.{en,pt,es}.js` (`design-system/i18n.md`).
+- Widget uses `tbl-` classes in `widget.css` only. Legal pages stay standalone.
+
+Do not hardcode colors, new fonts, or locale strings in render functions.
