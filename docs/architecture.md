@@ -56,7 +56,7 @@ graph TD
         WR[WebhookRoutes<br/>WhatsApp + Instagram]
         AR[AdminRoutes]
         WV[WebhookVerifier]
-        Health["/health  /ready  /admin"]
+        Health["/health  /ready  /app  /backoffice"]
     end
 
     subgraph Messaging
@@ -111,7 +111,7 @@ graph TD
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
 | `channel/` | `OutboundClient` interface and per-channel capability flags used by the pipeline |
-| `instagram/` | Instagram DM Graph API outbound adapter |
+| `instagram/` | Instagram DM Graph API outbound adapter plus post/comment inbox (webhook ingest, Graph list/reply) |
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
 | `persistence/` | MongoDB wiring, index creation at startup |
@@ -125,7 +125,7 @@ graph TD
 catalog lives in `DashboardModules`:
 
 - Always enabled and not admin-disableable: `overview`, `conversations`, `contacts`, `settings`.
-- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`.
+- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
 
 The server sanitizes explicit selections against this catalog and force-adds the always-on
 modules. A missing Mongo `enabledModules` field maps to `null`, which preserves legacy behavior by
@@ -142,6 +142,16 @@ Optional `bookings` module: weekly availability, bookable services, conflict-che
 Instants are stored in UTC; wall times use `Tenant.timezone` (IANA, default `Europe/Lisbon`).
 Surfaces: `/app/api/bookings/*`, admin mirror `/admin/api/tenants/{slug}/bookings/*`, WhatsApp
 `BookingTools` (only when the module is enabled), and dashboard assistant tools mapped to `bookings`.
+
+### Instagram
+
+Optional `instagram` module: a comment work queue for the connected Instagram professional account.
+DMs stay in Conversations; this surface is public posts and comments. Incoming `comments` webhooks
+are stored in Mongo (`instagram.media`, `instagram.comments`) and never enter `MessagePipeline`.
+The dashboard lists unreplied comments, recent media, and can reply via
+`POST /{comment-id}/replies` on `graph.instagram.com`. OAuth now requests
+`instagram_business_manage_comments` in addition to basic + messages; existing bindings must
+reconnect before comments work. App Review for that permission is a separate submission from DMs.
 
 ## MongoDB Collections
 
@@ -160,6 +170,8 @@ Surfaces: `/app/api/bookings/*`, admin mirror `/admin/api/tenants/{slug}/booking
 | `bookings.services` | Bookable services (name, duration, active) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
 | `bookings.appointments` | Bookings with UTC start/end and status | `tenantId`, `startAt` |
+| `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
+| `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
 
 ## Dashboard AI Assistant
@@ -189,11 +201,12 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Async decoupling** — webhook POST returns 200 immediately; processing happens in a `SupervisorJob` coroutine scope consuming the `Channel`. Backpressure is handled by `Channel.UNLIMITED` (bounded capacity can be set via `MessageQueue(capacity=N)`).
 - **Channel adapters at the edges** — webhook ingress normalizes WhatsApp and Instagram payloads into `InboundMessage`; the consumer selects an `OutboundClient` from the tenant's channel binding before calling the shared `MessagePipeline`.
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
-- **Shared web design system** — `/admin`, `/app`, and `/backoffice` all load the same static stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). The stylesheet centralizes light + dark tokens, component classes, and auth card styles so the three HTML surfaces stay visually consistent without route-specific CSS. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
+- **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, and i18n. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
+- **Tenant dashboard work surface** — `/app` Home is a work queue plus setup checklist. Conversations is a split inbox (`lastPreview` / `waiting` on `GET /app/api/conversations`). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
-- **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath`, then uploaded to WhatsApp as documents and linked from admin APIs.
+- **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath`, then uploaded to WhatsApp as documents and linked from the tenant dashboard and operator APIs.
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
 - **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
 

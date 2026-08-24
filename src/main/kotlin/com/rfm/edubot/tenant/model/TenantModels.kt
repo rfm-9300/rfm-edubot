@@ -152,6 +152,8 @@ data class ChannelBinding(
     val wabaId: String? = null,
     val tokenObtainedAt: Instant? = null,
     val source: String? = null,
+    /** OAuth scopes granted at connect time. Empty on older Instagram bindings. */
+    val grantedScopes: List<String> = emptyList(),
     // WEB only: browser origins allowed to open the widget WebSocket. Empty = allow any.
     val allowedOrigins: List<String> = emptyList(),
 )

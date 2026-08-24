@@ -258,6 +258,19 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             .reversed()
     }
 
+    suspend fun lastByConversationIds(ids: Collection<ObjectId>): Map<ObjectId, Message> {
+        if (ids.isEmpty()) return emptyMap()
+        val pipeline = listOf(
+            Document("\$match", Document("tenantId", tenantId).append("conversationId", Document("\$in", ids.toList()))),
+            Document("\$sort", Document("createdAt", -1)),
+            Document("\$group", Document("_id", "\$conversationId").append("doc", Document("\$first", "\$\$ROOT"))),
+        )
+        return collection.aggregate<Document>(pipeline).toList().mapNotNull { group ->
+            val doc = group.get("doc", Document::class.java) ?: return@mapNotNull null
+            doc.getObjectId("conversationId") to doc.toMessage()
+        }.toMap()
+    }
+
     suspend fun threadByConversation(conversationId: ObjectId, limit: Int = 200): List<Message> {
         return collection.find(scoped(Filters.eq("conversationId", conversationId)))
             .sort(Document("createdAt", 1))

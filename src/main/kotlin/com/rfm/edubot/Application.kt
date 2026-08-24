@@ -22,6 +22,7 @@ import com.rfm.edubot.oauth.InstagramOAuthClient
 import com.rfm.edubot.oauth.OAuthState
 import com.rfm.edubot.oauth.instagramMetaCallbacks
 import com.rfm.edubot.oauth.instagramOAuthRoutes
+import com.rfm.edubot.instagram.InstagramSocialService
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaCompiler
 import com.rfm.edubot.persona.PersonaRepository
@@ -121,6 +122,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     val channelBindingService = ChannelBindingService(tenantRepository, tenantRegistry, pipelineFactory)
     val oauthState = OAuthState(secretProvider = { runtimeConfig.get().admin.jwtSecret })
     val instagramOAuthClient = InstagramOAuthClient({ runtimeConfig.get().instagram }, whatsappHttpClient)
+    val instagramSocial = InstagramSocialService(mongoModule, whatsappHttpClient) { runtimeConfig.get().instagram.graphVersion }
     val whatsAppSignupClient = WhatsAppSignupClient({ runtimeConfig.get().whatsapp }, whatsappHttpClient)
 
     val pipelineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
@@ -193,6 +195,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             messageQueue = messageQueue,
             deduplicationService = deduplicationService,
             tenantRegistry = tenantRegistry,
+            instagramSocial = instagramSocial,
         )
         authRoutes(runtimeConfig)
         platformSettingsRoutes(platformSettingsService)
@@ -207,6 +210,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             aiClient = aiClient,
             runtimeConfig = runtimeConfig,
             channelBindingService = channelBindingService,
+            instagramSocial = instagramSocial,
         )
         dashboardImpersonationRoute(
             tenantRepository = tenantRepository,

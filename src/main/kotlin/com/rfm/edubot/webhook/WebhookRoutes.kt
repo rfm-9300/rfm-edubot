@@ -1,6 +1,7 @@
 package com.rfm.edubot.webhook
 
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.instagram.InstagramSocialService
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.InboundMessage
 import com.rfm.edubot.messaging.MessageQueue
@@ -19,6 +20,7 @@ import io.ktor.server.routing.Routing
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
+import kotlinx.datetime.Instant
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -34,6 +36,7 @@ fun Routing.webhookRoutes(
     messageQueue: MessageQueue,
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
+    instagramSocial: InstagramSocialService,
 ) {
     route("/webhook") {
         get {
@@ -85,7 +88,7 @@ fun Routing.webhookRoutes(
 
             when (objectType) {
                 "whatsapp_business_account" -> handleWhatsAppWebhook(body, messageQueue, deduplicationService, tenantRegistry)
-                "instagram" -> handleInstagramWebhook(body, messageQueue, deduplicationService, tenantRegistry)
+                "instagram" -> handleInstagramWebhook(body, messageQueue, deduplicationService, tenantRegistry, instagramSocial)
                 else -> log.info("Ignoring unsupported webhook object={}", objectType)
             }
 
@@ -159,6 +162,7 @@ private suspend fun handleInstagramWebhook(
     messageQueue: MessageQueue,
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
+    instagramSocial: InstagramSocialService,
 ) {
     val payload = try {
         json.decodeFromString(InstagramPayload.serializer(), body)
@@ -171,6 +175,19 @@ private suspend fun handleInstagramWebhook(
     for (entry in payload.entry) {
         val instagramAccountId = entry.id
         val tenant = activeTenant(tenantRegistry.byExternalId(Platform.INSTAGRAM, instagramAccountId), Platform.INSTAGRAM, instagramAccountId) ?: continue
+        for (comment in entry.commentEvents) {
+            val commentId = comment.id.takeIf { it.isNotBlank() } ?: continue
+            if (deduplicationService.isDuplicate("igc:$commentId", body, tenant.id)) {
+                log.debug("Skipping duplicate Instagram comment: id={}", commentId)
+                continue
+            }
+            val receivedAt = entry.time?.let { Instant.fromEpochMilliseconds(it * 1000) } ?: com.rfm.edubot.shared.SystemClock.now()
+            try {
+                instagramSocial.ingestComment(tenant, instagramAccountId, comment, receivedAt)
+            } catch (e: Exception) {
+                log.error("Failed to store Instagram comment id={}", commentId, e)
+            }
+        }
         for (messaging in entry.events) {
             val message = messaging.message ?: continue
             if (message.isEcho && !message.isSelf) {

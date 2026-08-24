@@ -500,6 +500,7 @@ private fun List<ChannelBindingRequest>?.toBindings(existing: List<ChannelBindin
             wabaId = existingBinding?.wabaId,
             tokenObtainedAt = existingBinding?.tokenObtainedAt,
             source = existingBinding?.source,
+            grantedScopes = existingBinding?.grantedScopes.orEmpty(),
         )
     }
 
@@ -521,6 +522,7 @@ private fun ChannelBinding.toDocument(): Document = Document("platform", platfor
     .appendIfNotNull("wabaId", wabaId)
     .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
     .appendIfNotNull("source", source)
+    .append("grantedScopes", grantedScopes)
     .append("allowedOrigins", allowedOrigins)
 
 private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =

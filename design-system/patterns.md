@@ -4,7 +4,7 @@ Page-level recipes. Markup classes are defined in [components.md](components.md)
 
 ## Dashboard shell
 
-Every admin / app / backoffice page uses this structure:
+Every `/app` and `/backoffice` page uses this structure:
 
 ```
 body
@@ -50,8 +50,9 @@ Used by clients, quotes, invoices, catalog, tenants:
 3. Footer: ghost Cancel + accent Save
 4. On save: disable button, swap label to saving, close only on success
 5. Focus first input after open
-6. Close via `[data-close]` and scrim
+6. Close via `[data-close]`, scrim, and Escape; trap Tab inside the panel; restore focus on close
 7. Wide (`.drawer__panel--wide`) for line-item editors
+8. Quote / invoice / client rows open the drawer for status, convert, or edit — not a new page
 
 ## Login
 
@@ -69,9 +70,36 @@ Success and recoverable errors: `toast(translatedString)`. Do not use `alert()`.
 
 Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-side unless the module already hits an API query param.
 
+## Home (work queue)
+
+`/app` overview is a work queue, not a KPI wall:
+
+1. `.view__hero` + today’s message/contact stats
+2. `.queue` of items that need a reply (waiting chats, overdue invoices, pending bookings, unreplied Instagram comments)
+3. `.setup-list` of unfinished setup (channels, website widget, persona)
+4. A second stat row for conversations / quotes / invoices
+
+Queue clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module.
+
 ## Conversation / assistant
 
 Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute.
+
+`/app` Conversations is this same split inbox (thread list + live reply), not a table that opens a drawer.
+
+## Instagram (comments inbox)
+
+Optional `instagram` module. Work queue first, not an Insights wall:
+
+1. `.view__hero` + unreplied / posts stats
+2. Chip filter: needs a reply vs posts (`.panel__tools` chips)
+3. Comment/post tables with `.ig-thumb` in the first column; row click opens the **drawer**
+4. Drawer lists `.ig-comment` items and a reply form; do not auto-send
+5. Empty / not-connected / reconnect copy goes through i18n. Reconnect is Settings → Channels.
+
+## Settings (tenant)
+
+Chip tabs (`.settings-tabs`): Channels · Website · Language · Documents. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
 
 ## Document template studio
 
@@ -89,12 +117,12 @@ Settings → Quote & invoice template is a three-pane studio (layers · A4 stage
 
 At `max-width: 920px`:
 
-- Sidebar becomes a horizontal chip scroller; foot and brand sub hide
-- Topbar search hides
+- Sidebar becomes a slide-over; `#btn-nav` + `#nav-scrim` toggle it
+- Topbar search stays visible on a second row (`grid-column: 1 / -1`); hide only `kbd`
 - View padding shrinks; hero stacks
 - Drawer goes full width, square corners
 
-Do not hide primary CTAs at this breakpoint. Do not introduce a hamburger unless the existing horizontal nav is proven insufficient.
+Do not hide primary CTAs or the search field at this breakpoint.
 
 ## Widget (not the dashboard)
 

@@ -1,6 +1,6 @@
 name: Deploy WhatsApp Bot
 
-# Server + bundled web UIs (/admin, /app, /backoffice, widget, legal).
+# Server + bundled web UIs (/app, /backoffice, shared /admin assets, widget, legal).
 # Mobile is intentionally excluded (see mobile-ci.yml). The marketing site
 # (websites-thebots on the VPS) is a separate deployment and is not touched.
 

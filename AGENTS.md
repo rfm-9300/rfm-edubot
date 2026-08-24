@@ -36,7 +36,7 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-Merges to `main` deploy the Ktor app (including `/admin`, `/app`, and `/backoffice`) via GitHub Actions. See [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project and is not part of this pipeline.
+Merges to `main` deploy the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. See [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project and is not part of this pipeline.
 
 When Rodrigo says any of the following, treat it as permission to ship this WhatsApp bot to production:
 

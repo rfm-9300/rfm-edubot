@@ -111,3 +111,10 @@ replies in those customer conversations.
   Connect Instagram**.
 * If reviewer credentials cannot complete Meta consent independently, say so explicitly and make
   the recording self-contained rather than claiming the reviewer can reproduce it.
+
+## Comments inbox (`instagram_business_manage_comments`)
+
+A later App Review request. The optional dashboard module **Instagram** lists comments on the
+connected account's posts and lets the operator reply. After that permission is granted, operators
+must **Reconnect Instagram** so the new scope is on the stored token and the `comments` webhook
+is subscribed. Until Advanced Access is approved, this only works for Instagram Testers, same as DMs.

@@ -1,6 +1,7 @@
-/* Theme switcher + mobile nav shell — shared by backoffice, admin CRM and tenant dashboard.
+/* Theme switcher + mobile nav shell — shared by backoffice and tenant dashboard.
    Loaded synchronously in <head> so the theme applies before first paint.
-   Preference persists per browser in localStorage ("light" | "dark"). */
+   Preference persists per browser in localStorage ("light" | "dark").
+   If the user has never chosen, follow prefers-color-scheme. */
 (function () {
   const KEY = 'uiTheme';
   const root = document.documentElement;
@@ -9,17 +10,38 @@
     return root.dataset.theme === 'dark' ? 'dark' : 'light';
   }
 
+  function themeLabel(theme) {
+    const key = theme === 'dark' ? 'common.themeToLight' : 'common.themeToDark';
+    if (window.I18N && typeof window.I18N.t === 'function') return window.I18N.t(key);
+    return theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme';
+  }
+
+  function themeIcon(theme) {
+    return theme === 'dark'
+      ? '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="3" fill="currentColor"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.2 3.2l1.4 1.4M11.4 11.4l1.4 1.4M12.8 3.2l-1.4 1.4M4.6 11.4L3.2 12.8" stroke="currentColor" stroke-width="1.4" fill="none" stroke-linecap="round"/></svg>'
+      : '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M12.6 10.4A5.4 5.4 0 0 1 6.2 3.4 5.8 5.8 0 1 0 12.6 10.4z" fill="currentColor"/></svg>';
+  }
+
   function apply(theme) {
     root.dataset.theme = theme;
     const btn = document.getElementById('btn-theme');
     if (btn) {
-      btn.textContent = theme === 'dark' ? '☀️' : '🌙';
-      btn.title = theme === 'dark' ? 'Tema claro' : 'Tema escuro';
-      btn.setAttribute('aria-label', btn.title);
+      btn.innerHTML = themeIcon(theme);
+      const label = themeLabel(theme);
+      btn.title = label;
+      btn.setAttribute('aria-label', label);
     }
   }
 
-  apply(localStorage.getItem(KEY) === 'dark' ? 'dark' : 'light');
+  function initialTheme() {
+    try {
+      const stored = localStorage.getItem(KEY);
+      if (stored === 'dark' || stored === 'light') return stored;
+    } catch (_) {}
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+
+  apply(initialTheme());
 
   function menuLabel(open) {
     const key = open ? 'common.menuCloseAria' : 'common.menuOpenAria';
@@ -93,9 +115,11 @@
     apply(current());
     document.getElementById('btn-theme')?.addEventListener('click', () => {
       const next = current() === 'dark' ? 'light' : 'dark';
-      localStorage.setItem(KEY, next);
+      try { localStorage.setItem(KEY, next); } catch (_) {}
       apply(next);
     });
     initMobileNav();
   });
+
+  window.refreshThemeLabels = function () { apply(current()); };
 })();

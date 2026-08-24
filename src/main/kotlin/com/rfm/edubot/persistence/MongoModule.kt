@@ -132,6 +132,17 @@ class MongoModule(config: AppConfig.MongoConfig) {
             bookingAppointments.createIndex(Document("tenantId", 1).append("startAt", 1))
             bookingAppointments.createIndex(Document("tenantId", 1).append("status", 1).append("startAt", 1))
             bookingAppointments.createIndex(Document("tenantId", 1).append("clientId", 1))
+
+            val instagramMedia = db.getCollection<Document>("instagram.media")
+            instagramMedia.createIndex(Document("tenantId", 1).append("mediaId", 1), IndexOptions().unique(true))
+            instagramMedia.createIndex(Document("tenantId", 1).append("publishedAt", -1))
+
+            val instagramComments = db.getCollection<Document>("instagram.comments")
+            instagramComments.createIndex(Document("tenantId", 1).append("commentId", 1), IndexOptions().unique(true))
+            instagramComments.createIndex(Document("tenantId", 1).append("mediaId", 1).append("createdAt", 1))
+            instagramComments.createIndex(
+                Document("tenantId", 1).append("fromAccount", 1).append("hidden", 1).append("parentCommentId", 1).append("repliedAt", 1).append("createdAt", -1),
+            )
         }
         log.info("MongoDB indexes initialized")
     }

@@ -95,21 +95,30 @@ class InstagramOAuthClient(
         return runCatching { json.decodeFromString(LongLivedResponse.serializer(), text).access_token }.getOrNull()
     }
 
-    /** Subscribe the account to the app's `messages` webhook. Returns false on failure (non-fatal). */
+    /** Subscribe the account to webhook fields. Comments is best-effort so DM onboarding still works. */
     private suspend fun subscribeMessages(longToken: String): Boolean {
+        if (subscribeFields(longToken, "messages,comments")) {
+            log.info("Instagram account subscribed to messages and comments webhooks")
+            return true
+        }
+        val messagesOnly = subscribeFields(longToken, "messages")
+        if (messagesOnly) log.info("Instagram account subscribed to messages webhook")
+        return messagesOnly
+    }
+
+    private suspend fun subscribeFields(longToken: String, fields: String): Boolean {
         val response = httpClient.submitForm(
             url = "https://graph.instagram.com/${config.graphVersion}/me/subscribed_apps",
             formParameters = Parameters.build {
-                append("subscribed_fields", "messages")
+                append("subscribed_fields", fields)
                 append("access_token", longToken)
             },
         )
         val text = response.bodyAsText()
         if (!response.status.isSuccess()) {
-            log.error("Instagram subscribe_apps failed: status={} body={}", response.status.value, text)
+            log.error("Instagram subscribe_apps failed: fields={} status={} body={}", fields, response.status.value, text)
             return false
         }
-        log.info("Instagram account subscribed to messages webhook")
         return true
     }
 

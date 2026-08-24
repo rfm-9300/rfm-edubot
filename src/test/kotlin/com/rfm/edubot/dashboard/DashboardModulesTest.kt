@@ -51,6 +51,15 @@ class DashboardModulesTest {
         )
     }
 
+    @Test
+    fun `instagram is an optional tenant module`() {
+        assertEquals(true, DashboardModules.INSTAGRAM in DashboardModules.optional)
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.INSTAGRAM,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.INSTAGRAM))),
+        )
+    }
+
     private fun tenant(enabledModules: List<String>?) = Tenant(
         slug = "test",
         name = "Test",

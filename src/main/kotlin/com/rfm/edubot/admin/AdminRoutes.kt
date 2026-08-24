@@ -15,11 +15,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 
 fun Route.adminRoutes() {
-    get("/admin") { call.respondRedirect("/admin/") }
-    get("/admin/") {
-        val html = this::class.java.classLoader.getResource("admin/index.html")?.readText()
-        call.respondText(html ?: "Admin UI missing", ContentType.Text.Html)
-    }
+    // The old tenant CRM at /admin is retired. Clients use /app; you configure
+    // tenants in /backoffice. Shared CSS/JS/catalogs stay under /admin/{asset}.
+    get("/admin") { call.respondRedirect("/backoffice/") }
+    get("/admin/") { call.respondRedirect("/backoffice/") }
     get("/admin/{asset}") {
         val asset = call.parameters["asset"] ?: return@get call.respond(HttpStatusCode.NotFound)
         val contentType = when (asset.substringAfterLast('.', "")) {
@@ -110,6 +109,14 @@ internal data class ClientDto(
 )
 
 @Serializable
+internal data class LineItemDto(
+    val description: String,
+    val quantity: Double,
+    val unit: String,
+    val unitPriceEur: Double,
+)
+
+@Serializable
 internal data class QuoteDto(
     val id: String,
     val number: String,
@@ -120,6 +127,8 @@ internal data class QuoteDto(
     val validUntil: String?,
     val hasPdf: Boolean,
     val createdAt: String,
+    val notes: String? = null,
+    val items: List<LineItemDto> = emptyList(),
 )
 
 @Serializable
@@ -154,6 +163,8 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     validUntil = validUntil?.toString(),
     hasPdf = pdfPath != null,
     createdAt = createdAt.toString(),
+    notes = notes,
+    items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
 )
 
 internal fun Invoice.dto(client: Client?) = InvoiceDto(

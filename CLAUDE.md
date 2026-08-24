@@ -36,7 +36,7 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-Merges to `main` deploy the Ktor app (including `/admin`, `/app`, and `/backoffice`) via GitHub Actions. See `DEPLOYMENT_RUNBOOK.md`. Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project.
+Merges to `main` deploy the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. See `DEPLOYMENT_RUNBOOK.md`. Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project.
 
 When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Prefer confirming or re-running the **Deploy WhatsApp Bot** workflow. Use `./deploy.sh` + `ssh hillsong-vps` only as a fallback if CI cannot publish or SSH.
 

@@ -42,13 +42,18 @@ Mark is 40×40, gradient, display font. Surfaces: CRM SVG house, app `"AI"`, bac
 
 ```html
 <nav class="nav">
-  <a class="nav__item is-active" data-tab="overview" href="#overview">
-    <span class="nav__dot"></span>
-    <span class="nav__label">Overview</span>
-    <span class="nav__count">3</span>
-  </a>
+  <div class="nav__group">
+    <div class="nav__group-label">Inbox</div>
+    <a class="nav__item is-active" data-tab="conversations" href="#conversations">
+      <span class="nav__dot"></span>
+      <span class="nav__label">Conversations</span>
+      <span class="nav__count is-alert">2</span>
+    </a>
+  </div>
 </nav>
 ```
+
+Wrap related items in `.nav__group`. The first group (Home) may omit `.nav__group-label`. `.nav__count.is-alert` is for waiting chats, overdue invoices, or pending bookings.
 
 Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `style.css` for `--tab` color and `.nav__dot::after` emoji. Copy an existing tab block. Dark theme remaps overview/tenants to yellow.
 
@@ -223,7 +228,7 @@ Wide editor: `.drawer__panel--wide`. Footer:
 </div>
 ```
 
-Show/hide with the `hidden` attribute, not a CSS class.
+Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
 ## Confirm
 
@@ -288,6 +293,46 @@ Render login **inside** `#view` so the sidebar/topbar chrome can remain or clear
 | `.assistant__action` | Confirm-before-execute card |
 
 User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that.
+
+Inbox list items also use `.assistant__thread`, plus `.inbox__preview` (last message) and `.inbox__meta` (channel · time). Waiting threads prefix the preview with the waiting label.
+
+## Work queue
+
+Home uses `.queue` / `.setup-list` of `.queue__item` buttons (title + detail). Click navigates to the matching module. Do not replace this with a table.
+
+## Media thumb
+
+Used by the Instagram inbox for post previews:
+
+```html
+<img class="ig-thumb" src="…" alt="" />
+<div class="ig-thumb ig-thumb--empty" aria-hidden="true">◇</div>
+```
+
+48×48, `object-fit: cover`, `--r-md`. Empty placeholder uses `--surface-2` + `--ink-faint`. Comment threads in the drawer use `.ig-post` + `.ig-comments` / `.ig-comment` (`.is-target` for the comment that opened the drawer).
+
+## Settings tabs + widget customizer
+
+```html
+<div class="settings-tabs">
+  <button type="button" class="chip is-on">Channels</button>
+  <button type="button" class="chip">Website</button>
+</div>
+<div class="panel widget-customizer">
+  <div class="widget-customizer__studio">
+    <form class="form widget-customizer__controls">…</form>
+    <div class="widget-preview">
+      <div class="widget-preview__stage">
+        <div class="widget-demo widget-demo--light widget-demo--right">…</div>
+      </div>
+    </div>
+  </div>
+</div>
+```
+
+`.settings-tabs` is a chip row, not a second nav. `.widget-customizer` pairs localized form controls with a responsive `.widget-demo` preview; update its `--widget-demo-accent` and `--widget-demo-accent-ink` properties from the color input. The generated embed snippet is the saved deliverable, while allowed origins remain a separate server-side security setting.
+
+The isolated embed under `resources/widget/` accepts `data-title`, `data-subtitle`, `data-welcome`, `data-placeholder`, `data-launcher`, `data-accent`, `data-position`, and `data-theme`. Dashboard classes must not be copied into the embed.
 
 ## Bookings calendar
 

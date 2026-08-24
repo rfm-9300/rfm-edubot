@@ -18,21 +18,22 @@ Source of truth for every **dashboard web UI** in this repo. Agents and LLMs mus
 
 | Surface | URL | Files | Stylesheet |
 |---|---|---|---|
-| CRM Admin | `/admin` | `src/main/resources/admin/` | **shared** `/admin/style.css` |
 | Tenant Dashboard | `/app` | `src/main/resources/app/` | **shared** `/admin/style.css` |
 | Backoffice | `/backoffice` | `src/main/resources/backoffice/` | **shared** `/admin/style.css` |
+| Shared assets | `/admin/{asset}` | `src/main/resources/admin/style.css`, catalogs, `theme.js` | — |
+| Retired CRM | `/admin` | redirects to `/backoffice/` | — |
 | Website widget | embed | `src/main/resources/widget/` | **separate** `widget.css` (`tbl-` prefix) |
 | Legal pages | `/legal/…` | `src/main/resources/legal/` | **standalone** inline CSS |
 | Mobile | n/a | `mobile/` | **out of scope** (KMP) |
 
-Admin, app, and backoffice are one design system. Widget and legal are not.
+`/app` and `/backoffice` are the two product surfaces. They share one design system. `/admin` now only hosts those shared assets (and redirects the old CRM page to backoffice). Widget and legal are not in this system.
 
 The same tokens and class vocabulary are used by **Extractor** (`/Users/rodrigomartins/projects/Extractor/design-system/`) in a compact topbar shell.
 
-## How the three dashboards stay in sync
+## How the two dashboards stay in sync
 
 1. One stylesheet: `src/main/resources/admin/style.css`, served at `/admin/style.css`.
-2. One theme switcher: `src/main/resources/admin/theme.js` (`html[data-theme]`, `localStorage.uiTheme`).
+2. One theme switcher: `src/main/resources/admin/theme.js` (`html[data-theme]`, `localStorage.uiTheme`). If the user has never chosen, follow `prefers-color-scheme`. Labels come from `common.themeToLight` / `common.themeToDark`.
 3. One i18n runtime: `admin/i18n.js` + `admin/catalog.{en,pt,es}.js`.
 4. Shared class vocabulary: `.sidebar`, `.nav`, `.topbar`, `.btn`, `.panel`, `.tbl`, `.pill`, `.drawer`, `.form`, `.inp`, `.toast`, `.auth`, …
 

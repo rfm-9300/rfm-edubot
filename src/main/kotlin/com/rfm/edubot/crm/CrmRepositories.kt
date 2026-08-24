@@ -46,6 +46,21 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
         return collection.find(filter).limit(20).toList().map { it.toClient() }
     }
 
+    suspend fun update(id: ObjectId, name: String, phone: String, address: String?): Client? {
+        val now = SystemClock.now()
+        val doc = collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(
+                Updates.set("name", name.trim()),
+                Updates.set("phone", phone.trim()),
+                Updates.set("address", address?.trim()?.takeIf { it.isNotBlank() }),
+                Updates.set("updatedAt", now.toDate()),
+            ),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )
+        return doc?.toClient()
+    }
+
     suspend fun create(name: String, phone: String, address: String? = null): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"

@@ -77,5 +77,65 @@ class InstagramClientTest {
         assertEquals("Ada Lovelace", name)
     }
 
+    @Test
+    fun `list media uses the Instagram user token`() = runBlocking {
+        var requestedPath = ""
+        val http = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    requestedPath = request.url.encodedPath
+                    respond(
+                        """{"data":[{"id":"media-1","caption":"Hello","media_type":"IMAGE","media_url":"https://cdn.example/1.jpg","permalink":"https://instagram.com/p/1","timestamp":"2026-01-01T12:00:00+0000","comments_count":2}]}""",
+                        headers = jsonHeaders,
+                    )
+                }
+            }
+        }
+
+        val result = InstagramClient("account-token", "ig-account-1", httpClient = http).listMedia()
+
+        assertEquals("/v21.0/me/media", requestedPath)
+        val media = (result as InstagramGraphResult.Ok).value.single()
+        assertEquals("media-1", media.id)
+        assertEquals("Hello", media.caption)
+        assertEquals(2, media.commentsCount)
+    }
+
+    @Test
+    fun `reply to comment posts to the comments replies edge`() = runBlocking {
+        var requestedPath = ""
+        val http = HttpClient(MockEngine) {
+            engine {
+                addHandler { request ->
+                    requestedPath = request.url.encodedPath
+                    respond("""{"id":"reply-1"}""", headers = jsonHeaders)
+                }
+            }
+        }
+
+        val result = InstagramClient("account-token", "ig-account-1", httpClient = http).replyToComment("comment-1", "Thanks")
+
+        assertEquals("/v21.0/comment-1/replies", requestedPath)
+        assertEquals("reply-1", (result as InstagramGraphResult.Ok).value)
+    }
+
+    @Test
+    fun `list media reports a missing comments permission as reconnect`() = runBlocking {
+        val http = HttpClient(MockEngine) {
+            engine {
+                addHandler {
+                    respond(
+                        """{"error":{"message":"Missing permission","code":10}}""",
+                        status = HttpStatusCode.Forbidden,
+                        headers = jsonHeaders,
+                    )
+                }
+            }
+        }
+
+        val result = InstagramClient("account-token", "ig-account-1", httpClient = http).listMedia()
+        assertEquals(InstagramGraphResult.PermissionDenied, result)
+    }
+
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
 }

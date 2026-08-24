@@ -183,6 +183,7 @@ private fun Document.getChannels(): List<ChannelBinding> {
             wabaId = doc.getString("wabaId"),
             tokenObtainedAt = doc.getDate("tokenObtainedAt")?.let { Instant.fromEpochMilliseconds(it.time) },
             source = doc.getString("source"),
+            grantedScopes = doc.getList("grantedScopes", String::class.java).orEmpty(),
             allowedOrigins = doc.getList("allowedOrigins", String::class.java).orEmpty(),
         )
     }
@@ -198,6 +199,7 @@ private fun ChannelBinding.toDocument(): Document = Document("platform", platfor
     .appendIfNotNull("wabaId", wabaId)
     .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.toDate())
     .appendIfNotNull("source", source)
+    .append("grantedScopes", grantedScopes)
     .append("allowedOrigins", allowedOrigins)
 
 private fun Document.getInstant(field: String): Instant = Instant.fromEpochMilliseconds(getDate(field).time)

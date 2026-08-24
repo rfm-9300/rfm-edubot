@@ -2,6 +2,11 @@ package com.rfm.edubot.webhook.dto
 
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.decodeFromJsonElement
+
+internal val instagramPayloadJson = Json { ignoreUnknownKeys = true }
 
 @Serializable
 data class InstagramPayload(
@@ -20,13 +25,24 @@ data class InstagramEntry(
 ) {
     /** Normalizes both webhook shapes into a single list of message events. */
     val events: List<InstagramMessaging>
-        get() = messaging.orEmpty() + changes.orEmpty().filter { it.field == "messages" }.mapNotNull { it.value }
+        get() = messaging.orEmpty() + changes.orEmpty()
+            .filter { it.field == "messages" }
+            .mapNotNull { change ->
+                change.value?.let { runCatching { instagramPayloadJson.decodeFromJsonElement<InstagramMessaging>(it) }.getOrNull() }
+            }
+
+    val commentEvents: List<InstagramCommentValue>
+        get() = changes.orEmpty()
+            .filter { it.field == "comments" || it.field == "live_comments" }
+            .mapNotNull { change ->
+                change.value?.let { runCatching { instagramPayloadJson.decodeFromJsonElement<InstagramCommentValue>(it) }.getOrNull() }
+            }
 }
 
 @Serializable
 data class InstagramChange(
     val field: String? = null,
-    val value: InstagramMessaging? = null,
+    val value: JsonObject? = null,
 )
 
 @Serializable
@@ -54,3 +70,23 @@ data class InstagramMessage(
 
 @Serializable
 data class InstagramRead(val mid: String? = null)
+
+@Serializable
+data class InstagramCommentValue(
+    val id: String,
+    val text: String? = null,
+    val from: InstagramCommentFrom? = null,
+    val media: InstagramCommentMedia? = null,
+)
+
+@Serializable
+data class InstagramCommentFrom(
+    val id: String? = null,
+    val username: String? = null,
+)
+
+@Serializable
+data class InstagramCommentMedia(
+    val id: String? = null,
+    @SerialName("media_product_type") val mediaProductType: String? = null,
+)

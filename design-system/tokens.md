@@ -122,6 +122,8 @@ Body: `14px / 1.5`, antialiased. Do not add a fourth family.
 | `--doc-page-surface` / `--doc-page-wave` / `--doc-page-rule` | table fill, waves, snap grid | same |
 | `--doc-page-shadow` | soft ink | heavier black |
 | `--doc-brand` / `--doc-brand-ink` | template accent + contrast text; set on `.tpl__page` from JS | same |
+| `--widget-preview-light-*` / `--widget-preview-dark-*` | Fixed light and dark surfaces for the widget customizer preview | same |
+| `--widget-preview-on-accent` | Fallback preview text color; JS computes the accessible dynamic value | same |
 
 Light: shadows. Dark: hairline borders + restrained shadows. Do not add heavy drop shadows on dark.
 

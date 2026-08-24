@@ -57,6 +57,7 @@ private fun ChannelBinding.toDocument(): Document = Document("platform", platfor
     .appendIfNotNull("wabaId", wabaId)
     .appendIfNotNull("tokenObtainedAt", tokenObtainedAt?.let { Date(it.toEpochMilliseconds()) })
     .appendIfNotNull("source", source)
+    .append("grantedScopes", grantedScopes)
     .append("allowedOrigins", allowedOrigins)
 
 private fun phoneNumberIdUpdate(bindings: List<ChannelBinding>) =

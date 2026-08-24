@@ -13,7 +13,7 @@ but the default path is CI/CD, not a laptop SSH session.
 | Surface | Runtime | Deployed by this pipeline? |
 |---------|---------|----------------------------|
 | Ktor API, WhatsApp/Instagram webhooks | Docker image `ghcr.io/rfm-9300/whatsapp-bot` | Yes |
-| CRM Admin `/admin` | Static files inside the same image | Yes (same container) |
+| Shared dashboard assets `/admin/{asset}` | Static files inside the same image (`style.css`, catalogs). `/admin` redirects to `/backoffice/` | Yes (same container) |
 | Tenant dashboard `/app` | Static files inside the same image | Yes (same container) |
 | Operator backoffice `/backoffice` | Static files inside the same image | Yes (same container) |
 | Website chat widget `/widget`, `/chat/ws` | Same image | Yes (same container) |
@@ -22,8 +22,9 @@ but the default path is CI/CD, not a laptop SSH session.
 | Marketing site `websites-thebots` | Separate VPS compose + Caddy | **No** — different project |
 | Mobile Android/iOS | `mobile/` KMP app | **No** — `mobile-ci.yml` tests only; no store deploy |
 
-`/admin`, `/app`, and `/backoffice` are not separate services. They are HTML/JS
-resources baked into the fat JAR. One image publish updates all three.
+`/app` and `/backoffice` are not separate services. They are HTML/JS
+resources baked into the fat JAR, and they share CSS/i18n served under `/admin/{asset}`.
+One image publish updates both surfaces.
 
 ## Production Target
 
@@ -162,8 +163,8 @@ Create the shared proxy network once:
 ssh hillsong-vps "docker network create web_proxy || true"
 ```
 
-Add path routes to `/root/websites-thebots/Caddyfile` so every bot web surface
-is reachable (not only `/admin`):
+Add path routes to `/root/websites-thebots/Caddyfile` so `/app`, `/backoffice`,
+and shared `/admin` assets/APIs are reachable:
 
 ```caddy
 thebotslab.eu {

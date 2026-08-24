@@ -24,6 +24,7 @@ const MODULES = [
   { id: 'catalog' },
   { id: 'ai-assistant' },
   { id: 'bookings' },
+  { id: 'instagram' },
 ];
 
 async function api(path, options = {}) {

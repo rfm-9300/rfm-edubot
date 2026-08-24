@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Tenant Dashboard</title>
+<title>Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -22,8 +22,8 @@
     </div>
     <nav class="nav" id="nav"></nav>
     <div class="sidebar__foot">
-      <div class="kpi"><div class="kpi__label" data-i18n="app.statMessages">Messages</div><div class="kpi__value" id="kpi-messages">—</div></div>
-      <div class="kpi"><div class="kpi__label" data-i18n="app.statContacts">Contacts</div><div class="kpi__value" id="kpi-users">—</div></div>
+      <div class="kpi"><div class="kpi__label" id="kpi-1-label" data-i18n="app.statMessages">Messages</div><div class="kpi__value" id="kpi-messages">—</div></div>
+      <div class="kpi"><div class="kpi__label" id="kpi-2-label" data-i18n="app.statContacts">Contacts</div><div class="kpi__value" id="kpi-users">—</div></div>
       <div class="meta"><span id="principal-type">—</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
     </div>
   </aside>
@@ -40,7 +40,18 @@
     </header>
     <section class="view" id="view"></section>
   </main>
-  <div class="drawer" id="drawer" hidden><div class="drawer__scrim" data-close></div><aside class="drawer__panel"><header class="drawer__head"><div><div class="drawer__eyebrow" data-i18n="app.dashboardWord">Dashboard</div><h2 class="drawer__title" id="drawer-title">—</h2></div><button class="iconbtn" data-close>×</button></header><div class="drawer__body" id="drawer-body"></div></aside></div>
+  <div class="drawer" id="drawer" hidden><div class="drawer__scrim" data-close></div><aside class="drawer__panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title"><header class="drawer__head"><div><div class="drawer__eyebrow" data-i18n="app.dashboardWord">Dashboard</div><h2 class="drawer__title" id="drawer-title">—</h2></div><button class="iconbtn" data-close data-i18n-aria-label="app.closeAria" aria-label="Close">×</button></header><div class="drawer__body" id="drawer-body"></div></aside></div>
+  <div class="confirm" id="confirm" hidden>
+    <div class="confirm__scrim" data-confirm-cancel></div>
+    <div class="confirm__panel" role="alertdialog" aria-modal="true" aria-labelledby="confirm-title">
+      <h3 class="confirm__title" id="confirm-title" data-i18n="app.confirm">Confirm</h3>
+      <p class="confirm__body" id="confirm-body">—</p>
+      <div class="confirm__actions">
+        <button class="btn btn--ghost" data-confirm-cancel data-i18n="app.cancel">Cancel</button>
+        <button class="btn btn--danger" id="confirm-ok" data-i18n="app.confirm">Confirm</button>
+      </div>
+    </div>
+  </div>
   <div class="toast" id="toast" hidden></div>
   <script src="/app/doc-template.js" defer></script>
   <script src="/app/app.js" defer></script>

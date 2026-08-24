@@ -5,6 +5,7 @@ import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.Platform
+import com.rfm.edubot.shared.SystemClock
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.encodeURLParameter
 import io.ktor.server.application.call
@@ -97,7 +98,15 @@ fun Route.instagramOAuthRoutes(
 
         val updated = bindingService.upsert(
             slug,
-            ChannelBinding(Platform.INSTAGRAM, result.igId, result.accessToken, displayName = result.username),
+            ChannelBinding(
+                Platform.INSTAGRAM,
+                result.igId,
+                result.accessToken,
+                displayName = result.username,
+                tokenObtainedAt = SystemClock.now(),
+                source = "oauth",
+                grantedScopes = InstagramOAuthScopes.login,
+            ),
         )
         if (updated == null) {
             return@get call.respondRedirect(resultUrl(origin, "error", reason = "tenant_not_found", tenant = slug))
@@ -109,7 +118,7 @@ fun Route.instagramOAuthRoutes(
 }
 
 private fun authorizeUrl(config: AppConfig.InstagramConfig, state: String): String {
-    val scope = "instagram_business_basic,instagram_business_manage_messages"
+    val scope = InstagramOAuthScopes.authorizeParam
     return "https://www.instagram.com/oauth/authorize" +
         "?client_id=${config.appId.encodeURLParameter()}" +
         "&redirect_uri=${config.redirectUri.encodeURLParameter()}" +

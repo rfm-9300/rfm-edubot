@@ -36,6 +36,10 @@ import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.QuoteStatus
+import com.rfm.edubot.instagram.InstagramSocialDeps
+import com.rfm.edubot.instagram.InstagramSocialService
+import com.rfm.edubot.instagram.installInstagramSocialRoutes
+import com.rfm.edubot.oauth.InstagramOAuthScopes
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
@@ -121,6 +125,7 @@ fun Route.dashboardRoutes(
     aiClient: AiClient,
     runtimeConfig: RuntimeConfig,
     channelBindingService: ChannelBindingService,
+    instagramSocial: InstagramSocialService,
 ) {
     post("/app/auth/login") {
         val request = call.receive<DashboardLoginRequest>()
@@ -163,7 +168,8 @@ fun Route.dashboardRoutes(
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
                 val conversations = ConversationRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"])
                 val displayNames = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(conversations.map { it.userId })
-                call.respond(conversations.map { it.dto(displayNames[it.userId]) })
+                val lastMessages = MessageRepository(mongo, ctx.tenant.id).lastByConversationIds(conversations.map { it.id })
+                call.respond(conversations.map { it.dto(displayNames[it.userId], lastMessages[it.id]) })
             }
             get("/conversations/{id}/messages") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
@@ -402,6 +408,14 @@ fun Route.dashboardRoutes(
                     }
                 bookingDeps(mongo, ctx.tenant, BookingSource.DASHBOARD)
             }
+            installInstagramSocialRoutes {
+                val ctx = dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INSTAGRAM) }
+                    ?: run {
+                        respond(HttpStatusCode.Forbidden)
+                        return@installInstagramSocialRoutes null
+                    }
+                InstagramSocialDeps(ctx.tenant, instagramSocial)
+            }
         }
     }
 }
@@ -483,6 +497,15 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
         }
+        patch("/clients/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<CreateClientRequest>()
+            if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
+            val client = deps.clients.update(id, request.name, request.phone, request.address) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(client.dto())
+        }
         get("/standard-items") {
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
@@ -524,6 +547,36 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate))
             deps.quotes.setPdfPath(quote.id, path.toString())
             call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
+        }
+        get("/quotes/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.respond(quote.dto(deps.clients.findById(quote.clientId)))
+        }
+        patch("/quotes/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val request = call.receive<QuoteStatusRequest>()
+            val status = runCatching { QuoteStatus.valueOf(request.status.uppercase()) }.getOrNull()
+                ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid status"))
+            val quote = deps.quotes.update(ObjectId(call.parameters["id"]), null, null, null, status)
+                ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(quote.dto(deps.clients.findById(quote.clientId)))
+        }
+        post("/quotes/{id}/invoice") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) && it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@post call.respond(HttpStatusCode.NotFound)
+            val request = call.receive<ConvertQuoteRequest>()
+            val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
+            val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+            val invoice = deps.invoices.create(quote.clientId, quote.id, quote.items, dueDate)
+            val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate))
+            deps.invoices.setPdfPath(invoice.id, path.toString())
+            deps.quotes.update(quote.id, null, null, null, QuoteStatus.ACEITO)
+            call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
         }
         get("/quotes/{id}/pdf") {
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -727,6 +780,15 @@ private suspend fun overview(mongo: MongoModule, tenantId: ObjectId): OverviewDt
         messagesToday = mongo.database.getCollection<Document>("messages").countDocuments(Filters.and(tenantFilter, Filters.gte("createdAt", todayStart))),
         quotes = mongo.database.getCollection<Document>("crm.quotes").countDocuments(tenantFilter),
         invoices = mongo.database.getCollection<Document>("crm.invoices").countDocuments(tenantFilter),
+        instagramUnreplied = mongo.database.getCollection<Document>("instagram.comments").countDocuments(
+            Filters.and(
+                tenantFilter,
+                Filters.eq("fromAccount", false),
+                Filters.eq("hidden", false),
+                Filters.eq("parentCommentId", null),
+                Filters.eq("repliedAt", null),
+            ),
+        ),
     )
 }
 
@@ -810,9 +872,22 @@ private suspend fun runPersonaTest(
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
 @Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
-@Serializable private data class ChannelMeDto(val platform: String, val externalId: String, val displayName: String? = null)
+@Serializable private data class ChannelMeDto(
+    val platform: String,
+    val externalId: String,
+    val displayName: String? = null,
+    val commentsEnabled: Boolean = false,
+)
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
-@Serializable private data class OverviewDto(val users: Long, val conversations: Long, val messages: Long, val messagesToday: Long, val quotes: Long, val invoices: Long)
+@Serializable private data class OverviewDto(
+    val users: Long,
+    val conversations: Long,
+    val messages: Long,
+    val messagesToday: Long,
+    val quotes: Long,
+    val invoices: Long,
+    val instagramUnreplied: Long = 0,
+)
 @Serializable private data class ContactStatusRequest(val status: String)
 @Serializable private data class PersonaUpdateRequest(val compiledInstructions: String)
 @Serializable private data class PersonaSourceRequest(val content: String)
@@ -822,7 +897,20 @@ private suspend fun runPersonaTest(
 @Serializable private data class PersonaSourceDto(val id: String, val kind: String, val label: String, val compiled: Boolean, val createdAt: String)
 @Serializable private data class PersonaDto(val compiledInstructions: String, val version: Int, val tokenEstimate: Int, val status: String, val updatedAt: String?, val sources: List<PersonaSourceDto>)
 @Serializable private data class ContactDto(val id: String, val waId: String, val channel: String, val displayName: String?, val status: String, val lastSeenAt: String)
-@Serializable private data class ConversationDto(val id: String, val waId: String, val channel: String, val displayName: String?, val state: String, val lastMessageAt: String, val messageCount: Int)
+@Serializable private data class QuoteStatusRequest(val status: String)
+@Serializable private data class ConvertQuoteRequest(val dueDate: String)
+@Serializable private data class ConversationDto(
+    val id: String,
+    val waId: String,
+    val channel: String,
+    val displayName: String?,
+    val state: String,
+    val lastMessageAt: String,
+    val messageCount: Int,
+    val lastPreview: String? = null,
+    val lastRole: String? = null,
+    val waiting: Boolean = false,
+)
 @Serializable private data class OutboundMessageRequest(val text: String, val assetExternalId: String)
 @Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val status: String, val createdAt: String)
 @Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
@@ -831,7 +919,21 @@ private suspend fun runPersonaTest(
 
 private fun ChannelBinding?.toWebWidgetDto() = WebWidgetDto(publicKey = this?.externalId, allowedOrigins = this?.allowedOrigins ?: emptyList())
 
-private fun Tenant.dto() = TenantMeDto(id.toHexString(), slug, name, locale, timezone, channels.map { ChannelMeDto(it.platform.name, it.externalId, it.displayName) })
+private fun Tenant.dto() = TenantMeDto(
+    id.toHexString(),
+    slug,
+    name,
+    locale,
+    timezone,
+    channels.map {
+        ChannelMeDto(
+            it.platform.name,
+            it.externalId,
+            it.displayName,
+            commentsEnabled = it.platform == Platform.INSTAGRAM && InstagramOAuthScopes.hasComments(it.grantedScopes),
+        )
+    },
+)
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),
@@ -842,5 +944,23 @@ private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: 
     sources = sources.map { PersonaSourceDto(it.id.toHexString(), it.kind.name, it.label, it.compiledIntoVersion != null, it.createdAt.toString()) },
 )
 private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, channel.name, displayName, status.name, lastSeenAt.toString())
-private fun com.rfm.edubot.conversation.model.Conversation.dto(displayName: String?) = ConversationDto(id.toHexString(), waId, channel.name, displayName, state.name, lastMessageAt.toString(), messageCount)
+private fun com.rfm.edubot.conversation.model.Conversation.dto(
+    displayName: String?,
+    last: com.rfm.edubot.conversation.model.Message? = null,
+) = ConversationDto(
+    id.toHexString(),
+    waId,
+    channel.name,
+    displayName,
+    state.name,
+    lastMessageAt.toString(),
+    messageCount,
+    lastPreview = last?.previewText(),
+    lastRole = last?.role?.name,
+    waiting = last?.role == UserRole.USER,
+)
+private fun com.rfm.edubot.conversation.model.Message.previewText(): String {
+    val text = (content as? MessageContent.Text)?.body.orEmpty().trim()
+    return if (text.length <= 120) text else text.take(117) + "…"
+}
 private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(id.toHexString(), role.name, (content as? MessageContent.Text)?.body ?: "", status.name, createdAt.toString())
