@@ -206,6 +206,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
             lastMessageAt = getInstant("lastMessageAt"),
             messageCount = getInteger("messageCount") ?: 0,
             systemPromptVersion = getString("systemPromptVersion") ?: "v1",
+            autoReplyEnabled = getBoolean("autoReplyEnabled") ?: true,
             createdAt = getInstant("createdAt"),
         )
     }
@@ -222,7 +223,13 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
             .append("lastMessageAt", lastMessageAt.toDate())
             .append("messageCount", messageCount)
             .append("systemPromptVersion", systemPromptVersion)
+            .append("autoReplyEnabled", autoReplyEnabled)
             .append("createdAt", createdAt.toDate())
+    }
+
+    suspend fun setAutoReplyEnabled(convoId: ObjectId, enabled: Boolean): Conversation? {
+        collection.updateOne(scoped(Filters.eq("_id", convoId)), Updates.set("autoReplyEnabled", enabled))
+        return findById(convoId)
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)

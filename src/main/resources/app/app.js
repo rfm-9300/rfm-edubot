@@ -393,7 +393,21 @@ async function openInboxThread(id, root) {
   const pane = $('#inbox-thread', root);
   if (!pane) return;
   const recipient = conversation?.displayName || conversation?.waId || '';
-  pane.innerHTML = `<div class="thread__asset"><span class="lbl">${escapeHTML(STR.sendingFrom)}</span><strong>${escapeHTML(asset ? assetLabel(asset) : conversation?.channel || '')}</strong><span class="mono muted">${escapeHTML(STR.sendingTo)} ${escapeHTML(recipient)}</span></div><div class="chat__log assistant__log" id="thread-log"></div>${asset ? `<form class="chat__form" id="thread-form"><input class="inp chat__input" id="thread-input" maxlength="1000" required placeholder="${escapeHTML(STR.messagePlaceholder)}" autocomplete="off" /><button class="btn btn--primary" type="submit">${escapeHTML(STR.send)}</button></form>` : `<p class="hint">${escapeHTML(STR.sendUnavailable)}</p>`}`;
+  const autoReplyOn = conversation?.autoReplyEnabled !== false;
+  const autoReplyRow = conversation ? `<div class="thread__auto-reply"><span class="pill ${autoReplyOn ? 'pill--ok' : 'pill--warn'}">${escapeHTML(autoReplyOn ? STR.autoReplyOn : STR.autoReplyPaused)}</span><button type="button" class="btn btn--sm btn--ghost" id="thread-auto-reply">${escapeHTML(autoReplyOn ? STR.autoReplyPauseAction : STR.autoReplyResumeAction)}</button></div>` : '';
+  pane.innerHTML = `<div class="thread__asset"><span class="lbl">${escapeHTML(STR.sendingFrom)}</span><strong>${escapeHTML(asset ? assetLabel(asset) : conversation?.channel || '')}</strong><span class="mono muted">${escapeHTML(STR.sendingTo)} ${escapeHTML(recipient)}</span>${autoReplyRow}</div><div class="chat__log assistant__log" id="thread-log"></div>${asset ? `<form class="chat__form" id="thread-form"><input class="inp chat__input" id="thread-input" maxlength="1000" required placeholder="${escapeHTML(STR.messagePlaceholder)}" autocomplete="off" /><button class="btn btn--primary" type="submit">${escapeHTML(STR.send)}</button></form>` : `<p class="hint">${escapeHTML(STR.sendUnavailable)}</p>`}`;
+  $('#thread-auto-reply', pane)?.addEventListener('click', async () => {
+    const button = $('#thread-auto-reply', pane);
+    const nextEnabled = !(conversation.autoReplyEnabled !== false);
+    button.disabled = true;
+    try {
+      const updated = await api(`/app/api/conversations/${id}/auto-reply`, { method: 'PATCH', body: JSON.stringify({ enabled: nextEnabled }) });
+      const idx = state.conversations.findIndex(c => c.id === id);
+      if (idx >= 0) state.conversations[idx] = updated;
+      toast(nextEnabled ? STR.autoReplyOn : STR.autoReplyPaused);
+      openInboxThread(id, root);
+    } catch { toast(STR.autoReplyToggleFailed); button.disabled = false; }
+  });
   try { state.threadMessages = await api(`/app/api/conversations/${id}/messages`); }
   catch { state.threadMessages = []; toast(STR.loadFailed); }
   const renderMessages = () => {

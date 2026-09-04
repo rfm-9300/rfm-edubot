@@ -177,6 +177,18 @@ fun Route.dashboardRoutes(
                 val convo = ConversationRepository(mongo, ctx.tenant.id).findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                 call.respond(MessageRepository(mongo, ctx.tenant.id).threadByConversation(convo.id).map { it.dto() })
             }
+            patch("/conversations/{id}/auto-reply") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@patch
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@patch call.respond(HttpStatusCode.Forbidden)
+                val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
+                    ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
+                val request = call.receive<AutoReplyRequest>()
+                val conversation = ConversationRepository(mongo, ctx.tenant.id).setAutoReplyEnabled(conversationId, request.enabled)
+                    ?: return@patch call.respond(HttpStatusCode.NotFound)
+                val displayName = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(listOf(conversation.userId))[conversation.userId]
+                val last = MessageRepository(mongo, ctx.tenant.id).lastByConversationIds(listOf(conversation.id))[conversation.id]
+                call.respond(conversation.dto(displayName, last))
+            }
             post("/conversations/{id}/messages") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
@@ -910,7 +922,9 @@ private suspend fun runPersonaTest(
     val lastPreview: String? = null,
     val lastRole: String? = null,
     val waiting: Boolean = false,
+    val autoReplyEnabled: Boolean = true,
 )
+@Serializable private data class AutoReplyRequest(val enabled: Boolean)
 @Serializable private data class OutboundMessageRequest(val text: String, val assetExternalId: String)
 @Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val status: String, val createdAt: String)
 @Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
@@ -958,6 +972,7 @@ private fun com.rfm.edubot.conversation.model.Conversation.dto(
     lastPreview = last?.previewText(),
     lastRole = last?.role?.name,
     waiting = last?.role == UserRole.USER,
+    autoReplyEnabled = autoReplyEnabled,
 )
 private fun com.rfm.edubot.conversation.model.Message.previewText(): String {
     val text = (content as? MessageContent.Text)?.body.orEmpty().trim()

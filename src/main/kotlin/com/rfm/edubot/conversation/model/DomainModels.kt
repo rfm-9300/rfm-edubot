@@ -46,6 +46,7 @@ data class Conversation(
     val lastMessageAt: Instant,
     val messageCount: Int = 0,
     val systemPromptVersion: String = "v1",
+    val autoReplyEnabled: Boolean = true,
     val createdAt: Instant,
 )
 

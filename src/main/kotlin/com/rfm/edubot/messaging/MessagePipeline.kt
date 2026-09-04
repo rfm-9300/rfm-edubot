@@ -95,6 +95,27 @@ class MessagePipeline(
                 return
             }
 
+            val existingConversation = conversations.findByWaId(inbound.waId, inbound.platform)
+            if (existingConversation != null && !existingConversation.autoReplyEnabled) {
+                messages.insert(
+                    Message(
+                        tenantId = inbound.tenantId,
+                        conversationId = existingConversation.id,
+                        channel = inbound.platform,
+                        waId = user.waId,
+                        role = UserRole.USER,
+                        waMessageId = inbound.waMessageId,
+                        content = MessageContent.Text(inbound.messageText),
+                        status = MessageStatus.RECEIVED,
+                        createdAt = SystemClock.now(),
+                    )
+                )
+                conversations.bumpActivity(existingConversation.id)
+                deduplicationService.markProcessed(inbound.eventId)
+                log.info("Automatic reply paused for conversation; stored inbound message only: platform={}, waId={}", inbound.platform, inbound.waId)
+                return
+            }
+
             val rateResult = rateLimiter.tryAcquire("${inbound.platform.name}:${user.waId}")
             if (rateResult is RateDecision.Reject) {
                 log.warn("Rate limited user: waId={}", inbound.waId)
