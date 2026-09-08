@@ -330,6 +330,20 @@ fun Route.dashboardRoutes(
                 ) ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(updated.binding(Platform.WEB).toWebWidgetDto())
             }
+            // Self-serve disconnect: only removes the binding for the tenant's own slug (never an
+            // arbitrary one from the URL), mirroring the admin-only delete in TenantAdminRoutes but
+            // scoped to the authenticated tenant. Instagram's Meta-side deauthorize webhook
+            // (InstagramMetaCallbacks) converges on the same ChannelBindingService.remove call.
+            delete("/channels/{platform}/{externalId}") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
+                val platform = call.parameters["platform"]?.uppercase()?.let { runCatching { Platform.valueOf(it) }.getOrNull() }
+                    ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid platform"))
+                val externalId = call.parameters["externalId"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
+                val updated = channelBindingService.remove(ctx.tenant.slug, platform, externalId)
+                    ?: return@delete call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.dto())
+            }
             // Tenant-selectable UI language. Persisted on the tenant so it becomes the default for every
             // dashboard session; the browser keeps a per-session override (localStorage.uiLocale).
             post("/settings/locale") {

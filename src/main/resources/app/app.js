@@ -1258,7 +1258,7 @@ function renderSettings(root) {
           <tr><td class="name">WhatsApp</td><td class="mono">${escapeHTML(wa?.displayName || wa?.externalId || '—')}</td><td>${wa ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${state.whatsAppSignup?.enabled ? `<button class="btn btn--sm" id="wa-connect">${escapeHTML(wa ? STR.waReconnect : STR.waConnect)}</button>` : ''}</td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
-            <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button></td></tr>
+            <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button>${ig ? ` <button class="btn btn--sm btn--ghost" id="ig-disconnect">${escapeHTML(STR.igDisconnect)}</button>` : ''}</td></tr>
           <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
@@ -1372,6 +1372,7 @@ function renderSettings(root) {
   $$('[data-settings]', root).forEach(b => b.addEventListener('click', () => { state.settingsSection = b.dataset.settings; render(); }));
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
+  $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
     const locale = localeSel.value;
@@ -1476,6 +1477,22 @@ async function connectInstagram() {
     }
   };
   window.addEventListener('message', onMsg);
+}
+
+async function disconnectInstagram(ig) {
+  if (!ig) return;
+  const ok = await confirmDialog({
+    title: STR.igDisconnectConfirmTitle,
+    body: STR.igDisconnectConfirmBody({ account: ig.displayName ? '@' + ig.displayName : ig.externalId }),
+    okLabel: STR.igDisconnectAction,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/channels/INSTAGRAM/${encodeURIComponent(ig.externalId)}`, { method: 'DELETE' });
+    state.me = await api('/app/api/me');
+    toast(STR.igDisconnected);
+    render();
+  } catch { toast(STR.igDisconnectFailed); }
 }
 
 function loadFacebookSdk(appId, graphVersion) {
