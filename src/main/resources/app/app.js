@@ -626,23 +626,29 @@ function lineItemsField(catalog) {
   return { html, wire, collect };
 }
 
-async function openPdf(url) {
+async function openPdf(url, downloadName) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);
-  window.open(objectUrl, '_blank');
+  if (downloadName) {
+    const a = document.createElement('a');
+    a.href = objectUrl;
+    a.download = downloadName.endsWith('.pdf') ? downloadName : `${downloadName}.pdf`;
+    a.rel = 'noopener';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  } else {
+    window.open(objectUrl, '_blank');
+  }
   setTimeout(() => URL.revokeObjectURL(objectUrl), 60000);
 }
 
-function pdfButton(id, type, hasPdf, label) {
-  if (!hasPdf) {
-    return `<span class="pdf pdf--ghost" title="${escapeHTML(STR.pdfPending)}">
-      <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1"/></svg>
-      ${escapeHTML(STR.pdfPending)}</span>`;
-  }
-  return `<button class="pdf" type="button" data-pdf-url="/app/api/crm/${type}/${encodeURIComponent(id)}/pdf" title="${escapeHTML(STR.viewPdf)}">
+function pdfButton(id, type, hasPdf, label, downloadName) {
+  const downloadAttr = downloadName ? ` data-pdf-download="${escapeHTML(downloadName)}"` : '';
+  return `<button class="pdf" type="button" data-pdf-url="/app/api/crm/${type}/${encodeURIComponent(id)}/pdf"${downloadAttr} title="${escapeHTML(STR.viewPdf)}">
     <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="5.5" y="10" font-family="monospace" font-size="3.6" text-anchor="middle" fill="currentColor">PDF</text></svg>
     ${escapeHTML(label || STR.viewPdf)}</button>`;
 }
@@ -651,7 +657,7 @@ function wirePdfButtons(root) {
   $$('[data-pdf-url]', root).forEach(btn => {
     btn.addEventListener('click', async e => {
       e.stopPropagation();
-      try { await openPdf(btn.dataset.pdfUrl); }
+      try { await openPdf(btn.dataset.pdfUrl, btn.dataset.pdfDownload); }
       catch (err) { toast(STR.errorPdf({ msg: err.message })); }
     });
   });
@@ -976,6 +982,20 @@ function assistantActionDetails(action) {
   return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
 }
 
+function assistantDocumentDownload(action) {
+  if (action.status !== 'CONFIRMED') return '';
+  const result = action.result || {};
+  const id = result.id;
+  if (!id) return '';
+  const invoice = action.toolName === 'create_invoice' || result.type === 'invoice';
+  const quote = action.toolName === 'create_quote' || result.type === 'quote';
+  if (!invoice && !quote) return '';
+  const type = invoice ? 'invoices' : 'quotes';
+  const number = result.number || '';
+  const filename = `${invoice ? 'Fatura' : 'Orcamento'} ${number || id}.pdf`;
+  return `<div class="assistant__action-buttons">${pdfButton(id, type, true, STR.assistantDownloadPdf({ number }), filename)}</div>`;
+}
+
 async function openAssistantThread(id) {
   state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
   render();
@@ -996,7 +1016,7 @@ function renderAssistant(root) {
     if (!m.action) return bubble;
     const pending = m.action.status === 'PENDING';
     const details = assistantActionDetails(m.action);
-    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}</div>`;
+    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}</div>`;
   }).join('');
   root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
   $('#assistant-new').addEventListener('click', createAssistantThread);
@@ -1032,6 +1052,7 @@ function renderAssistant(root) {
   });
   $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
   $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
+  wirePdfButtons(root);
 }
 
 async function updateAssistantAction(threadId, actionId, decision) {

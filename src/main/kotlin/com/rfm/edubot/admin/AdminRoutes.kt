@@ -32,11 +32,37 @@ fun Route.adminRoutes() {
     }
 }
 
-internal suspend fun io.ktor.server.application.ApplicationCall.respondPdf(path: String?) {
-    if (path.isNullOrBlank()) return respond(HttpStatusCode.NotFound, mapOf("error" to "PDF not generated"))
+internal suspend fun io.ktor.server.application.ApplicationCall.respondGeneratedPdf(
+    storedPath: String?,
+    basePath: String,
+    folder: String,
+    filename: String,
+    generate: () -> ByteArray,
+    persist: suspend (String) -> Unit,
+) {
+    val bytes = persistGeneratedPdf(storedPath, basePath, folder, filename, generate, persist)
+    respondBytes(bytes, ContentType.Application.Pdf)
+}
+
+internal fun existingPdfBytes(path: String?): ByteArray? {
+    if (path.isNullOrBlank()) return null
     val pdf = Path.of(path)
-    if (!Files.exists(pdf)) return respond(HttpStatusCode.NotFound, mapOf("error" to "PDF file missing"))
-    respondBytes(Files.readAllBytes(pdf), ContentType.Application.Pdf)
+    return if (Files.exists(pdf)) Files.readAllBytes(pdf) else null
+}
+
+internal suspend fun persistGeneratedPdf(
+    storedPath: String?,
+    basePath: String,
+    folder: String,
+    filename: String,
+    generate: () -> ByteArray,
+    persist: suspend (String) -> Unit,
+): ByteArray {
+    existingPdfBytes(storedPath)?.let { return it }
+    val bytes = generate()
+    val path = savePdf(basePath, folder, filename, bytes)
+    persist(path.toString())
+    return bytes
 }
 
 internal fun savePdf(basePath: String, folder: String, filename: String, bytes: ByteArray): Path {

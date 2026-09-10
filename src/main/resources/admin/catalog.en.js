@@ -209,6 +209,7 @@ window.__I18N_CATALOGS['en'] = {
     assistantCreateInvoice: 'Create invoice', assistantMarkPaid: p => `Mark invoice ${p.id} as paid`, assistantChangeData: 'Change dashboard data',
     assistantClientRef: p => `Client: ${p.id}`, assistantQuoteRef: p => `Quote: ${p.id}`, assistantInvoiceRef: p => `Invoice: ${p.id}`,
     assistantValidUntil: p => `Valid until: ${p.date}`, assistantDueDate: p => `Due date: ${p.date}`, assistantNewStatus: p => `New status: ${p.status}`,
+    assistantDownloadPdf: p => p.number ? `Download ${p.number} PDF` : 'Download PDF',
     bookingsDesc: 'Appointments, services and weekly availability.',
     bookingsWeek: 'Week', bookingsList: 'List', bookingsServices: 'Services', bookingsAvailability: 'Availability',
     bookingsPrev: 'Previous week', bookingsNext: 'Next week', bookingsToday: 'This week',

@@ -275,7 +275,15 @@ fun Route.tenantAdminRoutes(
                 get("/quotes/{id}/pdf") {
                     val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.QUOTES) ?: return@get
                     val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-                    call.respondPdf(quote.pdfPath)
+                    val client = deps.clients.findById(quote.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
+                    call.respondGeneratedPdf(
+                        storedPath = quote.pdfPath,
+                        basePath = deps.pdfStoragePath,
+                        folder = "quotes",
+                        filename = "Orcamento ${quote.number}.pdf",
+                        generate = { deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate) },
+                        persist = { deps.quotes.setPdfPath(quote.id, it) },
+                    )
                 }
                 get("/invoices") {
                     val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@get
@@ -303,7 +311,15 @@ fun Route.tenantAdminRoutes(
                 get("/invoices/{id}/pdf") {
                     val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@get
                     val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-                    call.respondPdf(invoice.pdfPath)
+                    val client = deps.clients.findById(invoice.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
+                    call.respondGeneratedPdf(
+                        storedPath = invoice.pdfPath,
+                        basePath = deps.pdfStoragePath,
+                        folder = "invoices",
+                        filename = "Fatura ${invoice.number}.pdf",
+                        generate = { deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate) },
+                        persist = { deps.invoices.setPdfPath(invoice.id, it) },
+                    )
                 }
                 patch("/invoices/{id}/paid") {
                     val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@patch

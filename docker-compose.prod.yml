@@ -7,6 +7,9 @@ services:
     environment:
       MONGO_URI: mongodb://mongo:27017
       PORT: "8080"
+      PDF_STORAGE_PATH: /data/pdfs
+    volumes:
+      - pdf_data:/data/pdfs
     restart: always
     depends_on:
       - mongo
@@ -26,6 +29,7 @@ services:
 
 volumes:
   mongo_data:
+  pdf_data:
 
 networks:
   web_proxy:

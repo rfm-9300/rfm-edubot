@@ -208,6 +208,7 @@ window.__I18N_CATALOGS['es'] = {
     assistantCreateInvoice: 'Crear factura', assistantMarkPaid: p => `Marcar factura ${p.id} como pagada`, assistantChangeData: 'Cambiar datos del panel',
     assistantClientRef: p => `Cliente: ${p.id}`, assistantQuoteRef: p => `Presupuesto: ${p.id}`, assistantInvoiceRef: p => `Factura: ${p.id}`,
     assistantValidUntil: p => `Válido hasta: ${p.date}`, assistantDueDate: p => `Vencimiento: ${p.date}`, assistantNewStatus: p => `Nuevo estado: ${p.status}`,
+    assistantDownloadPdf: p => p.number ? `Descargar PDF ${p.number}` : 'Descargar PDF',
     bookingsDesc: 'Citas, servicios y disponibilidad semanal.',
     bookingsWeek: 'Semana', bookingsList: 'Lista', bookingsServices: 'Servicios', bookingsAvailability: 'Disponibilidad',
     bookingsPrev: 'Semana anterior', bookingsNext: 'Semana siguiente', bookingsToday: 'Esta semana',

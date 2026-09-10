@@ -13,7 +13,7 @@ import com.rfm.edubot.admin.CreateInvoiceRequest
 import com.rfm.edubot.admin.CreateQuoteRequest
 import com.rfm.edubot.admin.StandardItemRequest
 import com.rfm.edubot.admin.dto
-import com.rfm.edubot.admin.respondPdf
+import com.rfm.edubot.admin.respondGeneratedPdf
 import com.rfm.edubot.admin.savePdf
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
@@ -608,7 +608,15 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respondPdf(quote.pdfPath)
+            val client = deps.clients.findById(quote.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.respondGeneratedPdf(
+                storedPath = quote.pdfPath,
+                basePath = deps.pdfStoragePath,
+                folder = "quotes",
+                filename = "Orcamento ${quote.number}.pdf",
+                generate = { deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate) },
+                persist = { deps.quotes.setPdfPath(quote.id, it) },
+            )
         }
         get("/invoices") {
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -631,7 +639,15 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respondPdf(invoice.pdfPath)
+            val client = deps.clients.findById(invoice.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.respondGeneratedPdf(
+                storedPath = invoice.pdfPath,
+                basePath = deps.pdfStoragePath,
+                folder = "invoices",
+                filename = "Fatura ${invoice.number}.pdf",
+                generate = { deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate) },
+                persist = { deps.invoices.setPdfPath(invoice.id, it) },
+            )
         }
         patch("/invoices/{id}/paid") {
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)

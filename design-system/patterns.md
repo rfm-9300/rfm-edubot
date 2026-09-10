@@ -83,7 +83,7 @@ Queue clicks set `data-go` (and optional `data-conversation` / `data-settings`) 
 
 ## Conversation / assistant
 
-Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute.
+Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute. After a confirmed `create_invoice` / `create_quote`, reuse `.pdf` in `.assistant__action-buttons` so the user can download the generated document.
 
 `/app` Conversations is this same split inbox (thread list + live reply), not a table that opens a drawer.
 
