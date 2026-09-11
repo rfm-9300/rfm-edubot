@@ -251,7 +251,11 @@ function render() {
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
   $('#btn-new').hidden = !['clients', 'quotes', 'invoices', 'catalog', 'bookings'].includes(state.active);
-  $('#btn-new').textContent = state.active === 'bookings' ? STR.bookingsNew : `${STR.newPrefix} ${labels[state.active] || ''}`;
+  const newButtonLabels = {
+    clients: STR.clientFormTitle, quotes: STR.quoteFormTitle,
+    invoices: STR.invoiceFormTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
+  };
+  $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
   if (state.active === 'overview') return renderOverview(root);
   if (state.active === 'contacts') return renderContacts(root);
@@ -360,7 +364,10 @@ function renderContacts(root) {
   root.innerHTML = hero(labels.contacts, STR.contactsDesc) + panelTable(`<tr><th>${STR.thName}</th><th>${STR.colChannel}</th><th>${STR.colAccount}</th><th>${STR.thStatus}</th><th>${STR.thLastSeen}</th><th class="right">${STR.thActions}</th></tr>`, rows, STR.noData);
   $$('[data-contact-status]').forEach(b => b.addEventListener('click', async () => { await api(`/app/api/contacts/${b.dataset.contactStatus}/status`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.status }) }); await loadModule('contacts'); render(); }));
 }
-function assetLabel(asset) { return `${asset.platform} · ${asset.displayName || STR.unnamedAsset} · ${asset.externalId}`; }
+function assetLabel(asset) {
+  if (asset.platform === 'WEB') return `${asset.platform} · ${STR.webWidgetAsset}`;
+  return `${asset.platform} · ${asset.displayName || STR.unnamedAsset} · ${asset.externalId}`;
+}
 function rememberedAsset() {
   try { return localStorage.getItem('dashboardAsset') || ''; } catch { return ''; }
 }
@@ -369,7 +376,7 @@ function rememberAsset(id) {
   try { localStorage.setItem('dashboardAsset', id); } catch { /* ignore */ }
 }
 function renderConversations(root) {
-  const assets = (state.me?.tenant.channels || []).filter(a => a.platform !== 'WEB');
+  const assets = state.me?.tenant.channels || [];
   if (!state.selectedAsset) state.selectedAsset = rememberedAsset();
   if (!assets.some(a => a.externalId === state.selectedAsset)) state.selectedAsset = assets[0]?.externalId || '';
   const selected = assets.find(a => a.externalId === state.selectedAsset);
@@ -394,8 +401,10 @@ async function openInboxThread(id, root) {
   if (!pane) return;
   const recipient = conversation?.displayName || conversation?.waId || '';
   const autoReplyOn = conversation?.autoReplyEnabled !== false;
-  const autoReplyRow = conversation ? `<div class="thread__auto-reply"><span class="pill ${autoReplyOn ? 'pill--ok' : 'pill--warn'}">${escapeHTML(autoReplyOn ? STR.autoReplyOn : STR.autoReplyPaused)}</span><button type="button" class="btn btn--sm btn--ghost" id="thread-auto-reply">${escapeHTML(autoReplyOn ? STR.autoReplyPauseAction : STR.autoReplyResumeAction)}</button></div>` : '';
-  pane.innerHTML = `<div class="thread__asset"><span class="lbl">${escapeHTML(STR.sendingFrom)}</span><strong>${escapeHTML(asset ? assetLabel(asset) : conversation?.channel || '')}</strong><span class="mono muted">${escapeHTML(STR.sendingTo)} ${escapeHTML(recipient)}</span>${autoReplyRow}</div><div class="chat__log assistant__log" id="thread-log"></div>${asset ? `<form class="chat__form" id="thread-form"><input class="inp chat__input" id="thread-input" maxlength="1000" required placeholder="${escapeHTML(STR.messagePlaceholder)}" autocomplete="off" /><button class="btn btn--primary" type="submit">${escapeHTML(STR.send)}</button></form>` : `<p class="hint">${escapeHTML(STR.sendUnavailable)}</p>`}`;
+  const isWeb = conversation?.channel === 'WEB';
+  const autoReplyRow = conversation && !isWeb ? `<div class="thread__auto-reply"><span class="pill ${autoReplyOn ? 'pill--ok' : 'pill--warn'}">${escapeHTML(autoReplyOn ? STR.autoReplyOn : STR.autoReplyPaused)}</span><button type="button" class="btn btn--sm btn--ghost" id="thread-auto-reply">${escapeHTML(autoReplyOn ? STR.autoReplyPauseAction : STR.autoReplyResumeAction)}</button></div>` : '';
+  const composer = isWeb ? `<p class="hint">${escapeHTML(STR.webConversationReadOnly)}</p>` : asset ? `<form class="chat__form" id="thread-form"><input class="inp chat__input" id="thread-input" maxlength="1000" required placeholder="${escapeHTML(STR.messagePlaceholder)}" autocomplete="off" /><button class="btn btn--primary" type="submit">${escapeHTML(STR.send)}</button></form>` : `<p class="hint">${escapeHTML(STR.sendUnavailable)}</p>`;
+  pane.innerHTML = `<div class="thread__asset"><span class="lbl">${escapeHTML(STR.sendingFrom)}</span><strong>${escapeHTML(asset ? assetLabel(asset) : conversation?.channel || '')}</strong><span class="mono muted">${escapeHTML(STR.sendingTo)} ${escapeHTML(recipient)}</span>${autoReplyRow}</div><div class="chat__log assistant__log" id="thread-log"></div>${composer}`;
   $('#thread-auto-reply', pane)?.addEventListener('click', async () => {
     const button = $('#thread-auto-reply', pane);
     const nextEnabled = !(conversation.autoReplyEnabled !== false);
@@ -1917,12 +1926,12 @@ function openBookingForm(booking = null, slotLocal = '') {
 function openBookingServicesForm() {
   const body = document.createElement('div');
   body.className = 'form';
-  const list = state.bookingServices.map(s => `<tr><td class="name">${escapeHTML(s.name)}</td><td class="mono">${s.durationMinutes}m</td><td>${s.active ? '✓' : '—'}</td><td class="right"><button type="button" class="btn btn--sm" data-edit-service="${s.id}">${escapeHTML(STR.bookingsEdit)}</button></td></tr>`).join('');
+  const list = state.bookingServices.map(s => `<tr><td class="name">${escapeHTML(s.name)}</td><td class="mono">${s.durationMinutes}m</td><td>${s.active ? '✓' : '—'}</td><td class="right"><button type="button" class="btn btn--sm" data-edit-service="${s.id}">${escapeHTML(s.active ? STR.bookingsDeactivate : STR.bookingsActivate)}</button></td></tr>`).join('');
   body.innerHTML = `${panelTable(`<tr><th>${STR.bookingsServiceName}</th><th>${STR.bookingsDuration}</th><th>${STR.bookingsActive}</th><th></th></tr>`, list)}
     <form id="service-create" class="form" style="margin-top:16px">
       <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsServiceName)}</label><input class="inp" name="name" required /></div>
       <div class="form__row"><label class="lbl">${escapeHTML(STR.bookingsDuration)}</label><input class="inp" type="number" min="5" name="durationMinutes" value="30" required /></div>
-      <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsSave)}</button>
+      <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsAddService)}</button>
     </form>`;
   body.querySelector('#service-create').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1955,7 +1964,7 @@ function openBookingAvailabilityForm() {
     </div>`).join('');
   body.innerHTML = `<p class="hint">${escapeHTML(STR.bookingsManageAvailability)}</p>${rows}
     <button type="button" class="btn btn--sm" id="add-avail">${escapeHTML(STR.bookingsAddWindow)}</button>
-    <button class="btn btn--primary" type="submit" style="margin-top:12px">${escapeHTML(STR.bookingsSave)}</button>`;
+    <button class="btn btn--primary" type="submit" style="margin-top:12px">${escapeHTML(STR.bookingsSaveHours)}</button>`;
   $('#add-avail', body).addEventListener('click', () => {
     const row = document.createElement('div');
     row.className = 'form__row booking-avail-row';

@@ -263,11 +263,20 @@ class MessagePipeline(
                                 }
                             } catch (e: Exception) {
                                 log.error("Tool failed: name={}, error={}", call.name, e.message, e)
+                                val notFoundMatch = Regex("(Client|Quote) not found for reference").find(e.message.orEmpty())
                                 buildJsonObject {
                                     put("error", "tool_failed")
                                     put("tool", call.name)
                                     put("message", e.message ?: "Unknown CRM tool failure")
-                                    put("instruction", "Do not claim this action succeeded. If enough data exists, retry with corrected tool arguments. Otherwise explain the concrete failure briefly.")
+                                    put(
+                                        "instruction",
+                                        if (notFoundMatch != null) {
+                                            val lookupTool = if (notFoundMatch.groupValues[1] == "Client") "search_clients" else "list_quotes"
+                                            "This id was not a real record — it was likely guessed instead of copied from a tool result. Do not claim this action succeeded. Call $lookupTool now to get the real id, then retry this call with that id. Never invent or reuse an id that did not come from a tool result earlier in this same conversation."
+                                        } else {
+                                            "Do not claim this action succeeded. If enough data exists, retry with corrected tool arguments. Otherwise explain the concrete failure briefly."
+                                        },
+                                    )
                                 }
                             }
                             log.info("CRM tool result: name={}, result={}", call.name, json.encodeToString(result))
@@ -454,6 +463,24 @@ class MessagePipeline(
             "servico",
             "serviço",
             "material",
+            "produto",
+            "produtos",
+            "catalogo",
+            "catálogo",
+            "preco",
+            "preço",
+            "precos",
+            "preços",
+            "custa",
+            "custo",
+            "valor",
+            "vende",
+            "venda",
+            "disponivel",
+            "disponível",
+            "estoque",
+            "comprar",
+            "compra",
             "pago",
             "pagamento",
             "pdf",
