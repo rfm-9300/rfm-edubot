@@ -341,15 +341,14 @@ class MessagePipeline(
     private suspend fun buildContext(conversation: Conversation, newUserMessage: String): List<ChatMessage> {
         val contextMessages = mutableListOf<ChatMessage>()
 
-        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
-        compiledPersona?.takeIf { it.isNotBlank() }?.let { persona ->
-            contextMessages.add(
-                ChatMessage(
-                    role = "system",
-                    content = "<persona>\n$persona\n</persona>\nA identidade, nome e tom definidos acima em <persona> tem prioridade sobre qualquer identidade generica mencionada nas instrucoes anteriores. Use-os ao responder quem voce e.",
-                )
+        val persona = compiledPersona?.takeIf { it.isNotBlank() }
+        contextMessages.add(
+            ChatMessage(
+                role = "system",
+                content = if (persona != null) "<persona>\n$persona\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
             )
-        }
+        )
+        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
 
         conversation.summary?.let { summary ->
             contextMessages.add(

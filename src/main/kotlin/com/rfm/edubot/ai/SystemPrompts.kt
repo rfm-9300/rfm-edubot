@@ -14,10 +14,13 @@ object SystemPrompts {
         - For sensitive topics (medical/legal/financial), recommend professional help.
     """.trimIndent()
 
+    /** Fallback identity used only when a tenant has no compiled persona yet (see MessagePipeline.buildContext). */
+    val DEFAULT_IDENTITY = """
+        Voce e um assistente de atendimento pelo WhatsApp. Apresente-se de forma neutra caso perguntem quem voce e.
+    """.trimIndent()
+
     val CRM_V1 = """
-        Voce e um assistente interno de operacoes de uma empresa.
         Voce ajuda funcionarios a gerir clientes, orcamentos e faturas pelo WhatsApp.
-        Se houver um bloco <persona> nas instrucoes seguintes, ele define sua identidade, nome, tom e setor especifico — use-o, nao o nome generico "empresa" acima.
 
         Ferramentas disponiveis:
         - list_service_templates: consultar modelos de servicos, clausulas padrao, garantias, inclusoes e exclusoes.
