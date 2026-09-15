@@ -4,6 +4,7 @@ import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.QuoteStatus
+import com.rfm.edubot.dashboard.DashboardModules
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -41,6 +42,30 @@ class CrmTools(
 
     /** Tools that only read data — safe for the persona test playground (never mutate the tenant's records). */
     val readOnlyDefinitions: List<ToolDefinition> = definitions.filter { it.name in READ_ONLY_TOOL_NAMES }
+
+    /** Which dashboard module owns each tool — drives per-tenant exposure via [definitionsFor]. */
+    private val MODULE_OF_TOOL: Map<String, String> = mapOf(
+        "search_clients" to DashboardModules.CLIENTS,
+        "create_client" to DashboardModules.CLIENTS,
+        "list_service_templates" to DashboardModules.CATALOG,
+        "list_standard_items" to DashboardModules.CATALOG,
+        "create_quote" to DashboardModules.QUOTES,
+        "update_quote" to DashboardModules.QUOTES,
+        "list_quotes" to DashboardModules.QUOTES,
+        "sum_quotes_by_client" to DashboardModules.QUOTES,
+        "create_invoice" to DashboardModules.INVOICES,
+        "list_invoices" to DashboardModules.INVOICES,
+        "mark_invoice_paid" to DashboardModules.INVOICES,
+        "sum_invoices_by_client" to DashboardModules.INVOICES,
+    )
+
+    /** Only the tool definitions whose owning module is enabled for the tenant. */
+    fun definitionsFor(modules: Set<String>): List<ToolDefinition> =
+        definitions.filter { MODULE_OF_TOOL[it.name] in modules }
+
+    /** Read-only tools whose owning module is enabled — for the persona test playground. */
+    fun readOnlyDefinitionsFor(modules: Set<String>): List<ToolDefinition> =
+        definitionsFor(modules).filter { it.name in READ_ONLY_TOOL_NAMES }
 
     suspend fun execute(call: ToolCall): JsonObject = when (call.name) {
         "search_clients" -> searchClients(call.arguments)

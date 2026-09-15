@@ -74,12 +74,13 @@ class TenantPipelineFactory(
     }
 
     private fun build(tenant: Tenant): MessagePipeline {
+        val modules = DashboardModules.effectiveFor(tenant).toSet()
         val clients = ClientRepository(mongo, tenant.id)
         val quotes = QuoteRepository(mongo, tenant.id)
         val invoices = InvoiceRepository(mongo, tenant.id)
         val items = StandardItemRepository(mongo, tenant.id).also { runBlocking { it.seedDefaults() } }
         val compiledPersona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions }
-        val bookingTools = if (DashboardModules.BOOKINGS in DashboardModules.effectiveFor(tenant)) {
+        val bookingTools = if (DashboardModules.BOOKINGS in modules) {
             val bookingServices = BookingServiceRepository(mongo, tenant.id)
             val availability = AvailabilityRepository(mongo, tenant.id)
             val bookings = BookingRepository(mongo, tenant.id)
@@ -111,6 +112,7 @@ class TenantPipelineFactory(
             documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
             openrouterModel = tenant.openrouterModel,
             compiledPersona = compiledPersona,
+            enabledModules = modules,
         )
     }
 }

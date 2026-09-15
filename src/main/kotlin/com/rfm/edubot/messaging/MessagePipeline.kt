@@ -13,6 +13,7 @@ import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
@@ -54,6 +55,7 @@ class MessagePipeline(
     private val documentTemplate: DocumentTemplate = DocumentTemplate(),
     private val openrouterModel: String? = null,
     private val compiledPersona: String? = null,
+    private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -199,7 +201,7 @@ class MessagePipeline(
             // Tools must be available when confirmed, plus whenever message has CRM keywords or mid-flow.
             var useTools = shouldUseCrmTools(inbound.messageText) || shouldUseBookingTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
             var feedbackSent = false
-            val toolDefinitions = crmTools.definitions + (bookingTools?.definitions ?: emptyList())
+            val toolDefinitions = crmTools.definitionsFor(enabledModules) + (bookingTools?.definitions ?: emptyList())
             if (bookingTools != null) {
                 contextMessages.add(
                     1,
@@ -348,7 +350,9 @@ class MessagePipeline(
                 content = if (persona != null) "<persona>\n$persona\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
             )
         )
-        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
+        SystemPrompts.crmPromptFor(enabledModules)?.let { crmPrompt ->
+            contextMessages.add(ChatMessage(role = "system", content = crmPrompt))
+        }
 
         conversation.summary?.let { summary ->
             contextMessages.add(

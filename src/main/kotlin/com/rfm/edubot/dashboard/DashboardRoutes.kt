@@ -847,10 +847,17 @@ private suspend fun runPersonaTest(
     tenant: Tenant,
     history: List<PersonaTestMessage>,
 ): String {
+    val modules = DashboardModules.effectiveFor(tenant).toSet()
     val persona = PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions
     val context = mutableListOf<ChatMessage>()
-    context.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
-    persona?.takeIf { it.isNotBlank() }?.let { context.add(ChatMessage(role = "system", content = "<persona>\n$it\n</persona>")) }
+    val personaBlock = persona?.takeIf { it.isNotBlank() }
+    context.add(
+        ChatMessage(
+            role = "system",
+            content = if (personaBlock != null) "<persona>\n$personaBlock\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
+        )
+    )
+    SystemPrompts.crmPromptFor(modules)?.let { crmPrompt -> context.add(ChatMessage(role = "system", content = crmPrompt)) }
     for (msg in history) {
         val role = if (msg.role == "assistant") "assistant" else "user"
         context.add(ChatMessage(role = role, content = msg.content))
@@ -862,7 +869,7 @@ private suspend fun runPersonaTest(
         InvoiceRepository(mongo, tenant.id),
         StandardItemRepository(mongo, tenant.id),
     )
-    val toolDefs = crmTools.readOnlyDefinitions
+    val toolDefs = crmTools.readOnlyDefinitionsFor(modules)
     val allowedTools = toolDefs.map { it.name }.toSet()
 
     var reply = "Desculpe, não consegui processar isso."

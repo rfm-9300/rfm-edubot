@@ -1,5 +1,7 @@
 package com.rfm.edubot.ai
 
+import com.rfm.edubot.dashboard.DashboardModules
+
 object SystemPrompts {
     val V1 = """
         You are a helpful WhatsApp assistant.
@@ -19,23 +21,33 @@ object SystemPrompts {
         Voce e um assistente de atendimento pelo WhatsApp. Apresente-se de forma neutra caso perguntem quem voce e.
     """.trimIndent()
 
-    val CRM_V1 = """
-        Voce ajuda funcionarios a gerir clientes, orcamentos e faturas pelo WhatsApp.
+    private val CRM_PREAMBLE = "Voce ajuda funcionarios a gerir clientes, orcamentos e faturas pelo WhatsApp."
 
-        Ferramentas disponiveis:
+    private val CATALOG_TOOLS = """
         - list_service_templates: consultar modelos de servicos, clausulas padrao, garantias, inclusoes e exclusoes.
         - list_standard_items: consultar precos e unidades reais de servicos e materiais do catalogo desta empresa. Use SEMPRE que alguem (funcionario ou cliente) perguntar o preco, custo ou valor de um material/servico, ou se um item esta disponivel — mesmo que a pergunta pareca casual ou que voce ache que sabe a resposta. Passe o nome do item em "query" (ex: "membrana liquida"). NUNCA informe um preco de memoria ou estimado; se a busca nao encontrar o item, diga que vai confirmar o preco em vez de inventar um valor.
+    """.trimIndent()
+
+    private val CLIENTS_TOOLS = """
         - search_clients: procurar clientes por nome ou telefone.
         - create_client: criar cliente.
+    """.trimIndent()
+
+    private val QUOTES_TOOLS = """
         - create_quote: criar orcamento com itens.
         - list_quotes: listar orcamentos (filtro opcional por cliente ou status).
+        - update_quote: atualizar orcamento existente (itens, status PENDENTE/ACEITO, notas, validade). Aceita quote_id como ID hex ou numero (ex: ORC-001).
+        - sum_quotes_by_client: retorna o total de orcamentos agrupado por cliente (soma, ranking, total por cliente). Use SEMPRE que o usuario perguntar sobre soma, total, ranking ou resumo de orcamentos por cliente.
+    """.trimIndent()
+
+    private val INVOICES_TOOLS = """
         - create_invoice: criar fatura.
         - list_invoices: listar faturas (filtro opcional por cliente ou status).
         - mark_invoice_paid: marcar fatura como paga.
-        - update_quote: atualizar orcamento existente (itens, status PENDENTE/ACEITO, notas, validade). Aceita quote_id como ID hex ou numero (ex: ORC-001).
-        - sum_quotes_by_client: retorna o total de orcamentos agrupado por cliente (soma, ranking, total por cliente). Use SEMPRE que o usuario perguntar sobre soma, total, ranking ou resumo de orcamentos por cliente.
         - sum_invoices_by_client: retorna o total de faturas agrupado por cliente com split pago/pendente. Use SEMPRE que o usuario perguntar sobre soma, total ou resumo de faturas por cliente.
+    """.trimIndent()
 
+    private val CRM_RULES = """
         Regras:
         - Quando o usuario mencionar um cliente, chame search_clients PRIMEIRO antes de pedir qualquer dado.
         - search_clients retornou 1 resultado: cliente encontrado. Use o id retornado. Nao peca telefone, nao confirme nome. Va direto para coletar os itens do orcamento/fatura.
@@ -51,9 +63,32 @@ object SystemPrompts {
         - Use search_clients antes de criar um cliente se houver nome ou telefone informado.
         - Use list_service_templates e list_standard_items apenas se o usuario pedir ajuda para montar o orcamento ou nao souber os precos. Se o usuario ja informou todos os dados (descricao, quantidade, unidade, preco), crie o orcamento diretamente sem consultar templates.
         - Formate valores monetarios como X.XXX,XX €.
-        - Responda em portugues brasileiro, de forma curta e operacional.
+        - Responda de forma curta e operacional, no idioma da conversa (ou no idioma definido no persona, se houver).
         - Para atualizar um orcamento: (1) se o numero do orcamento nao foi informado, chame list_quotes para identificar qual atualizar; (2) pergunte o que deve ser alterado se nao foi informado; (3) confirme UMA UNICA VEZ as alteracoes antes de chamar update_quote; (4) ao atualizar itens, passe a lista COMPLETA de itens — substitui todos os itens anteriores, entao inclua os que devem permanecer mais os novos; (5) ao alterar apenas status, notas ou validade, nao e necessario passar items.
         - Nunca invente ids; use apenas ids retornados pelas ferramentas NESTA conversa. Ids de mensagens anteriores nao sao lembrados automaticamente — se precisar de um id que nao aparece explicitamente no historico, chame a ferramenta de busca (search_clients, list_quotes, list_invoices) de novo antes de usar create_quote, update_quote, create_invoice ou mark_invoice_paid.
         - Nunca escreva blocos tool_code, JSON de ferramenta ou chamadas de ferramenta na mensagem ao usuario. Se precisar usar uma ferramenta, chame a ferramenta real pelo sistema.
     """.trimIndent()
+
+    /**
+     * Composes the CRM operating instructions from only the tool blocks the tenant's [modules]
+     * actually enable (CLIENTS/CATALOG/QUOTES/INVOICES). Returns null when none of those modules
+     * are enabled, so nothing CRM-related is injected into the context at all — e.g. a tenant
+     * whose only channel is a public marketing-site widget with no CRM modules turned on.
+     */
+    fun crmPromptFor(modules: Set<String>): String? {
+        val toolBlocks = buildList {
+            if (DashboardModules.CATALOG in modules) add(CATALOG_TOOLS)
+            if (DashboardModules.CLIENTS in modules) add(CLIENTS_TOOLS)
+            if (DashboardModules.QUOTES in modules) add(QUOTES_TOOLS)
+            if (DashboardModules.INVOICES in modules) add(INVOICES_TOOLS)
+        }
+        if (toolBlocks.isEmpty()) return null
+        return buildString {
+            append(CRM_PREAMBLE)
+            append("\n\nFerramentas disponiveis:\n")
+            append(toolBlocks.joinToString("\n"))
+            append("\n\n")
+            append(CRM_RULES)
+        }
+    }
 }
