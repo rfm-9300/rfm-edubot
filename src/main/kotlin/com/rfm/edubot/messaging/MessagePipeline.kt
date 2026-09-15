@@ -343,7 +343,12 @@ class MessagePipeline(
 
         contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.CRM_V1))
         compiledPersona?.takeIf { it.isNotBlank() }?.let { persona ->
-            contextMessages.add(ChatMessage(role = "system", content = "<persona>\n$persona\n</persona>"))
+            contextMessages.add(
+                ChatMessage(
+                    role = "system",
+                    content = "<persona>\n$persona\n</persona>\nA identidade, nome e tom definidos acima em <persona> tem prioridade sobre qualquer identidade generica mencionada nas instrucoes anteriores. Use-os ao responder quem voce e.",
+                )
+            )
         }
 
         conversation.summary?.let { summary ->
