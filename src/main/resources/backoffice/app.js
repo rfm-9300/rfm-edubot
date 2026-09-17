@@ -12,11 +12,13 @@ let fbSdkPromise;
 const T = I18N.section('backoffice');
 
 // Module ids only — display labels come from the shared catalog (common.nav.<id>) at render time.
+// Only `overview` is always on (see DashboardModules.alwaysOn) — every other module, messaging
+// included, is opt-in so a tenant can be CRM-only.
 const MODULES = [
   { id: 'overview', always: true },
-  { id: 'conversations', always: true },
-  { id: 'contacts', always: true },
-  { id: 'settings', always: true },
+  { id: 'conversations' },
+  { id: 'contacts' },
+  { id: 'settings' },
   { id: 'persona' },
   { id: 'clients' },
   { id: 'quotes' },
@@ -408,13 +410,19 @@ function tenantForm(editing) {
       <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerDay)}</label><input class="inp inp--mono" id="t-day" type="number" value="${editing?.rateLimitPerDay || 200}" /></div>
     </div>
     <div class="form__row">
-      <label class="lbl">${escapeHTML(T.modulesLabel)}</label>
+      <div class="row" style="justify-content:space-between">
+        <label class="lbl">${escapeHTML(T.modulesLabel)}</label>
+        <div class="row" style="gap:6px">
+          <button class="btn btn--sm btn--ghost" type="button" id="modules-all">${escapeHTML(T.selectAllModules)}</button>
+          <button class="btn btn--sm btn--ghost" type="button" id="modules-none">${escapeHTML(T.selectNoModules)}</button>
+        </div>
+      </div>
       <div class="panel" style="padding:12px" id="modules-box"></div>
       <div class="hint">${escapeHTML(T.modulesHint)}</div>
     </div>
     <div class="form__row">
       <div class="row" style="justify-content:space-between">
-        <label class="lbl">${escapeHTML(T.channelsLabel)} <span class="req">●</span></label>
+        <label class="lbl">${escapeHTML(T.channelsLabel)}</label>
         <div class="row" style="gap:6px">
           ${editing && state.whatsAppSignup.enabled ? `<button class="btn btn--sm btn--ghost" type="button" id="wa-connect">${escapeHTML(T.connectWhatsApp)}</button>` : ''}
           ${editing ? `<button class="btn btn--sm btn--ghost" type="button" id="ig-connect">${escapeHTML(T.connectInstagram)}</button>` : ''}
@@ -427,10 +435,14 @@ function tenantForm(editing) {
       </div>
       <div class="hint">${escapeHTML(T.channelsHint)}</div>
     </div>`;
-  const existingChannels = editing?.channels?.length ? editing.channels : (editing?.phoneNumberId ? [{ platform: 'WHATSAPP', externalId: editing.phoneNumberId, hasAccessToken: true }] : [{ platform: 'WHATSAPP', externalId: '', hasAccessToken: false }]);
+  // A new tenant starts with no channel row: bindings are optional and can be connected later.
+  const existingChannels = editing?.channels?.length ? editing.channels : (editing?.phoneNumberId ? [{ platform: 'WHATSAPP', externalId: editing.phoneNumberId, hasAccessToken: true }] : []);
   existingChannels.forEach(c => addChannelRow(wrap, c));
+  renderChannelsEmpty(wrap);
   renderModulesBox(wrap, editing);
   $('#add-channel', wrap).addEventListener('click', () => addChannelRow(wrap));
+  $('#modules-all', wrap).addEventListener('click', () => setAllModules(wrap, true));
+  $('#modules-none', wrap).addEventListener('click', () => setAllModules(wrap, false));
   $('#wa-connect', wrap)?.addEventListener('click', () => connectWhatsApp(editing.slug));
   $('#ig-connect', wrap)?.addEventListener('click', () => connectInstagram(editing.slug));
   if (!editing) {
@@ -453,7 +465,6 @@ function tenantForm(editing) {
         enabledModules: collectModules(wrap),
       };
       if (!payload.name) { toast(T.nameRequired); return false; }
-      if (payload.channels.length === 0) { toast(T.addOneChannel); return false; }
       if (payload.channels.some(c => c.platform === 'INSTAGRAM' && !editing && !c.accessToken)) { toast(T.igNeedsToken); return false; }
       try {
         if (editing) {
@@ -488,6 +499,24 @@ function collectModules(root) {
   return $$('[data-module]', root).filter(input => input.checked || input.disabled).map(input => input.dataset.module);
 }
 
+function setAllModules(root, checked) {
+  $$('[data-module]', root).filter(input => !input.disabled).forEach(input => { input.checked = checked; });
+}
+
+// Channels are optional — show a placeholder instead of an empty table when there is no binding.
+function renderChannelsEmpty(root) {
+  const body = $('#channels-body', root);
+  const empty = $('#channels-empty', root);
+  if (body.children.length) { empty?.remove(); return; }
+  if (empty) return;
+  const el = document.createElement('div');
+  el.id = 'channels-empty';
+  el.className = 'muted';
+  el.style.padding = '10px 12px';
+  el.textContent = T.noChannels;
+  body.parentElement.appendChild(el);
+}
+
 function addChannelRow(root, channel = { platform: 'WHATSAPP', externalId: '', hasAccessToken: false }) {
   const row = document.createElement('div');
   row.className = 'line channel-row';
@@ -501,8 +530,9 @@ function addChannelRow(root, channel = { platform: 'WHATSAPP', externalId: '', h
     <input class="inp inp--mono" data-channel-token type="password" placeholder="${channel.hasAccessToken ? escapeHTML(T.chTokenUnchanged) : escapeHTML(T.chTokenPlaceholder)}" />
     <button class="l-rm" type="button" aria-label="${escapeHTML(T.removeChannel)}">×</button>
   `;
-  row.querySelector('.l-rm').addEventListener('click', () => row.remove());
+  row.querySelector('.l-rm').addEventListener('click', () => { row.remove(); renderChannelsEmpty(root); });
   $('#channels-body', root).appendChild(row);
+  renderChannelsEmpty(root);
 }
 
 function collectChannels(root, editing) {

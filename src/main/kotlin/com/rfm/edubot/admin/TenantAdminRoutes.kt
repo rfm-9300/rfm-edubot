@@ -523,8 +523,9 @@ private fun List<ChannelBindingRequest>?.toBindings(existing: List<ChannelBindin
 private fun ChannelBindingRequest.toBinding(): ChannelBinding =
     ChannelBinding(Platform.valueOf(platform.uppercase()), externalId.trim(), accessToken.trim())
 
+// Channels are optional: a tenant can exist with no messaging binding at all (CRM-only) and get a
+// channel connected later. Only the shape of the bindings that *are* present is validated.
 private fun validateBindings(bindings: List<ChannelBinding>): String? {
-    if (bindings.isEmpty()) return "at least one channel binding is required"
     if (bindings.any { it.externalId.isBlank() }) return "channel externalId is required"
     if (bindings.distinctBy { it.platform to it.externalId }.size != bindings.size) return "duplicate channel bindings are not allowed"
     if (bindings.any { it.platform == Platform.INSTAGRAM && it.accessToken.isBlank() }) return "Instagram accessToken is required"

@@ -124,8 +124,13 @@ graph TD
 `Tenant.enabledModules` is the only tenant-level dashboard capability control. The canonical
 catalog lives in `DashboardModules`:
 
-- Always enabled and not admin-disableable: `overview`, `conversations`, `contacts`, `settings`.
-- Admin-selectable: `persona`, `clients`, `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+- Always enabled and not admin-disableable: `overview` (the dashboard landing page, and the
+  fallback view when nothing else is enabled).
+- Admin-selectable: `conversations`, `contacts`, `settings`, `persona`, `clients`, `quotes`,
+  `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+
+The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
+other module, so a tenant can be provisioned CRM-only.
 
 The server sanitizes explicit selections against this catalog and force-adds the always-on
 modules. A missing Mongo `enabledModules` field maps to `null`, which preserves legacy behavior by

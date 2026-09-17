@@ -34,6 +34,22 @@ class DashboardModulesTest {
     }
 
     @Test
+    fun `messaging modules are optional so a tenant can run CRM-only`() {
+        listOf(DashboardModules.CONVERSATIONS, DashboardModules.CONTACTS, DashboardModules.SETTINGS)
+            .forEach { assertEquals(true, it in DashboardModules.optional, "$it should be optional") }
+        assertEquals(
+            listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS),
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.CLIENTS))),
+        )
+    }
+
+    @Test
+    fun `overview is the only module that cannot be switched off`() {
+        assertEquals(listOf(DashboardModules.OVERVIEW), DashboardModules.alwaysOn)
+        assertEquals(listOf(DashboardModules.OVERVIEW), DashboardModules.sanitize(emptyList()))
+    }
+
+    @Test
     fun `AI assistant is an optional tenant module`() {
         assertEquals(true, DashboardModules.AI_ASSISTANT in DashboardModules.optional)
         assertEquals(

@@ -203,7 +203,7 @@ async function loadModule(tab) {
     if (hasModule('bookings')) extra.push(api(`/app/api/bookings?from=${encodeURIComponent(toIso(startOfWeek()))}&to=${encodeURIComponent(toIso(addDays(startOfWeek(), 7)))}`).then(rows => { state.bookings = rows; }).catch(() => {}));
     if (hasModule('instagram')) extra.push(api('/app/api/instagram').then(data => { state.instagram = data; }).catch(() => {}));
     if (hasModule('persona')) extra.push(api('/app/api/persona').then(p => { state.persona = p; }).catch(() => {}));
-    extra.push(api('/app/api/web-widget').then(w => { state.webWidget = w; }).catch(() => {}));
+    if (hasModule('settings')) extra.push(api('/app/api/web-widget').then(w => { state.webWidget = w; }).catch(() => {}));
     await Promise.all(extra);
   }
   if (tab === 'contacts') state.contacts = await api('/app/api/contacts');

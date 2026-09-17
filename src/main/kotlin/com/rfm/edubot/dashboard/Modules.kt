@@ -16,8 +16,16 @@ object DashboardModules {
     const val BOOKINGS = "bookings"
     const val INSTAGRAM = "instagram"
 
-    val alwaysOn = listOf(OVERVIEW, CONVERSATIONS, CONTACTS, SETTINGS)
-    val optional = listOf(PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG, AI_ASSISTANT, BOOKINGS, INSTAGRAM)
+    /**
+     * Only the dashboard landing page is mandatory — it is the fallback view every tenant needs.
+     * Everything else (messaging, contacts, settings, CRM) is opt-in: the product is no longer
+     * WhatsApp-first, so a tenant may run CRM-only with no inbox at all.
+     */
+    val alwaysOn = listOf(OVERVIEW)
+    val optional = listOf(
+        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG,
+        AI_ASSISTANT, BOOKINGS, INSTAGRAM,
+    )
     val catalog = alwaysOn + optional
 
     fun availableFor(): List<String> = catalog
