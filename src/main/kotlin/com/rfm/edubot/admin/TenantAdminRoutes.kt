@@ -91,7 +91,6 @@ fun Route.tenantAdminRoutes(
                     updatedAt = now,
                 )
                 tenantRepository.create(tenant)
-                StandardItemRepository(mongo, tenant.id).seedDefaults()
                 tenantRegistry.put(tenant)
                 call.respond(HttpStatusCode.Created, tenant.dto())
             }

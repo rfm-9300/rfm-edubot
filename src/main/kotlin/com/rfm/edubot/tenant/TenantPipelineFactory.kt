@@ -78,7 +78,7 @@ class TenantPipelineFactory(
         val clients = ClientRepository(mongo, tenant.id)
         val quotes = QuoteRepository(mongo, tenant.id)
         val invoices = InvoiceRepository(mongo, tenant.id)
-        val items = StandardItemRepository(mongo, tenant.id).also { runBlocking { it.seedDefaults() } }
+        val items = StandardItemRepository(mongo, tenant.id)
         val compiledPersona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions }
         val bookingTools = if (DashboardModules.BOOKINGS in modules) {
             val bookingServices = BookingServiceRepository(mongo, tenant.id)

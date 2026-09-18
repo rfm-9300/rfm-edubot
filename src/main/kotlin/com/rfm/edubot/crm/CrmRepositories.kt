@@ -11,7 +11,6 @@ import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.crm.StandardItem
-import com.rfm.edubot.crm.StandardItems
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -323,11 +322,6 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
 class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")
-
-    suspend fun seedDefaults() {
-        if (collection.countDocuments(Filters.eq("tenantId", tenantId)) > 0) return
-        collection.insertMany(StandardItems.defaults.map { it.toDocument() })
-    }
 
     suspend fun search(query: String? = null, type: String? = null): List<StandardItem> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
