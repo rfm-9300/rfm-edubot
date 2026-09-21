@@ -27,6 +27,7 @@ data class OverviewDto(
     val catalog: OverviewCatalogDto? = null,
     val assistant: OverviewAssistantDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),
+    val hiddenCards: List<String> = emptyList(),
 )
 
 @Serializable

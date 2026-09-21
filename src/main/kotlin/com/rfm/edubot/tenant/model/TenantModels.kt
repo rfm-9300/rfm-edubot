@@ -13,6 +13,8 @@ data class Tenant(
     val timezone: String = TenantTimeZones.DEFAULT,
     val openrouterModel: String? = null,
     val enabledModules: List<String>? = null,
+    /** Home snapshot ids the tenant turned off. Empty = show every available card. */
+    val overviewHiddenCards: List<String> = emptyList(),
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
     val status: TenantStatus = TenantStatus.ACTIVE,
