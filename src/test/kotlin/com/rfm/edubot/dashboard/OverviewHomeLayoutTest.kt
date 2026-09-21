@@ -2,7 +2,6 @@ package com.rfm.edubot.dashboard
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
-import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 class OverviewHomeLayoutTest {
@@ -28,7 +27,7 @@ class OverviewHomeLayoutTest {
     }
 
     @Test
-    fun `hiding money drops the cash snapshot and money highlights`() {
+    fun `hiding money drops money highlights but keeps cash for other surfaces`() {
         val applied = OverviewHomeLayout.apply(
             overview(
                 cash = cashDto(),
@@ -40,7 +39,7 @@ class OverviewHomeLayoutTest {
             ),
             listOf(OverviewHomeLayout.CASH),
         )
-        assertNull(applied.cash)
+        assertEquals(cashDto().outstandingCents, applied.cash?.outstandingCents)
         assertEquals(pipelineDto().openCents, applied.pipeline?.openCents)
         assertEquals(listOf(OverviewMath.HIGHLIGHT_PIPELINE), applied.highlights.map { it.key })
         assertEquals(listOf(OverviewHomeLayout.CASH), applied.hiddenCards)

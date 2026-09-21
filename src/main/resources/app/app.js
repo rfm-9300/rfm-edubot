@@ -429,7 +429,7 @@ function renderOverview(root) {
     }).join('')}</div></div>`
     : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
-  if (o.cash) {
+  if (o.cash && !hidden.has('cash')) {
     const cashRows = [
       { label: STR.hl_collected_month, value: centsEUR(o.cash.collectedThisMonthCents) },
       { label: STR.hl_outstanding, value: centsEUR(o.cash.outstandingCents) },
@@ -445,7 +445,7 @@ function renderOverview(root) {
     }
     snapshots.push(snapshotPanel('invoices', STR.snapCash, centsEUR(o.cash.outstandingCents), cashRows));
   }
-  if (o.pipeline) {
+  if (o.pipeline && !hidden.has('pipeline')) {
     snapshots.push(snapshotPanel('quotes', STR.snapPipeline, `${o.pipeline.winRatePct}%`, [
       { label: STR.hl_pipeline_open, value: centsEUR(o.pipeline.openCents) },
       { label: STR.pipelineDrafts, value: o.pipeline.pendingCount },
@@ -456,14 +456,14 @@ function renderOverview(root) {
       { label: STR.hl_win_rate, value: `${o.pipeline.winRatePct}%` },
     ]));
   }
-  if (o.customers) {
+  if (o.customers && !hidden.has('customers')) {
     snapshots.push(snapshotPanel('clients', STR.snapCustomers, o.customers.total, [
       { label: STR.hl_clients, value: o.customers.total },
       { label: STR.customersNewMonth, value: o.customers.newThisMonth },
       { label: STR.customersNewLastMonth, value: o.customers.newLastMonth },
     ]));
   }
-  if (o.inbox && hasModule('conversations')) {
+  if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
     snapshots.push(snapshotPanel('conversations', STR.snapInbox, o.inbox.waiting, [
       { label: STR.hl_waiting, value: o.inbox.waiting },
       { label: STR.hl_messages_today, value: o.inbox.messagesToday },
@@ -472,13 +472,13 @@ function renderOverview(root) {
       { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
       { label: STR.inboxPaused, value: o.inbox.autoReplyPaused },
     ]));
-  } else if (o.inbox && hasModule('contacts')) {
+  } else if (o.inbox && hasModule('contacts') && !hidden.has('inbox')) {
     snapshots.push(snapshotPanel('contacts', labels.contacts, o.inbox.contacts, [
       { label: STR.hl_contacts, value: o.inbox.contacts },
       { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
     ]));
   }
-  if (o.calendar) {
+  if (o.calendar && !hidden.has('calendar')) {
     snapshots.push(snapshotPanel('bookings', STR.snapCalendar, o.calendar.today, [
       { label: STR.hl_bookings_today, value: o.calendar.today },
       { label: STR.snapCalendar, value: o.calendar.thisWeek },
@@ -486,18 +486,18 @@ function renderOverview(root) {
       { label: STR.calendarNext, value: o.calendar.next ? `${o.calendar.next.contactName} · ${fmtDate(o.calendar.next.startAt)}` : STR.calendarNone },
     ]));
   }
-  if (o.social) {
+  if (o.social && !hidden.has('social')) {
     snapshots.push(snapshotPanel('instagram', STR.snapSocial, o.social.unreplied, [
       { label: STR.hl_instagram_unreplied, value: o.social.unreplied },
       { label: STR.colStatus, value: o.social.connected ? STR.connected : STR.notConnected },
     ]));
   }
-  if (o.catalog) {
+  if (o.catalog && !hidden.has('catalog')) {
     snapshots.push(snapshotPanel('catalog', STR.snapCatalog, o.catalog.items, [
       { label: STR.catalogItems, value: o.catalog.items },
     ]));
   }
-  if (o.assistant) {
+  if (o.assistant && !hidden.has('assistant')) {
     snapshots.push(snapshotPanel('ai-assistant', STR.snapAssistant, o.assistant.pendingActions, [
       { label: STR.assistantPending, value: o.assistant.pendingActions },
     ]));
@@ -522,7 +522,7 @@ function renderOverview(root) {
   const customize = hasModule('settings')
     ? `<button type="button" class="btn btn--sm home-customize" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>`
     : '';
-  const heroHtml = `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(labels.overview)}</h1><p class="view__desc">${escapeHTML(STR.overviewDesc)}</p>${customize}</div>${stats}</div>`;
+  const heroHtml = `<div class="view__hero"><div><div class="home-title-row"><h1 class="view__title">${escapeHTML(labels.overview)}</h1>${customize}</div><p class="view__desc">${escapeHTML(STR.overviewDesc)}</p></div>${stats}</div>`;
   root.innerHTML = heroHtml + pulseHtml + needsHtml + modulesHtml + setupHtml;
   $$('[data-go]', root).forEach(b => b.addEventListener('click', async () => {
     if (b.dataset.conversation) state.selectedConversation = b.dataset.conversation;

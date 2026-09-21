@@ -5,7 +5,8 @@ import kotlinx.serialization.Serializable
 
 /**
  * Tenant-chosen Home layout. Cards default to visible; [Tenant.overviewHiddenCards] lists
- * the ones the manager turned off. Unknown ids are dropped.
+ * the ones the manager turned off. Unknown ids are dropped. Snapshot payloads stay on
+ * the overview DTO so sidebar counts keep working; the dashboard hides cards in the UI.
  */
 object OverviewHomeLayout {
     const val HIGHLIGHTS = "highlights"
@@ -65,14 +66,6 @@ object OverviewHomeLayout {
         return dto.copy(
             hiddenCards = hide.toList(),
             highlights = highlights,
-            cash = dto.cash.takeUnless { CASH in hide },
-            pipeline = dto.pipeline.takeUnless { PIPELINE in hide },
-            customers = dto.customers.takeUnless { CUSTOMERS in hide },
-            inbox = dto.inbox.takeUnless { INBOX in hide },
-            calendar = dto.calendar.takeUnless { CALENDAR in hide },
-            social = dto.social.takeUnless { SOCIAL in hide },
-            catalog = dto.catalog.takeUnless { CATALOG in hide },
-            assistant = dto.assistant.takeUnless { ASSISTANT in hide },
         )
     }
 
