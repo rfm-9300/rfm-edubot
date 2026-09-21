@@ -1018,12 +1018,13 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .pulse--ok { border-color: color-mix(in srgb, var(--ok) 36%, var(--mix)); background: color-mix(in srgb, var(--ok) 8%, var(--mix)); }
 .pulse--watch { border-color: color-mix(in srgb, var(--warn) 36%, var(--mix)); background: color-mix(in srgb, var(--warn) 8%, var(--mix)); }
 .pulse--urgent { border-color: color-mix(in srgb, var(--bad) 36%, var(--mix)); background: color-mix(in srgb, var(--bad) 8%, var(--mix)); }
-.pulse__text { color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.pulse__text { color: var(--ink-2); font-size: 13px; font-weight: 700; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .home-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
   margin-bottom: 22px;
+  align-items: start;
 }
 .snapshot__body { display: grid; gap: 10px; padding: 14px 16px 16px; }
 .snapshot__row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 13px; }

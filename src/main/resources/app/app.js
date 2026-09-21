@@ -418,12 +418,10 @@ function renderOverview(root) {
       { label: STR.cashIssuedMonth, value: centsEUR(o.cash.issuedThisMonthCents) },
     ];
     if (o.cash.agingWeekCents || o.cash.agingMonthCents || o.cash.agingOldCents) {
-      cashRows.push(
-        { label: STR.cashAgingCurrent, value: centsEUR(o.cash.agingCurrentCents) },
-        { label: STR.cashAgingWeek, value: centsEUR(o.cash.agingWeekCents) },
-        { label: STR.cashAgingMonth, value: centsEUR(o.cash.agingMonthCents) },
-        { label: STR.cashAgingOld, value: centsEUR(o.cash.agingOldCents) },
-      );
+      cashRows.push({ label: STR.cashAgingCurrent, value: centsEUR(o.cash.agingCurrentCents) });
+      if (o.cash.agingWeekCents) cashRows.push({ label: STR.cashAgingWeek, value: centsEUR(o.cash.agingWeekCents) });
+      if (o.cash.agingMonthCents) cashRows.push({ label: STR.cashAgingMonth, value: centsEUR(o.cash.agingMonthCents) });
+      if (o.cash.agingOldCents) cashRows.push({ label: STR.cashAgingOld, value: centsEUR(o.cash.agingOldCents) });
     }
     snapshots.push(snapshotPanel('invoices', STR.snapCash, centsEUR(o.cash.outstandingCents), cashRows));
   }
