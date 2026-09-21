@@ -44,7 +44,9 @@ class AssistantViewModelTest {
         controller.updateDraft("Create a quote for Acme tomorrow")
         controller.send()
         controller.state.awaitFirst { state ->
-            !state.busy && state.detail?.messages?.any { it.content == "Create a quote for Acme tomorrow" } == true
+            !state.busy &&
+                state.draft.isEmpty() &&
+                state.detail?.messages?.any { it.content == "Create a quote for Acme tomorrow" } == true
         }
 
         assertEquals(listOf("Create a quote for Acme tomorrow"), api.sentAssistantMessages)
