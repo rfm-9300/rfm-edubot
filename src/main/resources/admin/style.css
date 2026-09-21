@@ -541,6 +541,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl .num, .tbl .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .tbl .num  { text-align: right; font-weight: 600; }
 .tbl .id   { font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.tbl td.check { width: 36px; }
+.tbl td.check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .tbl .name { font-weight: 800; color: var(--ink); }
 .tbl .muted { color: var(--ink-mute); }
 .tbl .actions { display: flex; gap: 4px; justify-content: flex-end; align-items: center; flex-wrap: wrap; }

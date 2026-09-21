@@ -398,12 +398,12 @@ private class SequenceRepository(mongoModule: MongoModule, private val tenantId:
     }
 }
 
-fun lineItem(description: String, quantity: Double = 1.0, unitPriceEur: Double): LineItem {
+fun lineItem(description: String, quantity: Double = 1.0, unitPriceEur: Double, unit: String = ""): LineItem {
     val unitPriceCents = (unitPriceEur * 100).toLong()
     return LineItem(
         description = description,
         quantity = quantity,
-        unit = "",
+        unit = unit,
         unitPriceCents = unitPriceCents,
         totalCents = (quantity * unitPriceCents).toLong(),
     )
@@ -429,22 +429,22 @@ private fun LineItem.toDocument() = Document("description", description)
     .append("unitPriceCents", unitPriceCents)
     .append("totalCents", totalCents)
 
-private fun Document.getLongValue(field: String): Long = when (val value = get(field)) {
+internal fun Document.getLongValue(field: String): Long = when (val value = get(field)) {
     is Long -> value
     is Int -> value.toLong()
     is Double -> value.toLong()
     else -> 0L
 }
 
-private fun Document.getDoubleValue(field: String): Double = when (val value = get(field)) {
+internal fun Document.getDoubleValue(field: String): Double = when (val value = get(field)) {
     is Double -> value
     is Int -> value.toDouble()
     is Long -> value.toDouble()
     else -> 0.0
 }
 
-private fun Document.getInstant(field: String): Instant = getDate(field).toInstantValue()
+internal fun Document.getInstant(field: String): Instant = getDate(field).toInstantValue()
 
-private fun Date.toInstantValue(): Instant = Instant.fromEpochMilliseconds(time)
+internal fun Date.toInstantValue(): Instant = Instant.fromEpochMilliseconds(time)
 
-private fun Instant.toDate(): Date = Date(toEpochMilliseconds())
+internal fun Instant.toDate(): Date = Date(toEpochMilliseconds())

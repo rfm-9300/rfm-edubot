@@ -9,6 +9,7 @@ object DashboardModules {
     const val SETTINGS = "settings"
     const val PERSONA = "persona"
     const val CLIENTS = "clients"
+    const val SERVICES = "services"
     const val QUOTES = "quotes"
     const val INVOICES = "invoices"
     const val CATALOG = "catalog"
@@ -23,7 +24,7 @@ object DashboardModules {
      */
     val alwaysOn = listOf(OVERVIEW)
     val optional = listOf(
-        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, QUOTES, INVOICES, CATALOG,
+        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, CATALOG,
         AI_ASSISTANT, BOOKINGS, INSTAGRAM,
     )
     val catalog = alwaysOn + optional
@@ -32,7 +33,9 @@ object DashboardModules {
 
     fun effectiveFor(tenant: Tenant): List<String> {
         val selected = tenant.enabledModules ?: catalog
-        return (alwaysOn + selected).filter { it in catalog }.distinct()
+        val resolved = (alwaysOn + selected).filter { it in catalog }.toMutableList()
+        if (CLIENTS in resolved && SERVICES in catalog) resolved += SERVICES
+        return resolved.distinct()
     }
 
     fun sanitize(requested: List<String>?): List<String>? {

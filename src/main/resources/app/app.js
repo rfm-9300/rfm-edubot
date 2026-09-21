@@ -4,6 +4,7 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
+  clientServices: [], filterServiceStatus: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -107,6 +108,14 @@ function invoicePill(status) {
   const map = { PENDING: 'pill--warn', PAID: 'pill--ok', OVERDUE: 'pill--bad', CANCELLED: '' };
   return `<span class="pill ${map[status] || ''}">${escapeHTML(invoiceStatusLabel(status))}</span>`;
 }
+function serviceStatusLabel(status) {
+  const t = CRM.services;
+  return ({ OPEN: t.open, INVOICED: t.invoiced, CANCELLED: t.cancelled }[status] || status);
+}
+function servicePill(status) {
+  const map = { OPEN: 'pill--warn', INVOICED: 'pill--ok', CANCELLED: '' };
+  return `<span class="pill ${map[status] || ''}">${escapeHTML(serviceStatusLabel(status))}</span>`;
+}
 function contactPill(status) {
   const map = { ACTIVE: 'pill--ok', BLOCKED: 'pill--bad', RATE_LIMITED: 'pill--warn' };
   return `<span class="pill ${map[status] || ''}">${escapeHTML(contactStatusLabel(status))}</span>`;
@@ -164,6 +173,7 @@ function renderNav() {
     quotes: state.quotes.length || o.pipeline?.quoteCount || 0,
     invoices: overdue || state.invoices.length || o.cash?.invoiceCount || 0,
     catalog: state.catalog.length || o.catalog?.items || 0,
+    services: (state.clientServices.filter(s => s.status === 'OPEN').length) || o.services?.openCount || 0,
     bookings: pendingBookings || state.bookings.length || o.calendar?.thisWeek || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
   };
@@ -171,7 +181,7 @@ function renderNav() {
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'quotes', 'invoices', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
@@ -196,6 +206,7 @@ async function setActive(tab) {
   state.search = '';
   state.filterQuoteStatus = '';
   state.filterInvoiceStatus = '';
+  state.filterServiceStatus = '';
   try {
     await loadModule(tab);
     render();
@@ -214,6 +225,16 @@ async function loadModule(tab) {
     state.fetched.conversations = true;
   }
   if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
+  if (tab === 'services') {
+    const [services, clients] = await Promise.all([
+      api('/app/api/crm/services'),
+      api('/app/api/crm/clients').catch(() => state.clients),
+    ]);
+    state.clientServices = services;
+    state.clients = clients;
+    if (hasModule('catalog')) state.catalog = await api('/app/api/crm/standard-items').catch(() => state.catalog);
+    if (hasModule('bookings')) state.bookingServices = await api('/app/api/bookings/services').catch(() => state.bookingServices);
+  }
   if (tab === 'quotes') state.quotes = await api('/app/api/crm/quotes');
   if (tab === 'invoices') {
     state.invoices = await api('/app/api/crm/invoices');
@@ -259,9 +280,9 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'quotes', 'invoices', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'catalog', 'bookings'].includes(state.active);
   const newButtonLabels = {
-    clients: STR.clientFormTitle, quotes: STR.quoteFormTitle,
+    clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
   };
   $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
@@ -270,6 +291,7 @@ function render() {
   if (state.active === 'contacts') return renderContacts(root);
   if (state.active === 'conversations') return renderConversations(root);
   if (state.active === 'clients') return renderClients(root);
+  if (state.active === 'services') return renderServices(root);
   if (state.active === 'quotes') return renderQuotes(root);
   if (state.active === 'invoices') return renderInvoices(root);
   if (state.active === 'catalog') return renderCatalog(root);
@@ -389,12 +411,12 @@ function homeCardCopy(id) {
   const titles = {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     cash: STR.snapCash, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
-    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, assistant: STR.snapAssistant,
+    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices, assistant: STR.snapAssistant,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     cash: STR.homeCard_cashDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
-    calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, assistant: STR.homeCard_assistantDesc,
+    calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc, assistant: STR.homeCard_assistantDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -463,6 +485,12 @@ function renderOverview(root) {
       { label: STR.customersNewLastMonth, value: o.customers.newLastMonth },
     ]));
   }
+  if (o.services && !hidden.has('services')) {
+    snapshots.push(snapshotPanel('services', STR.snapServices, o.services.openCount, [
+      { label: STR.servicesOpen, value: `${o.services.openCount} · ${centsEUR(o.services.openCents)}` },
+      { label: STR.servicesInvoicedMonth, value: `${o.services.invoicedThisMonthCount} · ${centsEUR(o.services.invoicedThisMonthCents)}` },
+    ]));
+  }
   if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
     snapshots.push(snapshotPanel('conversations', STR.snapInbox, o.inbox.waiting, [
       { label: STR.hl_waiting, value: o.inbox.waiting },
@@ -515,7 +543,7 @@ function renderOverview(root) {
       return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
-  const snapshotsOff = ['cash', 'pipeline', 'customers', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
+  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
   const modulesHtml = snapshots.length
     ? `<div class="home-grid">${snapshots.join('')}</div>`
     : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);
@@ -632,17 +660,183 @@ function renderClients(root) {
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientForm(state.clients.find(c => c.id === r.dataset.client))));
 }
+
+function renderServices(root) {
+  const t = CRM.services;
+  const q = state.search.toLowerCase();
+  const rows = (state.clientServices || [])
+    .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
+    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q))
+    .map(s => {
+      const canPick = s.status === 'OPEN';
+      return `<tr class="conversation-row ${s.status === 'INVOICED' ? 'is-paid' : ''}" data-service="${escapeHTML(s.id)}">
+        <td class="check">${canPick ? `<input type="checkbox" data-pick-service="${escapeHTML(s.id)}" data-client="${escapeHTML(s.clientId)}" />` : ''}</td>
+        <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
+        <td class="name">${escapeHTML(s.clientName || '')}</td>
+        <td>${escapeHTML(s.name)}</td>
+        <td class="mono muted">${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}</td>
+        <td class="num">${fmtEUR(s.totalEur)}</td>
+        <td>${servicePill(s.status)}</td>
+      </tr>`;
+    }).join('');
+  const open = (state.clientServices || []).filter(s => s.status === 'OPEN');
+  const openCents = open.reduce((sum, s) => sum + Number(s.totalEur || 0), 0);
+  const invoiced = (state.clientServices || []).filter(s => s.status === 'INVOICED');
+  const tools = `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
+    + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
+    + (hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
+    { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
+    { label: t.invoiced, value: invoiced.length },
+  ])) + crmPanel({
+    title: t.work,
+    tag: (state.clientServices || []).filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus).length,
+    tools,
+    head: `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`,
+    rows,
+    empty: t.emptyTitle,
+    emptyDesc: t.emptyDesc,
+  });
+  $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
+  $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
+  $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
+    if (e.target.closest('[data-pick-service]')) return;
+    openServiceForm(state.clientServices.find(s => s.id === r.dataset.service));
+  }));
+  $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
+}
+
+function serviceSourceOptions() {
+  const catalog = (state.catalog || []).filter(c => c.type === 'service' || c.type === 'servico');
+  const bookings = state.bookingServices || [];
+  const catalogOpts = catalog.map(c => `<option value="catalog:${escapeHTML(c.id)}" data-name="${escapeHTML(c.description)}" data-price="${c.defaultUnitPriceEur}" data-unit="${escapeHTML(c.unit || '')}">${escapeHTML(c.description)}</option>`).join('');
+  const bookingOpts = bookings.filter(s => s.active).map(s => `<option value="booking:${escapeHTML(s.id)}" data-name="${escapeHTML(s.name)}" data-price="" data-unit="">${escapeHTML(s.name)}</option>`).join('');
+  return { catalogOpts, bookingOpts };
+}
+
+async function openServiceForm(service, presetClientId) {
+  const t = CRM.services;
+  const editing = service && service.id ? service : null;
+  if (!state.clients.length && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => []);
+  if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
+  if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
+  const sources = serviceSourceOptions();
+  const clientId = editing?.clientId || presetClientId || '';
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${editing ? '' : clientSelect(state.clients)}
+    ${editing ? `<p class="hint">${escapeHTML(editing.clientName || '')}</p>` : ''}
+    ${(sources.catalogOpts || sources.bookingOpts) && !editing ? `<div class="form__row"><label class="lbl" for="svc-source">${escapeHTML(t.fromCatalog)}</label>
+      <select class="sel" id="svc-source"><option value="">${escapeHTML(t.fromCatalogNone)}</option>
+        ${sources.bookingOpts ? `<optgroup label="${escapeHTML(labels.bookings)}">${sources.bookingOpts}</optgroup>` : ''}
+        ${sources.catalogOpts ? `<optgroup label="${escapeHTML(labels.catalog)}">${sources.catalogOpts}</optgroup>` : ''}
+      </select></div>` : ''}
+    <div class="form__row"><label class="lbl" for="svc-name">${escapeHTML(t.name)} <span class="req">●</span></label>
+      <input class="inp" id="svc-name" required placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+    <div class="form__grid">
+      <div class="form__row"><label class="lbl" for="svc-qty">${escapeHTML(t.qty)}</label>
+        <input class="inp inp--mono" id="svc-qty" type="number" min="0" step="0.01" value="${editing?.quantity ?? 1}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+      <div class="form__row"><label class="lbl" for="svc-unit">${escapeHTML(t.unit)}</label>
+        <input class="inp" id="svc-unit" value="${escapeHTML(editing?.unit || '')}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+      <div class="form__row"><label class="lbl" for="svc-price">${escapeHTML(t.price)} <span class="req">●</span></label>
+        <input class="inp inp--mono inp--right" id="svc-price" type="number" min="0" step="0.01" required value="${editing?.unitPriceEur ?? ''}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+      <div class="form__row"><label class="lbl" for="svc-when">${escapeHTML(t.when)}</label>
+        <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing?.performedAt || '').slice(0, 10))}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+    </div>
+    <div class="form__row form__row--full"><label class="lbl" for="svc-notes">${escapeHTML(t.notes)}</label>
+      <textarea class="txt" id="svc-notes" ${editing?.status === 'INVOICED' ? 'readonly' : ''}>${escapeHTML(editing?.notes || '')}</textarea></div>
+    ${editing?.status === 'INVOICED' ? '' : `<button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`}`;
+  if (clientId && $('#f-client', form)) $('#f-client', form).value = clientId;
+  const source = $('#svc-source', form);
+  source?.addEventListener('change', () => {
+    const opt = source.selectedOptions[0];
+    if (!opt || !opt.value) return;
+    $('#svc-name', form).value = opt.dataset.name || '';
+    if (opt.dataset.price) $('#svc-price', form).value = opt.dataset.price;
+    if (opt.dataset.unit) $('#svc-unit', form).value = opt.dataset.unit;
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    if (editing?.status === 'INVOICED') return;
+    const chosenClient = editing?.clientId || $('#f-client', form)?.value;
+    const name = $('#svc-name', form).value.trim();
+    if (!chosenClient || !name) return toast(t.validate);
+    const sourceVal = $('#svc-source', form)?.value || '';
+    const payload = {
+      clientId: chosenClient,
+      name,
+      notes: $('#svc-notes', form).value.trim() || null,
+      quantity: Number($('#svc-qty', form).value || 1),
+      unit: $('#svc-unit', form).value.trim(),
+      unitPriceEur: Number($('#svc-price', form).value || 0),
+      performedAt: $('#svc-when', form).value || null,
+      bookingServiceId: sourceVal.startsWith('booking:') ? sourceVal.slice(8) : null,
+      catalogItemId: sourceVal.startsWith('catalog:') ? sourceVal.slice(8) : null,
+    };
+    const btn = $('button[type=submit]', form);
+    if (btn) btn.disabled = true;
+    try {
+      if (editing) await api(`/app/api/crm/services/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      else await api('/app/api/crm/services', { method: 'POST', body: JSON.stringify(payload) });
+      closeDrawer();
+      await loadModule('services');
+      render();
+      toast(editing ? t.updated : t.created);
+    } catch { if (btn) btn.disabled = false; toast(t.saveFailed); }
+  });
+  openDrawer(editing ? t.editTitle : t.formTitle, form);
+}
+
+async function invoiceSelectedServices() {
+  const t = CRM.services;
+  const boxes = $$('[data-pick-service]:checked');
+  if (!boxes.length) return toast(t.invoiceNeedRows);
+  const clientIds = [...new Set(boxes.map(b => b.dataset.client))];
+  if (clientIds.length !== 1) return toast(t.invoiceNeedSameClient);
+  const form = document.createElement('form');
+  form.className = 'form';
+  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(boxes.length + ' · ' + (state.clients.find(c => c.id === clientIds[0])?.name || ''))}</p>
+    <div class="form__row"><label class="lbl" for="svc-due">${escapeHTML(t.invoiceDue)} <span class="req">●</span></label>
+      <input class="inp" id="svc-due" type="date" required value="${due}" /></div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.invoiceSelected)}</button>`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const dueDate = $('#svc-due', form).value;
+    if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const invoice = await api('/app/api/crm/services/invoice', {
+        method: 'POST',
+        body: JSON.stringify({ clientId: clientIds[0], serviceIds: boxes.map(b => b.dataset.pickService), dueDate }),
+      });
+      closeDrawer();
+      await loadModule('services');
+      if (hasModule('invoices')) state.invoices = await api('/app/api/crm/invoices').catch(() => state.invoices);
+      render();
+      toast(t.issuedFrom({ number: invoice.number }));
+    } catch { btn.disabled = false; toast(t.invoiceFailed); }
+  });
+  openDrawer(t.invoiceSelected, form);
+}
 async function openClientForm(client) {
   const editing = client && client.id ? client : null;
   let relatedQuotes = [];
   let relatedInvoices = [];
+  let relatedServices = [];
   if (editing) {
     if (hasModule('quotes')) relatedQuotes = await api(`/app/api/crm/quotes?clientId=${encodeURIComponent(editing.id)}`).catch(() => state.quotes.filter(q => q.clientId === editing.id));
     if (hasModule('invoices')) relatedInvoices = await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(editing.id)}`).catch(() => state.invoices.filter(i => i.clientId === editing.id));
+    if (hasModule('services')) relatedServices = await api(`/app/api/crm/services?clientId=${encodeURIComponent(editing.id)}`).catch(() => (state.clientServices || []).filter(s => s.clientId === editing.id));
   }
   const related = [
     relatedQuotes.length ? `<p class="hint">${escapeHTML(labels.quotes)} · ${relatedQuotes.map(q => escapeHTML(q.number)).join(', ')}</p>` : '',
     relatedInvoices.length ? `<p class="hint">${escapeHTML(labels.invoices)} · ${relatedInvoices.map(i => escapeHTML(i.number)).join(', ')}</p>` : '',
+    relatedServices.length ? `<p class="hint">${escapeHTML(CRM.services.related)} · ${relatedServices.map(s => escapeHTML(s.name)).join(', ')}</p>` : '',
+    editing && hasModule('services') ? `<button class="btn btn--sm" type="button" id="cf-add-service">${escapeHTML(CRM.services.addForClient)}</button>` : '',
   ].join('');
   const form = document.createElement('form');
   form.className = 'form';
@@ -655,6 +849,7 @@ async function openClientForm(client) {
       <input class="inp" id="cf-address" placeholder="${escapeHTML(STR.clientPhAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
     ${related}
     <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientEdit : STR.clientSave)}</button>`;
+  $('#cf-add-service', form)?.addEventListener('click', () => openServiceForm(null, editing.id));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const name = $('#cf-name', form).value.trim();
@@ -2205,6 +2400,7 @@ async function init() {
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
     if (state.active === 'clients') return openClientForm();
+    if (state.active === 'services') return openServiceForm();
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();

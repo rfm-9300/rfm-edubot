@@ -77,10 +77,14 @@ Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-
 1. `.view__hero` with 3–4 processed highlights (collected this month, outstanding, open quotes, waiting chats — only for modules the tenant has on)
 2. `.pulse` health strip (`pulse--ok` / `--watch` / `--urgent`) with a one-line summary
 3. `.queue` of items that need a person (overdue invoices, waiting chats, pending bookings, unreplied Instagram, expiring quotes)
-4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, inbox, calendar, Instagram, catalog, assistant). Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
+4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, services, inbox, calendar, Instagram, catalog, assistant). Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
 5. `.setup-list` only when setup is actually unfinished **and** relevant (CRM-only tenants are not asked to connect WhatsApp)
 
 Home has a **Choose cards** control in `.home-title-row` next to the page title (not in the highlight stats). It opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
+
+## Services (client work)
+
+`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with status chips and an Invoice selected action. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer. Prefill from catalog or booking service types is optional; the client is required.
 
 ## Conversation / assistant
 
