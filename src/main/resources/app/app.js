@@ -10,7 +10,7 @@ let state = {
   search: '', active: 'overview', selectedAsset: '',
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
-  settingsSection: 'channels', personaAdvanced: false,
+  settingsSection: 'channels', personaAdvanced: false, overviewLayout: null,
   whatsAppSignup: { enabled: false },
   fetched: { conversations: false, invoices: false, bookings: false, instagram: false },
 };
@@ -231,6 +231,7 @@ async function loadModule(tab) {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
     state.documentTemplate = await api('/app/api/settings/document-template').catch(() => null);
+    state.overviewLayout = await api('/app/api/settings/overview').catch(() => ({ hidden: [], available: [] }));
   }
   if (tab === 'bookings') {
     if (!state.bookingWeekStart) state.bookingWeekStart = startOfWeek();
@@ -384,6 +385,20 @@ function pulseLine(o) {
   if (o.calendar?.today > 0 && typeof STR.pulseBookingsToday === 'function') parts.push(STR.pulseBookingsToday({ n: o.calendar.today }));
   return parts.join(' · ');
 }
+function homeCardCopy(id) {
+  const titles = {
+    highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
+    cash: STR.snapCash, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
+    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, assistant: STR.snapAssistant,
+  };
+  const descs = {
+    highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
+    cash: STR.homeCard_cashDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
+    calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, assistant: STR.homeCard_assistantDesc,
+  };
+  return { title: titles[id] || id, detail: descs[id] || '' };
+}
+
 function snapshotPanel(tab, title, tag, rows) {
   const body = `<div class="snapshot__body">${rows.map(r => `<div class="snapshot__row"><span class="muted">${escapeHTML(r.label)}</span><span class="num">${escapeHTML(String(r.value))}</span></div>`).join('')}</div>`;
   return `<div class="panel snapshot"><div class="panel__head"><h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2><div class="panel__tools"><button type="button" class="btn btn--sm" data-go="${escapeHTML(tab)}">${escapeHTML(STR.openModule)}</button></div></div>${body}</div>`;
@@ -391,23 +406,28 @@ function snapshotPanel(tab, title, tag, rows) {
 
 function renderOverview(root) {
   const o = state.overview || {};
-  const highlights = (o.highlights || []).map(h => ({
+  const hidden = new Set(o.hiddenCards || []);
+  const highlights = hidden.has('highlights') ? [] : (o.highlights || []).map(h => ({
     label: highlightLabel(h.key),
     value: highlightValue(h),
     hint: deltaHint(h.deltaPct, h.key === 'messages_today' ? STR.vsLastWeek : STR.vsLastMonth),
   }));
   const stats = highlights.length ? statCards(highlights) : '';
   const health = o.health || 'ok';
-  const pulseHtml = `<div class="pulse pulse--${escapeHTML(health)}"><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
-  const attention = o.attention || [];
-  const needsHtml = attention.length
+  const pulseHtml = hidden.has('pulse')
+    ? ''
+    : `<div class="pulse pulse--${escapeHTML(health)}"><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
+  const attention = hidden.has('attention') ? [] : (o.attention || []);
+  const needsHtml = hidden.has('attention')
+    ? ''
+    : (attention.length
     ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="queue">${attention.map(n => {
       const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
         : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
       const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
       return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
     }).join('')}</div></div>`
-    : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`;
+    : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
   if (o.cash) {
     const cashRows = [
@@ -488,17 +508,22 @@ function renderOverview(root) {
     widget: { title: STR.setupWidget, detail: STR.settingsWidget },
     persona: { title: STR.teachBot, detail: STR.personaDesc },
   };
-  const setup = o.setup || [];
+  const setup = hidden.has('setup') ? [] : (o.setup || []);
   const setupHtml = setup.length
     ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.setupTitle)}</h2><div class="setup-list">${setup.map(s => {
       const copy = setupMap[s.kind] || { title: s.kind, detail: STR.setupTitle };
       return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
+  const snapshotsOff = ['cash', 'pipeline', 'customers', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
   const modulesHtml = snapshots.length
     ? `<div class="home-grid">${snapshots.join('')}</div>`
-    : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`;
-  root.innerHTML = hero(labels.overview, STR.overviewDesc, stats) + pulseHtml + needsHtml + modulesHtml + setupHtml;
+    : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);
+  const customize = hasModule('settings')
+    ? `<button type="button" class="btn btn--sm home-customize" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>`
+    : '';
+  const heroHtml = `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(labels.overview)}</h1><p class="view__desc">${escapeHTML(STR.overviewDesc)}</p>${customize}</div>${stats}</div>`;
+  root.innerHTML = heroHtml + pulseHtml + needsHtml + modulesHtml + setupHtml;
   $$('[data-go]', root).forEach(b => b.addEventListener('click', async () => {
     if (b.dataset.conversation) state.selectedConversation = b.dataset.conversation;
     if (b.dataset.settings) state.settingsSection = b.dataset.settings;
@@ -1412,6 +1437,40 @@ function widgetSnippet(key) {
   return `<script src="${location.origin}/widget/widget.js" ${attrs.map(([name, value]) => `${name}="${escapeHTML(value)}"`).join(' ')} defer><\/script>`;
 }
 
+function homeLayoutPanel() {
+  const layout = state.overviewLayout || { hidden: [], available: [] };
+  const hidden = new Set(layout.hidden || []);
+  const groups = [
+    ['sections', STR.homeLayoutSections],
+    ['snapshots', STR.homeLayoutSnapshots],
+  ];
+  const blocks = groups.map(([group, title]) => {
+    const items = (layout.available || []).filter(opt => opt.group === group);
+    if (!items.length) return '';
+    const rows = items.map(opt => {
+      const shown = !hidden.has(opt.id);
+      const copy = homeCardCopy(opt.id);
+      return `<button type="button" class="queue__item choice ${shown ? 'is-on' : ''}" data-home-card="${escapeHTML(opt.id)}" aria-pressed="${shown}"><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div><span class="queue__meta"><span class="pill ${shown ? 'pill--ok' : ''}">${escapeHTML(shown ? STR.homeLayoutShown : STR.homeLayoutHidden)}</span></span></button>`;
+    }).join('');
+    return `<div class="panel" style="padding:18px;margin-bottom:18px"><h2 class="view__title" style="font-size:18px;margin-bottom:14px">${escapeHTML(title)}</h2><div class="choice-list">${rows}</div></div>`;
+  }).join('');
+  return `<div class="panel" style="padding:18px;margin-bottom:18px"><h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.homeLayoutTitle)}</h2><p class="view__desc">${escapeHTML(STR.homeLayoutDesc)}</p></div>${blocks}`;
+}
+
+async function toggleHomeCard(id) {
+  const layout = state.overviewLayout || { hidden: [], available: [] };
+  const hidden = new Set(layout.hidden || []);
+  if (hidden.has(id)) hidden.delete(id); else hidden.add(id);
+  try {
+    state.overviewLayout = await api('/app/api/settings/overview', { method: 'PUT', body: JSON.stringify({ hidden: [...hidden] }) });
+    state.overview = await api('/app/api/overview').catch(() => state.overview);
+    toast(STR.homeLayoutSaved);
+    render();
+  } catch {
+    toast(STR.homeLayoutSaveFailed);
+  }
+}
+
 function renderSettings(root) {
   const channels = state.me?.tenant?.channels || [];
   const wa = channels.find(c => c.platform === 'WHATSAPP');
@@ -1420,6 +1479,7 @@ function renderSettings(root) {
   const draft = widgetDraft();
   const section = state.settingsSection || 'channels';
   const tabs = [
+    ['home', STR.settingsHome],
     ['channels', STR.settingsChannels],
     ['widget', STR.settingsWidget],
     ['language', STR.settingsLanguage],
@@ -1541,12 +1601,14 @@ function renderSettings(root) {
       </div>
     </div>
     <div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.moreSettingsTitle)}</p><p class="empty__desc">${escapeHTML(STR.moreSettingsDesc)}</p></div></div>`;
-  const body = section === 'widget' ? widgetPanel
+  const body = section === 'home' ? homeLayoutPanel()
+    : section === 'widget' ? widgetPanel
     : section === 'language' ? languagePanel
     : section === 'documents' ? renderDocumentTemplatePanel()
     : channelsPanel;
   root.innerHTML = `${hero(labels.settings, STR.settingsDesc)}${chips}${body}`;
   $$('[data-settings]', root).forEach(b => b.addEventListener('click', () => { state.settingsSection = b.dataset.settings; render(); }));
+  $$('[data-home-card]', root).forEach(b => b.addEventListener('click', () => toggleHomeCard(b.dataset.homeCard)));
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
   $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));

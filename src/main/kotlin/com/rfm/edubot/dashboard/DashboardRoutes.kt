@@ -355,6 +355,20 @@ fun Route.dashboardRoutes(
                     ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(mapOf("locale" to updated.locale))
             }
+            get("/settings/overview") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
+                call.respond(OverviewHomeLayout.dto(ctx.tenant))
+            }
+            put("/settings/overview") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@put call.respond(HttpStatusCode.Forbidden)
+                val request = call.receive<OverviewLayoutRequest>()
+                val hidden = OverviewHomeLayout.sanitize(request.hidden)
+                val updated = tenantRepository.setOverviewHiddenCards(ctx.tenant.slug, hidden, SystemClock.now())
+                    ?: return@put call.respond(HttpStatusCode.NotFound)
+                call.respond(OverviewHomeLayout.dto(updated))
+            }
             get("/settings/document-template") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
@@ -933,6 +947,7 @@ private suspend fun runPersonaTest(
 @Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val status: String, val createdAt: String)
 @Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
 @Serializable private data class LocaleRequest(val locale: String)
+@Serializable private data class OverviewLayoutRequest(val hidden: List<String> = emptyList())
 @Serializable private data class WebWidgetDto(val publicKey: String? = null, val allowedOrigins: List<String> = emptyList())
 
 private fun ChannelBinding?.toWebWidgetDto() = WebWidgetDto(publicKey = this?.externalId, allowedOrigins = this?.allowedOrigins ?: emptyList())

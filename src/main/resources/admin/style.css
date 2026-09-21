@@ -1034,6 +1034,10 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .delta--up { color: var(--ok-ink); }
 .delta--down { color: var(--bad-ink); }
 .queue__meta { display: flex; align-items: center; gap: 8px; color: var(--ink-mute); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.choice-list { display: grid; gap: 8px; }
+.queue__item.choice.is-on { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--surface)); }
+.home-customize { margin-top: 12px; }
+html[data-theme="dark"] .queue__item.choice.is-on { background: color-mix(in srgb, var(--accent) 14%, var(--surface)); }
 html[data-theme="dark"] .pulse--ok { background: color-mix(in srgb, var(--ok) 12%, var(--mix)); }
 html[data-theme="dark"] .pulse--watch { background: color-mix(in srgb, var(--warn) 12%, var(--mix)); }
 html[data-theme="dark"] .pulse--urgent { background: color-mix(in srgb, var(--bad) 12%, var(--mix)); }

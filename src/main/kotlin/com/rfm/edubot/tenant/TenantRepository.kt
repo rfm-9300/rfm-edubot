@@ -58,6 +58,15 @@ class TenantRepository(mongoModule: MongoModule) {
     suspend fun setLocale(slug: String, locale: String, updatedAt: Instant): Tenant? =
         update(slug, Updates.combine(Updates.set("locale", locale), Updates.set("updatedAt", updatedAt.toDate())))
 
+    suspend fun setOverviewHiddenCards(slug: String, hidden: List<String>, updatedAt: Instant): Tenant? =
+        update(
+            slug,
+            Updates.combine(
+                Updates.set("overviewHiddenCards", hidden),
+                Updates.set("updatedAt", updatedAt.toDate()),
+            ),
+        )
+
     suspend fun setDocumentTemplate(slug: String, template: DocumentTemplate, updatedAt: Instant): Tenant? =
         update(
             slug,
@@ -76,6 +85,7 @@ class TenantRepository(mongoModule: MongoModule) {
         timezone = com.rfm.edubot.tenant.model.TenantTimeZones.normalize(getString("timezone")),
         openrouterModel = getString("openrouterModel"),
         enabledModules = getList("enabledModules", String::class.java),
+        overviewHiddenCards = getList("overviewHiddenCards", String::class.java).orEmpty(),
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
@@ -93,6 +103,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("timezone", timezone)
             .append("openrouterModel", openrouterModel)
             .append("enabledModules", enabledModules)
+            .append("overviewHiddenCards", overviewHiddenCards)
             .append("rateLimitPerHour", rateLimitPerHour)
             .append("rateLimitPerDay", rateLimitPerDay)
             .append("status", status.name)

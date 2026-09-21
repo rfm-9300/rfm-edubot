@@ -333,6 +333,8 @@ Inbox list items also use `.assistant__thread`, plus `.inbox__preview` (last mes
 
 Home uses `.queue` / `.setup-list` of `.queue__item` buttons (title + detail). An optional `.queue__meta` column holds a status pill or timestamp. Click navigates to the matching module. Do not replace this with a table.
 
+Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive.
+
 ## Media thumb
 
 Used by the Instagram inbox for post previews:
@@ -348,7 +350,8 @@ Used by the Instagram inbox for post previews:
 
 ```html
 <div class="settings-tabs">
-  <button type="button" class="chip is-on">Channels</button>
+  <button type="button" class="chip is-on">Home</button>
+  <button type="button" class="chip">Channels</button>
   <button type="button" class="chip">Website</button>
 </div>
 <div class="panel widget-customizer">
