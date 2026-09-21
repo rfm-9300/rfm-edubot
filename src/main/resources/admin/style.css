@@ -516,6 +516,10 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
 }
 html[data-theme="dark"] .panel__title .tag { color: var(--accent); }
 .panel__tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.panel__tools .sel {
+  width: auto; min-width: 168px; max-width: 240px; height: 28px;
+  font-size: 12px; font-weight: 800; padding: 0 28px 0 12px;
+}
 .chip {
   display: inline-flex; align-items: center; gap: 6px;
   height: 28px; padding: 0 13px;

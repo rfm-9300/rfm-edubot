@@ -345,6 +345,8 @@ window.__I18N_CATALOGS['en'] = {
       open: 'Open', invoiced: 'Invoiced', cancelled: 'Cancelled', work: 'Client work', filterAll: 'All',
       thWhen: 'When', thClient: 'Client', thService: 'Service', thQty: 'Qty', thTotal: 'Total', thStatus: 'Status',
       emptyTitle: 'No services yet', emptyDesc: 'Attach work to a client, then invoice several rows together.',
+      emptyFiltered: 'No matching services', emptyFilteredDesc: 'Try another client or clear the filters.',
+      filterClientAll: 'All clients',
       formTitle: 'New service', editTitle: 'Edit service', save: 'Save service',
       name: 'Service', namePh: 'E.g.: Facade painting',
       fromCatalog: 'From catalog or booking', fromCatalogNone: '— Custom service —',

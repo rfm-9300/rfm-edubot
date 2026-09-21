@@ -68,7 +68,7 @@ Success and recoverable errors: `toast(translatedString)`. Do not use `alert()`.
 
 ## Filters
 
-Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-side unless the module already hits an API query param.
+Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-side unless the module already hits an API query param. When the filter is a long entity list (clients on Serviços), use a compact `.sel` beside the chips instead of one chip per row.
 
 ## Home (tenant snapshot)
 
@@ -84,7 +84,7 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Services (client work)
 
-`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with status chips and an Invoice selected action. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer. Prefill from catalog or booking service types is optional; the client is required.
+`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a compact `.sel` client filter, status chips, and an Invoice selected action. Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
 
 ## Conversation / assistant
 

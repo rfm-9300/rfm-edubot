@@ -146,7 +146,9 @@ effective module list and returns `403 Forbidden` when its module is disabled.
 
 Optional `services` module (also on whenever `clients` is on): client-attached work in
 `crm.client_services`. Managers record priced rows on a client and group open rows into one
-invoice via `POST /app/api/crm/services/invoice`. Booking service types stay under Bookings.
+invoice via `POST /app/api/crm/services/invoice`. The Services table filters by client
+(client-side; `GET /app/api/crm/services?clientId=` is also available). Booking service types
+stay under Bookings.
 
 ### Bookings
 
