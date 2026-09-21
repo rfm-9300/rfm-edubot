@@ -100,13 +100,15 @@ function confirmDialog({ title, body, okLabel = STR.confirm, danger = true }) {
   });
 }
 
+function quoteTone(status) { return { PENDENTE: 'warn', SENT: 'info', ACEITO: 'ok' }[status] || ''; }
 function quotePill(status) {
-  const map = { PENDENTE: 'pill--warn', SENT: 'pill--info', ACEITO: 'pill--ok' };
-  return `<span class="pill ${map[status] || ''}">${escapeHTML(quoteStatusLabel(status))}</span>`;
+  const tone = quoteTone(status);
+  return `<span class="pill ${tone ? `pill--${tone}` : ''}">${escapeHTML(quoteStatusLabel(status))}</span>`;
 }
+function invoiceTone(status) { return { PENDING: 'warn', PAID: 'ok', OVERDUE: 'bad', CANCELLED: '' }[status] || ''; }
 function invoicePill(status) {
-  const map = { PENDING: 'pill--warn', PAID: 'pill--ok', OVERDUE: 'pill--bad', CANCELLED: '' };
-  return `<span class="pill ${map[status] || ''}">${escapeHTML(invoiceStatusLabel(status))}</span>`;
+  const tone = invoiceTone(status);
+  return `<span class="pill ${tone ? `pill--${tone}` : ''}">${escapeHTML(invoiceStatusLabel(status))}</span>`;
 }
 function serviceStatusLabel(status) {
   const t = CRM.services;
@@ -1203,6 +1205,23 @@ function renderQuotes(root) {
   }));
 }
 
+function detailHead(clientName, pillHtml, totalEur, tone) {
+  return `<div class="detail__head">
+    <div class="detail__client">${escapeHTML(clientName || '')}</div>
+    <div class="detail__amount">${pillHtml}<span class="detail__figure${tone ? ` detail__figure--${tone}` : ''}">${fmtEUR(totalEur)}</span></div>
+  </div>`;
+}
+function detailMeta(items) {
+  const rows = items.filter(Boolean);
+  if (!rows.length) return '';
+  return `<div class="detail__meta">${rows.map(m => `<div class="detail__meta-item"><span class="detail__meta-label">${escapeHTML(m.label)}</span><span class="detail__meta-value">${escapeHTML(m.value)}</span></div>`).join('')}</div>`;
+}
+function itemsTable(items) {
+  if (!items || !items.length) return '';
+  const rows = items.map(it => `<tr><td class="name">${escapeHTML(it.description)}</td><td class="num muted">${it.quantity}${it.unit ? ` ${escapeHTML(it.unit)}` : ''}</td><td class="num muted">${fmtEUR(it.unitPriceEur)}</td><td class="num">${fmtEUR(it.quantity * it.unitPriceEur)}</td></tr>`).join('');
+  return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(STR.lineColDesc)}</th><th class="right">${escapeHTML(STR.lineColQty)}</th><th class="right">${escapeHTML(STR.lineColPrice)}</th><th class="right">${escapeHTML(STR.lineTotal)}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
 async function openQuoteDetail(id) {
   let quote = state.quotes.find(q => q.id === id);
   try { quote = await api(`/app/api/crm/quotes/${encodeURIComponent(id)}`); }
@@ -1210,17 +1229,17 @@ async function openQuoteDetail(id) {
   if (!quote) return;
   const form = document.createElement('div');
   form.className = 'form';
-  const items = (quote.items || []).map(it => `<li>${escapeHTML(it.description)} · ${it.quantity} × ${fmtEUR(it.unitPriceEur)}</li>`).join('');
   const canSend = quote.status === 'PENDENTE';
   const canAccept = quote.status === 'PENDENTE' || quote.status === 'SENT';
   const canConvert = hasModule('invoices') && quote.status !== 'CANCELLED';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(quote.clientName || '')} · ${quotePill(quote.status)} · ${fmtEUR(quote.totalEur)}</p>
-    ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
+    ${detailHead(quote.clientName, quotePill(quote.status), quote.totalEur, quoteTone(quote.status))}
+    ${detailMeta([quote.validUntil ? { label: CRM.quotes.thValidUntil, value: fmtDay(quote.validUntil) } : null])}
+    ${itemsTable(quote.items)}
     ${quote.notes ? `<p class="hint">${escapeHTML(quote.notes)}</p>` : ''}
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
       <input class="inp" id="q-due" type="date" value="${new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)}" /></div>` : ''}
-    <div class="actions">
+    <div class="detail__foot">
       ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
       ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
       ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
@@ -1324,16 +1343,17 @@ async function openInvoiceDetail(id) {
   catch { /* keep list row */ }
   if (!inv) return;
   const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
-  const items = (inv.items || []).map(it => `<li>${escapeHTML(it.description)} · ${it.quantity} × ${fmtEUR(it.unitPriceEur)}</li>`).join('');
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(inv.clientName || '')} · ${invoicePill(inv.status)} · ${fmtEUR(inv.totalEur)}</p>
-    <p class="hint">${escapeHTML(STR.thDueDate)} · ${escapeHTML(fmtDay(inv.dueDate))}</p>
-    ${inv.status === 'PAID' && inv.paidAt ? `<p class="hint">${escapeHTML(STR.paidOnLabel)} · ${escapeHTML(fmtDay(inv.paidAt))}</p>` : ''}
+    ${detailHead(inv.clientName, invoicePill(inv.status), inv.totalEur, invoiceTone(inv.status))}
+    ${detailMeta([
+      { label: STR.thDueDate, value: fmtDay(inv.dueDate) },
+      inv.status === 'PAID' && inv.paidAt ? { label: STR.paidOnLabel, value: fmtDay(inv.paidAt) } : null,
+    ])}
     ${inv.quoteNumber ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
-    ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
-    <div class="actions">
+    ${itemsTable(inv.items)}
+    <div class="detail__foot">
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
     </div>`;
