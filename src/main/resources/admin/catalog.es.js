@@ -340,6 +340,7 @@ window.__I18N_CATALOGS['es'] = {
     error: p => `Error: ${p.msg}`,
     quoteStatus: { PENDENTE: 'Pendiente', SENT: 'Enviado', ACEITO: 'Aceptado' },
     invoiceStatus: { PENDING: 'Pendiente', PAID: 'Pagada', OVERDUE: 'Vencida', CANCELLED: 'Cancelada' },
+    paymentStatus: { PENDING: 'Pendiente', PAID: 'Pagado', OVERDUE: 'Vencido', CANCELLED: 'Cancelado' },
     tabs: {
       clientes: { title: 'Clientes', desc: 'Directorio de clientes de la empresa.', newLabel: 'Nuevo cliente' },
       orcamentos: { title: 'Presupuestos', desc: 'Propuestas comerciales emitidas.', newLabel: 'Nuevo presupuesto' },

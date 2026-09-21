@@ -41,6 +41,7 @@ const fmtDay = iso => {
 const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString(uiLocale(), { hour: '2-digit', minute: '2-digit', timeZone: tenantTz() }) : '';
 const quoteStatusLabel = code => (CRM.quoteStatus && CRM.quoteStatus[code]) || code;
 const invoiceStatusLabel = code => (CRM.invoiceStatus && CRM.invoiceStatus[code]) || code;
+const paymentStatusLabel = code => (CRM.paymentStatus && CRM.paymentStatus[code]) || invoiceStatusLabel(code);
 const contactStatusLabel = code => STR[`contactStatus${code}`] || code;
 const conversationStateLabel = code => STR[`conversationState${code}`] || code;
 const QUOTE_STATUSES = ['PENDENTE', 'SENT', 'ACEITO'];
@@ -110,6 +111,10 @@ function invoiceTone(status) { return { PENDING: 'warn', PAID: 'ok', OVERDUE: 'b
 function invoicePill(status) {
   const tone = invoiceTone(status);
   return `<span class="pill ${tone ? `pill--${tone}` : ''}">${escapeHTML(invoiceStatusLabel(status))}</span>`;
+}
+function paymentPill(status) {
+  const map = { PENDING: 'pill--warn', PAID: 'pill--ok', OVERDUE: 'pill--bad', CANCELLED: '' };
+  return `<span class="pill ${map[status] || ''}">${escapeHTML(paymentStatusLabel(status))}</span>`;
 }
 function serviceStatusLabel(status) {
   const t = CRM.services;
@@ -1520,14 +1525,14 @@ function renderPayments(root) {
   const scoped = supplierId ? all.filter(p => p.supplierId === supplierId) : all;
   const rows = scoped
     .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
-    .filter(p => !q || `${p.number} ${p.supplierName || ''} ${invoiceStatusLabel(p.status)}`.toLowerCase().includes(q))
+    .filter(p => !q || `${p.number} ${p.supplierName || ''} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
     .map(p => {
       const canMarkPaid = p.status === 'PENDING' || p.status === 'OVERDUE';
       const rowClass = p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '';
       return `<tr class="conversation-row ${rowClass}" data-payment="${escapeHTML(p.id)}">
         <td class="id">${escapeHTML(p.number)}</td>
         <td class="name">${escapeHTML(p.supplierName || '')}</td>
-        <td>${invoicePill(p.status)}</td>
+        <td>${paymentPill(p.status)}</td>
         <td class="mono muted">${fmtDay(p.dueDate)}</td>
         <td class="num">${fmtEUR(p.totalEur)}</td>
         <td class="right"><div class="actions">
@@ -1544,7 +1549,7 @@ function renderPayments(root) {
     : '';
   const tools = supplierFilter
     + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
-    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(paymentStatusLabel(s))}</button>`).join('');
   const filtered = Boolean(supplierId || state.filterPaymentStatus || q);
   root.innerHTML = hero(labels.payments, CRM.tabs.pagamentos.desc, statCards([
     { label: t.paid, value: fmtEUR(paid) },
@@ -1642,7 +1647,7 @@ function openPaymentDetail(id) {
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(pay.supplierName || '')} · ${invoicePill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
+    <p class="hint">${escapeHTML(pay.supplierName || '')} · ${paymentPill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
     <p class="hint">${escapeHTML(t.thDueDate)} · ${escapeHTML(fmtDay(pay.dueDate))}</p>
     ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
