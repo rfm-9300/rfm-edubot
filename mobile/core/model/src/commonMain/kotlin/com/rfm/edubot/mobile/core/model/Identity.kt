@@ -45,4 +45,46 @@ data class Overview(
     val messagesToday: Long,
     val quotes: Long,
     val invoices: Long,
+    val instagramUnreplied: Long = 0,
+    val attentionCount: Int = 0,
+    val health: String = "ok",
+    val cash: OverviewCash? = null,
+    val pipeline: OverviewPipeline? = null,
+    val inbox: OverviewInbox? = null,
+    val calendar: OverviewCalendar? = null,
+    val customers: OverviewCustomers? = null,
+)
+
+@Serializable
+data class OverviewCash(
+    val collectedThisMonthCents: Long = 0,
+    val outstandingCents: Long = 0,
+    val overdueCents: Long = 0,
+    val overdueCount: Int = 0,
+)
+
+@Serializable
+data class OverviewPipeline(
+    val openCents: Long = 0,
+    val winRatePct: Int = 0,
+    val quoteCount: Int = 0,
+)
+
+@Serializable
+data class OverviewInbox(
+    val waiting: Int = 0,
+    val messagesToday: Long = 0,
+    val contacts: Long = 0,
+)
+
+@Serializable
+data class OverviewCalendar(
+    val today: Int = 0,
+    val pending: Int = 0,
+)
+
+@Serializable
+data class OverviewCustomers(
+    val total: Long = 0,
+    val newThisMonth: Long = 0,
 )

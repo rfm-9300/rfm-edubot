@@ -493,6 +493,7 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
 .stat__label { font-size: 10.5px; color: color-mix(in srgb, var(--stat) 55%, var(--ink)); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 800; }
 .stat__value { font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
 .stat__value--accent { color: color-mix(in srgb, var(--stat) 72%, var(--ink)); }
+.stat__hint { font-size: 11px; font-weight: 800; color: var(--ink-mute); }
 
 .panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); }
 .panel__head {
@@ -961,6 +962,10 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 }
 
 /* Dashboard AI assistant */
+.overview-block { margin-bottom: 22px; }
+.overview-block > .panel__title { margin-bottom: 10px; }
+.overview-block .queue,
+.overview-block .setup-list { margin-bottom: 0; }
 .queue { display: grid; gap: 10px; margin-bottom: 22px; }
 .queue__item {
   display: grid;
@@ -1000,6 +1005,41 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .ig-comment p { margin: 0; white-space: pre-wrap; }
 .ig-comment .pill { justify-self: start; }
 .setup-list { display: grid; gap: 8px; margin-bottom: 22px; }
+.pulse {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: -6px 0 22px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-lg);
+  background: var(--surface);
+}
+.pulse--ok { border-color: color-mix(in srgb, var(--ok) 36%, var(--mix)); background: color-mix(in srgb, var(--ok) 8%, var(--mix)); }
+.pulse--watch { border-color: color-mix(in srgb, var(--warn) 36%, var(--mix)); background: color-mix(in srgb, var(--warn) 8%, var(--mix)); }
+.pulse--urgent { border-color: color-mix(in srgb, var(--bad) 36%, var(--mix)); background: color-mix(in srgb, var(--bad) 8%, var(--mix)); }
+.pulse__text { color: var(--ink-2); font-size: 13px; font-weight: 700; }
+.home-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 22px;
+}
+.snapshot__body { display: grid; gap: 10px; padding: 14px 16px 16px; }
+.snapshot__row { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; font-size: 13px; }
+.snapshot__row .muted { color: var(--ink-mute); font-weight: 700; }
+.snapshot__row .num { font-variant-numeric: tabular-nums; font-weight: 800; }
+.delta { font-size: 11px; font-weight: 800; margin-left: 6px; }
+.delta--up { color: var(--ok-ink); }
+.delta--down { color: var(--bad-ink); }
+.queue__meta { display: flex; align-items: center; gap: 8px; color: var(--ink-mute); font-size: 12px; font-weight: 800; font-variant-numeric: tabular-nums; }
+html[data-theme="dark"] .pulse--ok { background: color-mix(in srgb, var(--ok) 12%, var(--mix)); }
+html[data-theme="dark"] .pulse--watch { background: color-mix(in srgb, var(--warn) 12%, var(--mix)); }
+html[data-theme="dark"] .pulse--urgent { background: color-mix(in srgb, var(--bad) 12%, var(--mix)); }
+@media (max-width: 920px) {
+  .home-grid { grid-template-columns: 1fr; }
+  .pulse { align-items: flex-start; flex-direction: column; }
+}
 .inbox__preview { color: var(--ink-mute); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .inbox__meta { display: flex; gap: 8px; align-items: center; color: var(--ink-mute); font-size: 11px; }
 .assistant__thread .inbox__preview,
