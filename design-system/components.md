@@ -97,40 +97,51 @@ Order: crumb · search · actions. Theme button is always in actions. Search hid
 </div>
 ```
 
-Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta.
+Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta — add `.delta--up` / `.delta--down` to it when the delta has a direction. `.stat--lg` is a bigger spotlight variant (Home's highlights only); don't use it on list-page stat rows (clients, services, quotes, invoices, catalog).
 
 ## Health pulse
 
-Home’s one-line status under the hero:
+Home’s status banner under the hero:
 
 ```html
 <div class="pulse pulse--urgent">
+  <span class="pulse__icon" aria-hidden="true">🚨</span>
   <span class="pill pill--bad">Urgent</span>
   <span class="pulse__text">3 items need you · €1.240,00 to collect</span>
 </div>
 ```
 
-Modifiers: `.pulse--ok` `.pulse--watch` `.pulse--urgent`. Dark theme keeps the same semantic tints.
+Modifiers: `.pulse--ok` `.pulse--watch` `.pulse--urgent`, each tinting `.pulse__icon`'s background too (`ok` → 🟢/✅, `watch` → 👀, `urgent` → 🚨 — pick the emoji in JS from the same health value, it's decorative so it doesn't go through i18n). Dark theme keeps the same semantic tints.
 
 ## Snapshot grid
 
-Home’s enabled-module cards. Two columns, one column below 920px:
+Home’s enabled-module cards, one per operational module. Two columns, one column below 920px:
 
 ```html
 <div class="home-grid">
-  <div class="panel snapshot">
-    <div class="panel__head">
-      <h2 class="panel__title">Money <span class="tag">€ 400,00</span></h2>
-      <div class="panel__tools"><button class="btn btn--sm" type="button">Open</button></div>
+  <div class="panel snapshot" data-kind="cash">
+    <div class="snapshot__head">
+      <span class="snapshot__icon" aria-hidden="true">💶</span>
+      <div class="snapshot__head-text">
+        <h2 class="panel__title">Money</h2>
+        <div class="snapshot__figure">€ 1.240,00</div>
+      </div>
+      <button class="btn btn--sm snapshot__open" type="button">Open</button>
     </div>
-    <div class="snapshot__body">
-      <div class="snapshot__row"><span class="muted">Collected this month</span><span class="num">€ 120,00</span></div>
+    <div class="meter"><div class="meter__fill" style="width:62%"></div></div>
+    <div class="snapshot__metrics">
+      <div class="snapshot__metric"><span class="snapshot__metric-label">Collected</span><span class="snapshot__metric-value">€ 120,00</span></div>
     </div>
   </div>
 </div>
 ```
 
-Do not replace this with a table. Row labels use `.muted`; values use `.num`.
+- `data-kind` selects the card's accent color (`--snap`), reusing the same personality-tint idea as nav tabs / `.stat` — see the `[data-kind]` rules in `style.css` (`cash`, `pipeline`, `customers`, `services`, `inbox`, `contacts`, `calendar`, `social`, `catalog`, `assistant`). Reuse a nav tab's hex when the module has a nav tab; keep unlisted kinds on the `var(--accent)` fallback.
+- `.snapshot__icon` is a module emoji, matching its nav dot emoji.
+- `.snapshot__figure` is the card's single headline number (display font, large, tinted `--snap`) — not a small `.tag`.
+- `.meter` / `.meter__fill` is optional: a thin progress bar for a card whose primary number is naturally a share of a whole (cash collected vs. outstanding, quote win rate). Omit it for cards without a meaningful ratio.
+- `.snapshot__metrics` is a 2-column grid of secondary numbers (`.snapshot__metric-label` + `.snapshot__metric-value`), not a vertical label/value list. A lone trailing item in an odd-length list spans both columns.
+- Do not replace this with a table.
 
 ## Panel + chips
 
@@ -331,7 +342,27 @@ Inbox list items also use `.assistant__thread`, plus `.inbox__preview` (last mes
 
 ## Work queue
 
-Home uses `.queue` / `.setup-list` of `.queue__item` buttons (title + detail). An optional `.queue__meta` column holds a status pill or timestamp. Click navigates to the matching module. Do not replace this with a table.
+Home uses `.queue` / `.setup-list` of `.queue__item` buttons: a leading `.queue__icon` (emoji, decorative), a title + detail block, then an optional trailing `.queue__meta` column with a status pill or timestamp:
+
+```html
+<button class="queue__item" type="button">
+  <span class="queue__icon queue__icon--warn" aria-hidden="true">💬</span>
+  <div><strong>Waiting on you</strong><span>Ana Silva · 12 min</span></div>
+  <span class="queue__meta"><span class="pill pill--warn">Waiting</span></span>
+</button>
+```
+
+`.queue__icon` tones: `--warn` `--bad` `--info` `--accent` (match the item's pill tone), or the plain `--surface-2` fill for neutral setup items. Click navigates to the matching module. Do not replace this with a table.
+
+## Meter
+
+Thin progress bar for a card whose headline number is a share of a whole (win rate, collected vs. outstanding):
+
+```html
+<div class="meter"><div class="meter__fill" style="width:62%"></div></div>
+```
+
+`.meter__fill` width is a JS-computed percentage (clamp 0–100), not a token. Inside `.snapshot`, its fill color follows that card's `--snap` tint automatically. Only add a meter where the ratio is meaningful — most panels don't need one.
 
 Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive.
 

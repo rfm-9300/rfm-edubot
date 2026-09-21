@@ -72,12 +72,12 @@ Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-
 
 ## Home (tenant snapshot)
 
-`/app` overview is a manager snapshot of **enabled modules**, not a KPI wall of raw counts:
+`/app` overview is a manager snapshot of **enabled modules**, not a KPI wall of raw counts. It should read as graphical — big tinted numbers and module color, not a stack of label/value form rows:
 
-1. `.view__hero` with 3–4 processed highlights (collected this month, outstanding, open quotes, waiting chats — only for modules the tenant has on)
-2. `.pulse` health strip (`pulse--ok` / `--watch` / `--urgent`) with a one-line summary
-3. `.queue` of items that need a person (overdue invoices, waiting chats, pending bookings, unreplied Instagram, expiring quotes)
-4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, services, inbox, calendar, Instagram, catalog, assistant). Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
+1. `.view__hero` with 3–4 processed highlights as `.stat--lg` spotlight tiles (collected this month, outstanding, open quotes, waiting chats — only for modules the tenant has on). A highlight's hint gets `.delta--up` / `.delta--down` from its `deltaPct` sign, not plain muted text.
+2. `.pulse` health strip (`pulse--ok` / `--watch` / `--urgent`) with a `.pulse__icon` and a one-line summary
+3. `.queue` of items that need a person (overdue invoices, waiting chats, pending bookings, unreplied Instagram, expiring quotes), each row led by a `.queue__icon`. The "Needs you" heading carries a `.tag` count.
+4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, services, inbox, calendar, Instagram, catalog, assistant). Each card gets a module `data-kind` (drives its `--snap` accent + `.snapshot__icon`), a single large `.snapshot__figure` headline number, an optional `.meter` when the number is a ratio, and secondary numbers in a `.snapshot__metrics` grid — not a vertical label/value list. Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
 5. `.setup-list` only when setup is actually unfinished **and** relevant (CRM-only tenants are not asked to connect WhatsApp)
 
 Home has a **Choose cards** control in `.home-title-row` next to the page title (not in the highlight stats). It opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.

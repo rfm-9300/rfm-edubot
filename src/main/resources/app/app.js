@@ -305,9 +305,13 @@ function render() {
 function hero(title, desc, stats = '') {
   return `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div>${stats}</div>`;
 }
-function statCards(items) {
+function statCards(items, size = '') {
   if (!items.length) return '';
-  return `<div class="view__stats">${items.map((it, i) => `<div class="stat"><div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint">${escapeHTML(it.hint)}</div>` : ''}</div>`).join('')}</div>`;
+  const sizeCls = size === 'lg' ? ' stat--lg' : '';
+  return `<div class="view__stats">${items.map((it, i) => {
+    const trendCls = it.trend === 'up' ? ' delta--up' : it.trend === 'down' ? ' delta--down' : '';
+    return `<div class="stat${sizeCls}"><div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint${trendCls}">${escapeHTML(it.hint)}</div>` : ''}</div>`;
+  }).join('')}</div>`;
 }
 function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
   const cols = (String(head).match(/<th/g) || []).length || 8;
@@ -399,6 +403,31 @@ function healthLabel(health) {
   if (health === 'watch') return STR.healthWatch;
   return STR.healthOk;
 }
+function healthIcon(health) {
+  if (health === 'urgent') return '🚨';
+  if (health === 'watch') return '👀';
+  return '✅';
+}
+function attentionIcon(kind) {
+  const map = {
+    waiting_chat: '💬', overdue_invoice: '💶', due_soon_invoice: '⏰',
+    pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
+    assistant_action: '✨',
+  };
+  return map[kind] || '•';
+}
+function attentionIconTone(kind) {
+  const pill = attentionPill(kind);
+  if (pill === 'pill--bad') return 'queue__icon--bad';
+  if (pill === 'pill--warn') return 'queue__icon--warn';
+  if (pill === 'pill--info') return 'queue__icon--info';
+  if (pill === 'pill--accent') return 'queue__icon--accent';
+  return '';
+}
+function setupIcon(kind) {
+  const map = { wa: '📱', ig: '📸', widget: '🧩', persona: '🎭' };
+  return map[kind] || '⚙️';
+}
 function pulseLine(o) {
   const parts = [];
   if ((o.health || 'ok') === 'ok') parts.push(STR.pulseOk);
@@ -421,9 +450,22 @@ function homeCardCopy(id) {
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
 
-function snapshotPanel(tab, title, tag, rows) {
-  const body = `<div class="snapshot__body">${rows.map(r => `<div class="snapshot__row"><span class="muted">${escapeHTML(r.label)}</span><span class="num">${escapeHTML(String(r.value))}</span></div>`).join('')}</div>`;
-  return `<div class="panel snapshot"><div class="panel__head"><h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2><div class="panel__tools"><button type="button" class="btn btn--sm" data-go="${escapeHTML(tab)}">${escapeHTML(STR.openModule)}</button></div></div>${body}</div>`;
+function snapshotPanel({ tab, kind, icon, title, figure, rows, meter }) {
+  const metrics = `<div class="snapshot__metrics">${rows.map(r => `<div class="snapshot__metric"><span class="snapshot__metric-label">${escapeHTML(r.label)}</span><span class="snapshot__metric-value">${escapeHTML(String(r.value))}</span></div>`).join('')}</div>`;
+  const pct = meter ? Math.max(0, Math.min(100, Math.round(meter.pct))) : null;
+  const meterHtml = pct != null ? `<div class="meter"><div class="meter__fill" style="width:${pct}%"></div></div>` : '';
+  return `<div class="panel snapshot" data-kind="${escapeHTML(kind)}">
+    <div class="snapshot__head">
+      <span class="snapshot__icon" aria-hidden="true">${icon}</span>
+      <div class="snapshot__head-text">
+        <h2 class="panel__title">${escapeHTML(title)}</h2>
+        <div class="snapshot__figure">${escapeHTML(String(figure))}</div>
+      </div>
+      <button type="button" class="btn btn--sm snapshot__open" data-go="${escapeHTML(tab)}">${escapeHTML(STR.openModule)}</button>
+    </div>
+    ${meterHtml}
+    ${metrics}
+  </div>`;
 }
 
 function renderOverview(root) {
@@ -433,21 +475,22 @@ function renderOverview(root) {
     label: highlightLabel(h.key),
     value: highlightValue(h),
     hint: deltaHint(h.deltaPct, h.key === 'messages_today' ? STR.vsLastWeek : STR.vsLastMonth),
+    trend: h.deltaPct > 0 ? 'up' : h.deltaPct < 0 ? 'down' : '',
   }));
-  const stats = highlights.length ? statCards(highlights) : '';
+  const stats = highlights.length ? statCards(highlights, 'lg') : '';
   const health = o.health || 'ok';
   const pulseHtml = hidden.has('pulse')
     ? ''
-    : `<div class="pulse pulse--${escapeHTML(health)}"><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
+    : `<div class="pulse pulse--${escapeHTML(health)}"><span class="pulse__icon" aria-hidden="true">${healthIcon(health)}</span><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
   const attention = hidden.has('attention') ? [] : (o.attention || []);
   const needsHtml = hidden.has('attention')
     ? ''
     : (attention.length
-    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="queue">${attention.map(n => {
+    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)} <span class="tag">${attention.length}</span></h2><div class="queue">${attention.map(n => {
       const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
         : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
       const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
     }).join('')}</div></div>`
     : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
@@ -465,10 +508,12 @@ function renderOverview(root) {
       if (o.cash.agingMonthCents) cashRows.push({ label: STR.cashAgingMonth, value: centsEUR(o.cash.agingMonthCents) });
       if (o.cash.agingOldCents) cashRows.push({ label: STR.cashAgingOld, value: centsEUR(o.cash.agingOldCents) });
     }
-    snapshots.push(snapshotPanel('invoices', STR.snapCash, centsEUR(o.cash.outstandingCents), cashRows));
+    const collected = o.cash.collectedThisMonthCents || 0, outstanding = o.cash.outstandingCents || 0;
+    const cashMeter = (collected || outstanding) ? { pct: (collected / (collected + outstanding)) * 100 } : null;
+    snapshots.push(snapshotPanel({ tab: 'invoices', kind: 'cash', icon: '💶', title: STR.snapCash, figure: centsEUR(o.cash.outstandingCents), rows: cashRows, meter: cashMeter }));
   }
   if (o.pipeline && !hidden.has('pipeline')) {
-    snapshots.push(snapshotPanel('quotes', STR.snapPipeline, `${o.pipeline.winRatePct}%`, [
+    snapshots.push(snapshotPanel({ tab: 'quotes', kind: 'pipeline', icon: '📝', title: STR.snapPipeline, figure: `${o.pipeline.winRatePct}%`, meter: { pct: o.pipeline.winRatePct }, rows: [
       { label: STR.hl_pipeline_open, value: centsEUR(o.pipeline.openCents) },
       { label: STR.pipelineDrafts, value: o.pipeline.pendingCount },
       { label: STR.pipelineSent, value: o.pipeline.sentCount },
@@ -476,59 +521,59 @@ function renderOverview(root) {
       { label: STR.pipelineAcceptedMonth, value: centsEUR(o.pipeline.acceptedThisMonthCents) },
       { label: STR.pipelineExpiring, value: o.pipeline.expiringSoonCount },
       { label: STR.hl_win_rate, value: `${o.pipeline.winRatePct}%` },
-    ]));
+    ] }));
   }
   if (o.customers && !hidden.has('customers')) {
-    snapshots.push(snapshotPanel('clients', STR.snapCustomers, o.customers.total, [
+    snapshots.push(snapshotPanel({ tab: 'clients', kind: 'customers', icon: '👥', title: STR.snapCustomers, figure: o.customers.total, rows: [
       { label: STR.hl_clients, value: o.customers.total },
       { label: STR.customersNewMonth, value: o.customers.newThisMonth },
       { label: STR.customersNewLastMonth, value: o.customers.newLastMonth },
-    ]));
+    ] }));
   }
   if (o.services && !hidden.has('services')) {
-    snapshots.push(snapshotPanel('services', STR.snapServices, o.services.openCount, [
+    snapshots.push(snapshotPanel({ tab: 'services', kind: 'services', icon: '🧾', title: STR.snapServices, figure: o.services.openCount, rows: [
       { label: STR.servicesOpen, value: `${o.services.openCount} · ${centsEUR(o.services.openCents)}` },
       { label: STR.servicesInvoicedMonth, value: `${o.services.invoicedThisMonthCount} · ${centsEUR(o.services.invoicedThisMonthCents)}` },
-    ]));
+    ] }));
   }
   if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
-    snapshots.push(snapshotPanel('conversations', STR.snapInbox, o.inbox.waiting, [
+    snapshots.push(snapshotPanel({ tab: 'conversations', kind: 'inbox', icon: '💬', title: STR.snapInbox, figure: o.inbox.waiting, rows: [
       { label: STR.hl_waiting, value: o.inbox.waiting },
       { label: STR.hl_messages_today, value: o.inbox.messagesToday },
       { label: STR.inboxWeek, value: o.inbox.messagesThisWeek },
       { label: STR.statConversations, value: o.inbox.conversations },
       { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
       { label: STR.inboxPaused, value: o.inbox.autoReplyPaused },
-    ]));
+    ] }));
   } else if (o.inbox && hasModule('contacts') && !hidden.has('inbox')) {
-    snapshots.push(snapshotPanel('contacts', labels.contacts, o.inbox.contacts, [
+    snapshots.push(snapshotPanel({ tab: 'contacts', kind: 'contacts', icon: '📇', title: labels.contacts, figure: o.inbox.contacts, rows: [
       { label: STR.hl_contacts, value: o.inbox.contacts },
       { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
-    ]));
+    ] }));
   }
   if (o.calendar && !hidden.has('calendar')) {
-    snapshots.push(snapshotPanel('bookings', STR.snapCalendar, o.calendar.today, [
+    snapshots.push(snapshotPanel({ tab: 'bookings', kind: 'calendar', icon: '📅', title: STR.snapCalendar, figure: o.calendar.today, rows: [
       { label: STR.hl_bookings_today, value: o.calendar.today },
       { label: STR.snapCalendar, value: o.calendar.thisWeek },
       { label: STR.calendarPending, value: o.calendar.pending },
       { label: STR.calendarNext, value: o.calendar.next ? `${o.calendar.next.contactName} · ${fmtDate(o.calendar.next.startAt)}` : STR.calendarNone },
-    ]));
+    ] }));
   }
   if (o.social && !hidden.has('social')) {
-    snapshots.push(snapshotPanel('instagram', STR.snapSocial, o.social.unreplied, [
+    snapshots.push(snapshotPanel({ tab: 'instagram', kind: 'social', icon: '📸', title: STR.snapSocial, figure: o.social.unreplied, rows: [
       { label: STR.hl_instagram_unreplied, value: o.social.unreplied },
       { label: STR.colStatus, value: o.social.connected ? STR.connected : STR.notConnected },
-    ]));
+    ] }));
   }
   if (o.catalog && !hidden.has('catalog')) {
-    snapshots.push(snapshotPanel('catalog', STR.snapCatalog, o.catalog.items, [
+    snapshots.push(snapshotPanel({ tab: 'catalog', kind: 'catalog', icon: '🗂️', title: STR.snapCatalog, figure: o.catalog.items, rows: [
       { label: STR.catalogItems, value: o.catalog.items },
-    ]));
+    ] }));
   }
   if (o.assistant && !hidden.has('assistant')) {
-    snapshots.push(snapshotPanel('ai-assistant', STR.snapAssistant, o.assistant.pendingActions, [
+    snapshots.push(snapshotPanel({ tab: 'ai-assistant', kind: 'assistant', icon: '✨', title: STR.snapAssistant, figure: o.assistant.pendingActions, rows: [
       { label: STR.assistantPending, value: o.assistant.pendingActions },
-    ]));
+    ] }));
   }
   const setupMap = {
     wa: { title: STR.waConnect, detail: STR.setupTitle },
@@ -540,7 +585,7 @@ function renderOverview(root) {
   const setupHtml = setup.length
     ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.setupTitle)}</h2><div class="setup-list">${setup.map(s => {
       const copy = setupMap[s.kind] || { title: s.kind, detail: STR.setupTitle };
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><span class="queue__icon queue__icon--info" aria-hidden="true">${setupIcon(s.kind)}</span><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
   const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
