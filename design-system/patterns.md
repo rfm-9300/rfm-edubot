@@ -80,7 +80,7 @@ Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-
 4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, inbox, calendar, Instagram, catalog, assistant). Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
 5. `.setup-list` only when setup is actually unfinished **and** relevant (CRM-only tenants are not asked to connect WhatsApp)
 
-Home has a **Choose cards** control that opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
+Home has a **Choose cards** control in `.home-title-row` next to the page title (not in the highlight stats). It opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
 
 ## Conversation / assistant
 
