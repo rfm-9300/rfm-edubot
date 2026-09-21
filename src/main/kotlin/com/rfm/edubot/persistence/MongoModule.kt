@@ -116,6 +116,11 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmSequences.dropIndexIfExists("name_1")
             crmSequences.createIndex(Document("tenantId", 1).append("name", 1), IndexOptions().unique(true))
 
+            val crmClientServices = db.getCollection<Document>("crm.client_services")
+            crmClientServices.createIndex(Document("tenantId", 1).append("clientId", 1).append("status", 1))
+            crmClientServices.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
+            crmClientServices.createIndex(Document("tenantId", 1).append("invoiceId", 1))
+
             val crmStandardItems = db.getCollection<Document>("crm.standard_items")
             crmStandardItems.dropIndexIfExists("id_1")
             crmStandardItems.createIndex(Document("tenantId", 1).append("id", 1), IndexOptions().unique(true))

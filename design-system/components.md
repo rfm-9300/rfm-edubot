@@ -346,6 +346,8 @@ Used by the Instagram inbox for post previews:
 
 48×48, `object-fit: cover`, `--r-md`. Empty placeholder uses `--surface-2` + `--ink-faint`. Comment threads in the drawer use `.ig-post` + `.ig-comments` / `.ig-comment` (`.is-target` for the comment that opened the drawer).
 
+Services tables may use a leading `.tbl td.check` column for multi-select before invoicing. Do not invent a new checkbox primitive.
+
 ## Settings tabs + widget customizer
 
 ```html

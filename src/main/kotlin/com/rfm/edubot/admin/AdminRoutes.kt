@@ -193,6 +193,74 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
 )
 
+@Serializable
+internal data class ClientServiceDto(
+    val id: String,
+    val clientId: String,
+    val clientName: String,
+    val name: String,
+    val notes: String? = null,
+    val quantity: Double,
+    val unit: String,
+    val unitPriceEur: Double,
+    val totalEur: Double,
+    val status: String,
+    val invoiceId: String? = null,
+    val bookingServiceId: String? = null,
+    val catalogItemId: String? = null,
+    val performedAt: String? = null,
+    val createdAt: String,
+)
+
+@Serializable
+internal data class CreateClientServiceRequest(
+    val clientId: String,
+    val name: String,
+    val notes: String? = null,
+    val quantity: Double = 1.0,
+    val unit: String = "",
+    val unitPriceEur: Double,
+    val bookingServiceId: String? = null,
+    val catalogItemId: String? = null,
+    val performedAt: String? = null,
+)
+
+@Serializable
+internal data class UpdateClientServiceRequest(
+    val name: String? = null,
+    val notes: String? = null,
+    val quantity: Double? = null,
+    val unit: String? = null,
+    val unitPriceEur: Double? = null,
+    val performedAt: String? = null,
+    val status: String? = null,
+)
+
+@Serializable
+internal data class InvoiceClientServicesRequest(
+    val clientId: String,
+    val serviceIds: List<String>,
+    val dueDate: String,
+)
+
+internal fun com.rfm.edubot.crm.model.ClientService.dto(client: Client?) = ClientServiceDto(
+    id = id.toHexString(),
+    clientId = clientId.toHexString(),
+    clientName = client?.name ?: "",
+    name = name,
+    notes = notes,
+    quantity = quantity,
+    unit = unit,
+    unitPriceEur = unitPriceCents / 100.0,
+    totalEur = totalCents / 100.0,
+    status = status.name,
+    invoiceId = invoiceId?.toHexString(),
+    bookingServiceId = bookingServiceId?.toHexString(),
+    catalogItemId = catalogItemId,
+    performedAt = performedAt?.toString(),
+    createdAt = createdAt.toString(),
+)
+
 internal fun Invoice.dto(client: Client?) = InvoiceDto(
     id = id.toHexString(),
     number = number,

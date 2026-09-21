@@ -8,9 +8,12 @@ import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.admin.CreateClientRequest
+import com.rfm.edubot.admin.CreateClientServiceRequest
 import com.rfm.edubot.admin.CreateInvoiceRequest
 import com.rfm.edubot.admin.CreateQuoteRequest
+import com.rfm.edubot.admin.InvoiceClientServicesRequest
 import com.rfm.edubot.admin.StandardItemRequest
+import com.rfm.edubot.admin.UpdateClientServiceRequest
 import com.rfm.edubot.admin.dto
 import com.rfm.edubot.admin.respondGeneratedPdf
 import com.rfm.edubot.admin.savePdf
@@ -28,11 +31,14 @@ import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceBilling
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
+import com.rfm.edubot.crm.model.ClientServiceStatus
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.instagram.InstagramSocialDeps
@@ -517,6 +523,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
         quotes = QuoteRepository(mongo, ctx.tenant.id),
         invoices = InvoiceRepository(mongo, ctx.tenant.id),
         standardItems = StandardItemRepository(mongo, ctx.tenant.id),
+        clientServices = ClientServiceRepository(mongo, ctx.tenant.id),
         pdfGenerator = PdfGenerator(),
         pdfStoragePath = "${runtimeConfig.get().pdfStoragePath}/${ctx.tenant.slug}",
         documentTemplate = ctx.tenant.documentTemplate.withCompanyFallback(ctx.tenant.name),
@@ -667,6 +674,74 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             val invoice = deps.invoices.markPaid(ObjectId(call.parameters["id"])) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
         }
+        get("/services") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
+            val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
+            call.respond(deps.clientServices.list(clientId, status).map { it.dto(deps.clients.findById(it.clientId)) })
+        }
+        post("/services") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val request = call.receive<CreateClientServiceRequest>()
+            val clientId = runCatching { ObjectId(request.clientId) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client required"))
+            val client = deps.clients.findById(clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+            if (request.name.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required"))
+            val service = deps.clientServices.create(
+                clientId = clientId,
+                name = request.name,
+                notes = request.notes,
+                quantity = request.quantity,
+                unit = request.unit,
+                unitPriceCents = (request.unitPriceEur * 100).toLong(),
+                bookingServiceId = request.bookingServiceId?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() },
+                catalogItemId = request.catalogItemId,
+                performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+            )
+            call.respond(HttpStatusCode.Created, service.dto(client))
+        }
+        post("/services/invoice") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf {
+                it.requireModule(DashboardModules.SERVICES) && it.requireModule(DashboardModules.INVOICES)
+            } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val request = call.receive<InvoiceClientServicesRequest>()
+            val clientId = runCatching { ObjectId(request.clientId) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client required"))
+            val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
+            val ids = request.serviceIds.mapNotNull { runCatching { ObjectId(it) }.getOrNull() }
+            val services = deps.clientServices.findByIds(ids)
+            when (val prepared = ClientServiceBilling.prepareInvoice(clientId, services)) {
+                is ClientServiceBilling.Outcome.Rejected -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to prepared.reason))
+                is ClientServiceBilling.Outcome.Ready -> {
+                    val client = deps.clients.findById(clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+                    val invoice = deps.invoices.create(clientId, null, prepared.items, dueDate)
+                    val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate))
+                    deps.invoices.setPdfPath(invoice.id, path.toString())
+                    deps.clientServices.markInvoiced(services.map { it.id }, invoice.id)
+                    call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
+                }
+            }
+        }
+        patch("/services/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<UpdateClientServiceRequest>()
+            val status = request.status?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
+            val service = deps.clientServices.update(
+                id = id,
+                name = request.name,
+                notes = request.notes,
+                quantity = request.quantity,
+                unit = request.unit,
+                unitPriceCents = request.unitPriceEur?.let { (it * 100).toLong() },
+                performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                status = status,
+            ) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(service.dto(deps.clients.findById(service.clientId)))
+        }
     }
 }
 
@@ -688,6 +763,7 @@ private data class CrmDeps(
     val quotes: QuoteRepository,
     val invoices: InvoiceRepository,
     val standardItems: StandardItemRepository,
+    val clientServices: ClientServiceRepository,
     val pdfGenerator: PdfGenerator,
     val pdfStoragePath: String,
     val documentTemplate: DocumentTemplate,

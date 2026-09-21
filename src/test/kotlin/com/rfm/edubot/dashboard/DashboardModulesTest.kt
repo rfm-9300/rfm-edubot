@@ -38,7 +38,7 @@ class DashboardModulesTest {
         listOf(DashboardModules.CONVERSATIONS, DashboardModules.CONTACTS, DashboardModules.SETTINGS)
             .forEach { assertEquals(true, it in DashboardModules.optional, "$it should be optional") }
         assertEquals(
-            listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS),
+            listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS, DashboardModules.SERVICES),
             DashboardModules.effectiveFor(tenant(listOf(DashboardModules.CLIENTS))),
         )
     }
@@ -55,6 +55,15 @@ class DashboardModulesTest {
         assertEquals(
             DashboardModules.alwaysOn + DashboardModules.AI_ASSISTANT,
             DashboardModules.effectiveFor(tenant(listOf(DashboardModules.AI_ASSISTANT))),
+        )
+    }
+
+    @Test
+    fun `services is an optional tenant module enabled with clients`() {
+        assertEquals(true, DashboardModules.SERVICES in DashboardModules.optional)
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.SERVICES,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.SERVICES))),
         )
     }
 

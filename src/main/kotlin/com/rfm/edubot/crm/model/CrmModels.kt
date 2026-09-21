@@ -28,6 +28,29 @@ enum class QuoteStatus { PENDENTE, SENT, ACEITO }
 
 enum class InvoiceStatus { PENDING, PAID, OVERDUE, CANCELLED }
 
+enum class ClientServiceStatus { OPEN, INVOICED, CANCELLED }
+
+/** Work sold or performed for a client. Open rows can be grouped into one invoice. */
+data class ClientService(
+    @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val clientId: ObjectId,
+    val name: String,
+    val notes: String? = null,
+    val quantity: Double = 1.0,
+    val unit: String = "",
+    val unitPriceCents: Long,
+    val totalCents: Long,
+    val status: ClientServiceStatus = ClientServiceStatus.OPEN,
+    val invoiceId: ObjectId? = null,
+    val bookingServiceId: ObjectId? = null,
+    val catalogItemId: String? = null,
+    val bookingId: ObjectId? = null,
+    val performedAt: LocalDate? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
 data class Quote(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,

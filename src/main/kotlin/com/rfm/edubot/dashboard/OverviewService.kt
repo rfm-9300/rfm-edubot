@@ -58,6 +58,7 @@ class OverviewService(private val mongo: MongoModule) {
         val catalog = async {
             if (DashboardModules.CATALOG in modules) OverviewCatalogDto(items = coll("crm.standard_items").countDocuments(tenantFilter)) else null
         }
+        val services = async { if (DashboardModules.SERVICES in modules) services(tenant.id, window) else null }
         val assistant = async {
             if (DashboardModules.AI_ASSISTANT in modules) {
                 OverviewAssistantDto(
@@ -85,6 +86,7 @@ class OverviewService(private val mongo: MongoModule) {
         val calendarDto = calendar.await()
         val socialDto = social.await()
         val catalogDto = catalog.await()
+        val servicesDto = services.await()
         val assistantDto = assistant.await()
 
         val waiting = waitingList.await()
@@ -128,6 +130,7 @@ class OverviewService(private val mongo: MongoModule) {
                 calendar = calendarDto,
                 social = socialDto,
                 catalog = catalogDto,
+                services = servicesDto,
                 assistant = assistantDto,
                 setup = setup,
             ),
@@ -236,6 +239,25 @@ class OverviewService(private val mongo: MongoModule) {
             winRatePct = OverviewMath.winRatePct(accepted.count, pending.count, sent.count),
             expiringSoonCount = expiring.toInt(),
             quoteCount = byStatus.values.sumOf { it.count },
+        )
+    }
+
+    private suspend fun services(tenantId: ObjectId, window: OverviewMath.Window): OverviewServicesDto {
+        val tenantFilter = Filters.eq("tenantId", tenantId)
+        val open = coll("crm.client_services").find(Filters.and(tenantFilter, Filters.eq("status", "OPEN"))).limit(500).toList()
+        val invoiced = coll("crm.client_services").find(
+            Filters.and(
+                tenantFilter,
+                Filters.eq("status", "INVOICED"),
+                Filters.gte("updatedAt", Date(window.monthStart.toEpochMilliseconds())),
+                Filters.lt("updatedAt", Date(window.nextMonthStart.toEpochMilliseconds())),
+            ),
+        ).limit(500).toList()
+        return OverviewServicesDto(
+            openCount = open.size,
+            openCents = open.sumOf { it.get("totalCents").asLong() },
+            invoicedThisMonthCount = invoiced.size,
+            invoicedThisMonthCents = invoiced.sumOf { it.get("totalCents").asLong() },
         )
     }
 

@@ -126,8 +126,9 @@ catalog lives in `DashboardModules`:
 
 - Always enabled and not admin-disableable: `overview` (the dashboard landing page, and the
   fallback view when nothing else is enabled).
-- Admin-selectable: `conversations`, `contacts`, `settings`, `persona`, `clients`, `quotes`,
-  `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+- Admin-selectable: `conversations`, `contacts`, `settings`, `persona`, `clients`, `services`,
+  `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+  Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
 
 The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
 other module, so a tenant can be provisioned CRM-only.
@@ -140,6 +141,12 @@ not require a data migration.
 `GET /app/api/me` returns the effective module list for navigation, but navigation is not the
 security boundary. Every dashboard module route and tenant-scoped admin CRM route checks the same
 effective module list and returns `403 Forbidden` when its module is disabled.
+
+### Services
+
+Optional `services` module (also on whenever `clients` is on): client-attached work in
+`crm.client_services`. Managers record priced rows on a client and group open rows into one
+invoice via `POST /app/api/crm/services/invoice`. Booking service types stay under Bookings.
 
 ### Bookings
 
@@ -169,6 +176,7 @@ reconnect before comments work. App Review for that permission is a separate sub
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
+| `crm.client_services` | Client-attached work; open rows can be billed together | `tenantId+clientId+status` |
 | `crm.sequences` | Atomic quote/invoice numbering counters | unique on `name` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
