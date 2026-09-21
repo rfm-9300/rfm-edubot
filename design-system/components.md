@@ -130,8 +130,7 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
     </div>
     <div class="meter"><div class="meter__fill" style="width:62%"></div></div>
     <div class="snapshot__metrics">
-      <div class="snapshot__metric"><span class="snapshot__metric-label">Collected</span><span class="snapshot__metric-value">€ 120,00</span></div>
-    </div>
+      <div class="snapshot__metric"><span class="snapshot__metric-label">Received this month</span><span class="snapshot__metric-value">€ 120,00</span></div>
   </div>
 </div>
 ```
