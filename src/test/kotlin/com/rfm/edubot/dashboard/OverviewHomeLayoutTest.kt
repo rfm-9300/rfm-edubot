@@ -27,6 +27,17 @@ class OverviewHomeLayoutTest {
     }
 
     @Test
+    fun `suppliers and payments snapshots follow those modules`() {
+        val options = OverviewHomeLayout.available(
+            setOf(DashboardModules.OVERVIEW, DashboardModules.SUPPLIERS, DashboardModules.PAYMENTS),
+        )
+        assertEquals(
+            listOf("highlights", "pulse", "attention", "setup", "suppliers", "payments"),
+            options.map { it.id },
+        )
+    }
+
+    @Test
     fun `hiding money drops money highlights but keeps cash for other surfaces`() {
         val applied = OverviewHomeLayout.apply(
             overview(

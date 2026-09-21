@@ -12,6 +12,8 @@ object DashboardModules {
     const val SERVICES = "services"
     const val QUOTES = "quotes"
     const val INVOICES = "invoices"
+    const val SUPPLIERS = "suppliers"
+    const val PAYMENTS = "payments"
     const val CATALOG = "catalog"
     const val AI_ASSISTANT = "ai-assistant"
     const val BOOKINGS = "bookings"
@@ -24,7 +26,7 @@ object DashboardModules {
      */
     val alwaysOn = listOf(OVERVIEW)
     val optional = listOf(
-        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, CATALOG,
+        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, PAYMENTS, CATALOG,
         AI_ASSISTANT, BOOKINGS, INSTAGRAM,
     )
     val catalog = alwaysOn + optional
@@ -35,6 +37,7 @@ object DashboardModules {
         val selected = tenant.enabledModules ?: catalog
         val resolved = (alwaysOn + selected).filter { it in catalog }.toMutableList()
         if (CLIENTS in resolved && SERVICES in catalog) resolved += SERVICES
+        if (PAYMENTS in resolved && SUPPLIERS in catalog) resolved += SUPPLIERS
         return resolved.distinct()
     }
 

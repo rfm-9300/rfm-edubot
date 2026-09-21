@@ -381,7 +381,7 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
 
-private class SequenceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
+internal class SequenceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.sequences")
 
     suspend fun next(name: String): Long {
@@ -415,7 +415,7 @@ private fun parseQuoteStatus(raw: String?): QuoteStatus =
 private fun parseInvoiceStatus(raw: String?): InvoiceStatus =
     runCatching { InvoiceStatus.valueOf(raw?.trim()?.uppercase().orEmpty()) }.getOrDefault(InvoiceStatus.PENDING)
 
-private fun Document.toLineItem() = LineItem(
+internal fun Document.toLineItem() = LineItem(
     description = getString("description"),
     quantity = getDoubleValue("quantity"),
     unit = getString("unit") ?: "",
@@ -423,7 +423,7 @@ private fun Document.toLineItem() = LineItem(
     totalCents = getLongValue("totalCents"),
 )
 
-private fun LineItem.toDocument() = Document("description", description)
+internal fun LineItem.toDocument() = Document("description", description)
     .append("quantity", quantity)
     .append("unit", unit)
     .append("unitPriceCents", unitPriceCents)

@@ -10,7 +10,9 @@ import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.admin.CreateClientRequest
 import com.rfm.edubot.admin.CreateClientServiceRequest
 import com.rfm.edubot.admin.CreateInvoiceRequest
+import com.rfm.edubot.admin.CreatePaymentRequest
 import com.rfm.edubot.admin.CreateQuoteRequest
+import com.rfm.edubot.admin.CreateSupplierRequest
 import com.rfm.edubot.admin.InvoiceClientServicesRequest
 import com.rfm.edubot.admin.StandardItemRequest
 import com.rfm.edubot.admin.UpdateClientServiceRequest
@@ -35,11 +37,14 @@ import com.rfm.edubot.crm.ClientServiceBilling
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
+import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.model.ClientServiceStatus
 import com.rfm.edubot.crm.model.InvoiceStatus
+import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.instagram.InstagramSocialDeps
 import com.rfm.edubot.instagram.InstagramSocialService
@@ -573,6 +578,8 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
         clients = ClientRepository(mongo, ctx.tenant.id),
         quotes = QuoteRepository(mongo, ctx.tenant.id),
         invoices = InvoiceRepository(mongo, ctx.tenant.id),
+        suppliers = SupplierRepository(mongo, ctx.tenant.id),
+        payments = PaymentRepository(mongo, ctx.tenant.id),
         standardItems = StandardItemRepository(mongo, ctx.tenant.id),
         clientServices = ClientServiceRepository(mongo, ctx.tenant.id),
         pdfGenerator = PdfGenerator(),
@@ -800,6 +807,60 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             ) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(service.dto(deps.clients.findById(service.clientId)))
         }
+        get("/suppliers") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            call.respond(deps.suppliers.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
+        }
+        post("/suppliers") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val request = call.receive<CreateSupplierRequest>()
+            if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
+            call.respond(HttpStatusCode.Created, deps.suppliers.create(request.name, request.phone, request.address).dto())
+        }
+        patch("/suppliers/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<CreateSupplierRequest>()
+            if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
+            val supplier = deps.suppliers.update(id, request.name, request.phone, request.address) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(supplier.dto())
+        }
+        get("/payments") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val supplierId = call.request.queryParameters["supplierId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
+            val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { PaymentStatus.valueOf(it.uppercase()) }.getOrNull() }
+            call.respond(deps.payments.list(supplierId, status).map { it.dto(deps.suppliers.findById(it.supplierId)) })
+        }
+        post("/payments") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val request = call.receive<CreatePaymentRequest>()
+            if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
+            val supplierId = runCatching { ObjectId(request.supplierId) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier required"))
+            val supplier = deps.suppliers.findById(supplierId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier not found"))
+            val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
+            val payment = deps.payments.create(supplierId, request.items.map { it.toLineItem() }, dueDate, request.notes)
+            call.respond(HttpStatusCode.Created, payment.dto(supplier))
+        }
+        get("/payments/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val payment = deps.payments.findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.respond(payment.dto(deps.suppliers.findById(payment.supplierId)))
+        }
+        patch("/payments/{id}/paid") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val payment = deps.payments.markPaid(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(payment.dto(deps.suppliers.findById(payment.supplierId)))
+        }
     }
 }
 
@@ -820,6 +881,8 @@ private data class CrmDeps(
     val clients: ClientRepository,
     val quotes: QuoteRepository,
     val invoices: InvoiceRepository,
+    val suppliers: SupplierRepository,
+    val payments: PaymentRepository,
     val standardItems: StandardItemRepository,
     val clientServices: ClientServiceRepository,
     val pdfGenerator: PdfGenerator,

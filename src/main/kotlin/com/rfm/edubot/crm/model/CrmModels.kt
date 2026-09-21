@@ -30,6 +30,36 @@ enum class InvoiceStatus { PENDING, PAID, OVERDUE, CANCELLED }
 
 enum class ClientServiceStatus { OPEN, INVOICED, CANCELLED }
 
+enum class PaymentStatus { PENDING, PAID, OVERDUE, CANCELLED }
+
+/** Vendor the tenant buys from. Payments attach to a supplier. */
+data class Supplier(
+    @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val number: String,
+    val name: String,
+    val phone: String,
+    val address: String? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+/** Money the tenant owes or has paid a supplier. */
+data class Payment(
+    @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val number: String,
+    val supplierId: ObjectId,
+    val items: List<LineItem>,
+    val notes: String? = null,
+    val status: PaymentStatus = PaymentStatus.PENDING,
+    val dueDate: LocalDate,
+    val paidAt: Instant? = null,
+    val totalCents: Long,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
 /** Work sold or performed for a client. Open rows can be grouped into one invoice. */
 data class ClientService(
     @BsonId val id: ObjectId = ObjectId(),

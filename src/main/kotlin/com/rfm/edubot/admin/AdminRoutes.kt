@@ -4,7 +4,9 @@ import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.Quote
+import com.rfm.edubot.crm.model.Supplier
 import com.rfm.edubot.crm.StandardItem
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -100,9 +102,10 @@ internal data class CreateInvoiceRequest(
 internal data class CreateLineItemRequest(
     val description: String,
     val quantity: Double = 1.0,
+    val unit: String = "",
     val unitPriceEur: Double,
 ) {
-    fun toLineItem() = lineItem(description, quantity, unitPriceEur)
+    fun toLineItem() = lineItem(description, quantity, unitPriceEur, unit)
 }
 
 @Serializable
@@ -172,6 +175,45 @@ internal data class InvoiceDto(
     val quoteNumber: String? = null,
     val paidAt: String? = null,
     val items: List<LineItemDto> = emptyList(),
+)
+
+@Serializable
+internal data class CreateSupplierRequest(
+    val name: String,
+    val phone: String,
+    val address: String? = null,
+)
+
+@Serializable
+internal data class CreatePaymentRequest(
+    val supplierId: String,
+    val items: List<CreateLineItemRequest>,
+    val dueDate: String,
+    val notes: String? = null,
+)
+
+@Serializable
+internal data class SupplierDto(
+    val id: String,
+    val number: String,
+    val name: String,
+    val phone: String,
+    val address: String? = null,
+    val createdAt: String,
+)
+
+@Serializable
+internal data class PaymentDto(
+    val id: String,
+    val number: String,
+    val supplierId: String,
+    val supplierName: String,
+    val status: String,
+    val dueDate: String,
+    val totalEur: Double,
+    val notes: String? = null,
+    val items: List<LineItemDto> = emptyList(),
+    val createdAt: String,
 )
 
 internal fun Client.dto() = ClientDto(
@@ -279,4 +321,26 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     quoteNumber = quoteNumber,
     paidAt = paidAt?.toString(),
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+)
+
+internal fun Supplier.dto() = SupplierDto(
+    id = id.toHexString(),
+    number = number,
+    name = name,
+    phone = phone,
+    address = address,
+    createdAt = createdAt.toString(),
+)
+
+internal fun Payment.dto(supplier: Supplier?) = PaymentDto(
+    id = id.toHexString(),
+    number = number,
+    supplierId = supplierId.toHexString(),
+    supplierName = supplier?.name ?: "",
+    status = status.name,
+    dueDate = dueDate.toString(),
+    totalEur = totalCents / 100.0,
+    notes = notes,
+    items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    createdAt = createdAt.toString(),
 )

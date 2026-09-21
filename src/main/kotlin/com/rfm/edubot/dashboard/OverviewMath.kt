@@ -18,6 +18,8 @@ object OverviewMath {
     const val KIND_WAITING_CHAT = "waiting_chat"
     const val KIND_OVERDUE_INVOICE = "overdue_invoice"
     const val KIND_DUE_SOON_INVOICE = "due_soon_invoice"
+    const val KIND_OVERDUE_PAYMENT = "overdue_payment"
+    const val KIND_DUE_SOON_PAYMENT = "due_soon_payment"
     const val KIND_PENDING_BOOKING = "pending_booking"
     const val KIND_INSTAGRAM_COMMENT = "instagram_comment"
     const val KIND_QUOTE_EXPIRING = "quote_expiring"

@@ -5,6 +5,7 @@ let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '',
+  suppliers: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -13,7 +14,7 @@ let state = {
   selectedConversation: null, threadMessages: [],
   settingsSection: 'channels', personaAdvanced: false, overviewLayout: null,
   whatsAppSignup: { enabled: false },
-  fetched: { conversations: false, invoices: false, bookings: false, instagram: false },
+  fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false },
 };
 let personaChatBusy = false;
 let assistantBusy = false;
@@ -168,6 +169,9 @@ function renderNav() {
   const pendingIg = state.fetched.instagram
     ? ((state.instagram?.unrepliedCount) || (state.instagram?.comments || []).filter(c => c.needsReply).length)
     : (o.social?.unreplied || 0);
+  const overduePay = state.fetched.payments
+    ? state.payments.filter(p => p.status === 'OVERDUE').length
+    : (o.payments?.overdueCount || 0);
   const counts = {
     contacts: state.contacts.length || o.inbox?.contacts || 0,
     conversations: waiting || state.conversations.length || o.inbox?.conversations || 0,
@@ -176,14 +180,16 @@ function renderNav() {
     invoices: overdue || state.invoices.length || o.cash?.invoiceCount || 0,
     catalog: state.catalog.length || o.catalog?.items || 0,
     services: (state.clientServices.filter(s => s.status === 'OPEN').length) || o.services?.openCount || 0,
+    suppliers: state.suppliers.length || o.suppliers?.total || 0,
+    payments: overduePay || state.payments.length || o.payments?.paymentCount || 0,
     bookings: pendingBookings || state.bookings.length || o.calendar?.thisWeek || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
   };
-  const alerts = { conversations: waiting > 0, invoices: overdue > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0 };
+  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0 };
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'suppliers', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
@@ -210,6 +216,8 @@ async function setActive(tab) {
   state.filterInvoiceStatus = '';
   state.filterServiceStatus = '';
   state.filterServiceClient = '';
+  state.filterPaymentStatus = '';
+  state.filterPaymentSupplier = '';
   try {
     await loadModule(tab);
     render();
@@ -228,6 +236,18 @@ async function loadModule(tab) {
     state.fetched.conversations = true;
   }
   if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
+  if (tab === 'suppliers') state.suppliers = await api('/app/api/crm/suppliers');
+  if (tab === 'payments') {
+    const [payments, suppliers] = await Promise.all([
+      api('/app/api/crm/payments'),
+      api('/app/api/crm/suppliers').catch(() => state.suppliers),
+    ]);
+    state.payments = payments;
+    state.suppliers = suppliers;
+    state.fetched.payments = true;
+    if (hasModule('catalog')) state.catalog = await api('/app/api/crm/standard-items').catch(() => state.catalog);
+    if (!state.filterPaymentStatus && state.payments.some(p => p.status === 'OVERDUE')) state.filterPaymentStatus = 'OVERDUE';
+  }
   if (tab === 'services') {
     const [services, clients] = await Promise.all([
       api('/app/api/crm/services'),
@@ -283,10 +303,10 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'payments', 'catalog', 'bookings'].includes(state.active);
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
-    invoices: STR.invoiceFormTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
+    invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
   };
   $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -294,9 +314,11 @@ function render() {
   if (state.active === 'contacts') return renderContacts(root);
   if (state.active === 'conversations') return renderConversations(root);
   if (state.active === 'clients') return renderClients(root);
+  if (state.active === 'suppliers') return renderSuppliers(root);
   if (state.active === 'services') return renderServices(root);
   if (state.active === 'quotes') return renderQuotes(root);
   if (state.active === 'invoices') return renderInvoices(root);
+  if (state.active === 'payments') return renderPayments(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
   if (state.active === 'ai-assistant') return renderAssistant(root);
@@ -382,6 +404,8 @@ function attentionTitle(item) {
     waiting_chat: STR.waitingChat,
     overdue_invoice: STR.overdueInvoice,
     due_soon_invoice: STR.dueSoonInvoice,
+    overdue_payment: STR.overduePayment,
+    due_soon_payment: STR.dueSoonPayment,
     pending_booking: STR.pendingBooking,
     instagram_comment: STR.instagramWaitingComment,
     quote_expiring: STR.quoteExpiring,
@@ -391,6 +415,7 @@ function attentionTitle(item) {
 function attentionPill(kind) {
   const map = {
     waiting_chat: 'pill--warn', overdue_invoice: 'pill--bad', due_soon_invoice: 'pill--warn',
+    overdue_payment: 'pill--bad', due_soon_payment: 'pill--warn',
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
     assistant_action: 'pill--info',
   };
@@ -414,6 +439,7 @@ function healthIcon(health) {
 function attentionIcon(kind) {
   const map = {
     waiting_chat: '💬', overdue_invoice: '💶', due_soon_invoice: '⏰',
+    overdue_payment: '💸', due_soon_payment: '⏰',
     pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
     assistant_action: '✨',
   };
@@ -443,12 +469,14 @@ function homeCardCopy(id) {
   const titles = {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     cash: STR.snapCash, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
-    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices, assistant: STR.snapAssistant,
+    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
+    suppliers: STR.snapSuppliers, payments: STR.snapPayments, assistant: STR.snapAssistant,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     cash: STR.homeCard_cashDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
-    calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc, assistant: STR.homeCard_assistantDesc,
+    calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
+    suppliers: STR.homeCard_suppliersDesc, payments: STR.homeCard_paymentsDesc, assistant: STR.homeCard_assistantDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -539,6 +567,23 @@ function renderOverview(root) {
       { label: STR.servicesInvoicedMonth, value: `${o.services.invoicedThisMonthCount} · ${centsEUR(o.services.invoicedThisMonthCents)}` },
     ] }));
   }
+  if (o.suppliers && !hidden.has('suppliers')) {
+    snapshots.push(snapshotPanel({ tab: 'suppliers', kind: 'suppliers', icon: '🏭', title: STR.snapSuppliers, figure: o.suppliers.total, rows: [
+      { label: STR.snapSuppliers, value: o.suppliers.total },
+      { label: STR.suppliersNewMonth, value: o.suppliers.newThisMonth },
+      { label: STR.suppliersNewLastMonth, value: o.suppliers.newLastMonth },
+    ] }));
+  }
+  if (o.payments && !hidden.has('payments')) {
+    const paid = o.payments.paidThisMonthCents || 0, toPay = o.payments.outstandingCents || 0;
+    const payMeter = (paid || toPay) ? { pct: (paid / (paid + toPay)) * 100 } : null;
+    snapshots.push(snapshotPanel({ tab: 'payments', kind: 'payments', icon: '💸', title: STR.snapPayments, figure: centsEUR(o.payments.outstandingCents), rows: [
+      { label: STR.paymentsPaidMonth, value: centsEUR(o.payments.paidThisMonthCents) },
+      { label: STR.paymentsOutstanding, value: centsEUR(o.payments.outstandingCents) },
+      { label: STR.paymentsOverdue, value: `${centsEUR(o.payments.overdueCents)} · ${o.payments.overdueCount}` },
+      { label: STR.paymentsDueSoon, value: centsEUR(o.payments.dueSoonCents) },
+    ], meter: payMeter }));
+  }
   if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
     snapshots.push(snapshotPanel({ tab: 'conversations', kind: 'inbox', icon: '💬', title: STR.snapInbox, figure: o.inbox.waiting, rows: [
       { label: STR.hl_waiting, value: o.inbox.waiting },
@@ -591,7 +636,7 @@ function renderOverview(root) {
       return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><span class="queue__icon queue__icon--info" aria-hidden="true">${setupIcon(s.kind)}</span><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
-  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
+  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'suppliers', 'payments', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
   const modulesHtml = snapshots.length
     ? `<div class="home-grid">${snapshots.join('')}</div>`
     : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);
@@ -707,6 +752,28 @@ function renderClients(root) {
     emptyDesc: t.emptyDesc,
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientForm(state.clients.find(c => c.id === r.dataset.client))));
+}
+
+function renderSuppliers(root) {
+  const t = CRM.suppliers;
+  const q = state.search.toLowerCase();
+  const rows = (state.suppliers || [])
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.phone || ''} ${s.address || ''}`.toLowerCase().includes(q))
+    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${escapeHTML(s.name)}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`)
+    .join('');
+  const new30 = (state.suppliers || []).filter(s => s.createdAt && (Date.now() - new Date(s.createdAt)) / 86400000 <= 30).length;
+  root.innerHTML = hero(labels.suppliers, CRM.tabs.fornecedores.desc, statCards([
+    { label: t.total, value: (state.suppliers || []).length },
+    { label: t.new30, value: new30 },
+  ])) + crmPanel({
+    title: t.directory,
+    tag: (state.suppliers || []).length,
+    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    rows,
+    empty: t.emptyTitle,
+    emptyDesc: t.emptyDesc,
+  });
+  $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openSupplierForm(state.suppliers.find(s => s.id === r.dataset.supplier))));
 }
 
 function renderServices(root) {
@@ -932,6 +999,57 @@ async function openClientForm(client) {
   openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form);
 }
 
+async function openSupplierForm(supplier) {
+  const t = CRM.suppliers;
+  const editing = supplier && supplier.id ? supplier : null;
+  let relatedPayments = [];
+  if (editing && hasModule('payments')) {
+    relatedPayments = await api(`/app/api/crm/payments?supplierId=${encodeURIComponent(editing.id)}`).catch(() => (state.payments || []).filter(p => p.supplierId === editing.id));
+  }
+  const related = [
+    relatedPayments.length ? `<p class="hint">${escapeHTML(t.related)} · ${relatedPayments.map(p => escapeHTML(p.number)).join(', ')}</p>` : '',
+    editing && hasModule('payments') ? `<button class="btn btn--sm" type="button" id="sf-add-payment">${escapeHTML(t.addPayment)}</button>` : '',
+  ].join('');
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row"><label class="lbl" for="sf-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
+      <input class="inp" id="sf-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="sf-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
+      <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
+      <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+    ${related}
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
+  $('#sf-add-payment', form)?.addEventListener('click', () => openPaymentForm(editing.id));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('#sf-name', form).value.trim();
+    const phone = $('#sf-phone', form).value.trim();
+    const address = $('#sf-address', form).value.trim() || undefined;
+    if (!name || !phone) return toast(t.validate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      if (editing) {
+        await api(`/app/api/crm/suppliers/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, address }) });
+        closeDrawer();
+        await loadModule('suppliers');
+        render();
+        toast(t.updated);
+      } else {
+        const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify({ name, phone, address }) });
+        closeDrawer();
+        await loadModule('suppliers');
+        toast(t.created);
+        if (hasModule('payments') && state.active === 'payments') return openPaymentForm(created.id);
+        render();
+      }
+    } catch { btn.disabled = false; toast(t.saveFailed); }
+  });
+  openDrawer(editing ? t.editTitle : t.formTitle, form);
+}
+
 function openCatalogForm(itemId) {
   const editing = itemId ? state.catalog.find(c => c.id === itemId) : null;
   const t = CRM.items;
@@ -1004,6 +1122,13 @@ function clientSelect(clients) {
   return `<div class="form__row"><label class="lbl" for="f-client">${escapeHTML(STR.lineClient)} <span class="req">●</span></label>
     <select class="sel" id="f-client" required><option value="">${escapeHTML(STR.lineChooseClient)}</option>
     ${clients.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
+}
+
+function supplierSelect(suppliers, selectedId = '') {
+  const t = CRM.payments;
+  return `<div class="form__row"><label class="lbl" for="f-supplier">${escapeHTML(t.thSupplier)} <span class="req">●</span></label>
+    <select class="sel" id="f-supplier" required><option value="">${escapeHTML(t.chooseSupplierEmpty)}</option>
+    ${suppliers.map(s => `<option value="${escapeHTML(s.id)}" ${s.id === selectedId ? 'selected' : ''}>${escapeHTML(s.name)}</option>`).join('')}</select></div>`;
 }
 
 function lineItemsField(catalog) {
@@ -1181,6 +1306,55 @@ async function openInvoiceForm() {
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
+async function openPaymentForm(presetSupplierId) {
+  const t = CRM.payments;
+  let suppliers, catalog;
+  try {
+    suppliers = await api('/app/api/crm/suppliers');
+    catalog = hasModule('catalog') ? await api('/app/api/crm/standard-items').catch(() => state.catalog || []) : (state.catalog || []);
+  } catch { return toast(t.saveFailed); }
+  state.suppliers = suppliers;
+  if (!suppliers.length) {
+    toast(t.needSupplier);
+    return openSupplierForm();
+  }
+  const selectedId = presetSupplierId || state.filterPaymentSupplier || '';
+  const li = lineItemsField(catalog);
+  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__grid">
+      ${supplierSelect(suppliers, selectedId)}
+      <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
+    </div>
+    ${li.html}
+    <div class="form__row form__row--full"><label class="lbl" for="p-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}"></textarea></div>
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
+  li.wire(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const supplierId = $('#f-supplier', form).value;
+    const dueDate = $('#p-due', form).value;
+    if (!supplierId) return toast(t.chooseSupplier);
+    if (!dueDate) return toast(t.enterDueDate);
+    const items = li.collect(form);
+    if (!items.length) return toast(t.addLine);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify({ supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null }) });
+      closeDrawer();
+      await loadModule('payments');
+      render();
+      toast(t.created);
+    } catch { btn.disabled = false; toast(t.saveFailed); }
+  });
+  openDrawer(t.formTitle, form, true);
+}
+
 function renderQuotes(root) {
   const t = CRM.quotes;
   const q = state.search.toLowerCase();
@@ -1334,6 +1508,69 @@ function renderInvoices(root) {
   }));
 }
 
+function renderPayments(root) {
+  const t = CRM.payments;
+  const q = state.search.toLowerCase();
+  const all = state.payments || [];
+  const names = new Map();
+  for (const s of state.suppliers || []) names.set(s.id, s.name);
+  for (const p of all) if (!names.has(p.supplierId)) names.set(p.supplierId, p.supplierName || p.supplierId);
+  if (state.filterPaymentSupplier && !names.has(state.filterPaymentSupplier)) state.filterPaymentSupplier = '';
+  const supplierId = state.filterPaymentSupplier || '';
+  const scoped = supplierId ? all.filter(p => p.supplierId === supplierId) : all;
+  const rows = scoped
+    .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
+    .filter(p => !q || `${p.number} ${p.supplierName || ''} ${invoiceStatusLabel(p.status)}`.toLowerCase().includes(q))
+    .map(p => {
+      const canMarkPaid = p.status === 'PENDING' || p.status === 'OVERDUE';
+      const rowClass = p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '';
+      return `<tr class="conversation-row ${rowClass}" data-payment="${escapeHTML(p.id)}">
+        <td class="id">${escapeHTML(p.number)}</td>
+        <td class="name">${escapeHTML(p.supplierName || '')}</td>
+        <td>${invoicePill(p.status)}</td>
+        <td class="mono muted">${fmtDay(p.dueDate)}</td>
+        <td class="num">${fmtEUR(p.totalEur)}</td>
+        <td class="right"><div class="actions">
+          ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-payment="${escapeHTML(p.id)}">${escapeHTML(t.markPaid)}</button>` : ''}
+        </div></td>
+      </tr>`;
+    }).join('');
+  const paid = scoped.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
+  const pending = scoped.filter(p => p.status === 'PENDING').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
+  const overdue = scoped.filter(p => p.status === 'OVERDUE').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
+  const supplierOptions = [...names.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
+  const supplierFilter = supplierOptions.length
+    ? `<select class="sel" data-filter-pay-supplier aria-label="${escapeHTML(t.thSupplier)}"><option value="">${escapeHTML(t.filterSupplierAll)}</option>${supplierOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === supplierId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    : '';
+  const tools = supplierFilter
+    + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
+  const filtered = Boolean(supplierId || state.filterPaymentStatus || q);
+  root.innerHTML = hero(labels.payments, CRM.tabs.pagamentos.desc, statCards([
+    { label: t.paid, value: fmtEUR(paid) },
+    { label: t.pending, value: fmtEUR(pending) },
+    { label: t.overdue, value: fmtEUR(overdue) },
+  ])) + crmPanel({
+    title: t.ledger,
+    tag: scoped.filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus).length,
+    tools,
+    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thSupplier)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th></th></tr>`,
+    rows,
+    empty: filtered ? t.emptyFiltered : t.emptyTitle,
+    emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
+  });
+  $$('[data-filter-pay]', root).forEach(btn => btn.addEventListener('click', () => { state.filterPaymentStatus = btn.dataset.filterPay; render(); }));
+  $('[data-filter-pay-supplier]', root)?.addEventListener('change', e => { state.filterPaymentSupplier = e.target.value; render(); });
+  $$('[data-mark-payment]', root).forEach(btn => btn.addEventListener('click', e => {
+    e.stopPropagation();
+    markPaymentPaid(btn.dataset.markPayment);
+  }));
+  $$('[data-payment]', root).forEach(r => r.addEventListener('click', e => {
+    if (e.target.closest('[data-mark-payment]')) return;
+    openPaymentDetail(r.dataset.payment);
+  }));
+}
+
 async function markInvoicePaid(id) {
   const inv = state.invoices.find(i => i.id === id);
   const ok = await confirmDialog({
@@ -1375,6 +1612,45 @@ async function openInvoiceDetail(id) {
   $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
+}
+
+async function markPaymentPaid(id) {
+  const pay = state.payments.find(p => p.id === id);
+  const t = CRM.payments;
+  const ok = await confirmDialog({
+    title: t.markPaidConfirmTitle,
+    body: t.markPaidConfirmBody({ number: pay?.number || '' }),
+    okLabel: t.markPaid,
+    danger: false,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/crm/payments/${encodeURIComponent(id)}/paid`, { method: 'PATCH' });
+    closeDrawer();
+    await loadModule('payments');
+    render();
+    toast(t.markedPaid({ number: pay?.number || '' }));
+  } catch { toast(t.markPaidFailed); }
+}
+
+function openPaymentDetail(id) {
+  const pay = state.payments.find(p => p.id === id);
+  if (!pay) return;
+  const t = CRM.payments;
+  const canMarkPaid = pay.status === 'PENDING' || pay.status === 'OVERDUE';
+  const items = (pay.items || []).map(it => `<li>${escapeHTML(it.description)} · ${it.quantity} × ${fmtEUR(it.unitPriceEur)}</li>`).join('');
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(pay.supplierName || '')} · ${invoicePill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
+    <p class="hint">${escapeHTML(t.thDueDate)} · ${escapeHTML(fmtDay(pay.dueDate))}</p>
+    ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
+    ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
+    <div class="actions">
+      ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
+    </div>`;
+  $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id));
+  openDrawer(pay.number, form);
 }
 
 function catalogTypePill(type) {
@@ -2493,6 +2769,8 @@ async function init() {
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();
+    if (state.active === 'suppliers') return openSupplierForm();
+    if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
     toast(STR.quickCreateSoon);
   });
