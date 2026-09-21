@@ -168,6 +168,10 @@ internal data class InvoiceDto(
     val totalEur: Double,
     val hasPdf: Boolean,
     val createdAt: String,
+    val quoteId: String? = null,
+    val quoteNumber: String? = null,
+    val paidAt: String? = null,
+    val items: List<LineItemDto> = emptyList(),
 )
 
 internal fun Client.dto() = ClientDto(
@@ -261,7 +265,7 @@ internal fun com.rfm.edubot.crm.model.ClientService.dto(client: Client?) = Clien
     createdAt = createdAt.toString(),
 )
 
-internal fun Invoice.dto(client: Client?) = InvoiceDto(
+internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -271,4 +275,8 @@ internal fun Invoice.dto(client: Client?) = InvoiceDto(
     totalEur = totalCents / 100.0,
     hasPdf = pdfPath != null,
     createdAt = createdAt.toString(),
+    quoteId = quoteId?.toHexString(),
+    quoteNumber = quoteNumber,
+    paidAt = paidAt?.toString(),
+    items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
 )

@@ -1318,15 +1318,21 @@ async function markInvoicePaid(id) {
   } catch { toast(STR.markPaidFailed); }
 }
 
-function openInvoiceDetail(id) {
-  const inv = state.invoices.find(i => i.id === id);
+async function openInvoiceDetail(id) {
+  let inv = state.invoices.find(i => i.id === id);
+  try { inv = await api(`/app/api/crm/invoices/${encodeURIComponent(id)}`); }
+  catch { /* keep list row */ }
   if (!inv) return;
   const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const items = (inv.items || []).map(it => `<li>${escapeHTML(it.description)} · ${it.quantity} × ${fmtEUR(it.unitPriceEur)}</li>`).join('');
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
     <p class="hint">${escapeHTML(inv.clientName || '')} · ${invoicePill(inv.status)} · ${fmtEUR(inv.totalEur)}</p>
     <p class="hint">${escapeHTML(STR.thDueDate)} · ${escapeHTML(fmtDay(inv.dueDate))}</p>
+    ${inv.status === 'PAID' && inv.paidAt ? `<p class="hint">${escapeHTML(STR.paidOnLabel)} · ${escapeHTML(fmtDay(inv.paidAt))}</p>` : ''}
+    ${inv.quoteNumber ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
+    ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
     <div class="actions">
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}

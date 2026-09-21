@@ -230,6 +230,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     thPdf: 'PDF', thPdfActions: 'PDF · Acções', viewPdf: 'Ver PDF', pdfPending: 'pendente',
     errorPdf: p => `Erro PDF: ${p.msg}`, loadFailed: 'Não foi possível carregar esta secção',
     markPaid: 'Marcar pago', markedPaid: p => `Fatura ${p.number} marcada como paga`, markPaidFailed: 'Não foi possível marcar a fatura como paga',
+    invoiceFromQuote: p => `A partir do orçamento ${p.number}`, paidOnLabel: 'Paga em',
     catalogDesc: 'CRM · Serviços e materiais padrão.', thType: 'Tipo', thCategory: 'Categoria', thDescription: 'Descrição', thUnit: 'Unid.', thPrice: 'Preço',
     personaDesc: 'Personalidade do bot — sintetizada a partir das notas e ficheiros que carrega.',
     personaCompiling: 'A sintetizar…', statVersion: 'Versão', statTokens: 'Tokens est.', statUpdated: 'Atualizado',

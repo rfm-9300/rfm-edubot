@@ -654,6 +654,13 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             deps.invoices.setPdfPath(invoice.id, path.toString())
             call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
         }
+        get("/invoices/{id}") {
+            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
+            val quoteNumber = invoice.quoteId?.let { deps.quotes.findById(it)?.number }
+            call.respond(invoice.dto(deps.clients.findById(invoice.clientId), quoteNumber))
+        }
         get("/invoices/{id}/pdf") {
             val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)

@@ -231,6 +231,7 @@ window.__I18N_CATALOGS['en'] = {
     thPdf: 'PDF', thPdfActions: 'PDF · Actions', viewPdf: 'View PDF', pdfPending: 'pending',
     errorPdf: p => `PDF error: ${p.msg}`, loadFailed: 'Could not load this section',
     markPaid: 'Mark paid', markedPaid: p => `Invoice ${p.number} marked as paid`, markPaidFailed: 'Could not mark invoice as paid',
+    invoiceFromQuote: p => `From quote ${p.number}`, paidOnLabel: 'Paid on',
     catalogDesc: 'CRM · Standard services and materials.', thType: 'Type', thCategory: 'Category', thDescription: 'Description', thUnit: 'Unit', thPrice: 'Price',
     personaDesc: 'Bot personality — synthesized from notes and files you upload.',
     personaCompiling: 'Synthesizing…', statVersion: 'Version', statTokens: 'Tokens est.', statUpdated: 'Updated',
