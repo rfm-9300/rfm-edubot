@@ -13,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlin.random.Random
 
@@ -42,16 +43,22 @@ class AssistantViewModel(
     init {
         scope.launch {
             voiceInput.state.collect { voiceState ->
-                val transcript = when (voiceState) {
-                    is VoiceInputState.Listening -> voiceState.transcript
-                    is VoiceInputState.Finished -> voiceState.transcript
-                    else -> null
+                mutableState.update { current ->
+                    val transcript = when (voiceState) {
+                        is VoiceInputState.Listening -> voiceState.transcript
+                        is VoiceInputState.Finished -> voiceState.transcript
+                        else -> null
+                    }
+                    current.copy(
+                        draft = if (!current.busy && transcript != null) {
+                            mergeTranscript(voiceDraftPrefix, transcript)
+                        } else {
+                            current.draft
+                        },
+                        voiceState = voiceState,
+                        voiceError = (voiceState as? VoiceInputState.Failed)?.error,
+                    )
                 }
-                mutableState.value = mutableState.value.copy(
-                    draft = transcript?.let { mergeTranscript(voiceDraftPrefix, it) } ?: mutableState.value.draft,
-                    voiceState = voiceState,
-                    voiceError = (voiceState as? VoiceInputState.Failed)?.error,
-                )
             }
         }
     }
@@ -87,7 +94,7 @@ class AssistantViewModel(
 
     fun updateDraft(content: String) {
         if (mutableState.value.voiceState is VoiceInputState.Listening) voiceInput.cancel()
-        mutableState.value = mutableState.value.copy(draft = content, voiceState = VoiceInputState.Idle, voiceError = null)
+        mutableState.update { it.copy(draft = content, voiceState = VoiceInputState.Idle, voiceError = null) }
     }
 
     fun toggleVoice() {
@@ -105,33 +112,35 @@ class AssistantViewModel(
         val detail = mutableState.value.detail ?: return@launch
         val content = mutableState.value.draft.trim()
         if (content.isBlank() || mutableState.value.busy) return@launch
-        voiceInput.cancel()
         val optimistic = AssistantMessage(
             id = "local-${Random.nextLong()}",
             role = "user",
             content = content,
             createdAt = "",
         )
-        mutableState.value = mutableState.value.copy(
-            busy = true,
-            error = false,
-            draft = "",
-            voiceState = VoiceInputState.Idle,
-            voiceError = null,
-            detail = detail.copy(messages = detail.messages + optimistic),
-        )
+        mutableState.update {
+            it.copy(
+                busy = true,
+                error = false,
+                draft = "",
+                voiceState = VoiceInputState.Idle,
+                voiceError = null,
+                detail = (it.detail ?: detail).copy(messages = (it.detail ?: detail).messages + optimistic),
+            )
+        }
+        voiceInput.cancel()
         try {
-            mutableState.value = mutableState.value.copy(
-                detail = api.sendAssistantMessage(token, detail.thread.id, content),
-                busy = false,
-            )
+            val sent = api.sendAssistantMessage(token, detail.thread.id, content)
+            mutableState.update { it.copy(detail = sent, busy = false) }
         } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(
-                detail = detail,
-                draft = content,
-                busy = false,
-                error = true,
-            )
+            mutableState.update {
+                it.copy(
+                    detail = detail,
+                    draft = content,
+                    busy = false,
+                    error = true,
+                )
+            }
         }
     }
 

@@ -97,7 +97,40 @@ Order: crumb · search · actions. Theme button is always in actions. Search hid
 </div>
 ```
 
-Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`.
+Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta.
+
+## Health pulse
+
+Home’s one-line status under the hero:
+
+```html
+<div class="pulse pulse--urgent">
+  <span class="pill pill--bad">Urgent</span>
+  <span class="pulse__text">3 items need you · €1.240,00 to collect</span>
+</div>
+```
+
+Modifiers: `.pulse--ok` `.pulse--watch` `.pulse--urgent`. Dark theme keeps the same semantic tints.
+
+## Snapshot grid
+
+Home’s enabled-module cards. Two columns, one column below 920px:
+
+```html
+<div class="home-grid">
+  <div class="panel snapshot">
+    <div class="panel__head">
+      <h2 class="panel__title">Money <span class="tag">€ 400,00</span></h2>
+      <div class="panel__tools"><button class="btn btn--sm" type="button">Open</button></div>
+    </div>
+    <div class="snapshot__body">
+      <div class="snapshot__row"><span class="muted">Collected this month</span><span class="num">€ 120,00</span></div>
+    </div>
+  </div>
+</div>
+```
+
+Do not replace this with a table. Row labels use `.muted`; values use `.num`.
 
 ## Panel + chips
 
@@ -298,7 +331,7 @@ Inbox list items also use `.assistant__thread`, plus `.inbox__preview` (last mes
 
 ## Work queue
 
-Home uses `.queue` / `.setup-list` of `.queue__item` buttons (title + detail). Click navigates to the matching module. Do not replace this with a table.
+Home uses `.queue` / `.setup-list` of `.queue__item` buttons (title + detail). An optional `.queue__meta` column holds a status pill or timestamp. Click navigates to the matching module. Do not replace this with a table.
 
 ## Media thumb
 

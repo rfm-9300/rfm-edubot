@@ -3,7 +3,6 @@ package com.rfm.edubot.dashboard
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
-import com.mongodb.client.model.Filters
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
@@ -93,7 +92,6 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.datetime.LocalDate
-import org.bson.Document
 import org.bson.types.ObjectId
 import java.util.Date
 
@@ -148,7 +146,7 @@ fun Route.dashboardRoutes(
             get("/overview") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
                 if (!ctx.requireModule(DashboardModules.OVERVIEW)) return@get call.respond(HttpStatusCode.Forbidden)
-                call.respond(overview(mongo, ctx.tenant.id))
+                call.respond(OverviewService(mongo).build(ctx.tenant))
             }
             get("/contacts") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
@@ -812,28 +810,6 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
     .withExpiresAt(Date(System.currentTimeMillis() + expiryHours * 60L * 60L * 1000L))
     .sign(Algorithm.HMAC256(config.jwtSecret))
 
-private suspend fun overview(mongo: MongoModule, tenantId: ObjectId): OverviewDto {
-    val tenantFilter = Filters.eq("tenantId", tenantId)
-    val todayStart = Date(System.currentTimeMillis() - 24L * 60L * 60L * 1000L)
-    return OverviewDto(
-        users = mongo.database.getCollection<Document>("users").countDocuments(tenantFilter),
-        conversations = mongo.database.getCollection<Document>("conversations").countDocuments(tenantFilter),
-        messages = mongo.database.getCollection<Document>("messages").countDocuments(tenantFilter),
-        messagesToday = mongo.database.getCollection<Document>("messages").countDocuments(Filters.and(tenantFilter, Filters.gte("createdAt", todayStart))),
-        quotes = mongo.database.getCollection<Document>("crm.quotes").countDocuments(tenantFilter),
-        invoices = mongo.database.getCollection<Document>("crm.invoices").countDocuments(tenantFilter),
-        instagramUnreplied = mongo.database.getCollection<Document>("instagram.comments").countDocuments(
-            Filters.and(
-                tenantFilter,
-                Filters.eq("fromAccount", false),
-                Filters.eq("hidden", false),
-                Filters.eq("parentCommentId", null),
-                Filters.eq("repliedAt", null),
-            ),
-        ),
-    )
-}
-
 private val personaTestJson = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
 /**
@@ -928,15 +904,6 @@ private suspend fun runPersonaTest(
     val commentsEnabled: Boolean = false,
 )
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
-@Serializable private data class OverviewDto(
-    val users: Long,
-    val conversations: Long,
-    val messages: Long,
-    val messagesToday: Long,
-    val quotes: Long,
-    val invoices: Long,
-    val instagramUnreplied: Long = 0,
-)
 @Serializable private data class ContactStatusRequest(val status: String)
 @Serializable private data class PersonaUpdateRequest(val compiledInstructions: String)
 @Serializable private data class PersonaSourceRequest(val content: String)

@@ -70,16 +70,17 @@ Success and recoverable errors: `toast(translatedString)`. Do not use `alert()`.
 
 Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-side unless the module already hits an API query param.
 
-## Home (work queue)
+## Home (tenant snapshot)
 
-`/app` overview is a work queue, not a KPI wall:
+`/app` overview is a manager snapshot of **enabled modules**, not a KPI wall of raw counts:
 
-1. `.view__hero` + today’s message/contact stats
-2. `.queue` of items that need a reply (waiting chats, overdue invoices, pending bookings, unreplied Instagram comments)
-3. `.setup-list` of unfinished setup (channels, website widget, persona)
-4. A second stat row for conversations / quotes / invoices
+1. `.view__hero` with 3–4 processed highlights (collected this month, outstanding, open quotes, waiting chats — only for modules the tenant has on)
+2. `.pulse` health strip (`pulse--ok` / `--watch` / `--urgent`) with a one-line summary
+3. `.queue` of items that need a person (overdue invoices, waiting chats, pending bookings, unreplied Instagram, expiring quotes)
+4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, inbox, calendar, Instagram, catalog, assistant)
+5. `.setup-list` only when setup is actually unfinished **and** relevant (CRM-only tenants are not asked to connect WhatsApp)
 
-Queue clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module.
+Queue and snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
 
 ## Conversation / assistant
 

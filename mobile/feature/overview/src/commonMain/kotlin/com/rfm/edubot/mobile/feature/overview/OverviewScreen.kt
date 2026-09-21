@@ -49,9 +49,17 @@ fun OverviewScreen(
             }
         }
         if (overview == null) item { LoadingScreen() } else {
-            item { MetricRow(strings.messagesToday, overview.messagesToday, strings.messages, overview.messages) }
-            item { MetricRow(strings.contacts, overview.users, strings.conversations, overview.conversations) }
-            item { MetricRow(strings.quotes, overview.quotes, strings.invoices, overview.invoices) }
+            item { MetricRow(strings.messagesToday, overview.inbox?.messagesToday ?: overview.messagesToday, strings.waiting, (overview.inbox?.waiting ?: overview.attentionCount).toLong()) }
+            overview.cash?.let { cash ->
+                item { MetricRow(strings.collectedMonth, cash.collectedThisMonthCents / 100, strings.outstanding, cash.outstandingCents / 100) }
+            }
+            item { MetricRow(strings.contacts, overview.inbox?.contacts ?: overview.users, strings.conversations, overview.conversations) }
+            if (overview.cash == null) {
+                item { MetricRow(strings.quotes, overview.quotes, strings.invoices, overview.invoices) }
+            }
+            overview.calendar?.let { cal ->
+                item { MetricRow(strings.bookingsToday, cal.today.toLong(), strings.pendingBookings, cal.pending.toLong()) }
+            }
             item { InfoPanel(strings.cacheReady, strings.cacheDescription) }
         }
     }

@@ -12,6 +12,7 @@ let state = {
   selectedConversation: null, threadMessages: [],
   settingsSection: 'channels', personaAdvanced: false,
   whatsAppSignup: { enabled: false },
+  fetched: { conversations: false, invoices: false, bookings: false, instagram: false },
 };
 let personaChatBusy = false;
 let assistantBusy = false;
@@ -135,26 +136,35 @@ async function bootAuthed() {
   $('#principal-type').textContent = state.me.principalType;
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
   renderNav();
-  await loadModule(state.active);
-  if (hasModule('invoices') && state.active !== 'invoices') {
-    state.invoices = await api('/app/api/crm/invoices').catch(() => state.invoices);
+  if (state.active !== 'overview') {
+    state.overview = await api('/app/api/overview').catch(() => state.overview);
   }
+  await loadModule(state.active);
   render();
 }
 
 function renderNav() {
-  const waiting = state.conversations.filter(c => c.waiting).length;
-  const overdue = state.invoices.filter(i => i.status === 'OVERDUE').length;
-  const pendingBookings = state.bookings.filter(b => b.status === 'PENDING').length;
-  const pendingIg = (state.instagram?.unrepliedCount) || (state.instagram?.comments || []).filter(c => c.needsReply).length;
+  const o = state.overview || {};
+  const waiting = state.fetched.conversations
+    ? state.conversations.filter(c => c.waiting).length
+    : (o.inbox?.waiting || 0);
+  const overdue = state.fetched.invoices
+    ? state.invoices.filter(i => i.status === 'OVERDUE').length
+    : (o.cash?.overdueCount || 0);
+  const pendingBookings = state.fetched.bookings
+    ? state.bookings.filter(b => b.status === 'PENDING').length
+    : (o.calendar?.pending || 0);
+  const pendingIg = state.fetched.instagram
+    ? ((state.instagram?.unrepliedCount) || (state.instagram?.comments || []).filter(c => c.needsReply).length)
+    : (o.social?.unreplied || 0);
   const counts = {
-    contacts: state.contacts.length,
-    conversations: waiting || state.conversations.length,
-    clients: state.clients.length,
-    quotes: state.quotes.length,
-    invoices: overdue || state.invoices.length,
-    catalog: state.catalog.length,
-    bookings: pendingBookings || state.bookings.length,
+    contacts: state.contacts.length || o.inbox?.contacts || 0,
+    conversations: waiting || state.conversations.length || o.inbox?.conversations || 0,
+    clients: state.clients.length || o.customers?.total || 0,
+    quotes: state.quotes.length || o.pipeline?.quoteCount || 0,
+    invoices: overdue || state.invoices.length || o.cash?.invoiceCount || 0,
+    catalog: state.catalog.length || o.catalog?.items || 0,
+    bookings: pendingBookings || state.bookings.length || o.calendar?.thisWeek || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
   };
   const alerts = { conversations: waiting > 0, invoices: overdue > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0 };
@@ -197,21 +207,17 @@ async function setActive(tab) {
 async function loadModule(tab) {
   if (tab === 'overview') {
     state.overview = await api('/app/api/overview');
-    const extra = [];
-    if (hasModule('conversations')) extra.push(api('/app/api/conversations').then(rows => { state.conversations = rows; }).catch(() => {}));
-    if (hasModule('invoices')) extra.push(api('/app/api/crm/invoices').then(rows => { state.invoices = rows; }).catch(() => {}));
-    if (hasModule('bookings')) extra.push(api(`/app/api/bookings?from=${encodeURIComponent(toIso(startOfWeek()))}&to=${encodeURIComponent(toIso(addDays(startOfWeek(), 7)))}`).then(rows => { state.bookings = rows; }).catch(() => {}));
-    if (hasModule('instagram')) extra.push(api('/app/api/instagram').then(data => { state.instagram = data; }).catch(() => {}));
-    if (hasModule('persona')) extra.push(api('/app/api/persona').then(p => { state.persona = p; }).catch(() => {}));
-    if (hasModule('settings')) extra.push(api('/app/api/web-widget').then(w => { state.webWidget = w; }).catch(() => {}));
-    await Promise.all(extra);
   }
   if (tab === 'contacts') state.contacts = await api('/app/api/contacts');
-  if (tab === 'conversations') state.conversations = await api('/app/api/conversations');
+  if (tab === 'conversations') {
+    state.conversations = await api('/app/api/conversations');
+    state.fetched.conversations = true;
+  }
   if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
   if (tab === 'quotes') state.quotes = await api('/app/api/crm/quotes');
   if (tab === 'invoices') {
     state.invoices = await api('/app/api/crm/invoices');
+    state.fetched.invoices = true;
     if (!state.filterInvoiceStatus && state.invoices.some(i => i.status === 'OVERDUE')) state.filterInvoiceStatus = 'OVERDUE';
   }
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
@@ -238,10 +244,12 @@ async function loadModule(tab) {
     state.bookings = bookings;
     state.bookingServices = services;
     state.bookingAvailability = availability;
+    state.fetched.bookings = true;
   }
   if (tab === 'instagram') {
     try { state.instagram = await api('/app/api/instagram?refresh=1'); }
     catch { toast(STR.instagramSyncFailed); state.instagram = await api('/app/api/instagram').catch(() => state.instagram); }
+    state.fetched.instagram = true;
   }
 }
 
@@ -276,7 +284,7 @@ function hero(title, desc, stats = '') {
 }
 function statCards(items) {
   if (!items.length) return '';
-  return `<div class="view__stats">${items.map((it, i) => `<div class="stat"><div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div></div>`).join('')}</div>`;
+  return `<div class="view__stats">${items.map((it, i) => `<div class="stat"><div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint">${escapeHTML(it.hint)}</div>` : ''}</div>`).join('')}</div>`;
 }
 function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
   const cols = (String(head).match(/<th/g) || []).length || 8;
@@ -297,61 +305,200 @@ function crmPanel({ title, tag, tools = '', head, rows, empty, emptyDesc }) {
 function updateSidebarKpis() {
   const label1 = $('#kpi-1-label') || $$('.kpi__label')[0];
   const label2 = $('#kpi-2-label') || $$('.kpi__label')[1];
-  if (hasModule('invoices')) {
-    const receivable = state.invoices.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE').reduce((t, i) => t + Number(i.totalEur || 0), 0);
-    const now = new Date();
-    const paid = state.invoices.filter(i => {
-      if (i.status !== 'PAID') return false;
-      const created = i.createdAt ? new Date(i.createdAt) : null;
-      return created && created.getMonth() === now.getMonth() && created.getFullYear() === now.getFullYear();
-    }).reduce((t, i) => t + Number(i.totalEur || 0), 0);
+  const o = state.overview || {};
+  if (o.cash) {
     if (label1) label1.textContent = CRM.kpiReceivable;
     if (label2) label2.textContent = CRM.kpiPaid;
-    $('#kpi-messages').textContent = fmtEUR(receivable);
-    $('#kpi-users').textContent = fmtEUR(paid);
+    $('#kpi-messages').textContent = fmtEUR((o.cash.outstandingCents || 0) / 100);
+    $('#kpi-users').textContent = fmtEUR((o.cash.collectedThisMonthCents || 0) / 100);
+    return;
+  }
+  if (o.inbox) {
+    if (label1) label1.textContent = STR.hl_waiting;
+    if (label2) label2.textContent = STR.hl_messages_today;
+    $('#kpi-messages').textContent = o.inbox.waiting ?? '—';
+    $('#kpi-users').textContent = o.inbox.messagesToday ?? '—';
+    return;
+  }
+  if (o.customers) {
+    if (label1) label1.textContent = STR.hl_clients;
+    if (label2) label2.textContent = STR.customersNewMonth;
+    $('#kpi-messages').textContent = o.customers.total ?? '—';
+    $('#kpi-users').textContent = o.customers.newThisMonth ?? '—';
     return;
   }
   if (label1) label1.textContent = STR.statMessages;
   if (label2) label2.textContent = STR.statContacts;
-  $('#kpi-messages').textContent = state.overview?.messages ?? '—';
-  $('#kpi-users').textContent = state.overview?.users ?? '—';
+  $('#kpi-messages').textContent = o.messages ?? '—';
+  $('#kpi-users').textContent = o.users ?? '—';
+}
+
+function centsEUR(n) { return fmtEUR(Number(n || 0) / 100); }
+function deltaHint(deltaPct, vs) {
+  if (deltaPct == null || typeof STR.deltaUp !== 'function') return '';
+  if (deltaPct > 0) return STR.deltaUp({ pct: deltaPct, vs });
+  if (deltaPct < 0) return STR.deltaDown({ pct: Math.abs(deltaPct), vs });
+  return STR.deltaFlat({ vs });
+}
+function highlightLabel(key) { return STR[`hl_${key}`] || key; }
+function highlightValue(h) {
+  if (h.cents != null) return centsEUR(h.cents);
+  if (h.pct != null) return `${h.pct}%`;
+  return String(h.count ?? 0);
+}
+function attentionTitle(item) {
+  if (item.kind === 'assistant_action' && typeof STR.assistantAction === 'function') return STR.assistantAction({ n: Number(item.detail || 0) });
+  const map = {
+    waiting_chat: STR.waitingChat,
+    overdue_invoice: STR.overdueInvoice,
+    due_soon_invoice: STR.dueSoonInvoice,
+    pending_booking: STR.pendingBooking,
+    instagram_comment: STR.instagramWaitingComment,
+    quote_expiring: STR.quoteExpiring,
+  };
+  return map[item.kind] || item.kind;
+}
+function attentionPill(kind) {
+  const map = {
+    waiting_chat: 'pill--warn', overdue_invoice: 'pill--bad', due_soon_invoice: 'pill--warn',
+    pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
+    assistant_action: 'pill--info',
+  };
+  return map[kind] || '';
+}
+function healthPill(health) {
+  if (health === 'urgent') return 'pill--bad';
+  if (health === 'watch') return 'pill--warn';
+  return 'pill--ok';
+}
+function healthLabel(health) {
+  if (health === 'urgent') return STR.healthUrgent;
+  if (health === 'watch') return STR.healthWatch;
+  return STR.healthOk;
+}
+function pulseLine(o) {
+  const parts = [];
+  if ((o.health || 'ok') === 'ok') parts.push(STR.pulseOk);
+  else parts.push(typeof STR.pulseNeeds === 'function' ? STR.pulseNeeds({ n: o.attentionCount || 1 }) : STR.needsYou);
+  if (o.cash?.outstandingCents > 0 && typeof STR.pulseOutstanding === 'function') parts.push(STR.pulseOutstanding({ amount: centsEUR(o.cash.outstandingCents) }));
+  if (o.calendar?.today > 0 && typeof STR.pulseBookingsToday === 'function') parts.push(STR.pulseBookingsToday({ n: o.calendar.today }));
+  return parts.join(' · ');
+}
+function snapshotPanel(tab, title, tag, rows) {
+  const body = `<div class="snapshot__body">${rows.map(r => `<div class="snapshot__row"><span class="muted">${escapeHTML(r.label)}</span><span class="num">${escapeHTML(String(r.value))}</span></div>`).join('')}</div>`;
+  return `<div class="panel snapshot"><div class="panel__head"><h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2><div class="panel__tools"><button type="button" class="btn btn--sm" data-go="${escapeHTML(tab)}">${escapeHTML(STR.openModule)}</button></div></div>${body}</div>`;
 }
 
 function renderOverview(root) {
   const o = state.overview || {};
-  const channels = state.me?.tenant?.channels || [];
-  const waiting = state.conversations.filter(c => c.waiting).slice(0, 5);
-  const overdue = state.invoices.filter(i => i.status === 'OVERDUE').slice(0, 5);
-  const pending = state.bookings.filter(b => b.status === 'PENDING').slice(0, 5);
-  const igComments = (state.instagram?.comments || []).filter(c => c.needsReply).slice(0, 5);
-  const needs = [
-    ...waiting.map(c => ({ tab: 'conversations', title: STR.waitingChat, detail: `${c.displayName || c.waId} · ${c.lastPreview || ''}`, id: c.id })),
-    ...overdue.map(i => ({ tab: 'invoices', title: STR.overdueInvoice, detail: `${i.number} · ${i.clientName || ''} · ${fmtEUR(i.totalEur)}` })),
-    ...pending.map(b => ({ tab: 'bookings', title: STR.pendingBooking, detail: `${b.contactName} · ${fmtDate(b.startAt)}` })),
-    ...igComments.map(c => ({ tab: 'instagram', title: STR.instagramWaitingComment, detail: `${c.fromUsername ? '@' + c.fromUsername : '—'} · ${c.text || ''}` })),
-  ];
-  const setup = [];
-  if (hasModule('settings') && !channels.some(c => c.platform === 'WHATSAPP')) setup.push({ tab: 'settings', section: 'channels', title: STR.waConnect, detail: STR.setupTitle });
-  if (hasModule('settings') && !channels.some(c => c.platform === 'INSTAGRAM')) setup.push({ tab: 'settings', section: 'channels', title: STR.igConnect, detail: STR.setupTitle });
-  if (hasModule('settings') && !state.webWidget?.publicKey) setup.push({ tab: 'settings', section: 'widget', title: STR.setupWidget, detail: STR.settingsWidget });
-  if (hasModule('persona') && (!state.persona || state.persona.status === 'EMPTY')) setup.push({ tab: 'persona', title: STR.teachBot, detail: STR.personaDesc });
-  const needsHtml = needs.length
-    ? `<div class="queue">${needs.map(n => `<button type="button" class="queue__item" data-go="${n.tab}" data-conversation="${n.id || ''}"><div><strong>${escapeHTML(n.title)}</strong><span>${escapeHTML(n.detail)}</span></div></button>`).join('')}</div>`
-    : `<div class="panel" style="margin-bottom:22px"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div>`;
+  const highlights = (o.highlights || []).map(h => ({
+    label: highlightLabel(h.key),
+    value: highlightValue(h),
+    hint: deltaHint(h.deltaPct, h.key === 'messages_today' ? STR.vsLastWeek : STR.vsLastMonth),
+  }));
+  const stats = highlights.length ? statCards(highlights) : '';
+  const health = o.health || 'ok';
+  const pulseHtml = `<div class="pulse pulse--${escapeHTML(health)}"><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
+  const attention = o.attention || [];
+  const needsHtml = attention.length
+    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="queue">${attention.map(n => {
+      const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
+        : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
+      const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
+    }).join('')}</div></div>`
+    : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`;
+  const snapshots = [];
+  if (o.cash) {
+    const cashRows = [
+      { label: STR.hl_collected_month, value: centsEUR(o.cash.collectedThisMonthCents) },
+      { label: STR.hl_outstanding, value: centsEUR(o.cash.outstandingCents) },
+      { label: STR.hl_overdue, value: `${centsEUR(o.cash.overdueCents)} · ${o.cash.overdueCount}` },
+      { label: STR.cashDueSoon, value: centsEUR(o.cash.dueSoonCents) },
+      { label: STR.cashIssuedMonth, value: centsEUR(o.cash.issuedThisMonthCents) },
+    ];
+    if (o.cash.agingWeekCents || o.cash.agingMonthCents || o.cash.agingOldCents) {
+      cashRows.push({ label: STR.cashAgingCurrent, value: centsEUR(o.cash.agingCurrentCents) });
+      if (o.cash.agingWeekCents) cashRows.push({ label: STR.cashAgingWeek, value: centsEUR(o.cash.agingWeekCents) });
+      if (o.cash.agingMonthCents) cashRows.push({ label: STR.cashAgingMonth, value: centsEUR(o.cash.agingMonthCents) });
+      if (o.cash.agingOldCents) cashRows.push({ label: STR.cashAgingOld, value: centsEUR(o.cash.agingOldCents) });
+    }
+    snapshots.push(snapshotPanel('invoices', STR.snapCash, centsEUR(o.cash.outstandingCents), cashRows));
+  }
+  if (o.pipeline) {
+    snapshots.push(snapshotPanel('quotes', STR.snapPipeline, `${o.pipeline.winRatePct}%`, [
+      { label: STR.hl_pipeline_open, value: centsEUR(o.pipeline.openCents) },
+      { label: STR.pipelineDrafts, value: o.pipeline.pendingCount },
+      { label: STR.pipelineSent, value: o.pipeline.sentCount },
+      { label: STR.pipelineAccepted, value: o.pipeline.acceptedCount },
+      { label: STR.pipelineAcceptedMonth, value: centsEUR(o.pipeline.acceptedThisMonthCents) },
+      { label: STR.pipelineExpiring, value: o.pipeline.expiringSoonCount },
+      { label: STR.hl_win_rate, value: `${o.pipeline.winRatePct}%` },
+    ]));
+  }
+  if (o.customers) {
+    snapshots.push(snapshotPanel('clients', STR.snapCustomers, o.customers.total, [
+      { label: STR.hl_clients, value: o.customers.total },
+      { label: STR.customersNewMonth, value: o.customers.newThisMonth },
+      { label: STR.customersNewLastMonth, value: o.customers.newLastMonth },
+    ]));
+  }
+  if (o.inbox && hasModule('conversations')) {
+    snapshots.push(snapshotPanel('conversations', STR.snapInbox, o.inbox.waiting, [
+      { label: STR.hl_waiting, value: o.inbox.waiting },
+      { label: STR.hl_messages_today, value: o.inbox.messagesToday },
+      { label: STR.inboxWeek, value: o.inbox.messagesThisWeek },
+      { label: STR.statConversations, value: o.inbox.conversations },
+      { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
+      { label: STR.inboxPaused, value: o.inbox.autoReplyPaused },
+    ]));
+  } else if (o.inbox && hasModule('contacts')) {
+    snapshots.push(snapshotPanel('contacts', labels.contacts, o.inbox.contacts, [
+      { label: STR.hl_contacts, value: o.inbox.contacts },
+      { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
+    ]));
+  }
+  if (o.calendar) {
+    snapshots.push(snapshotPanel('bookings', STR.snapCalendar, o.calendar.today, [
+      { label: STR.hl_bookings_today, value: o.calendar.today },
+      { label: STR.snapCalendar, value: o.calendar.thisWeek },
+      { label: STR.calendarPending, value: o.calendar.pending },
+      { label: STR.calendarNext, value: o.calendar.next ? `${o.calendar.next.contactName} · ${fmtDate(o.calendar.next.startAt)}` : STR.calendarNone },
+    ]));
+  }
+  if (o.social) {
+    snapshots.push(snapshotPanel('instagram', STR.snapSocial, o.social.unreplied, [
+      { label: STR.hl_instagram_unreplied, value: o.social.unreplied },
+      { label: STR.colStatus, value: o.social.connected ? STR.connected : STR.notConnected },
+    ]));
+  }
+  if (o.catalog) {
+    snapshots.push(snapshotPanel('catalog', STR.snapCatalog, o.catalog.items, [
+      { label: STR.catalogItems, value: o.catalog.items },
+    ]));
+  }
+  if (o.assistant) {
+    snapshots.push(snapshotPanel('ai-assistant', STR.snapAssistant, o.assistant.pendingActions, [
+      { label: STR.assistantPending, value: o.assistant.pendingActions },
+    ]));
+  }
+  const setupMap = {
+    wa: { title: STR.waConnect, detail: STR.setupTitle },
+    ig: { title: STR.igConnect, detail: STR.setupTitle },
+    widget: { title: STR.setupWidget, detail: STR.settingsWidget },
+    persona: { title: STR.teachBot, detail: STR.personaDesc },
+  };
+  const setup = o.setup || [];
   const setupHtml = setup.length
-    ? `<div class="setup-list">${setup.map(s => `<button type="button" class="queue__item" data-go="${s.tab}" data-settings="${s.section || ''}"><div><strong>${escapeHTML(s.title)}</strong><span>${escapeHTML(s.detail)}</span></div></button>`).join('')}</div>`
-    : `<p class="hint" style="margin-bottom:22px">${escapeHTML(STR.setupDone)}</p>`;
-  root.innerHTML = hero(labels.overview, STR.overviewDesc, statCards([
-    { label: STR.statMessages24h, value: o.messagesToday || 0 },
-    { label: STR.statMessages, value: o.messages || 0 },
-    { label: STR.statContacts, value: o.users || 0 },
-  ])) + `<h2 class="panel__title" style="margin-bottom:10px">${escapeHTML(STR.needsYou)}</h2>${needsHtml}
-    <h2 class="panel__title" style="margin-bottom:10px">${escapeHTML(STR.setupTitle)}</h2>${setupHtml}
-    <h2 class="panel__title" style="margin-bottom:10px">${escapeHTML(STR.todayTitle)}</h2>` + statCards([
-    { label: STR.statConversations, value: o.conversations || 0 },
-    { label: STR.statQuotes, value: o.quotes || 0 },
-    { label: STR.statInvoices, value: o.invoices || 0 },
-  ]);
+    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.setupTitle)}</h2><div class="setup-list">${setup.map(s => {
+      const copy = setupMap[s.kind] || { title: s.kind, detail: STR.setupTitle };
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
+    }).join('')}</div></div>`
+    : '';
+  const modulesHtml = snapshots.length
+    ? `<div class="home-grid">${snapshots.join('')}</div>`
+    : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`;
+  root.innerHTML = hero(labels.overview, STR.overviewDesc, stats) + pulseHtml + needsHtml + modulesHtml + setupHtml;
   $$('[data-go]', root).forEach(b => b.addEventListener('click', async () => {
     if (b.dataset.conversation) state.selectedConversation = b.dataset.conversation;
     if (b.dataset.settings) state.settingsSection = b.dataset.settings;
