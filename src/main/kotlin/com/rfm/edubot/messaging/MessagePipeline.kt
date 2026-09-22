@@ -35,8 +35,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
 import org.bson.types.ObjectId
-import java.nio.file.Files
-import java.nio.file.Path
 
 class MessagePipeline(
     private val users: UserRepository,
@@ -51,7 +49,6 @@ class MessagePipeline(
     private val quoteRepository: QuoteRepository,
     private val invoiceRepository: InvoiceRepository,
     private val pdfGenerator: PdfGenerator,
-    private val pdfStoragePath: String,
     private val documentTemplate: DocumentTemplate = DocumentTemplate(),
     private val openrouterModel: String? = null,
     private val compiledPersona: String? = null,
@@ -391,8 +388,6 @@ class MessagePipeline(
                     val client = clientRepository.findById(quote.clientId) ?: continue
                     val bytes = pdfGenerator.generateQuote(quote, client, documentTemplate)
                     val filename = "Orcamento ${quote.number}.pdf"
-                    val path = savePdf("quotes", filename, bytes)
-                    quoteRepository.setPdfPath(quote.id, path.toString())
                     if (responder.capabilities.supportsDocuments) {
                         responder.sendDocument(waId, bytes, filename, "application/pdf")
                     } else {
@@ -404,8 +399,6 @@ class MessagePipeline(
                     val client = clientRepository.findById(invoice.clientId) ?: continue
                     val bytes = pdfGenerator.generateInvoice(invoice, client, documentTemplate)
                     val filename = "Fatura ${invoice.number}.pdf"
-                    val path = savePdf("invoices", filename, bytes)
-                    invoiceRepository.setPdfPath(invoice.id, path.toString())
                     if (responder.capabilities.supportsDocuments) {
                         responder.sendDocument(waId, bytes, filename, "application/pdf")
                     } else {
@@ -416,21 +409,11 @@ class MessagePipeline(
         }
     }
 
-    private fun savePdf(folder: String, filename: String, bytes: ByteArray): Path {
-        val directory = Path.of(pdfStoragePath, folder)
-        Files.createDirectories(directory)
-        val path = directory.resolve(filename)
-        Files.write(path, bytes)
-        return path
-    }
-
     private suspend fun sendLatestQuotePdf(waId: String, contextMessages: List<ChatMessage>, responder: OutboundClient): String? {
         val client = inferClientFromContext(contextMessages) ?: return null
         val quote = quoteRepository.list(client.id).firstOrNull() ?: return null
         val bytes = pdfGenerator.generateQuote(quote, client, documentTemplate)
         val filename = "Orcamento ${quote.number}.pdf"
-        val path = savePdf("quotes", filename, bytes)
-        quoteRepository.setPdfPath(quote.id, path.toString())
         return if (responder.capabilities.supportsDocuments) {
             responder.sendDocument(waId, bytes, filename, "application/pdf")
             "Enviei o PDF do orçamento ${quote.number}."

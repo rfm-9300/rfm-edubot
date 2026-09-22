@@ -5,7 +5,6 @@ import com.mongodb.client.model.Updates
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
 import com.rfm.edubot.bookings.model.BookingSource
-import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.InvoiceRepository
@@ -212,44 +211,44 @@ fun Route.tenantAdminRoutes(
 
             route("/tenants/{slug}") {
                 get("/clients") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CLIENTS) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@get
                     call.respond(deps.clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
                 }
                 get("/standard-items") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CATALOG) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@get
                     call.respond(deps.standardItems.search(call.request.queryParameters["q"], call.request.queryParameters["type"]))
                 }
                 post("/standard-items") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CATALOG) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
                     val request = call.receive<StandardItemRequest>()
                     call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
                 }
                 post("/standard-items/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CATALOG) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
                     val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val request = call.receive<StandardItemRequest>()
                     val item = deps.standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound)
                     call.respond(item)
                 }
                 delete("/standard-items/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CATALOG) ?: return@delete
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@delete
                     val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
                     if (!deps.standardItems.delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
                     call.respond(mapOf("deleted" to true))
                 }
                 get("/clients/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CLIENTS) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@get
                     val client = deps.clients.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(client.dto())
                 }
                 post("/clients") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.CLIENTS) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                     call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
                 }
                 get("/quotes") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.QUOTES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.QUOTES) ?: return@get
                     val result = deps.quotes.list(
                         clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
                         status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { QuoteStatus.valueOf(it.uppercase()) },
@@ -257,35 +256,26 @@ fun Route.tenantAdminRoutes(
                     call.respond(result.map { it.dto(deps.clients.findById(it.clientId)) })
                 }
                 post("/quotes") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.QUOTES) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.QUOTES) ?: return@post
                     val request = call.receive<CreateQuoteRequest>()
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val quote = deps.quotes.create(ObjectId(request.clientId), request.items.map { it.toLineItem() }, request.notes, request.validUntil?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) })
                     val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                    val path = savePdf(deps.pdfStoragePath, "quotes", "Orcamento ${quote.number}.pdf", deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate))
-                    deps.quotes.setPdfPath(quote.id, path.toString())
-                    call.respond(HttpStatusCode.Created, quote.copy(pdfPath = path.toString()).dto(client))
+                    call.respond(HttpStatusCode.Created, quote.dto(client))
                 }
                 get("/quotes/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.QUOTES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.QUOTES) ?: return@get
                     val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(quote.dto(deps.clients.findById(quote.clientId)))
                 }
                 get("/quotes/{id}/pdf") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.QUOTES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.QUOTES) ?: return@get
                     val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     val client = deps.clients.findById(quote.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
-                    call.respondGeneratedPdf(
-                        storedPath = quote.pdfPath,
-                        basePath = deps.pdfStoragePath,
-                        folder = "quotes",
-                        filename = "Orcamento ${quote.number}.pdf",
-                        generate = { deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate) },
-                        persist = { deps.quotes.setPdfPath(quote.id, it) },
-                    )
+                    call.respondGeneratedPdf { deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate) }
                 }
                 get("/invoices") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@get
                     val result = deps.invoices.list(
                         clientId = call.request.queryParameters["clientId"]?.let { ObjectId(it) },
                         status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { InvoiceStatus.valueOf(it.uppercase()) },
@@ -293,35 +283,26 @@ fun Route.tenantAdminRoutes(
                     call.respond(result.map { it.dto(deps.clients.findById(it.clientId)) })
                 }
                 post("/invoices") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@post
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@post
                     val request = call.receive<CreateInvoiceRequest>()
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
                     val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
                     val client = deps.clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                    val path = savePdf(deps.pdfStoragePath, "invoices", "Fatura ${invoice.number}.pdf", deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate))
-                    deps.invoices.setPdfPath(invoice.id, path.toString())
-                    call.respond(HttpStatusCode.Created, invoice.copy(pdfPath = path.toString()).dto(client))
+                    call.respond(HttpStatusCode.Created, invoice.dto(client))
                 }
                 get("/invoices/{id}") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@get
                     val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
                 }
                 get("/invoices/{id}/pdf") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@get
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@get
                     val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                     val client = deps.clients.findById(invoice.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
-                    call.respondGeneratedPdf(
-                        storedPath = invoice.pdfPath,
-                        basePath = deps.pdfStoragePath,
-                        folder = "invoices",
-                        filename = "Fatura ${invoice.number}.pdf",
-                        generate = { deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate) },
-                        persist = { deps.invoices.setPdfPath(invoice.id, it) },
-                    )
+                    call.respondGeneratedPdf { deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate) }
                 }
                 patch("/invoices/{id}/paid") {
-                    val deps = call.crmDeps(mongo, tenantRepository, runtimeConfig.get(), DashboardModules.INVOICES) ?: return@patch
+                    val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@patch
                     val invoice = deps.invoices.markPaid(ObjectId(call.parameters["id"])) ?: return@patch call.respond(HttpStatusCode.NotFound)
                     call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
                 }
@@ -356,7 +337,7 @@ private suspend fun ApplicationCall.resolveTenant(repo: TenantRepository): Tenan
     return tenant
 }
 
-private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepository, appConfig: AppConfig, module: String): CrmDeps? {
+private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepository, module: String): CrmDeps? {
     val tenant = resolveTenant(repo) ?: return null
     if (module !in DashboardModules.effectiveFor(tenant)) {
         respond(HttpStatusCode.Forbidden)
@@ -368,7 +349,6 @@ private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepo
         invoices = InvoiceRepository(mongo, tenant.id),
         standardItems = StandardItemRepository(mongo, tenant.id),
         pdfGenerator = PdfGenerator(),
-        pdfStoragePath = "${appConfig.pdfStoragePath}/${tenant.slug}",
         documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
     )
 }
@@ -379,7 +359,6 @@ private data class CrmDeps(
     val invoices: InvoiceRepository,
     val standardItems: StandardItemRepository,
     val pdfGenerator: PdfGenerator,
-    val pdfStoragePath: String,
     val documentTemplate: DocumentTemplate,
 )
 

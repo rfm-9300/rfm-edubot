@@ -1,6 +1,5 @@
 package com.rfm.edubot.admin
 
-import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
@@ -13,8 +12,6 @@ import io.ktor.server.application.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
-import java.nio.file.Files
-import java.nio.file.Path
 
 fun Route.adminRoutes() {
     // The old tenant CRM at /admin is retired. Clients use /app; you configure
@@ -34,45 +31,11 @@ fun Route.adminRoutes() {
     }
 }
 
+/** Always builds a fresh PDF from the current document + template. Never reads or writes a saved file. */
 internal suspend fun io.ktor.server.application.ApplicationCall.respondGeneratedPdf(
-    storedPath: String?,
-    basePath: String,
-    folder: String,
-    filename: String,
     generate: () -> ByteArray,
-    persist: suspend (String) -> Unit,
 ) {
-    val bytes = persistGeneratedPdf(storedPath, basePath, folder, filename, generate, persist)
-    respondBytes(bytes, ContentType.Application.Pdf)
-}
-
-internal fun existingPdfBytes(path: String?): ByteArray? {
-    if (path.isNullOrBlank()) return null
-    val pdf = Path.of(path)
-    return if (Files.exists(pdf)) Files.readAllBytes(pdf) else null
-}
-
-internal suspend fun persistGeneratedPdf(
-    storedPath: String?,
-    basePath: String,
-    folder: String,
-    filename: String,
-    generate: () -> ByteArray,
-    persist: suspend (String) -> Unit,
-): ByteArray {
-    existingPdfBytes(storedPath)?.let { return it }
-    val bytes = generate()
-    val path = savePdf(basePath, folder, filename, bytes)
-    persist(path.toString())
-    return bytes
-}
-
-internal fun savePdf(basePath: String, folder: String, filename: String, bytes: ByteArray): Path {
-    val directory = Path.of(basePath, folder)
-    Files.createDirectories(directory)
-    val path = directory.resolve(filename)
-    Files.write(path, bytes)
-    return path
+    respondBytes(generate(), ContentType.Application.Pdf)
 }
 
 @Serializable
@@ -233,7 +196,7 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     status = status.name,
     totalEur = totalCents / 100.0,
     validUntil = validUntil?.toString(),
-    hasPdf = pdfPath != null,
+    hasPdf = true,
     createdAt = createdAt.toString(),
     notes = notes,
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
@@ -315,7 +278,7 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     status = status.name,
     dueDate = dueDate.toString(),
     totalEur = totalCents / 100.0,
-    hasPdf = pdfPath != null,
+    hasPdf = true,
     createdAt = createdAt.toString(),
     quoteId = quoteId?.toHexString(),
     quoteNumber = quoteNumber,
