@@ -159,6 +159,7 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 ```
 
 `.chip.is-on` = selected filter (solid accent). `.tag` inside `.panel__title` is a count pill.
+A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter Serviços by client). It uses chip height (28px) and `width: auto`; do not drop a full-width form select into the toolbar.
 
 ## Table
 

@@ -4,7 +4,7 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
-  clientServices: [], filterServiceStatus: '',
+  clientServices: [], filterServiceStatus: '', filterServiceClient: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -209,6 +209,7 @@ async function setActive(tab) {
   state.filterQuoteStatus = '';
   state.filterInvoiceStatus = '';
   state.filterServiceStatus = '';
+  state.filterServiceClient = '';
   try {
     await loadModule(tab);
     render();
@@ -711,7 +712,14 @@ function renderClients(root) {
 function renderServices(root) {
   const t = CRM.services;
   const q = state.search.toLowerCase();
-  const rows = (state.clientServices || [])
+  const all = state.clientServices || [];
+  const clientNames = new Map();
+  for (const c of state.clients || []) clientNames.set(c.id, c.name);
+  for (const s of all) if (!clientNames.has(s.clientId)) clientNames.set(s.clientId, s.clientName || s.clientId);
+  if (state.filterServiceClient && !clientNames.has(state.filterServiceClient)) state.filterServiceClient = '';
+  const clientId = state.filterServiceClient || '';
+  const scoped = clientId ? all.filter(s => s.clientId === clientId) : all;
+  const rows = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
     .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q))
     .map(s => {
@@ -726,25 +734,32 @@ function renderServices(root) {
         <td>${servicePill(s.status)}</td>
       </tr>`;
     }).join('');
-  const open = (state.clientServices || []).filter(s => s.status === 'OPEN');
+  const open = scoped.filter(s => s.status === 'OPEN');
   const openCents = open.reduce((sum, s) => sum + Number(s.totalEur || 0), 0);
-  const invoiced = (state.clientServices || []).filter(s => s.status === 'INVOICED');
-  const tools = `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
+  const invoiced = scoped.filter(s => s.status === 'INVOICED');
+  const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
+  const clientFilter = clientOptions.length
+    ? `<select class="sel" data-filter-svc-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    : '';
+  const tools = clientFilter
+    + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
     + (hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
+  const filtered = Boolean(clientId || state.filterServiceStatus || q);
   root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
     { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
     { label: t.invoiced, value: invoiced.length },
   ])) + crmPanel({
     title: t.work,
-    tag: (state.clientServices || []).filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus).length,
+    tag: scoped.filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus).length,
     tools,
     head: `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`,
     rows,
-    empty: t.emptyTitle,
-    emptyDesc: t.emptyDesc,
+    empty: filtered ? t.emptyFiltered : t.emptyTitle,
+    emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
   });
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
+  $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
   $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pick-service]')) return;
@@ -2474,7 +2489,7 @@ async function init() {
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
     if (state.active === 'clients') return openClientForm();
-    if (state.active === 'services') return openServiceForm();
+    if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined);
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();

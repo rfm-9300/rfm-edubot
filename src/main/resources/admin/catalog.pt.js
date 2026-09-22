@@ -363,6 +363,8 @@ window.__I18N_CATALOGS['pt-PT'] = {
       open: 'Em aberto', invoiced: 'Faturado', cancelled: 'Cancelado', work: 'Trabalho do cliente', filterAll: 'Todos',
       thWhen: 'Quando', thClient: 'Cliente', thService: 'Serviço', thQty: 'Qtd', thTotal: 'Total', thStatus: 'Estado',
       emptyTitle: 'Ainda sem serviços', emptyDesc: 'Ligue trabalho a um cliente e fatura várias linhas de uma vez.',
+      emptyFiltered: 'Sem serviços neste filtro', emptyFilteredDesc: 'Experimente outro cliente ou limpe os filtros.',
+      filterClientAll: 'Todos os clientes',
       formTitle: 'Novo serviço', editTitle: 'Editar serviço', save: 'Guardar serviço',
       name: 'Serviço', namePh: 'Ex.: Pintura de fachada',
       fromCatalog: 'Do catálogo ou marcação', fromCatalogNone: '— Serviço à medida —',
