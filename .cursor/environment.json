@@ -1,0 +1,12 @@
+{
+  "name": "WhatsApp Bot (Ktor + MongoDB)",
+  "install": ".cursor/install.sh",
+  "start": ".cursor/start.sh",
+  "terminals": [
+    {
+      "name": "app",
+      "command": "./gradlew run --console=plain"
+    }
+  ],
+  "ports": [8080]
+}
