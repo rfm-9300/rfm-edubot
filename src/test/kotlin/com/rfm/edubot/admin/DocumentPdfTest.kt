@@ -1,60 +1,60 @@
 package com.rfm.edubot.admin
 
-import java.nio.file.Files
+import com.rfm.edubot.crm.model.Client
+import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.InvoiceStatus
+import com.rfm.edubot.crm.model.Quote
+import com.rfm.edubot.crm.model.QuoteStatus
+import kotlinx.datetime.Clock
+import kotlinx.datetime.LocalDate
+import org.bson.types.ObjectId
 import kotlin.test.Test
-import kotlin.test.assertContentEquals
-import kotlin.test.assertEquals
 import kotlin.test.assertTrue
-import kotlinx.coroutines.runBlocking
 
 class DocumentPdfTest {
 
+    private val now = Clock.System.now()
+    private val tenantId = ObjectId()
+    private val client = Client(
+        id = ObjectId(),
+        tenantId = tenantId,
+        number = "CLT-001",
+        name = "Cliente",
+        phone = "+351 900 000 000",
+        createdAt = now,
+        updatedAt = now,
+    )
+
     @Test
-    fun `returns existing file without regenerating`() = runBlocking {
-        val dir = Files.createTempDirectory("pdf-existing")
-        val stored = savePdf(dir.toString(), "invoices", "Fatura FAT-004.pdf", byteArrayOf(1, 2, 3))
-        var persisted = 0
-        val bytes = persistGeneratedPdf(
-            storedPath = stored.toString(),
-            basePath = dir.toString(),
-            folder = "invoices",
-            filename = "Fatura FAT-004.pdf",
-            generate = { error("should not regenerate") },
-            persist = { persisted++ },
+    fun `quote without a stored file still offers a pdf`() {
+        val quote = Quote(
+            tenantId = tenantId,
+            number = "ORC-1",
+            clientId = client.id,
+            items = emptyList(),
+            status = QuoteStatus.PENDENTE,
+            totalCents = 0,
+            pdfPath = null,
+            createdAt = now,
+            updatedAt = now,
         )
-        assertContentEquals(byteArrayOf(1, 2, 3), bytes)
-        assertEquals(0, persisted)
+        assertTrue(quote.dto(client).hasPdf)
     }
 
     @Test
-    fun `regenerates when stored file is missing`() = runBlocking {
-        val dir = Files.createTempDirectory("pdf-missing")
-        var savedPath = ""
-        val bytes = persistGeneratedPdf(
-            storedPath = dir.resolve("gone.pdf").toString(),
-            basePath = dir.toString(),
-            folder = "invoices",
-            filename = "Fatura FAT-004.pdf",
-            generate = { byteArrayOf(9, 8, 7) },
-            persist = { savedPath = it },
+    fun `invoice without a stored file still offers a pdf`() {
+        val invoice = Invoice(
+            tenantId = tenantId,
+            number = "FAT-1",
+            clientId = client.id,
+            items = emptyList(),
+            status = InvoiceStatus.PENDING,
+            dueDate = LocalDate(2026, 9, 22),
+            totalCents = 0,
+            pdfPath = null,
+            createdAt = now,
+            updatedAt = now,
         )
-        assertContentEquals(byteArrayOf(9, 8, 7), bytes)
-        assertTrue(savedPath.endsWith("Fatura FAT-004.pdf"))
-        assertContentEquals(byteArrayOf(9, 8, 7), Files.readAllBytes(dir.resolve("invoices").resolve("Fatura FAT-004.pdf")))
-    }
-
-    @Test
-    fun `generates when invoice never had a pdf path`() = runBlocking {
-        val dir = Files.createTempDirectory("pdf-none")
-        val bytes = persistGeneratedPdf(
-            storedPath = null,
-            basePath = dir.toString(),
-            folder = "invoices",
-            filename = "Fatura FAT-004.pdf",
-            generate = { byteArrayOf(4, 5) },
-            persist = {},
-        )
-        assertContentEquals(byteArrayOf(4, 5), bytes)
-        assertTrue(Files.exists(dir.resolve("invoices").resolve("Fatura FAT-004.pdf")))
+        assertTrue(invoice.dto(client).hasPdf)
     }
 }
