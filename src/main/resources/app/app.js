@@ -1952,6 +1952,9 @@ function wireDocumentTemplateForm() {
     toast,
     STR,
     escapeHTML,
+    openDrawer,
+    closeDrawer,
+    confirmDialog,
   });
 }
 

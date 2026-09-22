@@ -62,8 +62,10 @@ import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.DocumentLayoutBlock
 import com.rfm.edubot.tenant.model.DocumentLayouts
+import com.rfm.edubot.tenant.model.BuiltInDesignTemplates
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
+import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantLocales
 import io.ktor.http.ContentType
@@ -442,6 +444,55 @@ fun Route.dashboardRoutes(
                 }
                 call.respondBytes(Files.readAllBytes(path), contentType)
             }
+            get("/settings/document-template/presets") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
+                call.respond(ctx.tenant.designPresets())
+            }
+            post("/settings/document-template/presets") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val name = call.receive<SaveDesignPresetRequest>().name.trim().take(60)
+                if (name.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required"))
+                if (ctx.tenant.savedDocumentTemplates.size >= MAX_SAVED_PRESETS) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "too many saved templates"))
+                }
+                val preset = SavedDocumentTemplate(
+                    id = ObjectId().toString(),
+                    name = name,
+                    accentColor = ctx.tenant.documentTemplate.accentColor,
+                    showDecor = ctx.tenant.documentTemplate.showDecor,
+                    layout = ctx.tenant.documentTemplate.layout,
+                    createdAt = SystemClock.now(),
+                )
+                val updated = tenantRepository.addSavedDocumentTemplate(ctx.tenant.slug, preset, SystemClock.now())
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.designPresets())
+            }
+            delete("/settings/document-template/presets/{id}") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
+                val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
+                val updated = tenantRepository.removeSavedDocumentTemplate(ctx.tenant.slug, id, SystemClock.now())
+                    ?: return@delete call.respond(HttpStatusCode.NotFound)
+                call.respond(updated.designPresets())
+            }
+            post("/settings/document-template/presets/{id}/apply") {
+                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
+                val preset = BuiltInDesignTemplates.find(id) ?: ctx.tenant.savedDocumentTemplates.find { it.id == id }
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                val next = ctx.tenant.documentTemplate.copy(
+                    accentColor = preset.accentColor,
+                    showDecor = preset.showDecor,
+                    layout = preset.layout,
+                )
+                val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                pipelineFactory.evict(updated.id)
+                call.respond(updated.documentTemplate.dto(updated.name))
+            }
             dashboardAssistantRoutes(mongo, tenantRepository, dashboardUsers, aiClient)
             crmRoutes(mongo, tenantRepository, dashboardUsers, runtimeConfig)
             installBookingRoutes {
@@ -777,6 +828,7 @@ private data class CrmDeps(
 )
 
 private const val MAX_LOGO_BYTES = 2 * 1024 * 1024
+private const val MAX_SAVED_PRESETS = 20
 
 @Serializable
 private data class DocumentTemplateRequest(
@@ -881,6 +933,32 @@ private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
 private fun DocumentLayoutBlock.dto() = DocumentLayoutBlockDto(id, x, y, w, h, visible)
 
 private fun DocumentLayoutBlockDto.toModel() = DocumentLayoutBlock(id, x, y, w, h, visible)
+
+@Serializable
+private data class SaveDesignPresetRequest(val name: String)
+
+@Serializable
+private data class DesignPresetDto(
+    val id: String,
+    /** For a saved preset, the tenant's own label. For a built-in one, a stable key the UI maps via i18n. */
+    val name: String,
+    val builtIn: Boolean,
+    val accentColor: String,
+    val showDecor: Boolean,
+    val layout: List<DocumentLayoutBlockDto>,
+)
+
+private fun SavedDocumentTemplate.dto(builtIn: Boolean) = DesignPresetDto(
+    id = id,
+    name = name,
+    builtIn = builtIn,
+    accentColor = accentColor,
+    showDecor = showDecor,
+    layout = layout.map { it.dto() },
+)
+
+private fun Tenant.designPresets(): List<DesignPresetDto> =
+    BuiltInDesignTemplates.ALL.map { it.dto(builtIn = true) } + savedDocumentTemplates.map { it.dto(builtIn = false) }
 
 private fun logoExtension(filename: String): String? = when (filename.substringAfterLast('.', "").lowercase()) {
     "png" -> "png"

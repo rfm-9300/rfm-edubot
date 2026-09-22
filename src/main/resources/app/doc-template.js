@@ -257,6 +257,7 @@
         <span class="tpl__dirty" data-tpl-dirty ${dirty ? '' : 'hidden'}>${esc(S.docTplDirty)}</span>
         <button class="chip ${mode === 'quote' ? 'is-on' : ''}" type="button" data-mode="quote">${esc(S.docTplPreviewQuote)}</button>
         <button class="chip ${mode === 'invoice' ? 'is-on' : ''}" type="button" data-mode="invoice">${esc(S.docTplPreviewInvoice)}</button>
+        <button class="btn btn--ghost btn--sm" type="button" id="tpl-templates">${esc(S.docTplTemplates)}</button>
         <button class="btn btn--ghost btn--sm" type="button" id="tpl-reset">${esc(S.docTplResetLayout)}</button>
         <button class="btn btn--primary" type="button" id="tpl-save">${esc(S.docTemplateSave)}</button>
       </div>
@@ -399,6 +400,7 @@
       deps.toast(STR().docTplLayoutReset);
     });
     host.querySelector('#tpl-save')?.addEventListener('click', save);
+    host.querySelector('#tpl-templates')?.addEventListener('click', openTemplates);
     host.querySelector('#tpl-accent')?.addEventListener('input', e => {
       draft.accentColor = normalizeHex(e.target.value);
       const hex = host.querySelector('#tpl-accent-hex');
@@ -520,6 +522,20 @@
     applyInspector(false);
   }
 
+  function useTemplate(saved) {
+    deps.setTemplate(saved);
+    draft = cloneDraft(saved);
+    draft.hasLogo = !!saved.hasLogo;
+    dirty = false;
+    const flag = host.querySelector('[data-tpl-dirty]');
+    if (flag) flag.hidden = true;
+    applyTheme();
+    applyGeometry();
+    applyContent();
+    applyLayers();
+    applyInspector(true);
+  }
+
   async function save() {
     const btn = host.querySelector('#tpl-save');
     if (btn) btn.disabled = true;
@@ -542,19 +558,104 @@
         layout: draft.layout.map(copyBlock),
       };
       const saved = await deps.api('/app/api/settings/document-template', { method: 'PUT', body: JSON.stringify(body) });
-      deps.setTemplate(saved);
-      draft = cloneDraft(saved);
-      draft.hasLogo = !!saved.hasLogo;
-      dirty = false;
-      const flag = host.querySelector('[data-tpl-dirty]');
-      if (flag) flag.hidden = true;
-      applyContent();
-      applyGeometry();
+      useTemplate(saved);
       deps.toast(STR().docTemplateSaved);
     } catch {
       deps.toast(STR().docTemplateSaveFailed);
     }
     if (btn) btn.disabled = false;
+  }
+
+  function presetLabel(p) {
+    if (!p.builtIn) return p.name;
+    const key = `docTplPreset${p.name.charAt(0).toUpperCase()}${p.name.slice(1)}`;
+    return STR()[key] || p.name;
+  }
+
+  function presetCardHtml(p) {
+    const S = STR();
+    return `<div class="tpl-preset">
+      <span class="tpl-preset__swatch" style="background:${esc(p.accentColor)}"></span>
+      <span class="tpl-preset__name">${esc(presetLabel(p))}</span>
+      ${p.builtIn ? `<span class="pill pill--info">${esc(S.docTplPresetBuiltIn)}</span>` : ''}
+      <span class="tpl-preset__actions">
+        <button class="btn btn--sm" type="button" data-apply-preset="${esc(p.id)}">${esc(S.docTplPresetApply)}</button>
+        ${p.builtIn ? '' : `<button class="btn btn--sm btn--ghost" type="button" data-delete-preset="${esc(p.id)}">${esc(S.docTplPresetDelete)}</button>`}
+      </span>
+    </div>`;
+  }
+
+  async function refreshPresets(body) {
+    const S = STR();
+    let list = [];
+    try { list = await deps.api('/app/api/settings/document-template/presets'); } catch { list = []; }
+    const gallery = list.filter(p => p.builtIn);
+    const yours = list.filter(p => !p.builtIn);
+    const root = body.querySelector('#tpl-presets-list');
+    if (!root) return;
+    root.innerHTML = `<p class="tpl__pane-title">${esc(S.docTplTemplatesGallery)}</p>
+      <div class="tpl-presets">${gallery.map(presetCardHtml).join('')}</div>
+      <p class="tpl__pane-title" style="margin-top:14px">${esc(S.docTplTemplatesYours)}</p>
+      <div class="tpl-presets">${yours.length ? yours.map(presetCardHtml).join('') : `<p class="hint">${esc(S.docTplTemplatesEmpty)}</p>`}</div>`;
+    root.querySelectorAll('[data-apply-preset]').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.applyPreset)));
+    root.querySelectorAll('[data-delete-preset]').forEach(b => b.addEventListener('click', () => deletePreset(b.dataset.deletePreset, body)));
+  }
+
+  async function applyPreset(id) {
+    try {
+      const saved = await deps.api(`/app/api/settings/document-template/presets/${encodeURIComponent(id)}/apply`, { method: 'POST' });
+      useTemplate(saved);
+      deps.toast(STR().docTplPresetApplied);
+      deps.closeDrawer();
+    } catch {
+      deps.toast(STR().docTplPresetApplyFailed);
+    }
+  }
+
+  async function deletePreset(id, body) {
+    const S = STR();
+    const ok = await deps.confirmDialog({ title: S.docTplPresetDeleteConfirmTitle, body: S.docTplPresetDeleteConfirmBody, okLabel: S.docTplPresetDelete });
+    if (!ok) return;
+    try {
+      await deps.api(`/app/api/settings/document-template/presets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      deps.toast(S.docTplPresetDeleted);
+      await refreshPresets(body);
+    } catch {
+      deps.toast(S.docTplPresetDeleteFailed);
+    }
+  }
+
+  async function savePreset(body) {
+    const input = body.querySelector('#tpl-preset-name');
+    const name = input.value.trim();
+    if (!name) { deps.toast(STR().docTplPresetNameRequired); return; }
+    try {
+      await deps.api('/app/api/settings/document-template/presets', { method: 'POST', body: JSON.stringify({ name }) });
+      input.value = '';
+      deps.toast(STR().docTplPresetSaved);
+      await refreshPresets(body);
+    } catch {
+      deps.toast(STR().docTplPresetSaveFailed);
+    }
+  }
+
+  function openTemplates() {
+    if (!deps.openDrawer) return;
+    const S = STR();
+    const body = document.createElement('div');
+    body.className = 'form';
+    body.innerHTML = `<p class="hint">${esc(S.docTplTemplatesDesc)}</p>
+      <div id="tpl-presets-list"></div>
+      <div class="form__row form__row--full" style="margin-top:14px">
+        <label class="lbl" for="tpl-preset-name">${esc(S.docTplPresetSaveLabel)}</label>
+        <div class="tpl__logo-row">
+          <input class="inp" id="tpl-preset-name" placeholder="${esc(S.docTplPresetNamePh)}" />
+          <button class="btn btn--sm btn--primary" type="button" id="tpl-preset-save">${esc(S.docTplPresetSaveBtn)}</button>
+        </div>
+      </div>`;
+    body.querySelector('#tpl-preset-save').addEventListener('click', () => savePreset(body));
+    deps.openDrawer(S.docTplTemplatesTitle, body);
+    refreshPresets(body);
   }
 
   async function uploadLogo(e) {

@@ -10,6 +10,7 @@ import com.rfm.edubot.tenant.model.DocumentLayoutBlock
 import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
+import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
 import kotlinx.coroutines.flow.firstOrNull
@@ -76,6 +77,24 @@ class TenantRepository(mongoModule: MongoModule) {
             ),
         )
 
+    suspend fun addSavedDocumentTemplate(slug: String, preset: SavedDocumentTemplate, updatedAt: Instant): Tenant? =
+        update(
+            slug,
+            Updates.combine(
+                Updates.push("savedDocumentTemplates", preset.toDocument()),
+                Updates.set("updatedAt", updatedAt.toDate()),
+            ),
+        )
+
+    suspend fun removeSavedDocumentTemplate(slug: String, id: String, updatedAt: Instant): Tenant? =
+        update(
+            slug,
+            Updates.combine(
+                Updates.pull("savedDocumentTemplates", Filters.eq("id", id)),
+                Updates.set("updatedAt", updatedAt.toDate()),
+            ),
+        )
+
     private fun Document.toTenant() = Tenant(
         id = getObjectId("_id"),
         slug = getString("slug"),
@@ -90,6 +109,8 @@ class TenantRepository(mongoModule: MongoModule) {
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
         documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
+        savedDocumentTemplates = getList("savedDocumentTemplates", Document::class.java).orEmpty()
+            .mapNotNull { it.toSavedDocumentTemplate() },
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
     )
@@ -108,6 +129,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("rateLimitPerDay", rateLimitPerDay)
             .append("status", status.name)
             .append("documentTemplate", documentTemplate.toDocument())
+            .append("savedDocumentTemplates", savedDocumentTemplates.map { it.toDocument() })
             .append("createdAt", createdAt.toDate())
             .append("updatedAt", updatedAt.toDate())
         if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
@@ -153,6 +175,29 @@ private fun Document.toDocumentTemplate() = DocumentTemplate(
         getList("layout", Document::class.java).orEmpty().mapNotNull { it.toLayoutBlock() },
     ),
 )
+
+private fun SavedDocumentTemplate.toDocument(): Document = Document()
+    .append("id", id)
+    .append("name", name)
+    .append("accentColor", accentColor)
+    .append("showDecor", showDecor)
+    .append("layout", layout.map { it.toDocument() })
+    .append("createdAt", createdAt.toDate())
+
+private fun Document.toSavedDocumentTemplate(): SavedDocumentTemplate? {
+    val id = getString("id")?.takeIf { it.isNotBlank() } ?: return null
+    val name = getString("name")?.takeIf { it.isNotBlank() } ?: return null
+    return SavedDocumentTemplate(
+        id = id,
+        name = name,
+        accentColor = DocumentLayouts.sanitizeAccent(getString("accentColor").orEmpty()),
+        showDecor = bool("showDecor", true),
+        layout = DocumentLayouts.sanitize(
+            getList("layout", Document::class.java).orEmpty().mapNotNull { it.toLayoutBlock() },
+        ),
+        createdAt = getDate("createdAt")?.let { Instant.fromEpochMilliseconds(it.time) } ?: Instant.fromEpochMilliseconds(0),
+    )
+}
 
 private fun DocumentLayoutBlock.toDocument(): Document = Document()
     .append("id", id)

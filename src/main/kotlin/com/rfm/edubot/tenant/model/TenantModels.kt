@@ -20,6 +20,8 @@ data class Tenant(
     val status: TenantStatus = TenantStatus.ACTIVE,
     /** Branding + copy used when generating quote/invoice PDFs. */
     val documentTemplate: DocumentTemplate = DocumentTemplate(),
+    /** Named designs (accent/decor/layout only) the tenant saved for reuse across document templates. */
+    val savedDocumentTemplates: List<SavedDocumentTemplate> = emptyList(),
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
@@ -73,6 +75,78 @@ data class DocumentLayoutBlock(
 ) {
     fun pdfY(pageH: Float = DocumentLayouts.PAGE_H): Float = pageH - y - h
     fun pdfTop(pageH: Float = DocumentLayouts.PAGE_H): Float = pageH - y
+}
+
+/**
+ * A reusable document *design* — accent color, decoration, and block geometry, without any of the
+ * tenant's own copy (company name, terms, etc). Applying one onto a [DocumentTemplate] only touches
+ * those three fields. Built-in entries come from [BuiltInDesignTemplates]; tenants can also save their
+ * own from the studio.
+ */
+data class SavedDocumentTemplate(
+    val id: String,
+    /** User-entered label for a saved preset; a stable lookup key (see [BuiltInDesignTemplates]) for a built-in one. */
+    val name: String,
+    val accentColor: String,
+    val showDecor: Boolean,
+    val layout: List<DocumentLayoutBlock>,
+    val createdAt: Instant,
+)
+
+/** Curated starter designs shown alongside a tenant's own saved presets in the template gallery. */
+object BuiltInDesignTemplates {
+    private val EPOCH = Instant.fromEpochMilliseconds(0)
+
+    val ALL: List<SavedDocumentTemplate> = listOf(
+        SavedDocumentTemplate(
+            id = "builtin-classic",
+            name = "classic",
+            accentColor = DocumentLayouts.DEFAULT_ACCENT,
+            showDecor = true,
+            layout = DocumentLayouts.DEFAULT,
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-modern",
+            name = "modern",
+            accentColor = "#1F6FEB",
+            showDecor = true,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 48f, 150f, 52f),
+                DocumentLayoutBlock("contact", 403f, 54f, 150f, 40f),
+                DocumentLayoutBlock("company", 42f, 96f, 280f, 44f, visible = false),
+                DocumentLayoutBlock("title", 42f, 120f, 511f, 48f),
+                DocumentLayoutBlock("client", 42f, 190f, 280f, 90f),
+                DocumentLayoutBlock("items", 42f, 290f, 511f, 280f),
+                DocumentLayoutBlock("totals", 333f, 590f, 220f, 32f),
+                DocumentLayoutBlock("payment", 50f, 708f, 320f, 56f),
+                DocumentLayoutBlock("terms", 50f, 766f, 320f, 40f),
+                DocumentLayoutBlock("footer", 200f, 812f, 353f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-minimal",
+            name = "minimal",
+            accentColor = "#111827",
+            showDecor = false,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 40f, 120f, 40f),
+                DocumentLayoutBlock("contact", 42f, 84f, 340f, 32f),
+                DocumentLayoutBlock("company", 42f, 84f, 280f, 32f, visible = false),
+                DocumentLayoutBlock("title", 42f, 136f, 400f, 40f),
+                DocumentLayoutBlock("client", 42f, 192f, 280f, 80f),
+                DocumentLayoutBlock("items", 42f, 284f, 511f, 290f),
+                DocumentLayoutBlock("totals", 333f, 584f, 220f, 32f),
+                DocumentLayoutBlock("payment", 42f, 700f, 320f, 50f),
+                DocumentLayoutBlock("terms", 42f, 754f, 320f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 353f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+    )
+
+    fun find(id: String): SavedDocumentTemplate? = ALL.find { it.id == id }
 }
 
 object DocumentLayouts {
