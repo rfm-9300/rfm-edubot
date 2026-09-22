@@ -32,6 +32,12 @@ class CrmToolsTest {
     }
 
     @Test
+    fun `catalog module exposes service templates and standard items`() {
+        val names = crmTools.definitionsFor(setOf(DashboardModules.CATALOG)).map { it.name }.toSet()
+        assertEquals(setOf("list_service_templates", "list_standard_items"), names)
+    }
+
+    @Test
     fun `every tool is reachable via some module and all four modules together yield everything`() {
         val allModules = setOf(DashboardModules.CLIENTS, DashboardModules.CATALOG, DashboardModules.QUOTES, DashboardModules.INVOICES)
         assertEquals(crmTools.definitions.map { it.name }.toSet(), crmTools.definitionsFor(allModules).map { it.name }.toSet())
