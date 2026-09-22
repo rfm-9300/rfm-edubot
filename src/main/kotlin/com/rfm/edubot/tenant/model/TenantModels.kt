@@ -144,6 +144,82 @@ object BuiltInDesignTemplates {
             ),
             createdAt = EPOCH,
         ),
+        SavedDocumentTemplate(
+            id = "builtin-editorial",
+            name = "editorial",
+            accentColor = "#C45C26",
+            showDecor = true,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 40f, 168f, 52f),
+                DocumentLayoutBlock("contact", 340f, 40f, 213f, 52f),
+                DocumentLayoutBlock("company", 42f, 100f, 260f, 44f),
+                DocumentLayoutBlock("title", 42f, 168f, 330f, 52f),
+                DocumentLayoutBlock("client", 400f, 168f, 153f, 108f),
+                DocumentLayoutBlock("items", 42f, 292f, 511f, 268f),
+                DocumentLayoutBlock("totals", 333f, 576f, 220f, 32f),
+                DocumentLayoutBlock("payment", 42f, 700f, 320f, 52f),
+                DocumentLayoutBlock("terms", 42f, 758f, 320f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-ledger",
+            name = "ledger",
+            accentColor = "#1B4D3E",
+            showDecor = false,
+            layout = listOf(
+                DocumentLayoutBlock("company", 42f, 36f, 300f, 48f),
+                DocumentLayoutBlock("logo", 403f, 36f, 150f, 52f),
+                DocumentLayoutBlock("contact", 42f, 92f, 340f, 36f),
+                DocumentLayoutBlock("title", 42f, 148f, 511f, 44f),
+                DocumentLayoutBlock("client", 42f, 204f, 280f, 80f),
+                DocumentLayoutBlock("items", 42f, 296f, 511f, 276f),
+                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
+                DocumentLayoutBlock("payment", 42f, 700f, 320f, 50f),
+                DocumentLayoutBlock("terms", 42f, 756f, 320f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-harbor",
+            name = "harbor",
+            accentColor = "#0E7490",
+            showDecor = true,
+            layout = listOf(
+                DocumentLayoutBlock("contact", 42f, 28f, 511f, 36f),
+                DocumentLayoutBlock("logo", 42f, 80f, 150f, 52f),
+                DocumentLayoutBlock("company", 220f, 80f, 280f, 52f),
+                DocumentLayoutBlock("title", 42f, 156f, 400f, 48f),
+                DocumentLayoutBlock("client", 42f, 220f, 280f, 84f),
+                DocumentLayoutBlock("items", 42f, 316f, 511f, 256f),
+                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
+                DocumentLayoutBlock("payment", 50f, 704f, 320f, 52f),
+                DocumentLayoutBlock("terms", 50f, 762f, 320f, 36f),
+                DocumentLayoutBlock("footer", 200f, 812f, 353f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-atelier",
+            name = "atelier",
+            accentColor = "#B45309",
+            showDecor = true,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 48f, 188f, 56f),
+                DocumentLayoutBlock("company", 42f, 112f, 280f, 32f, visible = false),
+                DocumentLayoutBlock("contact", 42f, 116f, 360f, 36f),
+                DocumentLayoutBlock("title", 42f, 172f, 511f, 56f),
+                DocumentLayoutBlock("client", 42f, 244f, 300f, 80f),
+                DocumentLayoutBlock("items", 42f, 340f, 511f, 236f),
+                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
+                DocumentLayoutBlock("payment", 42f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 42f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
     )
 
     fun find(id: String): SavedDocumentTemplate? = ALL.find { it.id == id }
@@ -196,6 +272,23 @@ object DocumentLayouts {
     fun sanitizeAccent(value: String): String {
         val match = Regex("^#?([0-9a-fA-F]{6})$").matchEntire(value.trim()) ?: return ""
         return "#" + match.groupValues[1].uppercase()
+    }
+
+    /** Visible blocks whose rectangles intersect. The PDF paints at these coordinates. */
+    fun overlappingIds(blocks: List<DocumentLayoutBlock>): Set<String> {
+        val visible = blocks.filter { it.visible }
+        val hit = mutableSetOf<String>()
+        for (i in visible.indices) {
+            for (j in i + 1 until visible.size) {
+                val a = visible[i]
+                val b = visible[j]
+                if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+                    hit += a.id
+                    hit += b.id
+                }
+            }
+        }
+        return hit
     }
 }
 
