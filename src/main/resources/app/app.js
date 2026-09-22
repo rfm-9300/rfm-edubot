@@ -26,6 +26,57 @@ const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+const formatChatInline = (escaped) => escaped
+  .replace(/`([^`]+)`/g, '<code>$1</code>')
+  .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  .replace(/__([^_]+)__/g, '<strong>$1</strong>');
+/** Escape first, then render the small markdown subset the assistant actually writes. */
+const formatChatMarkdown = (text) => {
+  const lines = String(text ?? '').replace(/\r\n/g, '\n').split('\n');
+  const html = [];
+  let listTag = '';
+  let items = [];
+  const flushList = () => {
+    if (!items.length) return;
+    html.push(`<${listTag}>${items.map(item => `<li>${item}</li>`).join('')}</${listTag}>`);
+    items = [];
+    listTag = '';
+  };
+  const inline = (value) => formatChatInline(escapeHTML(value));
+  for (const line of lines) {
+    const heading = line.match(/^(#{1,3})\s+(.+)$/);
+    if (heading) {
+      flushList();
+      const level = heading[1].length + 2;
+      html.push(`<h${level}>${inline(heading[2])}</h${level}>`);
+      continue;
+    }
+    const unordered = line.match(/^\s*[-*]\s+(.+)$/);
+    if (unordered) {
+      if (listTag && listTag !== 'ul') flushList();
+      listTag = 'ul';
+      items.push(inline(unordered[1]));
+      continue;
+    }
+    const ordered = line.match(/^\s*\d+[.)]\s+(.+)$/);
+    if (ordered) {
+      if (listTag && listTag !== 'ol') flushList();
+      listTag = 'ol';
+      items.push(inline(ordered[1]));
+      continue;
+    }
+    flushList();
+    if (!line.trim()) continue;
+    html.push(`<p>${inline(line)}</p>`);
+  }
+  flushList();
+  return html.join('');
+};
+const chatBubble = (role, content) => {
+  if (!content) return '';
+  const bot = role !== 'user';
+  return `<div class="chat__msg chat__msg--${bot ? 'bot' : 'user'}${bot ? ' chat__msg--rich' : ''}">${bot ? formatChatMarkdown(content) : escapeHTML(content)}</div>`;
+};
 const slugify = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const uiLocale = () => (window.I18N && I18N.locale()) || 'pt-PT';
 const fmtEUR = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
@@ -1755,7 +1806,7 @@ function renderAssistant(root) {
   const current = state.assistantThread;
   const threadRows = state.assistantThreads.map(t => `<button class="assistant__thread ${current?.thread.id === t.id ? 'is-active' : ''}" data-assistant-thread="${t.id}" type="button"><strong>${escapeHTML(t.title)}</strong><span>${escapeHTML(fmtDate(t.updatedAt))}</span></button>`).join('');
   const messages = (current?.messages || []).map(m => {
-    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>` : '';
+    const bubble = chatBubble(m.role, m.content);
     if (!m.action) return bubble;
     const pending = m.action.status === 'PENDING';
     const details = assistantActionDetails(m.action);
@@ -1959,7 +2010,7 @@ function renderPersonaChatLog(busy = false) {
     log.innerHTML = `<div class="chat__empty">${escapeHTML(STR.chatEmpty)}</div>`;
     return;
   }
-  log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>`).join('')
+  log.innerHTML = msgs.map(m => chatBubble(m.role, m.content)).join('')
     + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }

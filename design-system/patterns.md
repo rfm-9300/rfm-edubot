@@ -96,7 +96,7 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Conversation / assistant
 
-Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute. After a confirmed `create_invoice` / `create_quote`, reuse `.pdf` in `.assistant__action-buttons` so the user can download the generated document.
+Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Bot replies (assistant and persona playground) go through `formatChatMarkdown` / `.chat__msg--rich` so `**bold**`, lists, and headings render; escape first, never `innerHTML` raw model text. User bubbles stay plain escaped text. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute. After a confirmed `create_invoice` / `create_quote`, reuse `.pdf` in `.assistant__action-buttons` so the user can download the generated document.
 
 `/app` Conversations is this same split inbox (thread list + live reply), not a table that opens a drawer.
 
