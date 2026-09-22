@@ -44,6 +44,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     docTemplateSave: 'Guardar modelo', docTemplateSaved: 'Modelo de documento guardado',
     docTemplateSaveFailed: 'Não foi possível guardar o modelo',
     docTplDragHint: 'Arraste uma caixa para a mover. Redimensione pelas pegas. Clique numa caixa para editar o conteúdo.',
+    docTplOverlap: 'Estas caixas sobrepõem-se, por isso o texto será impresso por cima um do outro. Afaste-as.',
     docTplPreviewQuote: 'Orçamento', docTplPreviewInvoice: 'Fatura',
     docTplResetLayout: 'Repor disposição', docTplLayoutReset: 'Disposição reposta para a página predefinida',
     docTplLayers: 'Blocos', docTplInspector: 'Bloco selecionado',

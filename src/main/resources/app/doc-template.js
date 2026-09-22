@@ -19,7 +19,7 @@
   ];
   const MIN = {
     logo: [72, 28], contact: [140, 28], company: [120, 28], title: [160, 32],
-    client: [140, 48], items: [220, 80], totals: [120, 24], payment: [140, 36],
+    client: [140, 48], items: [420, 80], totals: [120, 24], payment: [140, 36],
     terms: [140, 32], footer: [120, 16],
   };
 
@@ -110,6 +110,23 @@
     return b;
   }
 
+  /** Visible blocks whose rectangles intersect. The generated PDF paints blocks at these exact
+   * coordinates, so an overlap here is text printed on top of text. */
+  function overlappingIds() {
+    const visible = draft.layout.filter(b => b.visible);
+    const hit = new Set();
+    for (let i = 0; i < visible.length; i++) {
+      for (let j = i + 1; j < visible.length; j++) {
+        const a = visible[i], b = visible[j];
+        if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+          hit.add(a.id);
+          hit.add(b.id);
+        }
+      }
+    }
+    return hit;
+  }
+
   function pagePoint(ev, page) {
     const r = page.getBoundingClientRect();
     return { x: (ev.clientX - r.left) * (PAGE_W / r.width), y: (ev.clientY - r.top) * (PAGE_H / r.height) };
@@ -177,7 +194,8 @@
   }
 
   function layerHtml(b) {
-    return `<div class="tpl__layer ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'}" data-layer="${esc(b.id)}">
+    const clash = overlappingIds().has(b.id);
+    return `<div class="tpl__layer ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${clash ? 'is-clash' : ''}" data-layer="${esc(b.id)}" ${clash ? `title="${esc(STR().docTplOverlap)}"` : ''}>
       <span>${esc(blockLabel(b.id))}</span>
       <button class="iconbtn" type="button" data-vis="${esc(b.id)}" aria-label="${esc(STR().docTplHideAria)}" title="${esc(b.visible ? STR().docTplHide : STR().docTplShow)}">${b.visible ? '◉' : '○'}</button>
     </div>`;
@@ -252,6 +270,7 @@
         <h2 class="view__title">${esc(S.docTemplateTitle)}</h2>
         <p class="view__desc">${esc(S.docTemplateDesc)}</p>
         <p class="hint">${esc(S.docTplDragHint)}</p>
+        <p class="tpl__warn" data-tpl-overlap ${overlappingIds().size ? '' : 'hidden'}>${esc(S.docTplOverlap)}</p>
       </div>
       <div class="tpl__actions">
         <span class="tpl__dirty" data-tpl-dirty ${dirty ? '' : 'hidden'}>${esc(S.docTplDirty)}</span>
@@ -280,7 +299,7 @@
         <p class="tpl__stage-label">${esc(S.docTplPageLabel)}</p>
         <div class="tpl__sizer" id="tpl-sizer">
           <div class="tpl__page ${draft.showDecor ? 'is-decor' : ''}" id="tpl-page" tabindex="0">
-            ${draft.layout.map(b => `<div class="tpl__block ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
+            ${draft.layout.map(b => `<div class="tpl__block ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${overlappingIds().has(b.id) ? 'is-clash' : ''}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
               <div class="tpl__block-body">${blockInner(b.id)}</div>${handlesHtml()}
             </div>`).join('')}
           </div>
@@ -302,6 +321,7 @@
   }
 
   function applyGeometry() {
+    const clashes = overlappingIds();
     draft.layout.forEach(b => {
       const el = host.querySelector(`[data-block="${b.id}"]`);
       if (!el) return;
@@ -311,7 +331,10 @@
       el.style.height = `${b.h}px`;
       el.classList.toggle('is-on', selected === b.id);
       el.classList.toggle('is-off', !b.visible);
+      el.classList.toggle('is-clash', clashes.has(b.id));
     });
+    const warn = host.querySelector('[data-tpl-overlap]');
+    if (warn) warn.hidden = clashes.size === 0;
   }
 
   function applyContent() {

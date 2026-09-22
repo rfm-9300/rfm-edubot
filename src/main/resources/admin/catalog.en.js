@@ -45,6 +45,7 @@ window.__I18N_CATALOGS['en'] = {
     docTemplateSave: 'Save template', docTemplateSaved: 'Document template saved',
     docTemplateSaveFailed: 'Could not save document template',
     docTplDragHint: 'Drag a box to move it. Resize from the handles. Click a box to edit its content.',
+    docTplOverlap: 'These boxes overlap, so their text will print on top of each other. Move them apart.',
     docTplPreviewQuote: 'Quote', docTplPreviewInvoice: 'Invoice',
     docTplResetLayout: 'Reset layout', docTplLayoutReset: 'Layout reset to the default page',
     docTplLayers: 'Blocks', docTplInspector: 'Selected block',
