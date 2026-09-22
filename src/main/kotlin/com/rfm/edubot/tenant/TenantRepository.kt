@@ -6,6 +6,7 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DocumentDesignStyle
 import com.rfm.edubot.tenant.model.DocumentLayoutBlock
 import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
@@ -154,6 +155,7 @@ private fun DocumentTemplate.toDocument(): Document = Document()
     .append("accentColor", accentColor)
     .append("showDecor", showDecor)
     .append("layout", layout.map { it.toDocument() })
+    .append("style", DocumentDesignStyle.sanitize(style))
 
 private fun Document.toDocumentTemplate() = DocumentTemplate(
     companyName = getString("companyName").orEmpty(),
@@ -174,6 +176,7 @@ private fun Document.toDocumentTemplate() = DocumentTemplate(
     layout = DocumentLayouts.sanitize(
         getList("layout", Document::class.java).orEmpty().mapNotNull { it.toLayoutBlock() },
     ),
+    style = DocumentDesignStyle.sanitize(getString("style")),
 )
 
 private fun SavedDocumentTemplate.toDocument(): Document = Document()
@@ -183,6 +186,7 @@ private fun SavedDocumentTemplate.toDocument(): Document = Document()
     .append("showDecor", showDecor)
     .append("layout", layout.map { it.toDocument() })
     .append("createdAt", createdAt.toDate())
+    .append("style", DocumentDesignStyle.sanitize(style))
 
 private fun Document.toSavedDocumentTemplate(): SavedDocumentTemplate? {
     val id = getString("id")?.takeIf { it.isNotBlank() } ?: return null
@@ -196,6 +200,7 @@ private fun Document.toSavedDocumentTemplate(): SavedDocumentTemplate? {
             getList("layout", Document::class.java).orEmpty().mapNotNull { it.toLayoutBlock() },
         ),
         createdAt = getDate("createdAt")?.let { Instant.fromEpochMilliseconds(it.time) } ?: Instant.fromEpochMilliseconds(0),
+        style = DocumentDesignStyle.sanitize(getString("style")),
     )
 }
 

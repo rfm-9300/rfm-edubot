@@ -69,10 +69,24 @@
       footerText: t.footerText || '',
       accentColor: normalizeHex(t.accentColor || t.defaults?.accentColor || '#96AAB6'),
       showDecor: t.showDecor !== false,
+      style: normalizeStyle(t.style || t.defaults?.style),
       layout: mergeLayout(t),
       hasLogo: !!t.hasLogo,
       defaults: t.defaults || {},
     };
+  }
+
+  function normalizeStyle(value) {
+    const s = String(value || '').trim().toLowerCase();
+    if (s === 'plain' || s === 'clear') return 'plain';
+    if (s === 'split' || s === 'statement') return 'split';
+    if (s === 'band' || s === 'margin') return 'band';
+    return 'classic';
+  }
+
+  function isRuled(style) {
+    const s = style || draft?.style;
+    return s === 'plain' || s === 'split' || s === 'band';
   }
 
   function normalizeHex(value) {
@@ -143,10 +157,12 @@
     return draft.defaults?.[fallback || key] || '';
   }
 
-  function blockInner(id) {
+  function blockInner(id, style) {
     const S = STR();
+    const ruled = isRuled(style);
     if (id === 'logo') {
       if (logoUrl) return `<div class="tpl-logo tpl-logo--img"><img alt="" src="${esc(logoUrl)}" /></div>`;
+      if (ruled) return '';
       const name = (draft.companyName || deps.tenantName() || '—').toUpperCase();
       const tag = draft.tagline ? `<div class="tpl-sub">${esc(draft.tagline)}</div>` : '';
       return `<div class="tpl-logo">${esc(name.slice(0, 18))}${tag}</div>`;
@@ -170,6 +186,14 @@
         <div class="tpl-sub">${esc(S.docTplSamplePhone)}</div>`;
     }
     if (id === 'items') {
+      if (ruled) {
+        return `<table class="tpl-table tpl-table--ruled"><thead><tr>
+          <th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColQty)}</th><th>${esc(S.docTplColPrice)}</th><th>${esc(S.docTplColValue)}</th>
+        </tr></thead><tbody>
+          <tr><td>${esc(S.docTplSampleItem1)} — ${esc(S.docTplSampleItem1Desc)}</td><td>1</td><td>1 500,00</td><td>1 500,00</td></tr>
+          <tr><td>${esc(S.docTplSampleItem2)} — ${esc(S.docTplSampleItem2Desc)}</td><td>1</td><td>2 000,00</td><td>2 000,00</td></tr>
+        </tbody></table>`;
+      }
       return `<table class="tpl-table"><thead><tr>
         <th>${esc(S.docTplColService)}</th><th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColValue)}</th>
       </tr></thead><tbody>
@@ -298,7 +322,7 @@
       <div class="tpl__stage" id="tpl-stage">
         <p class="tpl__stage-label">${esc(S.docTplPageLabel)}</p>
         <div class="tpl__sizer" id="tpl-sizer">
-          <div class="tpl__page ${draft.showDecor ? 'is-decor' : ''}" id="tpl-page" tabindex="0">
+          <div class="tpl__page ${draft.showDecor && !isRuled() ? 'is-decor' : ''}" id="tpl-page" tabindex="0" data-style="${esc(draft.style || 'classic')}">
             ${draft.layout.map(b => `<div class="tpl__block ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${overlappingIds().has(b.id) ? 'is-clash' : ''}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
               <div class="tpl__block-body">${blockInner(b.id)}</div>${handlesHtml()}
             </div>`).join('')}
@@ -317,7 +341,8 @@
     if (!page) return;
     page.style.setProperty('--doc-brand', draft.accentColor);
     page.style.setProperty('--doc-brand-ink', onBrand(draft.accentColor));
-    page.classList.toggle('is-decor', draft.showDecor);
+    page.dataset.style = draft.style || 'classic';
+    page.classList.toggle('is-decor', draft.showDecor && !isRuled());
   }
 
   function applyGeometry() {
@@ -578,6 +603,7 @@
         footerText: draft.footerText.trim(),
         accentColor: draft.accentColor,
         showDecor: draft.showDecor,
+        style: draft.style,
         layout: draft.layout.map(copyBlock),
       };
       const saved = await deps.api('/app/api/settings/document-template', { method: 'PUT', body: JSON.stringify(body) });
@@ -595,17 +621,43 @@
     return STR()[key] || p.name;
   }
 
+  function presetDesc(p) {
+    if (!p.builtIn) return '';
+    const key = `docTplPreset${p.name.charAt(0).toUpperCase()}${p.name.slice(1)}Desc`;
+    return STR()[key] || '';
+  }
+
+  function thumbPageHtml(p) {
+    const layout = (p.layout || []).filter(b => b.visible !== false);
+    const ink = onBrand(p.accentColor);
+    const style = normalizeStyle(p.style);
+    const ruled = isRuled(style);
+    return `<div class="tpl-thumb" aria-hidden="true">
+      <div class="tpl__page ${p.showDecor && !ruled ? 'is-decor' : ''}" data-style="${esc(style)}" style="--doc-brand:${esc(p.accentColor)};--doc-brand-ink:${ink}">
+        ${layout.map(b => `<div class="tpl__block" style="left:${+b.x}px;top:${+b.y}px;width:${+b.w}px;height:${+b.h}px">
+          <div class="tpl__block-body">${blockInner(b.id, style)}</div>
+        </div>`).join('')}
+      </div>
+    </div>`;
+  }
+
   function presetCardHtml(p) {
     const S = STR();
-    return `<div class="tpl-preset">
-      <span class="tpl-preset__swatch" style="background:${esc(p.accentColor)}"></span>
-      <span class="tpl-preset__name">${esc(presetLabel(p))}</span>
-      ${p.builtIn ? `<span class="pill pill--info">${esc(S.docTplPresetBuiltIn)}</span>` : ''}
-      <span class="tpl-preset__actions">
-        <button class="btn btn--sm" type="button" data-apply-preset="${esc(p.id)}">${esc(S.docTplPresetApply)}</button>
-        ${p.builtIn ? '' : `<button class="btn btn--sm btn--ghost" type="button" data-delete-preset="${esc(p.id)}">${esc(S.docTplPresetDelete)}</button>`}
-      </span>
-    </div>`;
+    const desc = presetDesc(p);
+    return `<article class="tpl-preset">
+      ${thumbPageHtml(p)}
+      <div class="tpl-preset__meta">
+        <div class="tpl-preset__title-row">
+          <span class="tpl-preset__name">${esc(presetLabel(p))}</span>
+          ${p.builtIn ? `<span class="pill pill--info">${esc(S.docTplPresetBuiltIn)}</span>` : ''}
+        </div>
+        ${desc ? `<p class="tpl-preset__desc">${esc(desc)}</p>` : ''}
+        <div class="tpl-preset__actions">
+          <button class="btn btn--sm" type="button" data-apply-preset="${esc(p.id)}">${esc(S.docTplPresetApply)}</button>
+          ${p.builtIn ? '' : `<button class="btn btn--sm btn--ghost" type="button" data-delete-preset="${esc(p.id)}">${esc(S.docTplPresetDelete)}</button>`}
+        </div>
+      </div>
+    </article>`;
   }
 
   async function refreshPresets(body) {
@@ -616,10 +668,14 @@
     const yours = list.filter(p => !p.builtIn);
     const root = body.querySelector('#tpl-presets-list');
     if (!root) return;
-    root.innerHTML = `<p class="tpl__pane-title">${esc(S.docTplTemplatesGallery)}</p>
-      <div class="tpl-presets">${gallery.map(presetCardHtml).join('')}</div>
-      <p class="tpl__pane-title" style="margin-top:14px">${esc(S.docTplTemplatesYours)}</p>
-      <div class="tpl-presets">${yours.length ? yours.map(presetCardHtml).join('') : `<p class="hint">${esc(S.docTplTemplatesEmpty)}</p>`}</div>`;
+    root.innerHTML = `<div class="tpl-presets-section">
+        <p class="tpl__pane-title">${esc(S.docTplTemplatesGallery)}</p>
+        <div class="tpl-presets">${gallery.map(presetCardHtml).join('')}</div>
+      </div>
+      <div class="tpl-presets-section">
+        <p class="tpl__pane-title">${esc(S.docTplTemplatesYours)}</p>
+        <div class="tpl-presets">${yours.length ? yours.map(presetCardHtml).join('') : `<p class="hint">${esc(S.docTplTemplatesEmpty)}</p>`}</div>
+      </div>`;
     root.querySelectorAll('[data-apply-preset]').forEach(b => b.addEventListener('click', () => applyPreset(b.dataset.applyPreset)));
     root.querySelectorAll('[data-delete-preset]').forEach(b => b.addEventListener('click', () => deletePreset(b.dataset.deletePreset, body)));
   }
@@ -669,7 +725,7 @@
     body.className = 'form';
     body.innerHTML = `<p class="hint">${esc(S.docTplTemplatesDesc)}</p>
       <div id="tpl-presets-list"></div>
-      <div class="form__row form__row--full" style="margin-top:14px">
+      <div class="form__row form__row--full tpl-preset__save">
         <label class="lbl" for="tpl-preset-name">${esc(S.docTplPresetSaveLabel)}</label>
         <div class="tpl__logo-row">
           <input class="inp" id="tpl-preset-name" placeholder="${esc(S.docTplPresetNamePh)}" />
@@ -677,7 +733,7 @@
         </div>
       </div>`;
     body.querySelector('#tpl-preset-save').addEventListener('click', () => savePreset(body));
-    deps.openDrawer(S.docTplTemplatesTitle, body);
+    deps.openDrawer(S.docTplTemplatesTitle, body, true);
     refreshPresets(body);
   }
 

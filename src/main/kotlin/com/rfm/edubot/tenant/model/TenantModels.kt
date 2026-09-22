@@ -56,6 +56,8 @@ data class DocumentTemplate(
     val showDecor: Boolean = true,
     /** A4 blocks in top-left points. Empty = PdfGenerator's original geometry. */
     val layout: List<DocumentLayoutBlock> = emptyList(),
+    /** How PdfGenerator paints the page. Blank or unknown = [DocumentDesignStyle.CLASSIC]. */
+    val style: String = "",
 ) {
     fun withCompanyFallback(tenantName: String): DocumentTemplate =
         if (companyName.isNotBlank()) this else copy(companyName = tenantName)
@@ -78,9 +80,9 @@ data class DocumentLayoutBlock(
 }
 
 /**
- * A reusable document *design* — accent color, decoration, and block geometry, without any of the
+ * A reusable document *design* — style, accent, decoration, and block geometry, without any of the
  * tenant's own copy (company name, terms, etc). Applying one onto a [DocumentTemplate] only touches
- * those three fields. Built-in entries come from [BuiltInDesignTemplates]; tenants can also save their
+ * those fields. Built-in entries come from [BuiltInDesignTemplates]; tenants can also save their
  * own from the studio.
  */
 data class SavedDocumentTemplate(
@@ -91,7 +93,30 @@ data class SavedDocumentTemplate(
     val showDecor: Boolean,
     val layout: List<DocumentLayoutBlock>,
     val createdAt: Instant,
+    val style: String = DocumentDesignStyle.CLASSIC.id,
 )
+
+/** How a quote/invoice PDF is painted. Classic is the historical pill page. */
+enum class DocumentDesignStyle(val id: String) {
+    CLASSIC("classic"),
+    PLAIN("plain"),
+    SPLIT("split"),
+    BAND("band"),
+    ;
+
+    val ruled: Boolean get() = this != CLASSIC
+
+    companion object {
+        fun parse(value: String?): DocumentDesignStyle = when (value?.trim()?.lowercase()) {
+            PLAIN.id, "clear" -> PLAIN
+            SPLIT.id, "statement" -> SPLIT
+            BAND.id, "margin" -> BAND
+            else -> CLASSIC
+        }
+
+        fun sanitize(value: String?): String = parse(value).id
+    }
+}
 
 /** Curated starter designs shown alongside a tenant's own saved presets in the template gallery. */
 object BuiltInDesignTemplates {
@@ -141,6 +166,66 @@ object BuiltInDesignTemplates {
                 DocumentLayoutBlock("payment", 42f, 700f, 320f, 50f),
                 DocumentLayoutBlock("terms", 42f, 754f, 320f, 36f),
                 DocumentLayoutBlock("footer", 42f, 812f, 353f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-clear",
+            name = "clear",
+            accentColor = "#1F2937",
+            showDecor = false,
+            style = DocumentDesignStyle.PLAIN.id,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 403f, 36f, 150f, 48f),
+                DocumentLayoutBlock("contact", 42f, 96f, 400f, 28f),
+                DocumentLayoutBlock("company", 42f, 36f, 320f, 52f),
+                DocumentLayoutBlock("title", 42f, 140f, 511f, 48f),
+                DocumentLayoutBlock("client", 42f, 200f, 340f, 68f),
+                DocumentLayoutBlock("items", 42f, 280f, 511f, 300f),
+                DocumentLayoutBlock("totals", 333f, 596f, 220f, 28f),
+                DocumentLayoutBlock("payment", 42f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 42f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-statement",
+            name = "statement",
+            accentColor = "#1E3A5F",
+            showDecor = false,
+            style = DocumentDesignStyle.SPLIT.id,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 40f, 120f, 44f),
+                DocumentLayoutBlock("contact", 42f, 104f, 278f, 32f),
+                DocumentLayoutBlock("company", 172f, 40f, 148f, 56f),
+                DocumentLayoutBlock("title", 336f, 40f, 217f, 92f),
+                DocumentLayoutBlock("client", 336f, 144f, 217f, 100f),
+                DocumentLayoutBlock("items", 42f, 264f, 511f, 316f),
+                DocumentLayoutBlock("totals", 333f, 596f, 220f, 28f),
+                DocumentLayoutBlock("payment", 42f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 42f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-margin",
+            name = "margin",
+            accentColor = "#0F766E",
+            showDecor = false,
+            style = DocumentDesignStyle.BAND.id,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 400f, 40f, 150f, 48f),
+                DocumentLayoutBlock("contact", 56f, 100f, 400f, 28f),
+                DocumentLayoutBlock("company", 56f, 40f, 300f, 52f),
+                DocumentLayoutBlock("title", 56f, 144f, 480f, 48f),
+                DocumentLayoutBlock("client", 56f, 204f, 320f, 68f),
+                DocumentLayoutBlock("items", 56f, 284f, 490f, 300f),
+                DocumentLayoutBlock("totals", 326f, 596f, 220f, 28f),
+                DocumentLayoutBlock("payment", 56f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 56f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 56f, 812f, 490f, 18f),
             ),
             createdAt = EPOCH,
         ),
@@ -196,6 +281,23 @@ object DocumentLayouts {
     fun sanitizeAccent(value: String): String {
         val match = Regex("^#?([0-9a-fA-F]{6})$").matchEntire(value.trim()) ?: return ""
         return "#" + match.groupValues[1].uppercase()
+    }
+
+    /** Visible blocks whose rectangles intersect. The PDF paints at these coordinates. */
+    fun overlappingIds(blocks: List<DocumentLayoutBlock>): Set<String> {
+        val visible = blocks.filter { it.visible }
+        val hit = mutableSetOf<String>()
+        for (i in visible.indices) {
+            for (j in i + 1 until visible.size) {
+                val a = visible[i]
+                val b = visible[j]
+                if (a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h) {
+                    hit += a.id
+                    hit += b.id
+                }
+            }
+        }
+        return hit
     }
 }
 

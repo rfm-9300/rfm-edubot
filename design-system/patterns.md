@@ -116,7 +116,7 @@ Chip tabs (`.settings-tabs`): Home · Channels · Website · Language · Documen
 
 ## Document template studio
 
-Settings → Quote & invoice template is a three-pane studio (layers · A4 stage · inspector), not a stacked form. Script: `app/doc-template.js`. Persist via `PUT /app/api/settings/document-template` (`layout`, `accentColor`, `showDecor` plus the existing copy fields). Empty `layout` keeps the historical PDF geometry.
+Settings → Quote & invoice template is a three-pane studio (layers · A4 stage · inspector), not a stacked form. Script: `app/doc-template.js`. Persist via `PUT /app/api/settings/document-template` (`layout`, `accentColor`, `showDecor`, `style` plus the existing copy fields). Empty `layout` keeps the historical PDF geometry. `style` chooses how PdfGenerator paints the page (`classic` pills vs `plain` / `split` / `band` ruled tables). Templates opens a wide drawer of A4 thumbnails (built-in + saved). Applying a design keeps company copy.
 
 ## New dashboard page
 

@@ -107,10 +107,28 @@ class PdfGeneratorTest {
                 accentColor = design.accentColor,
                 showDecor = design.showDecor,
                 layout = design.layout,
+                style = design.style,
             )
             val overlaps = overlappingRuns(generator.generateQuote(quote(items), client, template))
             assertTrue(overlaps.isEmpty(), "${design.name} prints text on top of text: $overlaps")
         }
+    }
+
+    @Test
+    fun `clear style prints quantity and unit price as columns`() {
+        val design = BuiltInDesignTemplates.find("builtin-clear")!!
+        val template = DocumentTemplate(
+            companyName = "Atelier Norte",
+            accentColor = design.accentColor,
+            showDecor = false,
+            layout = design.layout,
+            style = design.style,
+        )
+        val items = listOf(lineItem("Pintura interior", quantity = 2.0, unitPriceEur = 150.0, unit = "h"))
+        val text = Loader.loadPDF(generator.generateQuote(quote(items), client, template)).use { PDFTextStripper().getText(it) }
+        assertTrue(text.contains("Qtd"), text)
+        assertTrue(text.contains("2 h") || text.contains("2h") || text.contains("2"), text)
+        assertTrue(!text.contains("S E R V"), "Clear should not letter-space column headers: $text")
     }
 
     @Test

@@ -65,6 +65,7 @@ import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.DocumentLayoutBlock
+import com.rfm.edubot.tenant.model.DocumentDesignStyle
 import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.BuiltInDesignTemplates
 import com.rfm.edubot.tenant.model.DocumentTemplate
@@ -468,6 +469,7 @@ fun Route.dashboardRoutes(
                     showDecor = ctx.tenant.documentTemplate.showDecor,
                     layout = ctx.tenant.documentTemplate.layout,
                     createdAt = SystemClock.now(),
+                    style = DocumentDesignStyle.sanitize(ctx.tenant.documentTemplate.style),
                 )
                 val updated = tenantRepository.addSavedDocumentTemplate(ctx.tenant.slug, preset, SystemClock.now())
                     ?: return@post call.respond(HttpStatusCode.NotFound)
@@ -491,6 +493,7 @@ fun Route.dashboardRoutes(
                     accentColor = preset.accentColor,
                     showDecor = preset.showDecor,
                     layout = preset.layout,
+                    style = DocumentDesignStyle.sanitize(preset.style),
                 )
                 val updated = tenantRepository.setDocumentTemplate(ctx.tenant.slug, next, SystemClock.now())
                     ?: return@post call.respond(HttpStatusCode.NotFound)
@@ -885,6 +888,7 @@ private data class DocumentTemplateRequest(
     val accentColor: String? = null,
     val showDecor: Boolean? = null,
     val layout: List<DocumentLayoutBlockDto>? = null,
+    val style: String? = null,
 )
 
 @Serializable
@@ -904,6 +908,7 @@ private data class DocumentTemplateDto(
     val accentColor: String,
     val showDecor: Boolean,
     val layout: List<DocumentLayoutBlockDto>,
+    val style: String,
     val hasLogo: Boolean,
     val defaults: DocumentTemplateDefaultsDto,
 )
@@ -927,6 +932,7 @@ private data class DocumentTemplateDefaultsDto(
     val footerText: String = PdfGenerator.DEFAULT_FOOTER,
     val accentColor: String = DocumentLayouts.DEFAULT_ACCENT,
     val layout: List<DocumentLayoutBlockDto> = DocumentLayouts.DEFAULT.map { it.dto() },
+    val style: String = DocumentDesignStyle.CLASSIC.id,
 )
 
 private fun DocumentTemplateRequest.toTemplate(existing: DocumentTemplate): DocumentTemplate = DocumentTemplate(
@@ -946,6 +952,7 @@ private fun DocumentTemplateRequest.toTemplate(existing: DocumentTemplate): Docu
     accentColor = accentColor?.let(DocumentLayouts::sanitizeAccent) ?: existing.accentColor,
     showDecor = showDecor ?: existing.showDecor,
     layout = layout?.let { DocumentLayouts.sanitize(it.map { block -> block.toModel() }) } ?: existing.layout,
+    style = style?.let(DocumentDesignStyle::sanitize) ?: existing.style,
 )
 
 private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
@@ -964,6 +971,7 @@ private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
     accentColor = accentColor,
     showDecor = showDecor,
     layout = layout.map { it.dto() },
+    style = DocumentDesignStyle.sanitize(style),
     hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
     defaults = DocumentTemplateDefaultsDto(),
 )
@@ -984,6 +992,7 @@ private data class DesignPresetDto(
     val accentColor: String,
     val showDecor: Boolean,
     val layout: List<DocumentLayoutBlockDto>,
+    val style: String,
 )
 
 private fun SavedDocumentTemplate.dto(builtIn: Boolean) = DesignPresetDto(
@@ -993,6 +1002,7 @@ private fun SavedDocumentTemplate.dto(builtIn: Boolean) = DesignPresetDto(
     accentColor = accentColor,
     showDecor = showDecor,
     layout = layout.map { it.dto() },
+    style = DocumentDesignStyle.sanitize(style),
 )
 
 private fun Tenant.designPresets(): List<DesignPresetDto> =
