@@ -33,6 +33,15 @@ const ids = {
     i2: oid("665f40000000000000000002"),
     i3: oid("665f40000000000000000003"),
   },
+  suppliers: {
+    tintas: oid("665f80000000000000000001"),
+    andaimes: oid("665f80000000000000000002"),
+  },
+  payments: {
+    p1: oid("665f90000000000000000001"),
+    p2: oid("665f90000000000000000002"),
+    p3: oid("665f90000000000000000003"),
+  },
   bookingServices: {
     consult: oid("665f60000000000000000001"),
     visit: oid("665f60000000000000000002"),
@@ -308,6 +317,57 @@ const invoices = [
   },
 ];
 
+const suppliers = [
+  { _id: ids.suppliers.tintas, number: "FOR-001", name: "Tintas Norte, Lda.", phone: "+351220100001", address: "Zona Industrial, Porto", createdAt: date("2026-05-03T09:00:00.000Z"), updatedAt: now },
+  { _id: ids.suppliers.andaimes, number: "FOR-002", name: "Andaimes & Cia", phone: "+351220100002", address: "Rua do Ferro 8, 2400-100 Leiria", createdAt: date("2026-05-08T11:00:00.000Z"), updatedAt: now },
+];
+
+const payment1Items = [line("Tinta acrilica exterior premium", 40, "l", 12)];
+const payment2Items = [line("Aluguer de andaimes · 2 semanas", 1, "servico", 280)];
+const payment3Items = [line("Membrana liquida elastica", 80, "kg", 7.5)];
+
+const payments = [
+  {
+    _id: ids.payments.p1,
+    number: "PAG-001",
+    supplierId: ids.suppliers.tintas,
+    items: payment1Items,
+    notes: "Encomenda para a fachada Oliveira.",
+    status: "PAID",
+    dueDate: "2026-05-20",
+    paidAt: date("2026-05-18T10:00:00.000Z"),
+    totalCents: payment1Items.reduce((sum, item) => sum + item.totalCents, 0),
+    createdAt: date("2026-05-12T09:00:00.000Z"),
+    updatedAt: date("2026-05-18T10:00:00.000Z"),
+  },
+  {
+    _id: ids.payments.p2,
+    number: "PAG-002",
+    supplierId: ids.suppliers.andaimes,
+    items: payment2Items,
+    notes: null,
+    status: "PENDING",
+    dueDate: "2026-06-05",
+    paidAt: null,
+    totalCents: payment2Items.reduce((sum, item) => sum + item.totalCents, 0),
+    createdAt: date("2026-05-19T14:00:00.000Z"),
+    updatedAt: now,
+  },
+  {
+    _id: ids.payments.p3,
+    number: "PAG-003",
+    supplierId: ids.suppliers.tintas,
+    items: payment3Items,
+    notes: "Cobertura Costa.",
+    status: "OVERDUE",
+    dueDate: "2026-05-10",
+    paidAt: null,
+    totalCents: payment3Items.reduce((sum, item) => sum + item.totalCents, 0),
+    createdAt: date("2026-04-28T08:00:00.000Z"),
+    updatedAt: date("2026-05-11T08:00:00.000Z"),
+  },
+];
+
 const webhookEvents = [
   {
     eventId: "mock-event-maria-001",
@@ -329,6 +389,10 @@ const webhookEvents = [
 
 const seedTenant = target.tenants.findOne({}) || null;
 const seedTenantId = seedTenant ? seedTenant._id : null;
+if (seedTenantId) {
+  suppliers.forEach((item) => { item.tenantId = seedTenantId; });
+  payments.forEach((item) => { item.tenantId = seedTenantId; });
+}
 
 const bookingServices = seedTenantId ? [
   {
@@ -400,8 +464,10 @@ function removeSeedConflicts() {
   target.getCollection("crm.clients").deleteMany({ $or: [{ _id: { $in: clients.map((item) => item._id) } }, { number: { $in: clients.map((item) => item.number) } }, { phone: { $in: clients.map((item) => item.phone) } }] });
   target.getCollection("crm.quotes").deleteMany({ $or: [{ _id: { $in: quotes.map((item) => item._id) } }, { number: { $in: quotes.map((item) => item.number) } }] });
   target.getCollection("crm.invoices").deleteMany({ $or: [{ _id: { $in: invoices.map((item) => item._id) } }, { number: { $in: invoices.map((item) => item.number) } }] });
+  target.getCollection("crm.suppliers").deleteMany({ $or: [{ _id: { $in: suppliers.map((item) => item._id) } }, { number: { $in: suppliers.map((item) => item.number) } }, { phone: { $in: suppliers.map((item) => item.phone) } }] });
+  target.getCollection("crm.payments").deleteMany({ $or: [{ _id: { $in: payments.map((item) => item._id) } }, { number: { $in: payments.map((item) => item.number) } }] });
   target.getCollection("crm.standard_items").deleteMany({ id: { $in: standardItems.map((item) => item.id) } });
-  target.getCollection("crm.sequences").deleteMany({ name: { $in: ["client_number", "quote_number", "invoice_number"] } });
+  target.getCollection("crm.sequences").deleteMany({ name: { $in: ["client_number", "quote_number", "invoice_number", "supplier_number", "payment_number"] } });
   target.getCollection("bookings.services").deleteMany({ _id: { $in: Object.values(ids.bookingServices) } });
   target.getCollection("bookings.availability").deleteMany({ _id: { $in: bookingAvailability.map((item) => item._id) } });
   target.getCollection("bookings.appointments").deleteMany({ _id: { $in: Object.values(ids.bookings) } });
@@ -420,12 +486,16 @@ insertMany("webhook_events", webhookEvents);
 insertMany("crm.clients", clients);
 insertMany("crm.quotes", quotes);
 insertMany("crm.invoices", invoices);
+insertMany("crm.suppliers", suppliers);
+insertMany("crm.payments", payments);
 insertMany("crm.standard_items", standardItems);
 insertMany("crm.sequences", [
   { name: "client_number", value: 4 },
   { name: "quote_number", value: 3 },
   { name: "invoice_number", value: 3 },
-]);
+  { name: "supplier_number", value: 2 },
+  { name: "payment_number", value: 3 },
+].map((item) => seedTenantId ? { ...item, tenantId: seedTenantId } : item));
 insertMany("bookings.services", bookingServices);
 insertMany("bookings.availability", bookingAvailability);
 insertMany("bookings.appointments", bookingAppointments);
@@ -439,8 +509,10 @@ const summary = {
   crm_clients: target.getCollection("crm.clients").countDocuments({ _id: { $in: clients.map((item) => item._id) } }),
   crm_quotes: target.getCollection("crm.quotes").countDocuments({ _id: { $in: quotes.map((item) => item._id) } }),
   crm_invoices: target.getCollection("crm.invoices").countDocuments({ _id: { $in: invoices.map((item) => item._id) } }),
+  crm_suppliers: target.getCollection("crm.suppliers").countDocuments({ _id: { $in: suppliers.map((item) => item._id) } }),
+  crm_payments: target.getCollection("crm.payments").countDocuments({ _id: { $in: payments.map((item) => item._id) } }),
   crm_standard_items: target.getCollection("crm.standard_items").countDocuments({ id: { $in: standardItems.map((item) => item.id) } }),
-  crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: ["client_number", "quote_number", "invoice_number"] } }),
+  crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: ["client_number", "quote_number", "invoice_number", "supplier_number", "payment_number"] } }),
   booking_services: target.getCollection("bookings.services").countDocuments({ _id: { $in: Object.values(ids.bookingServices) } }),
   booking_availability: target.getCollection("bookings.availability").countDocuments({ _id: { $in: bookingAvailability.map((item) => item._id) } }),
   booking_appointments: target.getCollection("bookings.appointments").countDocuments({ _id: { $in: Object.values(ids.bookings) } }),

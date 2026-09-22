@@ -24,6 +24,8 @@ const MODULES = [
   { id: 'services' },
   { id: 'quotes' },
   { id: 'invoices' },
+  { id: 'suppliers' },
+  { id: 'payments' },
   { id: 'catalog' },
   { id: 'ai-assistant' },
   { id: 'bookings' },

@@ -16,6 +16,8 @@ const tenantId = t._id;
   "crm.invoices",
   "crm.sequences",
   "crm.standard_items",
+  "crm.suppliers",
+  "crm.payments",
 ].forEach((collectionName) => {
   const result = db[collectionName].updateMany(
     { tenantId: { $exists: false } },

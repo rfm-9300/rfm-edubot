@@ -69,7 +69,7 @@ graph TD
         UR[UserRepository]
         CR[ConversationRepository]
         MR[MessageRepository]
-        CRM[CRM repositories<br/>clients quotes invoices]
+        CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers payments]
         RL[RateLimiter<br/>token bucket]
         DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
     end
@@ -106,7 +106,7 @@ graph TD
 | `webhook/` | HTTP edge: HMAC signature verification, GET challenge + POST routing |
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
-| `crm/` | Client, quote, invoice models/repositories, CRM tool executor, PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio) |
+| `crm/` | Client, quote, invoice, supplier, payment models/repositories, CRM tool executor, PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio) |
 | `bookings/` | Bookable services, weekly availability, appointments, slot engine, booking tools |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
@@ -127,8 +127,9 @@ catalog lives in `DashboardModules`:
 - Always enabled and not admin-disableable: `overview` (the dashboard landing page, and the
   fallback view when nothing else is enabled).
 - Admin-selectable: `conversations`, `contacts`, `settings`, `persona`, `clients`, `services`,
-  `quotes`, `invoices`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+  `quotes`, `invoices`, `suppliers`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
   Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
+  Enabling `payments` also enables `suppliers` so outgoing bills always have a vendor directory.
 
 The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
 other module, so a tenant can be provisioned CRM-only.
@@ -149,6 +150,14 @@ Optional `services` module (also on whenever `clients` is on): client-attached w
 invoice via `POST /app/api/crm/services/invoice`. The Services table filters by client
 (client-side; `GET /app/api/crm/services?clientId=` is also available). Booking service types
 stay under Bookings.
+
+### Suppliers and payments
+
+Optional `suppliers` directory (`crm.suppliers`, numbers `FOR-nnn`) and optional `payments`
+module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached to a supplier:
+line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of client invoices, without
+PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
+`/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
 
 ### Bookings
 
@@ -179,7 +188,9 @@ reconnect before comments work. App Review for that permission is a separate sub
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
 | `crm.client_services` | Client-attached work; open rows can be billed together | `tenantId+clientId+status` |
-| `crm.sequences` | Atomic quote/invoice numbering counters | unique on `name` |
+| `crm.suppliers` | Vendor directory the tenant pays | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.payments` | Outgoing bills attached to a supplier | unique `(tenantId, number)`; `tenantId+supplierId`; `status+dueDate` |
+| `crm.sequences` | Atomic quote/invoice/supplier/payment numbering counters | unique on `name` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
 | `bookings.services` | Bookable services (name, duration, active) | `tenantId`, `active` |

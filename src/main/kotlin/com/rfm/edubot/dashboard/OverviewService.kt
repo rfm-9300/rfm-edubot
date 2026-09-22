@@ -59,6 +59,8 @@ class OverviewService(private val mongo: MongoModule) {
             if (DashboardModules.CATALOG in modules) OverviewCatalogDto(items = coll("crm.standard_items").countDocuments(tenantFilter)) else null
         }
         val services = async { if (DashboardModules.SERVICES in modules) services(tenant.id, window) else null }
+        val suppliers = async { if (DashboardModules.SUPPLIERS in modules) suppliers(tenant.id, window) else null }
+        val payments = async { if (DashboardModules.PAYMENTS in modules) payments(tenant.id, window) else null }
         val assistant = async {
             if (DashboardModules.AI_ASSISTANT in modules) {
                 OverviewAssistantDto(
@@ -87,10 +89,12 @@ class OverviewService(private val mongo: MongoModule) {
         val socialDto = social.await()
         val catalogDto = catalog.await()
         val servicesDto = services.await()
+        val suppliersDto = suppliers.await()
+        val paymentsDto = payments.await()
         val assistantDto = assistant.await()
 
         val waiting = waitingList.await()
-        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, waiting)
+        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, waiting)
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -99,11 +103,11 @@ class OverviewService(private val mongo: MongoModule) {
             personaEmpty = personaEmpty.await(),
         )
         val health = OverviewMath.health(
-            overdueCount = cashDto?.overdueCount ?: 0,
+            overdueCount = (cashDto?.overdueCount ?: 0) + (paymentsDto?.overdueCount ?: 0),
             waiting = inboxDto?.waiting ?: 0,
             pendingBookings = calendarDto?.pending ?: 0,
             unreplied = socialDto?.unreplied ?: 0,
-            dueSoonCount = cashDto?.dueSoonCount ?: 0,
+            dueSoonCount = (cashDto?.dueSoonCount ?: 0) + (paymentsDto?.dueSoonCount ?: 0),
             expiringQuotes = pipelineDto?.expiringSoonCount ?: 0,
             pendingAssistant = assistantDto?.pendingActions ?: 0,
         )
@@ -131,6 +135,8 @@ class OverviewService(private val mongo: MongoModule) {
                 social = socialDto,
                 catalog = catalogDto,
                 services = servicesDto,
+                suppliers = suppliersDto,
+                payments = paymentsDto,
                 assistant = assistantDto,
                 setup = setup,
             ),
@@ -140,8 +146,8 @@ class OverviewService(private val mongo: MongoModule) {
 
     private suspend fun cash(tenantId: ObjectId, window: OverviewMath.Window): OverviewCashDto {
         val byStatus = sumByStatus("crm.invoices", tenantId)
-        val collectedThisMonth = sumPaid(tenantId, window.monthStart, window.nextMonthStart)
-        val collectedLastMonth = sumPaid(tenantId, window.lastMonthStart, window.monthStart)
+        val collectedThisMonth = sumPaid("crm.invoices", tenantId, window.monthStart, window.nextMonthStart)
+        val collectedLastMonth = sumPaid("crm.invoices", tenantId, window.lastMonthStart, window.monthStart)
         val issuedThisMonth = sumCreated("crm.invoices", tenantId, window.monthStart, window.nextMonthStart)
         val open = coll("crm.invoices").find(
             Filters.and(
@@ -261,6 +267,56 @@ class OverviewService(private val mongo: MongoModule) {
         )
     }
 
+    private suspend fun suppliers(tenantId: ObjectId, window: OverviewMath.Window): OverviewSuppliersDto {
+        val tenantFilter = Filters.eq("tenantId", tenantId)
+        return OverviewSuppliersDto(
+            total = coll("crm.suppliers").countDocuments(tenantFilter),
+            newThisMonth = coll("crm.suppliers").countDocuments(
+                Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
+            ),
+            newLastMonth = coll("crm.suppliers").countDocuments(
+                Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.lastMonthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.monthStart.toEpochMilliseconds()))),
+            ),
+        )
+    }
+
+    private suspend fun payments(tenantId: ObjectId, window: OverviewMath.Window): OverviewPaymentsDto {
+        val byStatus = sumByStatus("crm.payments", tenantId)
+        val paidThisMonth = sumPaid("crm.payments", tenantId, window.monthStart, window.nextMonthStart)
+        val open = coll("crm.payments").find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.`in`("status", listOf("PENDING", "OVERDUE")),
+            ),
+        ).limit(300).toList()
+        var overdueCents = 0L
+        var overdueCount = 0
+        var dueSoonCents = 0L
+        var dueSoonCount = 0
+        for (doc in open) {
+            val cents = doc.get("totalCents").asLong()
+            val due = doc.localDate("dueDate")
+            val status = doc.getString("status") ?: "PENDING"
+            if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
+                overdueCents += cents
+                overdueCount += 1
+            } else if (status == "PENDING" && due != null && due >= window.today && due <= window.dueSoonEnd) {
+                dueSoonCents += cents
+                dueSoonCount += 1
+            }
+        }
+        val outstanding = (byStatus["PENDING"]?.cents ?: 0L) + (byStatus["OVERDUE"]?.cents ?: 0L)
+        return OverviewPaymentsDto(
+            paidThisMonthCents = paidThisMonth.first,
+            outstandingCents = outstanding,
+            overdueCents = overdueCents,
+            overdueCount = overdueCount,
+            dueSoonCents = dueSoonCents,
+            dueSoonCount = dueSoonCount,
+            paymentCount = byStatus.values.sumOf { it.count },
+        )
+    }
+
     private suspend fun customers(tenantId: ObjectId, window: OverviewMath.Window): OverviewCustomersDto {
         val tenantFilter = Filters.eq("tenantId", tenantId)
         return OverviewCustomersDto(
@@ -343,6 +399,7 @@ class OverviewService(private val mongo: MongoModule) {
         calendar: OverviewCalendarDto?,
         social: OverviewSocialDto?,
         assistant: OverviewAssistantDto?,
+        payments: OverviewPaymentsDto?,
         waiting: List<WaitingConversation>,
     ): List<OverviewAttentionItemDto> {
         val items = mutableListOf<OverviewAttentionItemDto>()
@@ -371,6 +428,39 @@ class OverviewService(private val mongo: MongoModule) {
                     items += OverviewAttentionItemDto(
                         kind = OverviewMath.KIND_DUE_SOON_INVOICE,
                         tab = DashboardModules.INVOICES,
+                        id = doc.getObjectId("_id").toHexString(),
+                        detail = detail,
+                        amountCents = cents,
+                        at = due.toString(),
+                    )
+                }
+            }
+        }
+        if (DashboardModules.PAYMENTS in modules && payments != null) {
+            val open = coll("crm.payments").find(
+                Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("status", listOf("PENDING", "OVERDUE"))),
+            ).limit(80).toList()
+            val names = supplierNames(tenantId, open.mapNotNull { it.getObjectIdOrNull("supplierId") })
+            open.sortedBy { it.localDate("dueDate") ?: window.today }.forEach { doc ->
+                val due = doc.localDate("dueDate")
+                val status = doc.getString("status") ?: "PENDING"
+                val cents = doc.get("totalCents").asLong()
+                val number = doc.getString("number") ?: ""
+                val name = doc.getObjectIdOrNull("supplierId")?.let { names[it] }.orEmpty()
+                val detail = listOf(number, name).filter { it.isNotBlank() }.joinToString(" · ")
+                if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
+                    items += OverviewAttentionItemDto(
+                        kind = OverviewMath.KIND_OVERDUE_PAYMENT,
+                        tab = DashboardModules.PAYMENTS,
+                        id = doc.getObjectId("_id").toHexString(),
+                        detail = detail,
+                        amountCents = cents,
+                        at = due?.toString(),
+                    )
+                } else if (status == "PENDING" && due != null && due >= window.today && due <= window.dueSoonEnd && items.count { it.kind == OverviewMath.KIND_DUE_SOON_PAYMENT } < 3) {
+                    items += OverviewAttentionItemDto(
+                        kind = OverviewMath.KIND_DUE_SOON_PAYMENT,
+                        tab = DashboardModules.PAYMENTS,
                         id = doc.getObjectId("_id").toHexString(),
                         detail = detail,
                         amountCents = cents,
@@ -453,10 +543,12 @@ class OverviewService(private val mongo: MongoModule) {
     private fun rankAttention(items: List<OverviewAttentionItemDto>): List<OverviewAttentionItemDto> {
         val order = listOf(
             OverviewMath.KIND_OVERDUE_INVOICE,
+            OverviewMath.KIND_OVERDUE_PAYMENT,
             OverviewMath.KIND_WAITING_CHAT,
             OverviewMath.KIND_PENDING_BOOKING,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
             OverviewMath.KIND_DUE_SOON_INVOICE,
+            OverviewMath.KIND_DUE_SOON_PAYMENT,
             OverviewMath.KIND_QUOTE_EXPIRING,
             OverviewMath.KIND_ASSISTANT_ACTION,
         )
@@ -502,8 +594,8 @@ class OverviewService(private val mongo: MongoModule) {
         }
     }
 
-    private suspend fun sumPaid(tenantId: ObjectId, from: Instant, to: Instant): Pair<Long, Int> {
-        val docs = coll("crm.invoices").find(
+    private suspend fun sumPaid(collection: String, tenantId: ObjectId, from: Instant, to: Instant): Pair<Long, Int> {
+        val docs = coll(collection).find(
             Filters.and(
                 Filters.eq("tenantId", tenantId),
                 Filters.eq("status", "PAID"),
@@ -532,6 +624,13 @@ class OverviewService(private val mongo: MongoModule) {
     private suspend fun clientNames(tenantId: ObjectId, ids: Collection<ObjectId>): Map<ObjectId, String> {
         if (ids.isEmpty()) return emptyMap()
         return coll("crm.clients").find(Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("_id", ids.toList())))
+            .toList()
+            .associate { it.getObjectId("_id") to (it.getString("name") ?: "") }
+    }
+
+    private suspend fun supplierNames(tenantId: ObjectId, ids: Collection<ObjectId>): Map<ObjectId, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return coll("crm.suppliers").find(Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("_id", ids.toList())))
             .toList()
             .associate { it.getObjectId("_id") to (it.getString("name") ?: "") }
     }

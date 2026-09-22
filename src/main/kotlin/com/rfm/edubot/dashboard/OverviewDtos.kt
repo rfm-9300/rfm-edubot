@@ -26,6 +26,8 @@ data class OverviewDto(
     val social: OverviewSocialDto? = null,
     val catalog: OverviewCatalogDto? = null,
     val services: OverviewServicesDto? = null,
+    val suppliers: OverviewSuppliersDto? = null,
+    val payments: OverviewPaymentsDto? = null,
     val assistant: OverviewAssistantDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),
     val hiddenCards: List<String> = emptyList(),
@@ -143,6 +145,24 @@ data class OverviewServicesDto(
     val openCents: Long,
     val invoicedThisMonthCount: Int,
     val invoicedThisMonthCents: Long,
+)
+
+@Serializable
+data class OverviewSuppliersDto(
+    val total: Long,
+    val newThisMonth: Long,
+    val newLastMonth: Long,
+)
+
+@Serializable
+data class OverviewPaymentsDto(
+    val paidThisMonthCents: Long,
+    val outstandingCents: Long,
+    val overdueCents: Long,
+    val overdueCount: Int,
+    val dueSoonCents: Long,
+    val dueSoonCount: Int,
+    val paymentCount: Int,
 )
 
 @Serializable
