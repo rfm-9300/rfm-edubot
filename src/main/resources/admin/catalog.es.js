@@ -44,6 +44,7 @@ window.__I18N_CATALOGS['es'] = {
     docTemplateSave: 'Guardar plantilla', docTemplateSaved: 'Plantilla de documento guardada',
     docTemplateSaveFailed: 'No se pudo guardar la plantilla',
     docTplDragHint: 'Arrastra una caja para moverla. Redimensiona desde los tiradores. Haz clic en una caja para editar su contenido.',
+    docTplOverlap: 'Estas cajas se solapan, así que su texto se imprimirá uno encima del otro. Sepáralas.',
     docTplPreviewQuote: 'Presupuesto', docTplPreviewInvoice: 'Factura',
     docTplResetLayout: 'Restablecer diseño', docTplLayoutReset: 'Diseño restablecido a la página predeterminada',
     docTplLayers: 'Bloques', docTplInspector: 'Bloque seleccionado',

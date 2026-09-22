@@ -64,11 +64,13 @@ class PdfGenerator {
     private val COL_DESC    = 218f
     private val COL_VALUE   = 110f
     private val COL_GAP     = 21.5f
+    private val MIN_TABLE_WIDTH = 420f
 
-    // Space reserved at the bottom of the LAST page (totals + payment + footer).
-    private val LAST_PAGE_BOTTOM_LIMIT = 200f
     // Minimal bottom margin on intermediate pages — no totals/footer drawn there.
     private val INTER_PAGE_BOTTOM_LIMIT = 60f
+    // Totals pill, the gap beneath it, and the footer line.
+    private val TOTALS_BLOCK_HEIGHT = 30f + 16f
+    private val FOOTER_RESERVE = 30f
     // Y where rows start on continuation pages (below a thin continuation header)
     private val CONTINUATION_ROW_START = H - 80f
 
@@ -137,8 +139,10 @@ class PdfGenerator {
             val firstPageStartY = tableHeaderY - 18f
 
             // Pre-calculate row heights and page breaks (two-pass layout).
-            val rowHeights = items.map { rowHeightFor(it) }
-            val pageBreakSet = layoutItems(rowHeights, firstPageStartY).drop(1).toSet()
+            val tableScale = ((itemsBlock?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)) / CONTENT_W
+            val rowHeights = items.map { rowHeightFor(it, tableScale) }
+            val bottomReserve = closingBlockHeight(paymentTerms, template, blocks)
+            val pageBreakSet = layoutItems(rowHeights, firstPageStartY, bottomReserve).drop(1).toSet()
 
             // ── Page 1 ──
             var page = PDPage(PDRectangle.A4)
@@ -159,8 +163,8 @@ class PdfGenerator {
 
             for ((idx, item) in items.withIndex()) {
                 val (service, description) = splitItem(item)
-                val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE - 32f).take(4)
-                val descLines = wrap(description, regular, 8f, COL_DESC - 24f).take(6)
+                val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE * tableScale - 32f).take(4)
+                val descLines = wrap(description, regular, 8f, COL_DESC * tableScale - 24f).take(6)
                 val rowH = rowHeights[idx]
 
                 if (idx in pageBreakSet) {
@@ -179,10 +183,14 @@ class PdfGenerator {
                 rowY -= rowH + 10f
             }
 
+            // Totals, payment and terms flow down from the last row instead of being painted at
+            // fixed coordinates: a fixed anchor lands on top of the rows whenever the table grows
+            // past it (see the page-break reservation in layoutItems).
+            var cursor = rowY - 12f
             if (blocks == null || blocks["totals"]?.visible != false) {
-                drawTotals(cs, totalCents, rowY - 12f, blocks?.get("totals")?.takeIf { it.visible })
+                cursor = drawTotals(cs, totalCents, cursor, blocks?.get("totals")?.takeIf { it.visible }) - 16f
             }
-            drawPaymentAndTerms(cs, paymentTerms, template, blocks)
+            cursor = drawPaymentAndTerms(cs, paymentTerms, template, blocks, cursor)
             drawFooter(cs, template, blocks?.get("footer"))
             cs.close()
 
@@ -191,21 +199,48 @@ class PdfGenerator {
     }
 
     /** Calculates the rendered height of a single item row. */
-    private fun rowHeightFor(item: LineItem): Float {
+    private fun rowHeightFor(item: LineItem, tableScale: Float = 1f): Float {
         val (service, description) = splitItem(item)
-        val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE - 32f).take(4)
-        val descLines    = wrap(description, regular, 8f, COL_DESC - 24f).take(6)
+        val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE * tableScale - 32f).take(4)
+        val descLines    = wrap(description, regular, 8f, COL_DESC * tableScale - 24f).take(6)
         return maxOf(72f, 22f + maxOf(serviceLines.size * 14f, descLines.size * 11.5f))
+    }
+
+    /**
+     * Height the closing block (totals pill, payment terms, terms, footer) needs below the last
+     * item row, so the page break leaves exactly enough room for it.
+     */
+    private fun closingBlockHeight(
+        paymentTerms: String?,
+        template: DocumentTemplate,
+        blocks: Map<String, DocumentLayoutBlock>?,
+    ): Float {
+        val payment = paymentTerms?.takeIf { it.isNotBlank() } ?: DEFAULT_PAYMENT_TERMS
+        val terms = template.termsText.takeIf { it.isNotBlank() } ?: DEFAULT_TERMS
+        val width = blocks?.get("payment")?.takeIf { it.visible }?.w
+            ?: blocks?.get("terms")?.takeIf { it.visible }?.w
+            ?: 315f
+        var height = FOOTER_RESERVE
+        if (blocks == null || blocks["totals"]?.visible != false) height += TOTALS_BLOCK_HEIGHT
+        val showPayment = blocks == null || blocks["payment"]?.visible == true
+        val showTerms = blocks == null || blocks["terms"]?.visible == true
+        if (showPayment) height += 16f + wrap(payment, regular, 9f, width).take(4).size * 13f + 8f
+        if (showTerms) height += 16f + wrap(terms, regular, 9f, width).take(2).size * 12f
+        return height
     }
 
     /**
      * Two-pass layout: returns a list of item indices where each page begins.
      *
      * Pass 1 uses INTER_PAGE_BOTTOM_LIMIT so intermediate pages fill completely.
-     * Pass 2 re-simulates only the last page with LAST_PAGE_BOTTOM_LIMIT to
-     * ensure room remains for the totals pill + payment/footer block.
+     * Pass 2 re-simulates only the last page, keeping [bottomReserve] clear below the last row so
+     * the totals pill, payment terms and footer fit without covering the rows.
      */
-    private fun layoutItems(heights: List<Float>, firstPageStartY: Float = H - 338f): List<Int> {
+    private fun layoutItems(
+        heights: List<Float>,
+        firstPageStartY: Float = H - 338f,
+        bottomReserve: Float = 200f,
+    ): List<Int> {
         if (heights.isEmpty()) return listOf(0)
 
         val pageStarts = mutableListOf(0)
@@ -220,7 +255,7 @@ class PdfGenerator {
             rowY -= rowH + 10f
         }
 
-        // Pass 2: re-simulate the current last page with LAST_PAGE_BOTTOM_LIMIT.
+        // Pass 2: re-simulate the current last page, reserving room for the closing block.
         // Repeat until stable — each iteration may promote one more item to a new page.
         var changed = true
         while (changed) {
@@ -230,7 +265,7 @@ class PdfGenerator {
             var lastY = startY
             for (idx in lastStart until heights.size) {
                 val rowH = heights[idx]
-                if (lastY - rowH < LAST_PAGE_BOTTOM_LIMIT) {
+                if (lastY - rowH < bottomReserve) {
                     pageStarts.add(idx)
                     changed = true
                     break
@@ -374,7 +409,10 @@ class PdfGenerator {
     /** Draws the column-header pills and returns the Y for the first data row. */
     private fun drawTableHeader(cs: PDPageContentStream, y: Float, items: DocumentLayoutBlock? = null): Float {
         val x = items?.x ?: MARGIN
-        val contentW = items?.w ?: CONTENT_W
+        // Three columns with readable gaps need about 420pt. Below that the editor's minimum
+        // (220pt) forces the columns into each other, so the table keeps a floor and the overflow
+        // is the block running past its frame — which the editor already flags as an overlap.
+        val contentW = (items?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)
         val scale = contentW / CONTENT_W
         val service = COL_SERVICE * scale
         val desc = COL_DESC * scale
@@ -383,9 +421,12 @@ class PdfGenerator {
         pill(cs, x, y, service, 30f, cBrand)
         pill(cs, x + service + gap, y, desc, 30f, cBrand)
         pill(cs, x + service + gap + desc + gap, y, value, 30f, cBrand)
-        textCentered(cs, spaced("SERVIÇO"),  x + service / 2f, y + 10f, 11f, bold, cOnBrand)
-        textCentered(cs, spaced("DESCRIÇÃO"), x + service + gap + desc / 2f, y + 10f, 11f, bold, cOnBrand)
-        textCentered(cs, spaced("VALOR"),    x + service + gap + desc + gap + value / 2f, y + 10f, 11f, bold, cOnBrand)
+        // Letter-spacing is dropped when the spaced label would spill out of its pill into the
+        // next column — the editor lets the items block shrink to 220pt, far below the 511pt the
+        // labels were designed for.
+        textCentered(cs, spacedToFit("SERVIÇO", service - 16f, 11f),  x + service / 2f, y + 10f, 11f, bold, cOnBrand)
+        textCentered(cs, spacedToFit("DESCRIÇÃO", desc - 16f, 11f), x + service + gap + desc / 2f, y + 10f, 11f, bold, cOnBrand)
+        textCentered(cs, spacedToFit("VALOR", value - 16f, 11f),    x + service + gap + desc + gap + value / 2f, y + 10f, 11f, bold, cOnBrand)
         return y - 18f
     }
 
@@ -401,7 +442,10 @@ class PdfGenerator {
         items: DocumentLayoutBlock? = null,
     ) {
         val x = items?.x ?: MARGIN
-        val contentW = items?.w ?: CONTENT_W
+        // Three columns with readable gaps need about 420pt. Below that the editor's minimum
+        // (220pt) forces the columns into each other, so the table keeps a floor and the overflow
+        // is the block running past its frame — which the editor already flags as an overlap.
+        val contentW = (items?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)
         val scale = contentW / CONTENT_W
         val service = COL_SERVICE * scale
         val desc = COL_DESC * scale
@@ -409,17 +453,22 @@ class PdfGenerator {
         val gap = COL_GAP * scale
         pill(cs, x, rowY - rowH, contentW, rowH, if (idx % 2 == 0) surface else Color(250, 250, 250))
 
+        // Padding shrinks with the column so a narrowed table can't push one column's text into
+        // the next. The insets stay inside what wrap() was given (COL_* - 32 / COL_DESC - 24).
+        val servicePad = minOf(20f, service * 0.12f)
+        val descPad = minOf(12f, desc * 0.1f)
+
         val serviceFontSize = 9.5f
         val serviceLineH    = 13.5f
         val serviceBlockH   = serviceLines.size * serviceLineH
         var sy = rowY - (rowH - serviceBlockH) / 2f - serviceFontSize + 2f
-        serviceLines.forEach { line -> text(cs, line, x + 20f, sy, serviceFontSize, regular, ink); sy -= serviceLineH }
+        serviceLines.forEach { line -> text(cs, line, x + servicePad, sy, serviceFontSize, regular, ink); sy -= serviceLineH }
 
         val descFontSize = 8.5f
         val descLineH    = 12f
         val descBlockH   = descLines.size * descLineH
         var dy = rowY - (rowH - descBlockH) / 2f - descFontSize + 2f
-        descLines.forEach { line -> text(cs, line, x + service + gap + 12f, dy, descFontSize, regular, ink); dy -= descLineH }
+        descLines.forEach { line -> text(cs, line, x + service + gap + descPad, dy, descFontSize, regular, ink); dy -= descLineH }
 
         textCentered(cs, money(item.totalCents), x + service + gap + desc + gap + value / 2f, rowY - rowH / 2f - 4f, 11f, bold, ink)
     }
@@ -438,50 +487,56 @@ class PdfGenerator {
         val h = block?.h?.coerceAtLeast(24f) ?: 30f
         val x = block?.x ?: (W - MARGIN - w)
         pill(cs, x, y - h, w, h, cBrand)
-        textCentered(cs, spaced("TOTAL: ${money(totalCents)}"), x + w / 2f, y - h / 2f - 4f, 13f, bold, cOnBrand)
+        textCentered(cs, spacedToFit("TOTAL: ${money(totalCents)}", w - 20f, 13f), x + w / 2f, y - h / 2f - 4f, 13f, bold, cOnBrand)
         return y - h
     }
 
     // ── Notes ─────────────────────────────────────────────────────────
 
+    /**
+     * Draws the payment and terms blocks stacked below [startY] (PDF coordinates, decreasing
+     * downward) and returns the Y below the last line drawn.
+     *
+     * Horizontal placement still comes from the layout blocks, but their vertical positions are
+     * ignored: they are authored against an empty table, so honouring them puts the text on top of
+     * the item rows as soon as the table grows.
+     */
     private fun drawPaymentAndTerms(
         cs: PDPageContentStream,
         paymentTerms: String?,
         template: DocumentTemplate,
         blocks: Map<String, DocumentLayoutBlock>? = null,
-    ) {
+        startY: Float = 122f,
+    ): Float {
         val payment = paymentTerms?.takeIf { it.isNotBlank() }
             ?: DEFAULT_PAYMENT_TERMS
         val terms = template.termsText.takeIf { it.isNotBlank() } ?: DEFAULT_TERMS
         val paymentBlock = blocks?.get("payment")?.takeIf { it.visible }
         val termsBlock = blocks?.get("terms")?.takeIf { it.visible }
-        if (blocks == null) {
-            text(cs, spaced("FORMA DE PAGAMENTO"), MARGIN + 8f, 122f, 11f, bold, cBrand)
-            var y = 101f
-            wrap(payment, regular, 9f, 315f).take(4).forEach { line ->
-                text(cs, line, MARGIN + 8f, y, 9f, regular, ink)
+        if (blocks != null && paymentBlock == null && termsBlock == null) return startY
+
+        val x = paymentBlock?.x ?: termsBlock?.x ?: (MARGIN + 8f)
+        val width = paymentBlock?.w ?: termsBlock?.w ?: 315f
+        var y = startY
+
+        if (blocks == null || paymentBlock != null) {
+            text(cs, spaced("FORMA DE PAGAMENTO"), x, y, 11f, bold, cBrand)
+            y -= 16f
+            wrap(payment, regular, 9f, width).take(4).forEach { line ->
+                text(cs, line, x, y, 9f, regular, ink)
                 y -= 13f
             }
-            text(cs, spaced("TERMOS E CONDIÇÕES"), MARGIN + 8f, 63f, 11f, bold, cBrand)
-            wrap(terms, regular, 9f, 315f).take(2).forEachIndexed { idx, line ->
-                text(cs, line, MARGIN + 8f, 47f - idx * 12f, 9f, regular, ink)
-            }
-            return
+            y -= 8f
         }
-        paymentBlock?.let { block ->
-            text(cs, spaced("FORMA DE PAGAMENTO"), block.x, block.pdfTop() - 12f, 11f, bold, cBrand)
-            var y = block.pdfTop() - 28f
-            wrap(payment, regular, 9f, block.w).take(4).forEach { line ->
-                text(cs, line, block.x, y, 9f, regular, ink)
-                y -= 13f
+        if (blocks == null || termsBlock != null) {
+            text(cs, spaced("TERMOS E CONDIÇÕES"), x, y, 11f, bold, cBrand)
+            y -= 16f
+            wrap(terms, regular, 9f, width).take(2).forEach { line ->
+                text(cs, line, x, y, 9f, regular, ink)
+                y -= 12f
             }
         }
-        termsBlock?.let { block ->
-            text(cs, spaced("TERMOS E CONDIÇÕES"), block.x, block.pdfTop() - 12f, 11f, bold, cBrand)
-            wrap(terms, regular, 9f, block.w).take(2).forEachIndexed { idx, line ->
-                text(cs, line, block.x, block.pdfTop() - 28f - idx * 12f, 9f, regular, ink)
-            }
-        }
+        return y
     }
 
     // ── Footer ────────────────────────────────────────────────────────
@@ -489,11 +544,10 @@ class PdfGenerator {
     private fun drawFooter(cs: PDPageContentStream, template: DocumentTemplate, block: DocumentLayoutBlock? = null) {
         if (block?.visible == false) return
         val footer = template.footerText.takeIf { it.isNotBlank() } ?: DEFAULT_FOOTER
-        if (block != null) {
-            textR(cs, footer, block.x + block.w, block.pdfY() + 4f, 7.5f, regular, Color(130, 130, 130))
-        } else {
-            textR(cs, footer, W - MARGIN, 22f, 7.5f, regular, Color(130, 130, 130))
-        }
+        // Pinned to the page bottom, never to the block's authored Y: the closing block above it
+        // grows with the table and would otherwise collide with a footer parked mid-page.
+        val xRight = block?.let { it.x + it.w } ?: (W - MARGIN)
+        textR(cs, footer, xRight, 22f, 7.5f, regular, Color(130, 130, 130))
     }
 
     // ── Primitives ────────────────────────────────────────────────────
@@ -659,6 +713,12 @@ class PdfGenerator {
     }
 
     private fun spaced(value: String): String = sanitize(value).uppercase().toCharArray().joinToString(" ")
+
+    /** Letter-spaced label, falling back to the plain word when spacing would exceed [maxWidth]. */
+    private fun spacedToFit(value: String, maxWidth: Float, size: Float): String {
+        val spaced = spaced(value)
+        return if (textWidth(spaced, bold, size) <= maxWidth) spaced else sanitize(value).uppercase()
+    }
 
     // ── Text helpers ──────────────────────────────────────────────────
 
