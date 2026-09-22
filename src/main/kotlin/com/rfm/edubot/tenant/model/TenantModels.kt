@@ -56,6 +56,8 @@ data class DocumentTemplate(
     val showDecor: Boolean = true,
     /** A4 blocks in top-left points. Empty = PdfGenerator's original geometry. */
     val layout: List<DocumentLayoutBlock> = emptyList(),
+    /** How PdfGenerator paints the page. Blank or unknown = [DocumentDesignStyle.CLASSIC]. */
+    val style: String = "",
 ) {
     fun withCompanyFallback(tenantName: String): DocumentTemplate =
         if (companyName.isNotBlank()) this else copy(companyName = tenantName)
@@ -78,9 +80,9 @@ data class DocumentLayoutBlock(
 }
 
 /**
- * A reusable document *design* — accent color, decoration, and block geometry, without any of the
+ * A reusable document *design* — style, accent, decoration, and block geometry, without any of the
  * tenant's own copy (company name, terms, etc). Applying one onto a [DocumentTemplate] only touches
- * those three fields. Built-in entries come from [BuiltInDesignTemplates]; tenants can also save their
+ * those fields. Built-in entries come from [BuiltInDesignTemplates]; tenants can also save their
  * own from the studio.
  */
 data class SavedDocumentTemplate(
@@ -91,7 +93,30 @@ data class SavedDocumentTemplate(
     val showDecor: Boolean,
     val layout: List<DocumentLayoutBlock>,
     val createdAt: Instant,
+    val style: String = DocumentDesignStyle.CLASSIC.id,
 )
+
+/** How a quote/invoice PDF is painted. Classic is the historical pill page. */
+enum class DocumentDesignStyle(val id: String) {
+    CLASSIC("classic"),
+    PLAIN("plain"),
+    SPLIT("split"),
+    BAND("band"),
+    ;
+
+    val ruled: Boolean get() = this != CLASSIC
+
+    companion object {
+        fun parse(value: String?): DocumentDesignStyle = when (value?.trim()?.lowercase()) {
+            PLAIN.id, "clear" -> PLAIN
+            SPLIT.id, "statement" -> SPLIT
+            BAND.id, "margin" -> BAND
+            else -> CLASSIC
+        }
+
+        fun sanitize(value: String?): String = parse(value).id
+    }
+}
 
 /** Curated starter designs shown alongside a tenant's own saved presets in the template gallery. */
 object BuiltInDesignTemplates {
@@ -145,78 +170,62 @@ object BuiltInDesignTemplates {
             createdAt = EPOCH,
         ),
         SavedDocumentTemplate(
-            id = "builtin-editorial",
-            name = "editorial",
-            accentColor = "#C45C26",
-            showDecor = true,
-            layout = listOf(
-                DocumentLayoutBlock("logo", 42f, 40f, 168f, 52f),
-                DocumentLayoutBlock("contact", 340f, 40f, 213f, 52f),
-                DocumentLayoutBlock("company", 42f, 100f, 260f, 44f),
-                DocumentLayoutBlock("title", 42f, 168f, 330f, 52f),
-                DocumentLayoutBlock("client", 400f, 168f, 153f, 108f),
-                DocumentLayoutBlock("items", 42f, 292f, 511f, 268f),
-                DocumentLayoutBlock("totals", 333f, 576f, 220f, 32f),
-                DocumentLayoutBlock("payment", 42f, 700f, 320f, 52f),
-                DocumentLayoutBlock("terms", 42f, 758f, 320f, 36f),
-                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
-            ),
-            createdAt = EPOCH,
-        ),
-        SavedDocumentTemplate(
-            id = "builtin-ledger",
-            name = "ledger",
-            accentColor = "#1B4D3E",
+            id = "builtin-clear",
+            name = "clear",
+            accentColor = "#1F2937",
             showDecor = false,
+            style = DocumentDesignStyle.PLAIN.id,
             layout = listOf(
-                DocumentLayoutBlock("company", 42f, 36f, 300f, 48f),
-                DocumentLayoutBlock("logo", 403f, 36f, 150f, 52f),
-                DocumentLayoutBlock("contact", 42f, 92f, 340f, 36f),
-                DocumentLayoutBlock("title", 42f, 148f, 511f, 44f),
-                DocumentLayoutBlock("client", 42f, 204f, 280f, 80f),
-                DocumentLayoutBlock("items", 42f, 296f, 511f, 276f),
-                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
-                DocumentLayoutBlock("payment", 42f, 700f, 320f, 50f),
-                DocumentLayoutBlock("terms", 42f, 756f, 320f, 36f),
-                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
-            ),
-            createdAt = EPOCH,
-        ),
-        SavedDocumentTemplate(
-            id = "builtin-harbor",
-            name = "harbor",
-            accentColor = "#0E7490",
-            showDecor = true,
-            layout = listOf(
-                DocumentLayoutBlock("contact", 42f, 28f, 511f, 36f),
-                DocumentLayoutBlock("logo", 42f, 80f, 150f, 52f),
-                DocumentLayoutBlock("company", 220f, 80f, 280f, 52f),
-                DocumentLayoutBlock("title", 42f, 156f, 400f, 48f),
-                DocumentLayoutBlock("client", 42f, 220f, 280f, 84f),
-                DocumentLayoutBlock("items", 42f, 316f, 511f, 256f),
-                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
-                DocumentLayoutBlock("payment", 50f, 704f, 320f, 52f),
-                DocumentLayoutBlock("terms", 50f, 762f, 320f, 36f),
-                DocumentLayoutBlock("footer", 200f, 812f, 353f, 18f),
-            ),
-            createdAt = EPOCH,
-        ),
-        SavedDocumentTemplate(
-            id = "builtin-atelier",
-            name = "atelier",
-            accentColor = "#B45309",
-            showDecor = true,
-            layout = listOf(
-                DocumentLayoutBlock("logo", 42f, 48f, 188f, 56f),
-                DocumentLayoutBlock("company", 42f, 112f, 280f, 32f, visible = false),
-                DocumentLayoutBlock("contact", 42f, 116f, 360f, 36f),
-                DocumentLayoutBlock("title", 42f, 172f, 511f, 56f),
-                DocumentLayoutBlock("client", 42f, 244f, 300f, 72f),
-                DocumentLayoutBlock("items", 42f, 332f, 511f, 236f),
-                DocumentLayoutBlock("totals", 333f, 588f, 220f, 32f),
+                DocumentLayoutBlock("logo", 403f, 36f, 150f, 48f),
+                DocumentLayoutBlock("contact", 42f, 96f, 400f, 28f),
+                DocumentLayoutBlock("company", 42f, 36f, 320f, 52f),
+                DocumentLayoutBlock("title", 42f, 140f, 511f, 48f),
+                DocumentLayoutBlock("client", 42f, 200f, 340f, 68f),
+                DocumentLayoutBlock("items", 42f, 280f, 511f, 300f),
+                DocumentLayoutBlock("totals", 333f, 596f, 220f, 28f),
                 DocumentLayoutBlock("payment", 42f, 700f, 340f, 50f),
                 DocumentLayoutBlock("terms", 42f, 756f, 340f, 36f),
                 DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-statement",
+            name = "statement",
+            accentColor = "#1E3A5F",
+            showDecor = false,
+            style = DocumentDesignStyle.SPLIT.id,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 42f, 40f, 120f, 44f),
+                DocumentLayoutBlock("contact", 42f, 104f, 278f, 32f),
+                DocumentLayoutBlock("company", 172f, 40f, 148f, 56f),
+                DocumentLayoutBlock("title", 336f, 40f, 217f, 92f),
+                DocumentLayoutBlock("client", 336f, 144f, 217f, 100f),
+                DocumentLayoutBlock("items", 42f, 264f, 511f, 316f),
+                DocumentLayoutBlock("totals", 333f, 596f, 220f, 28f),
+                DocumentLayoutBlock("payment", 42f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 42f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 42f, 812f, 511f, 18f),
+            ),
+            createdAt = EPOCH,
+        ),
+        SavedDocumentTemplate(
+            id = "builtin-margin",
+            name = "margin",
+            accentColor = "#0F766E",
+            showDecor = false,
+            style = DocumentDesignStyle.BAND.id,
+            layout = listOf(
+                DocumentLayoutBlock("logo", 400f, 40f, 150f, 48f),
+                DocumentLayoutBlock("contact", 56f, 100f, 400f, 28f),
+                DocumentLayoutBlock("company", 56f, 40f, 300f, 52f),
+                DocumentLayoutBlock("title", 56f, 144f, 480f, 48f),
+                DocumentLayoutBlock("client", 56f, 204f, 320f, 68f),
+                DocumentLayoutBlock("items", 56f, 284f, 490f, 300f),
+                DocumentLayoutBlock("totals", 326f, 596f, 220f, 28f),
+                DocumentLayoutBlock("payment", 56f, 700f, 340f, 50f),
+                DocumentLayoutBlock("terms", 56f, 756f, 340f, 36f),
+                DocumentLayoutBlock("footer", 56f, 812f, 490f, 18f),
             ),
             createdAt = EPOCH,
         ),

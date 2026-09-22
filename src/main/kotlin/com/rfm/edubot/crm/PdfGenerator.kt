@@ -4,6 +4,7 @@ import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
+import com.rfm.edubot.tenant.model.DocumentDesignStyle
 import com.rfm.edubot.tenant.model.DocumentLayoutBlock
 import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
@@ -34,6 +35,8 @@ class PdfGenerator {
     private var cBrand     = brand
     private var cBrandDark = brandDark
     private var cOnBrand   = Color.WHITE
+    private var design     = DocumentDesignStyle.CLASSIC
+    private val rule       = Color(210, 218, 223)
 
     // ── Fonts — reloaded per document (PDType0Font is doc-scoped) ────
     private var regular: PDFont = PDType1Font(Standard14Fonts.FontName.HELVETICA)
@@ -135,12 +138,13 @@ class PdfGenerator {
             applyTheme(template)
             val blocks = if (template.layout.isNotEmpty()) DocumentLayouts.resolve(template) else null
             val itemsBlock = blocks?.get("items")?.takeIf { it.visible }
-            val tableHeaderY = itemsBlock?.let { H - it.y - 30f } ?: (H - 320f)
-            val firstPageStartY = tableHeaderY - 18f
+            val headerPad = if (design.ruled) 20f else 30f
+            val tableHeaderY = itemsBlock?.let { H - it.y - headerPad } ?: (H - 320f)
+            val firstPageStartY = tableHeaderY - if (design.ruled) 6f else 18f
 
             // Pre-calculate row heights and page breaks (two-pass layout).
             val tableScale = ((itemsBlock?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)) / CONTENT_W
-            val rowHeights = items.map { rowHeightFor(it, tableScale) }
+            val rowHeights = items.map { rowHeightFor(it, tableScale, itemsBlock) }
             val bottomReserve = closingBlockHeight(paymentTerms, template, blocks)
             val pageBreakSet = layoutItems(rowHeights, firstPageStartY, bottomReserve).drop(1).toSet()
 
@@ -149,7 +153,8 @@ class PdfGenerator {
             doc.addPage(page)
             var cs = PDPageContentStream(doc, page)
             fillRect(cs, pageBg, 0f, 0f, W, H)
-            if (template.showDecor) drawDecor(cs)
+            if (design == DocumentDesignStyle.BAND) fillRect(cs, cBrand, 0f, 0f, 18f, H)
+            if (template.showDecor && design == DocumentDesignStyle.CLASSIC) drawDecor(cs)
             if (blocks != null) {
                 drawHeaderLaidOut(doc, cs, template, blocks)
                 drawDocumentInfoLaidOut(cs, docType, number, client, meta, blocks)
@@ -174,13 +179,14 @@ class PdfGenerator {
                     doc.addPage(page)
                     cs = PDPageContentStream(doc, page)
                     fillRect(cs, pageBg, 0f, 0f, W, H)
-                    if (template.showDecor) drawDecor(cs)
+                    if (design == DocumentDesignStyle.BAND) fillRect(cs, cBrand, 0f, 0f, 18f, H)
+                    if (template.showDecor && design == DocumentDesignStyle.CLASSIC) drawDecor(cs)
                     drawContinuationHeader(cs, docType, number, pageNum)
                     rowY = drawTableHeader(cs, CONTINUATION_ROW_START, itemsBlock)
                 }
 
                 drawItemRow(cs, idx, item, serviceLines, descLines, rowH, rowY, itemsBlock)
-                rowY -= rowH + 10f
+                rowY -= rowH + if (design.ruled) 0f else 10f
             }
 
             // Totals, payment and terms flow down from the last row instead of being painted at
@@ -199,7 +205,12 @@ class PdfGenerator {
     }
 
     /** Calculates the rendered height of a single item row. */
-    private fun rowHeightFor(item: LineItem, tableScale: Float = 1f): Float {
+    private fun rowHeightFor(item: LineItem, tableScale: Float = 1f, items: DocumentLayoutBlock? = null): Float {
+        if (design.ruled) {
+            val cols = ruledCols(items)
+            val lines = wrap(sanitize(item.description), regular, 9f, cols.desc - 10f).take(4)
+            return maxOf(22f, 10f + lines.size * 12f)
+        }
         val (service, description) = splitItem(item)
         val serviceLines = wrap(service, regular, 9.5f, COL_SERVICE * tableScale - 32f).take(4)
         val descLines    = wrap(description, regular, 8f, COL_DESC * tableScale - 24f).take(6)
@@ -221,7 +232,9 @@ class PdfGenerator {
             ?: blocks?.get("terms")?.takeIf { it.visible }?.w
             ?: 315f
         var height = FOOTER_RESERVE
-        if (blocks == null || blocks["totals"]?.visible != false) height += TOTALS_BLOCK_HEIGHT
+        if (blocks == null || blocks["totals"]?.visible != false) {
+            height += if (design.ruled) 28f else TOTALS_BLOCK_HEIGHT
+        }
         val showPayment = blocks == null || blocks["payment"]?.visible == true
         val showTerms = blocks == null || blocks["terms"]?.visible == true
         if (showPayment) height += 16f + wrap(payment, regular, 9f, width).take(4).size * 13f + 8f
@@ -304,6 +317,10 @@ class PdfGenerator {
         template: DocumentTemplate,
         blocks: Map<String, DocumentLayoutBlock>,
     ) {
+        if (design.ruled) {
+            drawHeaderRuled(doc, cs, template, blocks)
+            return
+        }
         val contact = blocks["contact"]?.takeIf { it.visible }
         val logo = blocks["logo"]?.takeIf { it.visible }
         val company = blocks["company"]?.takeIf { it.visible }
@@ -376,6 +393,10 @@ class PdfGenerator {
         meta: List<String>,
         blocks: Map<String, DocumentLayoutBlock>,
     ) {
+        if (design.ruled) {
+            drawDocumentInfoRuled(cs, docType, number, client, meta, blocks)
+            return
+        }
         val title = blocks["title"]?.takeIf { it.visible }
         val clientBlock = blocks["client"]?.takeIf { it.visible }
         title?.let { block ->
@@ -408,6 +429,7 @@ class PdfGenerator {
 
     /** Draws the column-header pills and returns the Y for the first data row. */
     private fun drawTableHeader(cs: PDPageContentStream, y: Float, items: DocumentLayoutBlock? = null): Float {
+        if (design.ruled) return drawRuledTableHeader(cs, y, items)
         val x = items?.x ?: MARGIN
         // Three columns with readable gaps need about 420pt. Below that the editor's minimum
         // (220pt) forces the columns into each other, so the table keeps a floor and the overflow
@@ -441,6 +463,10 @@ class PdfGenerator {
         rowY: Float,
         items: DocumentLayoutBlock? = null,
     ) {
+        if (design.ruled) {
+            drawRuledItemRow(cs, idx, item, rowH, rowY, items)
+            return
+        }
         val x = items?.x ?: MARGIN
         // Three columns with readable gaps need about 420pt. Below that the editor's minimum
         // (220pt) forces the columns into each other, so the table keeps a floor and the overflow
@@ -483,6 +509,7 @@ class PdfGenerator {
     // ── Totals card ───────────────────────────────────────────────────
 
     private fun drawTotals(cs: PDPageContentStream, totalCents: Long, y: Float, block: DocumentLayoutBlock? = null): Float {
+        if (design.ruled) return drawRuledTotals(cs, totalCents, y, block)
         val w = block?.w ?: 220f
         val h = block?.h?.coerceAtLeast(24f) ?: 30f
         val x = block?.x ?: (W - MARGIN - w)
@@ -520,7 +547,7 @@ class PdfGenerator {
         var y = startY
 
         if (blocks == null || paymentBlock != null) {
-            text(cs, spaced("FORMA DE PAGAMENTO"), x, y, 11f, bold, cBrand)
+            text(cs, if (design.ruled) "Forma de pagamento" else spaced("FORMA DE PAGAMENTO"), x, y, 11f, bold, cBrand)
             y -= 16f
             wrap(payment, regular, 9f, width).take(4).forEach { line ->
                 text(cs, line, x, y, 9f, regular, ink)
@@ -529,7 +556,7 @@ class PdfGenerator {
             y -= 8f
         }
         if (blocks == null || termsBlock != null) {
-            text(cs, spaced("TERMOS E CONDIÇÕES"), x, y, 11f, bold, cBrand)
+            text(cs, if (design.ruled) "Termos e condições" else spaced("TERMOS E CONDIÇÕES"), x, y, 11f, bold, cBrand)
             y -= 16f
             wrap(terms, regular, 9f, width).take(2).forEach { line ->
                 text(cs, line, x, y, 9f, regular, ink)
@@ -548,6 +575,176 @@ class PdfGenerator {
         // grows with the table and would otherwise collide with a footer parked mid-page.
         val xRight = block?.let { it.x + it.w } ?: (W - MARGIN)
         textR(cs, footer, xRight, 22f, 7.5f, regular, Color(130, 130, 130))
+    }
+
+    // ── Ruled styles (plain / split / band) ───────────────────────────
+
+    private data class RuledCols(val x: Float, val w: Float, val desc: Float, val qty: Float, val price: Float, val total: Float) {
+        val qtyX get() = x + desc
+        val priceX get() = qtyX + qty
+        val totalX get() = priceX + price
+    }
+
+    private fun ruledCols(items: DocumentLayoutBlock?): RuledCols {
+        val x = items?.x ?: MARGIN
+        val w = (items?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)
+        val total = 78f
+        val price = 78f
+        val qty = 50f
+        return RuledCols(x, w, w - total - price - qty, qty, price, total)
+    }
+
+    private fun drawHeaderRuled(
+        doc: PDDocument,
+        cs: PDPageContentStream,
+        template: DocumentTemplate,
+        blocks: Map<String, DocumentLayoutBlock>,
+    ) {
+        blocks["logo"]?.takeIf { it.visible }?.let { drawLogo(doc, cs, it.x, it.pdfY(), it.w, it.h, template) }
+        blocks["company"]?.takeIf { it.visible }?.let { block ->
+            val name = template.companyName.takeIf { it.isNotBlank() } ?: "Empresa"
+            var y = block.pdfTop() - 14f
+            text(cs, sanitize(name), block.x, y, 13f, bold, ink)
+            y -= 13f
+            if (template.tagline.isNotBlank()) {
+                text(cs, sanitize(template.tagline), block.x, y, 8f, regular, inkMuted)
+                y -= 11f
+            }
+            if (template.address.isNotBlank()) {
+                wrap(template.address, regular, 8f, block.w).take(2).forEach { line ->
+                    text(cs, line, block.x, y, 8f, regular, inkMuted)
+                    y -= 11f
+                }
+            }
+        }
+        blocks["contact"]?.takeIf { it.visible }?.let { block ->
+            val line = listOf(template.taxId, template.email, template.phone)
+                .map { it.trim() }.filter { it.isNotBlank() }.joinToString("  ·  ")
+            if (line.isNotBlank()) text(cs, line, block.x, block.pdfTop() - 16f, 8f, regular, inkMuted)
+            if (design == DocumentDesignStyle.PLAIN) {
+                strokeLine(cs, rule, 42f, block.pdfY() - 4f, W - 42f, block.pdfY() - 4f, 0.7f)
+            }
+        }
+    }
+
+    private fun drawDocumentInfoRuled(
+        cs: PDPageContentStream,
+        docType: String,
+        number: String,
+        client: Client,
+        meta: List<String>,
+        blocks: Map<String, DocumentLayoutBlock>,
+    ) {
+        val issueDate = meta.firstOrNull { it.startsWith("Emitido em:") }?.substringAfter(":")?.trim()
+        val status = meta.firstOrNull { it.startsWith("Estado:") }?.substringAfter(":")?.trim()
+        val extra = meta.firstOrNull { it.startsWith("Valido ate:") || it.startsWith("Vencimento:") }
+        blocks["title"]?.takeIf { it.visible }?.let { block ->
+            if (design == DocumentDesignStyle.SPLIT) {
+                fillRect(cs, cBrand, block.x, block.pdfY(), block.w, block.h)
+                var y = block.pdfTop() - 20f
+                text(cs, sanitize(docType), block.x + 12f, y, 13f, bold, cOnBrand)
+                y -= 16f
+                text(cs, sanitize(number), block.x + 12f, y, 11f, bold, cOnBrand)
+                y -= 14f
+                val bits = listOfNotNull(issueDate?.let { "Data $it" }, status, extra?.replace("Valido ate:", "Valido ate"))
+                bits.take(3).forEach { line ->
+                    text(cs, sanitize(line), block.x + 12f, y, 8f, regular, cOnBrand)
+                    y -= 11f
+                }
+            } else {
+                text(cs, sanitize(docType), block.x, block.pdfTop() - 18f, 20f, bold, ink)
+                val metaLine = listOfNotNull(sanitize(number), issueDate?.let { "Data $it" }, status, extra)
+                    .joinToString("  ·  ")
+                if (metaLine.isNotBlank()) {
+                    text(cs, sanitize(metaLine), block.x, block.pdfTop() - 36f, 9f, regular, inkMuted)
+                }
+            }
+        }
+        blocks["client"]?.takeIf { it.visible }?.let { block ->
+            val pad = if (design == DocumentDesignStyle.SPLIT) 10f else 0f
+            if (design == DocumentDesignStyle.SPLIT) {
+                fillRect(cs, surface, block.x, block.pdfY(), block.w, block.h)
+                strokeRect(cs, rule, block.x, block.pdfY(), block.w, block.h, 0.8f)
+            }
+            var y = block.pdfTop() - 14f - if (design == DocumentDesignStyle.SPLIT) 4f else 0f
+            text(cs, "Cliente", block.x + pad, y, 8f, bold, inkMuted)
+            y -= 14f
+            text(cs, sanitize(client.name), block.x + pad, y, 11f, bold, ink)
+            y -= 13f
+            if (client.phone.isNotBlank()) {
+                text(cs, sanitize(client.phone), block.x + pad, y, 8f, regular, inkMuted)
+                y -= 11f
+            }
+            if (client.number.isNotBlank()) {
+                text(cs, sanitize(client.number), block.x + pad, y, 8f, regular, inkMuted)
+                y -= 11f
+            }
+            client.address?.takeIf { it.isNotBlank() }?.let { address ->
+                wrap(address, regular, 8f, block.w - pad * 2).take(2).forEach { line ->
+                    text(cs, line, block.x + pad, y, 8f, regular, inkMuted)
+                    y -= 11f
+                }
+            }
+        }
+    }
+
+    private fun drawRuledTableHeader(cs: PDPageContentStream, y: Float, items: DocumentLayoutBlock?): Float {
+        val cols = ruledCols(items)
+        strokeLine(cs, ink, cols.x, y, cols.x + cols.w, y, 1.1f)
+        val ty = y + 6f
+        text(cs, "Descrição", cols.x + 2f, ty, 8f, bold, inkMuted)
+        textR(cs, "Qtd", cols.qtyX + cols.qty - 4f, ty, 8f, bold, inkMuted)
+        textR(cs, "Preço", cols.priceX + cols.price - 4f, ty, 8f, bold, inkMuted)
+        textR(cs, "Total", cols.totalX + cols.total - 2f, ty, 8f, bold, inkMuted)
+        return y - 4f
+    }
+
+    private fun drawRuledItemRow(
+        cs: PDPageContentStream,
+        idx: Int,
+        item: LineItem,
+        rowH: Float,
+        rowY: Float,
+        items: DocumentLayoutBlock?,
+    ) {
+        val cols = ruledCols(items)
+        if (idx % 2 == 0) fillRect(cs, surface, cols.x, rowY - rowH, cols.w, rowH)
+        strokeLine(cs, rule, cols.x, rowY - rowH, cols.x + cols.w, rowY - rowH, 0.5f)
+        val descLines = wrap(sanitize(item.description), regular, 9f, cols.desc - 10f).take(4)
+        var dy = rowY - 12f
+        descLines.forEach { line ->
+            text(cs, line, cols.x + 2f, dy, 9f, regular, ink)
+            dy -= 12f
+        }
+        val mid = rowY - rowH / 2f - 3f
+        val qty = listOfNotNull(trimDouble(item.quantity), item.unit.trim().takeIf { it.isNotBlank() }).joinToString(" ")
+        textR(cs, qty, cols.qtyX + cols.qty - 4f, mid, 9f, regular, ink)
+        textR(cs, money(item.unitPriceCents), cols.priceX + cols.price - 4f, mid, 9f, regular, ink)
+        textR(cs, money(item.totalCents), cols.totalX + cols.total - 2f, mid, 9f, bold, ink)
+    }
+
+    private fun drawRuledTotals(cs: PDPageContentStream, totalCents: Long, y: Float, block: DocumentLayoutBlock?): Float {
+        val w = block?.w ?: 220f
+        val x = block?.x ?: (W - MARGIN - w)
+        strokeLine(cs, ink, x, y, x + w, y, 1.1f)
+        text(cs, "Total", x, y - 16f, 11f, bold, ink)
+        textR(cs, money(totalCents), x + w, y - 16f, 11f, bold, ink)
+        return y - 22f
+    }
+
+    private fun strokeLine(cs: PDPageContentStream, color: Color, x1: Float, y1: Float, x2: Float, y2: Float, width: Float) {
+        cs.setStrokingColor(color)
+        cs.setLineWidth(width)
+        cs.moveTo(x1, y1)
+        cs.lineTo(x2, y2)
+        cs.stroke()
+    }
+
+    private fun strokeRect(cs: PDPageContentStream, color: Color, x: Float, y: Float, w: Float, h: Float, width: Float) {
+        cs.setStrokingColor(color)
+        cs.setLineWidth(width)
+        cs.addRect(x, y, w, h)
+        cs.stroke()
     }
 
     // ── Primitives ────────────────────────────────────────────────────
@@ -618,6 +815,8 @@ class PdfGenerator {
             this::class.java.classLoader.getResource(resource)?.readBytes()
         }?.takeIf { template.companyName.isBlank() && template.logoPath.isNullOrBlank() }
 
+        if (logoBytes == null && design.ruled) return
+
         if (logoBytes != null) {
             val image = PDImageXObject.createFromByteArray(doc, logoBytes, "logo")
             val scale = minOf(w / image.width, h / image.height)
@@ -637,6 +836,7 @@ class PdfGenerator {
     }
 
     private fun applyTheme(template: DocumentTemplate) {
+        design = DocumentDesignStyle.parse(template.style)
         val parsed = parseHex(template.accentColor)
         cBrand = parsed ?: brand
         cBrandDark = parsed?.let { darken(it, 0.82f) } ?: brandDark

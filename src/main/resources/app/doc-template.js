@@ -69,10 +69,24 @@
       footerText: t.footerText || '',
       accentColor: normalizeHex(t.accentColor || t.defaults?.accentColor || '#96AAB6'),
       showDecor: t.showDecor !== false,
+      style: normalizeStyle(t.style || t.defaults?.style),
       layout: mergeLayout(t),
       hasLogo: !!t.hasLogo,
       defaults: t.defaults || {},
     };
+  }
+
+  function normalizeStyle(value) {
+    const s = String(value || '').trim().toLowerCase();
+    if (s === 'plain' || s === 'clear') return 'plain';
+    if (s === 'split' || s === 'statement') return 'split';
+    if (s === 'band' || s === 'margin') return 'band';
+    return 'classic';
+  }
+
+  function isRuled(style) {
+    const s = style || draft?.style;
+    return s === 'plain' || s === 'split' || s === 'band';
   }
 
   function normalizeHex(value) {
@@ -143,10 +157,12 @@
     return draft.defaults?.[fallback || key] || '';
   }
 
-  function blockInner(id) {
+  function blockInner(id, style) {
     const S = STR();
+    const ruled = isRuled(style);
     if (id === 'logo') {
       if (logoUrl) return `<div class="tpl-logo tpl-logo--img"><img alt="" src="${esc(logoUrl)}" /></div>`;
+      if (ruled) return '';
       const name = (draft.companyName || deps.tenantName() || '—').toUpperCase();
       const tag = draft.tagline ? `<div class="tpl-sub">${esc(draft.tagline)}</div>` : '';
       return `<div class="tpl-logo">${esc(name.slice(0, 18))}${tag}</div>`;
@@ -170,6 +186,14 @@
         <div class="tpl-sub">${esc(S.docTplSamplePhone)}</div>`;
     }
     if (id === 'items') {
+      if (ruled) {
+        return `<table class="tpl-table tpl-table--ruled"><thead><tr>
+          <th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColQty)}</th><th>${esc(S.docTplColPrice)}</th><th>${esc(S.docTplColValue)}</th>
+        </tr></thead><tbody>
+          <tr><td>${esc(S.docTplSampleItem1)} — ${esc(S.docTplSampleItem1Desc)}</td><td>1</td><td>1 500,00</td><td>1 500,00</td></tr>
+          <tr><td>${esc(S.docTplSampleItem2)} — ${esc(S.docTplSampleItem2Desc)}</td><td>1</td><td>2 000,00</td><td>2 000,00</td></tr>
+        </tbody></table>`;
+      }
       return `<table class="tpl-table"><thead><tr>
         <th>${esc(S.docTplColService)}</th><th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColValue)}</th>
       </tr></thead><tbody>
@@ -298,7 +322,7 @@
       <div class="tpl__stage" id="tpl-stage">
         <p class="tpl__stage-label">${esc(S.docTplPageLabel)}</p>
         <div class="tpl__sizer" id="tpl-sizer">
-          <div class="tpl__page ${draft.showDecor ? 'is-decor' : ''}" id="tpl-page" tabindex="0">
+          <div class="tpl__page ${draft.showDecor && !isRuled() ? 'is-decor' : ''}" id="tpl-page" tabindex="0" data-style="${esc(draft.style || 'classic')}">
             ${draft.layout.map(b => `<div class="tpl__block ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${overlappingIds().has(b.id) ? 'is-clash' : ''}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
               <div class="tpl__block-body">${blockInner(b.id)}</div>${handlesHtml()}
             </div>`).join('')}
@@ -317,7 +341,8 @@
     if (!page) return;
     page.style.setProperty('--doc-brand', draft.accentColor);
     page.style.setProperty('--doc-brand-ink', onBrand(draft.accentColor));
-    page.classList.toggle('is-decor', draft.showDecor);
+    page.dataset.style = draft.style || 'classic';
+    page.classList.toggle('is-decor', draft.showDecor && !isRuled());
   }
 
   function applyGeometry() {
@@ -578,6 +603,7 @@
         footerText: draft.footerText.trim(),
         accentColor: draft.accentColor,
         showDecor: draft.showDecor,
+        style: draft.style,
         layout: draft.layout.map(copyBlock),
       };
       const saved = await deps.api('/app/api/settings/document-template', { method: 'PUT', body: JSON.stringify(body) });
@@ -604,10 +630,12 @@
   function thumbPageHtml(p) {
     const layout = (p.layout || []).filter(b => b.visible !== false);
     const ink = onBrand(p.accentColor);
+    const style = normalizeStyle(p.style);
+    const ruled = isRuled(style);
     return `<div class="tpl-thumb" aria-hidden="true">
-      <div class="tpl__page ${p.showDecor ? 'is-decor' : ''}" style="--doc-brand:${esc(p.accentColor)};--doc-brand-ink:${ink}">
+      <div class="tpl__page ${p.showDecor && !ruled ? 'is-decor' : ''}" data-style="${esc(style)}" style="--doc-brand:${esc(p.accentColor)};--doc-brand-ink:${ink}">
         ${layout.map(b => `<div class="tpl__block" style="left:${+b.x}px;top:${+b.y}px;width:${+b.w}px;height:${+b.h}px">
-          <div class="tpl__block-body">${blockInner(b.id)}</div>
+          <div class="tpl__block-body">${blockInner(b.id, style)}</div>
         </div>`).join('')}
       </div>
     </div>`;

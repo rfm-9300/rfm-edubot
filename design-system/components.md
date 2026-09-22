@@ -433,6 +433,7 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 - Blocks are absolutely positioned. Selection: `.is-on`. Hidden: `.is-off`. Resize: `.tpl__handle--nw|n|ne|e|se|s|sw|w`.
 - Preview chrome inside the page (`--doc-brand`, `.tpl-kicker`, `.tpl-table`, `.tpl-total`) is document ink, not dashboard `--ink`.
 - Templates opens a **wide** drawer. `.tpl-presets` is a card grid of A4 thumbnails (`.tpl-thumb` + `.tpl-preset`), not a swatch list. Built-in designs live in `BuiltInDesignTemplates`.
+- `.tpl__page[data-style="plain|split|band"]` paints the readable table (qty/price columns, no pills). Classic keeps the pill chrome. Do not restyle Classic to look like Clear.
 - Do not replace this with a generic drawer form.
 
 ## Settings rows

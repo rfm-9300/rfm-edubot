@@ -55,12 +55,19 @@ class DocumentLayoutsTest {
     fun `every built-in design has a complete page with no overlapping boxes`() {
         val names = BuiltInDesignTemplates.ALL.map { it.name }
         assertEquals(
-            listOf("classic", "modern", "minimal", "editorial", "ledger", "harbor", "atelier"),
+            listOf("classic", "modern", "minimal", "clear", "statement", "margin"),
             names,
         )
         BuiltInDesignTemplates.ALL.forEach { design ->
             assertEquals(DocumentLayouts.IDS.toSet(), design.layout.map { it.id }.toSet(), design.name)
             assertTrue(design.accentColor.matches(Regex("^#[0-9A-F]{6}$")), design.name)
+            val expectedStyle = when (design.name) {
+                "clear" -> DocumentDesignStyle.PLAIN.id
+                "statement" -> DocumentDesignStyle.SPLIT.id
+                "margin" -> DocumentDesignStyle.BAND.id
+                else -> DocumentDesignStyle.CLASSIC.id
+            }
+            assertEquals(expectedStyle, DocumentDesignStyle.sanitize(design.style), design.name)
             // Classic is the historical default: the items frame overlaps the client frame by a
             // few points, but the painted table header sits below the client text.
             if (design.name == "classic") return@forEach
