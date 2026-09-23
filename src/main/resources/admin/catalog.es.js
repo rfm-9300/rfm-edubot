@@ -385,6 +385,7 @@ window.__I18N_CATALOGS['es'] = {
     services: {
       open: 'Abierto', invoiced: 'Facturado', cancelled: 'Cancelado', work: 'Trabajo del cliente', filterAll: 'Todos',
       viewList: 'Lista', byWeek: 'Por semana', byMonth: 'Por mes', summaryWeek: 'Resumen de la semana', summaryMonth: 'Resumen del mes',
+      periodPrev: 'Anterior', periodNext: 'Siguiente', periodCurrent: 'Actual',
       vsPrev: p => `frente al anterior · ${p.delta}`,
       thPeriod: 'Periodo', thCount: 'Servicios',
       summaryEmpty: 'Nada en este resumen', summaryEmptyDesc: 'El trabajo aparece aquí cuando tiene fecha.',
@@ -458,6 +459,7 @@ window.__I18N_CATALOGS['es'] = {
     invoices: {
       paid: 'Pagado', pending: 'Pendiente', overdue: 'Vencido', documents: 'Documentos', filterAll: 'Todos',
       viewList: 'Lista', byWeek: 'Por semana', byMonth: 'Por mes', summaryWeek: 'Resumen de la semana', summaryMonth: 'Resumen del mes',
+      periodPrev: 'Anterior', periodNext: 'Siguiente', periodCurrent: 'Actual',
       vsPrev: p => `frente al anterior · ${p.delta}`,
       thPeriod: 'Periodo', thCount: 'Facturas',
       summaryEmpty: 'Nada en este resumen', summaryEmptyDesc: 'Las facturas aparecen aquí cuando se emiten.',

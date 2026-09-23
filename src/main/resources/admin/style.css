@@ -481,7 +481,10 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
 .view__title { font-family: var(--display); font-size: 28px; letter-spacing: -0.01em; font-weight: 700; margin: 0 0 4px; }
 .view__desc  { color: var(--ink-mute); font-size: 13.5px; font-weight: 600; margin: 0; max-width: 56ch; }
 
+.view__hero-right { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; }
 .view__stats { display: flex; gap: 12px; align-items: stretch; flex-wrap: wrap; }
+.period-nav { display: flex; align-items: center; gap: 8px; }
+.period-nav__label { color: var(--ink-mute); font-size: 12px; font-weight: 800; white-space: nowrap; }
 .stat {
   --stat: var(--accent);
   display: flex; flex-direction: column; gap: 2px;

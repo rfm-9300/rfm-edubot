@@ -4,8 +4,8 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
-  clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '',
-  filterInvoicePeriod: '',
+  clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
+  filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
@@ -313,7 +313,9 @@ async function setActive(tab) {
   state.filterServiceStatus = '';
   state.filterServiceClient = '';
   state.filterServicePeriod = '';
+  state.filterServicePeriodKey = '';
   state.filterInvoicePeriod = '';
+  state.filterInvoicePeriodKey = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
   try {
@@ -429,8 +431,19 @@ function render() {
   renderSettings(root);
 }
 
-function hero(title, desc, stats = '') {
-  return `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div>${stats}</div>`;
+function hero(title, desc, stats = '', nav = '') {
+  const right = nav ? `<div class="view__hero-right">${nav}${stats}</div>` : stats;
+  return `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div>${right}</div>`;
+}
+function periodNav(selectedKey, grain, attr, t) {
+  if (!grain) return '';
+  const atCurrent = selectedKey === currentPeriodKey(grain);
+  return `<div class="period-nav">
+    <button class="btn btn--sm" type="button" aria-label="${escapeHTML(t.periodPrev)}" ${attr}="prev">‹</button>
+    <span class="period-nav__label mono">${escapeHTML(periodLabel(selectedKey, grain))}</span>
+    <button class="btn btn--sm" type="button" aria-label="${escapeHTML(t.periodNext)}" ${atCurrent ? 'disabled' : ''} ${attr}="next">›</button>
+    ${atCurrent ? '' : `<button class="btn btn--sm" type="button" ${attr}="current">${escapeHTML(t.periodCurrent)}</button>`}
+  </div>`;
 }
 function statCards(items, size = '') {
   if (!items.length) return '';
@@ -950,7 +963,7 @@ function renderServices(root) {
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
     .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q));
   const serviceGroups = period ? groupByPeriod(listed, period, s => s.performedAt || s.createdAt) : [];
-  const nowKey = period ? currentPeriodKey(period) : '';
+  const nowKey = period ? (state.filterServicePeriodKey || currentPeriodKey(period)) : '';
   const nowRoll = serviceRollup(groupItems(serviceGroups, nowKey));
   const prevKey = period ? shiftPeriodKey(nowKey, period, -1) : '';
   const prevExists = serviceGroups.some(([key]) => key === prevKey);
@@ -971,9 +984,10 @@ function renderServices(root) {
   const filtered = Boolean(clientId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`;
+  const serviceNav = periodNav(nowKey, period, 'data-svc-period-nav', t);
   const serviceStats = period
     ? [
-      { label: t.thCount, value: nowRoll.jobs, hint: periodLabel(nowKey, period) },
+      { label: t.thCount, value: nowRoll.jobs },
       { label: t.open, value: fmtEUR(nowRoll.open) },
       { label: t.invoiced, value: fmtEUR(nowRoll.invoiced) },
       { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
@@ -982,7 +996,7 @@ function renderServices(root) {
       { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
       { label: t.invoiced, value: invoiced.length },
     ];
-  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards(serviceStats)) + crmPanel({
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards(serviceStats), serviceNav) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.work,
     tag: period ? serviceGroups.length : listed.length,
     views,
@@ -992,7 +1006,12 @@ function renderServices(root) {
     empty: period ? t.summaryEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: period ? t.summaryEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
-  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; render(); }));
+  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; state.filterServicePeriodKey = ''; render(); }));
+  $$('[data-svc-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
+    const dir = btn.dataset.svcPeriodNav;
+    state.filterServicePeriodKey = dir === 'current' ? '' : shiftPeriodKey(nowKey, period, dir === 'prev' ? -1 : 1);
+    render();
+  }));
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
@@ -1823,7 +1842,7 @@ function renderInvoices(root) {
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
     .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)}`.toLowerCase().includes(q));
   const invoiceGroups = period ? groupByPeriod(listed, period, inv => inv.createdAt || inv.dueDate) : [];
-  const nowKey = period ? currentPeriodKey(period) : '';
+  const nowKey = period ? (state.filterInvoicePeriodKey || currentPeriodKey(period)) : '';
   const nowRoll = invoiceRollup(groupItems(invoiceGroups, nowKey));
   const prevKey = period ? shiftPeriodKey(nowKey, period, -1) : '';
   const prevExists = invoiceGroups.some(([key]) => key === prevKey);
@@ -1841,9 +1860,10 @@ function renderInvoices(root) {
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`;
+  const invoiceNav = periodNav(nowKey, period, 'data-inv-period-nav', t);
   const invoiceStats = period
     ? [
-      { label: t.paid, value: fmtEUR(nowRoll.paid), hint: periodLabel(nowKey, period) },
+      { label: t.paid, value: fmtEUR(nowRoll.paid) },
       { label: t.pending, value: fmtEUR(nowRoll.pending) },
       { label: t.overdue, value: fmtEUR(nowRoll.overdue) },
       { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
@@ -1853,7 +1873,7 @@ function renderInvoices(root) {
       { label: t.pending, value: fmtEUR(pending) },
       { label: t.overdue, value: fmtEUR(overdue) },
     ];
-  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards(invoiceStats)) + crmPanel({
+  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards(invoiceStats), invoiceNav) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.documents,
     tag: period ? invoiceGroups.length : listed.length,
     views,
@@ -1864,7 +1884,12 @@ function renderInvoices(root) {
     emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
   });
   wirePdfButtons(root);
-  $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; render(); }));
+  $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; state.filterInvoicePeriodKey = ''; render(); }));
+  $$('[data-inv-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
+    const dir = btn.dataset.invPeriodNav;
+    state.filterInvoicePeriodKey = dir === 'current' ? '' : shiftPeriodKey(nowKey, period, dir === 'prev' ? -1 : 1);
+    render();
+  }));
   $$('[data-filter-inv]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoiceStatus = btn.dataset.filterInv; render(); }));
   $$('[data-mark-paid]', root).forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();

@@ -99,6 +99,30 @@ Order: crumb · search · actions. Theme button is always in actions. Search hid
 
 Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta — add `.delta--up` / `.delta--down` to it when the delta has a direction. `.stat--lg` is a bigger spotlight variant (Home's highlights only); don't use it on list-page stat rows (clients, services, quotes, invoices, catalog).
 
+### Hero with a period navigator
+
+When the stats under the hero summarize a single week or month (Services/Invoices in `By week`/`By month` view — [patterns.md](patterns.md)), stack a `.period-nav` above `.view__stats` inside a `.view__hero-right` wrapper so the whole right-hand column — nav and numbers — reads as one unit describing "which period, then its numbers":
+
+```html
+<div class="view__hero">
+  <div>
+    <h1 class="view__title">Invoices</h1>
+    <p class="view__desc">Issued invoices and their status.</p>
+  </div>
+  <div class="view__hero-right">
+    <div class="period-nav">
+      <button class="btn btn--sm" type="button" aria-label="Previous">‹</button>
+      <span class="period-nav__label mono">15 – 21 Sep 2026</span>
+      <button class="btn btn--sm" type="button" aria-label="Next">›</button>
+      <button class="btn btn--sm" type="button">Current</button>
+    </div>
+    <div class="view__stats"><!-- stat cards for the selected period --></div>
+  </div>
+</div>
+```
+
+The "Next" button gets `disabled` when the selected period is the current one — there's nothing to move forward to. The trailing "Current" button (`t.periodCurrent`) only renders once the viewer has actually navigated away from today's period; don't show a no-op jump button when already there. `.period-nav__label` reuses the same `periodLabel()` range text as the table's period rows and the row it currently matches gets `.is-current` in the history table below, so the nav, the stat cards, and the highlighted row all agree on the same selected period.
+
 ## Health pulse
 
 Home’s status banner under the hero:

@@ -386,6 +386,7 @@ window.__I18N_CATALOGS['en'] = {
     services: {
       open: 'Open', invoiced: 'Invoiced', cancelled: 'Cancelled', work: 'Client work', filterAll: 'All',
       viewList: 'List', byWeek: 'By week', byMonth: 'By month', summaryWeek: 'Week wrap-up', summaryMonth: 'Month wrap-up',
+      periodPrev: 'Previous', periodNext: 'Next', periodCurrent: 'Current',
       vsPrev: p => `vs previous · ${p.delta}`,
       thPeriod: 'Period', thCount: 'Jobs',
       summaryEmpty: 'Nothing in this wrap-up', summaryEmptyDesc: 'Work appears here once it has a date.',
@@ -459,6 +460,7 @@ window.__I18N_CATALOGS['en'] = {
     invoices: {
       paid: 'Paid', pending: 'Pending', overdue: 'Overdue', documents: 'Documents', filterAll: 'All',
       viewList: 'List', byWeek: 'By week', byMonth: 'By month', summaryWeek: 'Week wrap-up', summaryMonth: 'Month wrap-up',
+      periodPrev: 'Previous', periodNext: 'Next', periodCurrent: 'Current',
       vsPrev: p => `vs previous · ${p.delta}`,
       thPeriod: 'Period', thCount: 'Invoices',
       summaryEmpty: 'Nothing in this wrap-up', summaryEmptyDesc: 'Invoices appear here once they are issued.',
