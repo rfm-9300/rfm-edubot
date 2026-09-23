@@ -89,6 +89,46 @@ function periodChips(active, attr, labels) {
 function sumEur(items) {
   return items.reduce((sum, item) => sum + Number(item.totalEur || 0), 0);
 }
+function currentPeriodKey(grain) {
+  return periodKey(new Date().toISOString(), grain);
+}
+function shiftPeriodKey(key, grain, steps) {
+  if (!key || !steps) return key || '';
+  if (grain === 'month') {
+    const [y, m] = key.split('-').map(Number);
+    const d = new Date(Date.UTC(y, m - 1 + steps, 1));
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;
+  }
+  const [y, m, d] = key.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d + steps * 7));
+  const pad = n => String(n).padStart(2, '0');
+  return `${utc.getUTCFullYear()}-${pad(utc.getUTCMonth() + 1)}-${pad(utc.getUTCDate())}`;
+}
+function periodDelta(current, previous) {
+  if (previous == null || previous === 0) return { text: '', trend: '' };
+  const pct = Math.round(((current - previous) / Math.abs(previous)) * 100);
+  const sign = pct > 0 ? '+' : '';
+  return { text: `${sign}${pct}%`, trend: pct > 0 ? 'up' : pct < 0 ? 'down' : '' };
+}
+function groupItems(groups, key) {
+  return groups.find(entry => entry[0] === key)?.[1] || [];
+}
+function serviceRollup(items) {
+  const billable = items.filter(s => s.status !== 'CANCELLED');
+  const openRows = billable.filter(s => s.status === 'OPEN');
+  const invoicedRows = billable.filter(s => s.status === 'INVOICED');
+  return { jobs: billable.length, open: sumEur(openRows), invoiced: sumEur(invoicedRows), total: sumEur(billable) };
+}
+function invoiceRollup(items) {
+  const live = items.filter(inv => inv.status !== 'CANCELLED');
+  return {
+    count: live.length,
+    paid: sumEur(live.filter(inv => inv.status === 'PAID')),
+    pending: sumEur(live.filter(inv => inv.status === 'PENDING')),
+    overdue: sumEur(live.filter(inv => inv.status === 'OVERDUE')),
+    total: sumEur(live),
+  };
+}
 const quoteStatusLabel = code => (CRM.quoteStatus && CRM.quoteStatus[code]) || code;
 const invoiceStatusLabel = code => (CRM.invoiceStatus && CRM.invoiceStatus[code]) || code;
 const paymentStatusLabel = code => (CRM.paymentStatus && CRM.paymentStatus[code]) || invoiceStatusLabel(code);
@@ -904,19 +944,18 @@ function renderServices(root) {
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
     .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q));
   const serviceGroups = period ? groupByPeriod(listed, period, s => s.performedAt || s.createdAt) : [];
-  const summaryRows = period
-    ? serviceGroups.map(([key, items]) => {
-      const billable = items.filter(s => s.status !== 'CANCELLED');
-      const openRows = billable.filter(s => s.status === 'OPEN');
-      const invoicedRows = billable.filter(s => s.status === 'INVOICED');
-      return `<tr>
-        <td class="name">${escapeHTML(periodLabel(key, period))}</td>
-        <td class="num">${items.length}</td>
-        <td class="num">${openRows.length} · ${fmtEUR(sumEur(openRows))}</td>
-        <td class="num">${invoicedRows.length} · ${fmtEUR(sumEur(invoicedRows))}</td>
-        <td class="num">${fmtEUR(sumEur(billable))}</td>
-      </tr>`;
-    }).join('')
+  const nowKey = period ? currentPeriodKey(period) : '';
+  const nowRoll = serviceRollup(groupItems(serviceGroups, nowKey));
+  const prevKey = period ? shiftPeriodKey(nowKey, period, -1) : '';
+  const prevExists = serviceGroups.some(([key]) => key === prevKey);
+  const delta = prevExists ? periodDelta(nowRoll.total, serviceRollup(groupItems(serviceGroups, prevKey)).total) : { text: '', trend: '' };
+  const allRoll = serviceRollup(listed);
+  const summaryRows = period && serviceGroups.length
+    ? `<tr class="is-total"><td class="name">${escapeHTML(t.thTotal)}</td><td class="num">${allRoll.jobs}</td><td class="num">${fmtEUR(allRoll.open)}</td><td class="num">${fmtEUR(allRoll.invoiced)}</td><td class="num">${fmtEUR(allRoll.total)}</td></tr>`
+      + serviceGroups.map(([key, items]) => {
+        const roll = serviceRollup(items);
+        return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.jobs}</td><td class="num">${fmtEUR(roll.open)}</td><td class="num">${fmtEUR(roll.invoiced)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
+      }).join('')
     : '';
   const tools = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
     + clientFilter
@@ -926,10 +965,18 @@ function renderServices(root) {
   const filtered = Boolean(clientId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`;
-  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
-    { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
-    { label: t.invoiced, value: invoiced.length },
-  ])) + crmPanel({
+  const serviceStats = period
+    ? [
+      { label: t.thCount, value: nowRoll.jobs, hint: periodLabel(nowKey, period) },
+      { label: t.open, value: fmtEUR(nowRoll.open) },
+      { label: t.invoiced, value: fmtEUR(nowRoll.invoiced) },
+      { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
+    ]
+    : [
+      { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
+      { label: t.invoiced, value: invoiced.length },
+    ];
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards(serviceStats)) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.work,
     tag: period ? serviceGroups.length : listed.length,
     tools,
@@ -1355,6 +1402,16 @@ function payeeId(payment) {
   return payment.employeeId || payment.supplierId || '';
 }
 
+function generalPaymentFields() {
+  const t = CRM.payments;
+  return `<div id="payment-general" class="form__grid">
+    <div class="form__row"><label class="lbl" for="p-amount">${escapeHTML(t.amount)} <span class="req">●</span></label>
+      <input class="inp inp--mono inp--right" id="p-amount" type="number" min="0" step="0.01" placeholder="0.00" /></div>
+    <div class="form__row"><label class="lbl" for="p-desc">${escapeHTML(t.generalEntry)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <input class="inp" id="p-desc" value="${escapeHTML(t.generalEntryValue)}" /></div>
+  </div>`;
+}
+
 function lineItemsField(catalog) {
   const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.description)} · ${fmtEUR(c.defaultUnitPriceEur)}/${escapeHTML(c.unit)}</option>`;
   const services = catalog.filter(c => c.type === 'service');
@@ -1566,7 +1623,8 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId) {
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
     </div>
-    ${li.html}
+    <div id="payment-lines">${li.html}</div>
+    ${employeesOn ? generalPaymentFields() : ''}
     <div class="form__row form__row--full"><label class="lbl" for="p-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
       <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}"></textarea></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
@@ -1574,8 +1632,12 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId) {
     payee = kind;
     const supplierRow = $('#payee-supplier', form);
     const employeeRow = $('#payee-employee', form);
+    const lines = $('#payment-lines', form);
+    const general = $('#payment-general', form);
     if (supplierRow) supplierRow.hidden = kind !== 'supplier';
     if (employeeRow) employeeRow.hidden = kind !== 'employee';
+    if (lines) lines.hidden = kind === 'employee';
+    if (general) general.hidden = kind !== 'employee';
     $$('[data-payee]', form).forEach(btn => btn.classList.toggle('is-on', btn.dataset.payee === kind));
   };
   showPayee(payee);
@@ -1597,8 +1659,16 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId) {
       if (!employeeId) return toast(t.chooseEmployee);
     } else if (!supplierId) return toast(t.chooseSupplier);
     if (!dueDate) return toast(t.enterDueDate);
-    const items = li.collect(form);
-    if (!items.length) return toast(t.addLine);
+    let items;
+    if (payee === 'employee') {
+      const amount = Number($('#p-amount', form).value || 0);
+      if (!(amount > 0)) return toast(t.enterAmount);
+      const description = $('#p-desc', form).value.trim() || t.generalEntryValue;
+      items = [{ description, quantity: 1, unit: '', unitPriceEur: amount }];
+    } else {
+      items = li.collect(form);
+      if (!items.length) return toast(t.addLine);
+    }
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     const body = payee === 'employee'
@@ -1746,30 +1816,37 @@ function renderInvoices(root) {
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
     .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)}`.toLowerCase().includes(q));
   const invoiceGroups = period ? groupByPeriod(listed, period, inv => inv.createdAt || inv.dueDate) : [];
-  const summaryRows = invoiceGroups.map(([key, items]) => {
-    const live = items.filter(inv => inv.status !== 'CANCELLED');
-    const paidRows = live.filter(inv => inv.status === 'PAID');
-    const pendingRows = live.filter(inv => inv.status === 'PENDING');
-    const overdueRows = live.filter(inv => inv.status === 'OVERDUE');
-    return `<tr>
-      <td class="name">${escapeHTML(periodLabel(key, period))}</td>
-      <td class="num">${live.length}</td>
-      <td class="num">${fmtEUR(sumEur(paidRows))}</td>
-      <td class="num">${fmtEUR(sumEur(pendingRows))}</td>
-      <td class="num">${fmtEUR(sumEur(overdueRows))}</td>
-      <td class="num">${fmtEUR(sumEur(live))}</td>
-    </tr>`;
-  }).join('');
+  const nowKey = period ? currentPeriodKey(period) : '';
+  const nowRoll = invoiceRollup(groupItems(invoiceGroups, nowKey));
+  const prevKey = period ? shiftPeriodKey(nowKey, period, -1) : '';
+  const prevExists = invoiceGroups.some(([key]) => key === prevKey);
+  const delta = prevExists ? periodDelta(nowRoll.total, invoiceRollup(groupItems(invoiceGroups, prevKey)).total) : { text: '', trend: '' };
+  const allRoll = invoiceRollup(listed);
+  const summaryRows = period && invoiceGroups.length
+    ? `<tr class="is-total"><td class="name">${escapeHTML(t.thTotal)}</td><td class="num">${allRoll.count}</td><td class="num">${fmtEUR(allRoll.paid)}</td><td class="num">${fmtEUR(allRoll.pending)}</td><td class="num">${fmtEUR(allRoll.overdue)}</td><td class="num">${fmtEUR(allRoll.total)}</td></tr>`
+      + invoiceGroups.map(([key, items]) => {
+        const roll = invoiceRollup(items);
+        return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.count}</td><td class="num">${fmtEUR(roll.paid)}</td><td class="num">${fmtEUR(roll.pending)}</td><td class="num">${fmtEUR(roll.overdue)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
+      }).join('')
+    : '';
   const tools = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
     + `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`;
-  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards([
-    { label: t.paid, value: fmtEUR(paid) },
-    { label: t.pending, value: fmtEUR(pending) },
-    { label: t.overdue, value: fmtEUR(overdue) },
-  ])) + crmPanel({
+  const invoiceStats = period
+    ? [
+      { label: t.paid, value: fmtEUR(nowRoll.paid), hint: periodLabel(nowKey, period) },
+      { label: t.pending, value: fmtEUR(nowRoll.pending) },
+      { label: t.overdue, value: fmtEUR(nowRoll.overdue) },
+      { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
+    ]
+    : [
+      { label: t.paid, value: fmtEUR(paid) },
+      { label: t.pending, value: fmtEUR(pending) },
+      { label: t.overdue, value: fmtEUR(overdue) },
+    ];
+  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards(invoiceStats)) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.documents,
     tag: period ? invoiceGroups.length : listed.length,
     tools,
@@ -1920,20 +1997,25 @@ async function markPaymentPaid(id) {
   } catch { toast(t.markPaidFailed); }
 }
 
-function openPaymentDetail(id) {
-  const pay = state.payments.find(p => p.id === id);
-  if (!pay) return;
+async function openPaymentDetail(id) {
   const t = CRM.payments;
+  let pay = state.payments.find(p => p.id === id);
+  try { pay = await api(`/app/api/crm/payments/${encodeURIComponent(id)}`); }
+  catch { /* keep list row */ }
+  if (!pay) return;
   const canMarkPaid = pay.status === 'PENDING' || pay.status === 'OVERDUE';
-  const items = (pay.items || []).map(it => `<li>${escapeHTML(it.description)} · ${it.quantity} × ${fmtEUR(it.unitPriceEur)}</li>`).join('');
+  const tone = { PENDING: 'warn', PAID: 'ok', OVERDUE: 'bad' }[pay.status] || '';
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(payeeName(pay))} · ${paymentPill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
-    <p class="hint">${escapeHTML(t.thDueDate)} · ${escapeHTML(fmtDay(pay.dueDate))}</p>
-    ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
+    ${detailHead(payeeName(pay), paymentPill(pay.status), pay.totalEur, tone)}
+    ${detailMeta([
+      { label: t.thDueDate, value: fmtDay(pay.dueDate) },
+      pay.status === 'PAID' && pay.paidAt ? { label: STR.paidOnLabel, value: fmtDay(pay.paidAt) } : null,
+    ])}
+    ${itemsTable(pay.items)}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
-    <div class="actions">
+    <div class="detail__foot">
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
     </div>`;
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id));

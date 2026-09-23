@@ -563,6 +563,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl tbody tr.is-overdue td:first-child { box-shadow: inset 4px 0 0 var(--bad); }
 .tbl tbody tr.is-paid    td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
 .tbl tbody tr.is-draft   td:first-child { box-shadow: inset 4px 0 0 var(--ink-faint); }
+.tbl tbody tr.is-current td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
+.tbl tbody tr.is-total td,
+.tbl tbody tr.is-total:hover td { background: var(--surface-2); font-weight: 800; }
 
 .empty { padding: 52px 16px; text-align: center; color: var(--ink-mute); }
 .empty::before { content: "🪄"; display: block; font-size: 30px; margin-bottom: 10px; }

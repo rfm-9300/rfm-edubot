@@ -191,7 +191,7 @@ A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter S
 
 Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
-Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint). Clickable rows may use `.conversation-row`.
+Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). Clickable rows may use `.conversation-row`.
 
 ## Empty
 

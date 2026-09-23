@@ -196,6 +196,7 @@ internal data class PaymentDto(
     val dueDate: String,
     val totalEur: Double,
     val notes: String? = null,
+    val paidAt: String? = null,
     val items: List<LineItemDto> = emptyList(),
     val createdAt: String,
 )
@@ -336,6 +337,7 @@ internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null) = Paym
     dueDate = dueDate.toString(),
     totalEur = totalCents / 100.0,
     notes = notes,
+    paidAt = paidAt?.toString(),
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
     createdAt = createdAt.toString(),
 )

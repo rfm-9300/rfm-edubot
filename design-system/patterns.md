@@ -84,11 +84,11 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Services (client work)
 
-`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a compact `.sel` client filter, status chips, and an Invoice selected action. **List / By week / By month** chips switch the same panel to a wrap-up grouped by the performed date (Monday week, calendar month). Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
+`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a compact `.sel` client filter, status chips, and an Invoice selected action. **List / By week / By month** chips switch the same panel. By week and By month replace the hero with the current period (Monday week or calendar month): jobs, open €, invoiced €, and total, with a vs-previous hint on the total. The table is that history — a `.is-total` row, then one row per period (jobs and euros in separate columns). The current period row uses `.is-current`. Cancelled rows stay out of the money. List view hero stays all-time. Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
 
 ## Invoices
 
-`/app` Invoices uses the same period chips. **By week** and **By month** group issued invoices (`createdAt`) into paid, pending, overdue, and total. Cancelled rows stay out of the money columns. The list view is unchanged.
+`/app` Invoices uses the same period chips. **By week** and **By month** replace the hero with the current period: paid, pending, overdue, and total, with a vs-previous hint on the total. The table is the history (`.is-total`, then one row per issued period). The current period row uses `.is-current`. Cancelled rows stay out of the money columns. The list view hero stays all-time.
 
 ## Suppliers (vendor directory)
 
@@ -96,7 +96,7 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Payments (outgoing bills)
 
-`/app` Payments is invoices, inverted: bills attached to a **supplier** or, when that module is on, an **employee**. The form uses `.chip` to pick the payee kind, then a `.sel`. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` payee filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment with neither suppliers nor employees opens the supplier form first.
+`/app` Payments is invoices, inverted: bills attached to a **supplier** or, when that module is on, an **employee**. The form uses `.chip` to pick the payee kind, then a `.sel`. A supplier payment uses the catalog line editor. An employee payment is one amount and an optional description (default “Payment”), not a catalog line. Opening a payment uses the same detail drawer as an invoice: `.detail__head`, `.detail__meta`, the lines table, `.detail__foot` with Mark paid. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` payee filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment with neither suppliers nor employees opens the supplier form first.
 
 ## Conversation / assistant
 
