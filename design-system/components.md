@@ -163,6 +163,31 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 `.chip.is-on` = selected filter (solid accent). `.tag` inside `.panel__title` is a count pill.
 A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter Serviços by client, Pagamentos by supplier). It uses chip height (28px) and `width: auto`; do not drop a full-width form select into the toolbar.
 
+### Panel with a view switch (List / By week / By month)
+
+When a panel has a control that swaps its whole layout (columns, hero, even the stat row) rather than just narrowing the rows, keep it out of `.panel__tools` — a `.chip` reads as "one of several filters," which undersells a control that changes the table's shape. Use `crmPanel`'s `views` slot instead of `tools`; it renders in the head as its own `.panel__views` group (same buttons the bookings toolbar uses: `.btn.btn--sm`, active = `.btn--primary`), and any ordinary filters passed via `tools` automatically drop to a `.panel__filters` strip underneath, on a `--surface-2` band with its own bottom border:
+
+```html
+<div class="panel">
+  <div class="panel__head">
+    <h2 class="panel__title">Serviços <span class="tag">12</span></h2>
+    <div class="panel__views">
+      <button class="btn btn--sm btn--primary" type="button">List</button>
+      <button class="btn btn--sm" type="button">By week</button>
+      <button class="btn btn--sm" type="button">By month</button>
+    </div>
+  </div>
+  <div class="panel__filters">
+    <select class="sel" aria-label="Client"><option>All clients</option></select>
+    <button class="chip is-on" type="button">All</button>
+    <button class="chip" type="button">Open</button>
+  </div>
+  <!-- table -->
+</div>
+```
+
+Used by Services and Invoices (`design-system/patterns.md`). Don't reuse `.panel__views` for anything that is itself a filter (status, client, supplier) — those stay `.chip`s in `.panel__tools`/`.panel__filters`.
+
 ## Table
 
 ```html

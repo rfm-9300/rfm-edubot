@@ -525,10 +525,16 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
   background: var(--accent-soft); color: var(--accent-deep); letter-spacing: 0; text-transform: none; font-weight: 800;
 }
 html[data-theme="dark"] .panel__title .tag { color: var(--accent); }
-.panel__tools { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.panel__tools .sel {
+.panel__tools, .panel__views { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.panel__tools .sel, .panel__filters .sel {
   width: auto; min-width: 168px; max-width: 240px; height: 28px;
   font-size: 12px; font-weight: 800; padding: 0 28px 0 12px;
+}
+.panel__filters {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 10px 18px;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-soft);
 }
 .chip {
   display: inline-flex; align-items: center; gap: 6px;

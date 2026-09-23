@@ -84,7 +84,7 @@ function groupByPeriod(items, grain, dateOf) {
   return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
 }
 function periodChips(active, attr, labels) {
-  return ['', 'week', 'month'].map(period => `<button class="chip ${active === period ? 'is-on' : ''}" type="button" ${attr}="${period}">${escapeHTML(labels[period])}</button>`).join('');
+  return ['', 'week', 'month'].map(period => `<button class="btn btn--sm ${active === period ? 'btn--primary' : ''}" type="button" ${attr}="${period}">${escapeHTML(labels[period])}</button>`).join('');
 }
 function sumEur(items) {
   return items.reduce((sum, item) => sum + Number(item.totalEur || 0), 0);
@@ -445,14 +445,20 @@ function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
   const emptyCell = `<tr><td colspan="${cols}"><div class="empty"><p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
   return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || emptyCell}</tbody></table></div></div>`;
 }
-function crmPanel({ title, tag, tools = '', head, rows, empty, emptyDesc }) {
+function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, emptyDesc }) {
   const cols = (String(head).match(/<th/g) || []).length || 8;
   const emptyCell = `<tr><td colspan="${cols}"><div class="empty"><p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
+  // `views` switches the panel's whole layout (e.g. List / By week / By month). Keep it out of
+  // `.panel__tools` so it reads as a mode switch, not a same-weight filter: it stays in the head,
+  // and any `tools` (status/client filters) drop to their own `.panel__filters` row underneath.
+  const headTools = views ? `<div class="panel__views">${views}</div>` : (tools ? `<div class="panel__tools">${tools}</div>` : '');
+  const filtersRow = views && tools ? `<div class="panel__filters">${tools}</div>` : '';
   return `<div class="panel">
     <div class="panel__head">
       <h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2>
-      ${tools ? `<div class="panel__tools">${tools}</div>` : ''}
+      ${headTools}
     </div>
+    ${filtersRow}
     <div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || emptyCell}</tbody></table></div>
   </div>`;
 }
@@ -957,8 +963,8 @@ function renderServices(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.jobs}</td><td class="num">${fmtEUR(roll.open)}</td><td class="num">${fmtEUR(roll.invoiced)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
       }).join('')
     : '';
-  const tools = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
-    + clientFilter
+  const views = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
+  const tools = clientFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
     + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
@@ -979,6 +985,7 @@ function renderServices(root) {
   root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards(serviceStats)) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.work,
     tag: period ? serviceGroups.length : listed.length,
+    views,
     tools,
     head: period ? summaryHead : listHead,
     rows: period ? summaryRows : rows,
@@ -1829,8 +1836,8 @@ function renderInvoices(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.count}</td><td class="num">${fmtEUR(roll.paid)}</td><td class="num">${fmtEUR(roll.pending)}</td><td class="num">${fmtEUR(roll.overdue)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
       }).join('')
     : '';
-  const tools = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
-    + `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
+  const views = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
+  const tools = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`;
@@ -1849,6 +1856,7 @@ function renderInvoices(root) {
   root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards(invoiceStats)) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.documents,
     tag: period ? invoiceGroups.length : listed.length,
+    views,
     tools,
     head: period ? summaryHead : listHead,
     rows: period ? summaryRows : rows,
