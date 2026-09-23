@@ -13,6 +13,7 @@ object DashboardModules {
     const val QUOTES = "quotes"
     const val INVOICES = "invoices"
     const val SUPPLIERS = "suppliers"
+    const val EMPLOYEES = "employees"
     const val PAYMENTS = "payments"
     const val CATALOG = "catalog"
     const val AI_ASSISTANT = "ai-assistant"
@@ -26,7 +27,7 @@ object DashboardModules {
      */
     val alwaysOn = listOf(OVERVIEW)
     val optional = listOf(
-        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, PAYMENTS, CATALOG,
+        CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, EMPLOYEES, PAYMENTS, CATALOG,
         AI_ASSISTANT, BOOKINGS, INSTAGRAM,
     )
     val catalog = alwaysOn + optional

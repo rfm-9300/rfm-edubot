@@ -23,9 +23,10 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     suspend fun findById(id: ObjectId): Payment? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toPayment()
 
-    suspend fun list(supplierId: ObjectId? = null, status: PaymentStatus? = null): List<Payment> {
+    suspend fun list(supplierId: ObjectId? = null, employeeId: ObjectId? = null, status: PaymentStatus? = null): List<Payment> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         supplierId?.let { filters.add(Filters.eq("supplierId", it)) }
+        employeeId?.let { filters.add(Filters.eq("employeeId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
         return collection.find(Filters.and(filters))
             .sort(Document("dueDate", 1).append("createdAt", -1))
@@ -34,12 +35,13 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             .map { it.toPayment() }
     }
 
-    suspend fun create(supplierId: ObjectId, items: List<LineItem>, dueDate: LocalDate, notes: String?): Payment {
+    suspend fun create(supplierId: ObjectId?, employeeId: ObjectId?, items: List<LineItem>, dueDate: LocalDate, notes: String?): Payment {
         val now = SystemClock.now()
         val payment = Payment(
             tenantId = tenantId,
             number = "PAG-${sequences.next("payment_number").toString().padStart(3, '0')}",
             supplierId = supplierId,
+            employeeId = employeeId,
             items = items,
             notes = notes?.trim()?.takeIf { it.isNotBlank() },
             dueDate = dueDate,
@@ -69,7 +71,8 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         id = getObjectId("_id"),
         tenantId = getObjectId("tenantId"),
         number = getString("number"),
-        supplierId = getObjectId("supplierId"),
+        supplierId = get("supplierId", ObjectId::class.java),
+        employeeId = get("employeeId", ObjectId::class.java),
         items = getList("items", Document::class.java).orEmpty().map { it.toLineItem() },
         notes = getString("notes"),
         status = parsePaymentStatus(getString("status")),
@@ -84,6 +87,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("tenantId", tenantId)
         .append("number", number)
         .append("supplierId", supplierId)
+        .append("employeeId", employeeId)
         .append("items", items.map { it.toDocument() })
         .append("notes", notes)
         .append("status", status.name)

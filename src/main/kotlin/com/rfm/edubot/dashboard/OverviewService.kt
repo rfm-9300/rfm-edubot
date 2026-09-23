@@ -60,6 +60,7 @@ class OverviewService(private val mongo: MongoModule) {
         }
         val services = async { if (DashboardModules.SERVICES in modules) services(tenant.id, window) else null }
         val suppliers = async { if (DashboardModules.SUPPLIERS in modules) suppliers(tenant.id, window) else null }
+        val employees = async { if (DashboardModules.EMPLOYEES in modules) employees(tenant.id, window) else null }
         val payments = async { if (DashboardModules.PAYMENTS in modules) payments(tenant.id, window) else null }
         val assistant = async {
             if (DashboardModules.AI_ASSISTANT in modules) {
@@ -90,6 +91,7 @@ class OverviewService(private val mongo: MongoModule) {
         val catalogDto = catalog.await()
         val servicesDto = services.await()
         val suppliersDto = suppliers.await()
+        val employeesDto = employees.await()
         val paymentsDto = payments.await()
         val assistantDto = assistant.await()
 
@@ -136,6 +138,7 @@ class OverviewService(private val mongo: MongoModule) {
                 catalog = catalogDto,
                 services = servicesDto,
                 suppliers = suppliersDto,
+                employees = employeesDto,
                 payments = paymentsDto,
                 assistant = assistantDto,
                 setup = setup,
@@ -264,6 +267,19 @@ class OverviewService(private val mongo: MongoModule) {
             openCents = open.sumOf { it.get("totalCents").asLong() },
             invoicedThisMonthCount = invoiced.size,
             invoicedThisMonthCents = invoiced.sumOf { it.get("totalCents").asLong() },
+        )
+    }
+
+    private suspend fun employees(tenantId: ObjectId, window: OverviewMath.Window): OverviewSuppliersDto {
+        val tenantFilter = Filters.eq("tenantId", tenantId)
+        return OverviewSuppliersDto(
+            total = coll("crm.employees").countDocuments(tenantFilter),
+            newThisMonth = coll("crm.employees").countDocuments(
+                Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
+            ),
+            newLastMonth = coll("crm.employees").countDocuments(
+                Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.lastMonthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.monthStart.toEpochMilliseconds()))),
+            ),
         )
     }
 
@@ -441,12 +457,14 @@ class OverviewService(private val mongo: MongoModule) {
                 Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("status", listOf("PENDING", "OVERDUE"))),
             ).limit(80).toList()
             val names = supplierNames(tenantId, open.mapNotNull { it.getObjectIdOrNull("supplierId") })
+            val staff = employeeNames(tenantId, open.mapNotNull { it.getObjectIdOrNull("employeeId") })
             open.sortedBy { it.localDate("dueDate") ?: window.today }.forEach { doc ->
                 val due = doc.localDate("dueDate")
                 val status = doc.getString("status") ?: "PENDING"
                 val cents = doc.get("totalCents").asLong()
                 val number = doc.getString("number") ?: ""
-                val name = doc.getObjectIdOrNull("supplierId")?.let { names[it] }.orEmpty()
+                val name = doc.getObjectIdOrNull("employeeId")?.let { staff[it] }
+                    ?: doc.getObjectIdOrNull("supplierId")?.let { names[it] }.orEmpty()
                 val detail = listOf(number, name).filter { it.isNotBlank() }.joinToString(" · ")
                 if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
                     items += OverviewAttentionItemDto(
@@ -624,6 +642,13 @@ class OverviewService(private val mongo: MongoModule) {
     private suspend fun clientNames(tenantId: ObjectId, ids: Collection<ObjectId>): Map<ObjectId, String> {
         if (ids.isEmpty()) return emptyMap()
         return coll("crm.clients").find(Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("_id", ids.toList())))
+            .toList()
+            .associate { it.getObjectId("_id") to (it.getString("name") ?: "") }
+    }
+
+    private suspend fun employeeNames(tenantId: ObjectId, ids: Collection<ObjectId>): Map<ObjectId, String> {
+        if (ids.isEmpty()) return emptyMap()
+        return coll("crm.employees").find(Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("_id", ids.toList())))
             .toList()
             .associate { it.getObjectId("_id") to (it.getString("name") ?: "") }
     }

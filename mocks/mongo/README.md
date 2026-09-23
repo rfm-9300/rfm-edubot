@@ -26,6 +26,7 @@ Seeded collections:
 - `crm.quotes`
 - `crm.invoices`
 - `crm.suppliers`
+- `crm.employees`
 - `crm.payments`
 - `crm.sequences`
 - `crm.standard_items`

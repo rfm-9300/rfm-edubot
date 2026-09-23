@@ -69,7 +69,7 @@ graph TD
         UR[UserRepository]
         CR[ConversationRepository]
         MR[MessageRepository]
-        CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers payments]
+        CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
         DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
     end
@@ -127,7 +127,7 @@ catalog lives in `DashboardModules`:
 - Always enabled and not admin-disableable: `overview` (the dashboard landing page, and the
   fallback view when nothing else is enabled).
 - Admin-selectable: `conversations`, `contacts`, `settings`, `persona`, `clients`, `services`,
-  `quotes`, `invoices`, `suppliers`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
+  `quotes`, `invoices`, `suppliers`, `employees`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
   Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
   Enabling `payments` also enables `suppliers` so outgoing bills always have a vendor directory.
 
@@ -146,18 +146,22 @@ effective module list and returns `403 Forbidden` when its module is disabled.
 ### Services
 
 Optional `services` module (also on whenever `clients` is on): client-attached work in
-`crm.client_services`. Managers record priced rows on a client and group open rows into one
-invoice via `POST /app/api/crm/services/invoice`. The Services table filters by client
+`crm.client_services`. Managers record priced rows on a client, cancel or delete rows that are not yet invoiced, and group open rows into one
+invoice via `POST /app/api/crm/services/invoice`. Invoiced rows stay attached to that invoice. Delete is `DELETE /app/api/crm/services/{id}` (409 when the row is invoiced). Cancel is `PATCH /app/api/crm/services/{id}` with `status: CANCELLED`. The Services table filters by client
 (client-side; `GET /app/api/crm/services?clientId=` is also available). Booking service types
 stay under Bookings.
 
 ### Suppliers and payments
 
 Optional `suppliers` directory (`crm.suppliers`, numbers `FOR-nnn`) and optional `payments`
-module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached to a supplier:
+module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached to a supplier or an employee:
 line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of client invoices, without
 PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
 `/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
+
+### Employees
+
+Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role). It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
 
 ### Bookings
 
@@ -189,8 +193,9 @@ reconnect before comments work. App Review for that permission is a separate sub
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
 | `crm.client_services` | Client-attached work; open rows can be billed together | `tenantId+clientId+status` |
 | `crm.suppliers` | Vendor directory the tenant pays | unique `(tenantId, phone)` and `(tenantId, number)` |
-| `crm.payments` | Outgoing bills attached to a supplier | unique `(tenantId, number)`; `tenantId+supplierId`; `status+dueDate` |
-| `crm.sequences` | Atomic quote/invoice/supplier/payment numbering counters | unique on `name` |
+| `crm.employees` | Team directory (colaboradores) for a later payments payee | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
+| `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering counters | unique on `name` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
 | `bookings.services` | Bookable services (name, duration, active) | `tenantId`, `active` |

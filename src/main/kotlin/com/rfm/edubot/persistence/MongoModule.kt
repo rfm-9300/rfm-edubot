@@ -126,8 +126,14 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmSuppliers.createIndex(Document("tenantId", 1).append("name", 1))
             crmSuppliers.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 
+            val crmEmployees = db.getCollection<Document>("crm.employees")
+            crmEmployees.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
+            crmEmployees.createIndex(Document("tenantId", 1).append("name", 1))
+            crmEmployees.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
+            crmPayments.createIndex(Document("tenantId", 1).append("employeeId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("status", 1).append("dueDate", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 

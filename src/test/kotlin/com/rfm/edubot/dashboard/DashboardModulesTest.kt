@@ -86,6 +86,15 @@ class DashboardModulesTest {
     }
 
     @Test
+    fun `employees is an optional tenant module`() {
+        assertEquals(true, DashboardModules.EMPLOYEES in DashboardModules.optional)
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.EMPLOYEES,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.EMPLOYEES))),
+        )
+    }
+
+    @Test
     fun `payments is an optional tenant module that also enables suppliers`() {
         assertEquals(true, DashboardModules.PAYMENTS in DashboardModules.optional)
         assertEquals(true, DashboardModules.SUPPLIERS in DashboardModules.optional)

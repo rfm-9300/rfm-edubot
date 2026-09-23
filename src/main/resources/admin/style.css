@@ -286,6 +286,7 @@ html[data-theme="dark"] .sidebar { background: var(--bg-deep); }
                                                           .nav__item[data-tab="invoices"] .nav__dot::after { content: "💶"; }
 .nav__item[data-tab="services"]      { --tab: #fb923c; } .nav__item[data-tab="services"]  .nav__dot::after { content: "🛠️"; }
 .nav__item[data-tab="suppliers"]     { --tab: #818cf8; } .nav__item[data-tab="suppliers"] .nav__dot::after { content: "🏭"; }
+.nav__item[data-tab="employees"]     { --tab: #06b6d4; } .nav__item[data-tab="employees"] .nav__dot::after { content: "👷"; }
 .nav__item[data-tab="payments"]      { --tab: #f97316; } .nav__item[data-tab="payments"]  .nav__dot::after { content: "💸"; }
 .nav__item[data-tab="bookings"]      { --tab: #34d399; } .nav__item[data-tab="bookings"]  .nav__dot::after { content: "📅"; }
 .nav__item[data-tab="items"],
@@ -1067,6 +1068,7 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .snapshot[data-kind="customers"] { --snap: #ff7a8a; }
 .snapshot[data-kind="services"] { --snap: #fb923c; }
 .snapshot[data-kind="suppliers"] { --snap: #818cf8; }
+.snapshot[data-kind="employees"] { --snap: #06b6d4; }
 .snapshot[data-kind="payments"] { --snap: #f97316; }
 .snapshot[data-kind="inbox"] { --snap: #38bdf8; }
 .snapshot[data-kind="contacts"] { --snap: #2dd4a8; }

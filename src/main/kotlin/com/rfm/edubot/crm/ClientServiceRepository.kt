@@ -15,6 +15,8 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 
+enum class ClientServiceDelete { Removed, NotFound, Invoiced }
+
 class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.client_services")
 
@@ -103,6 +105,13 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
         return doc?.toClientService()
+    }
+
+    suspend fun delete(id: ObjectId): ClientServiceDelete {
+        val existing = findById(id) ?: return ClientServiceDelete.NotFound
+        if (existing.status == ClientServiceStatus.INVOICED) return ClientServiceDelete.Invoiced
+        val removed = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
+        return if (removed) ClientServiceDelete.Removed else ClientServiceDelete.NotFound
     }
 
     suspend fun markInvoiced(ids: List<ObjectId>, invoiceId: ObjectId): Int {

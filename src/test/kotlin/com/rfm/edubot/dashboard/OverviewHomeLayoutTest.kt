@@ -27,6 +27,17 @@ class OverviewHomeLayoutTest {
     }
 
     @Test
+    fun `employees snapshot follows that module`() {
+        val options = OverviewHomeLayout.available(
+            setOf(DashboardModules.OVERVIEW, DashboardModules.EMPLOYEES),
+        )
+        assertEquals(
+            listOf("highlights", "pulse", "attention", "setup", "employees"),
+            options.map { it.id },
+        )
+    }
+
+    @Test
     fun `suppliers and payments snapshots follow those modules`() {
         val options = OverviewHomeLayout.available(
             setOf(DashboardModules.OVERVIEW, DashboardModules.SUPPLIERS, DashboardModules.PAYMENTS),

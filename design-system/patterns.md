@@ -77,14 +77,18 @@ Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-
 1. `.view__hero` with 3–4 processed highlights as `.stat--lg` spotlight tiles (received this month, outstanding, open quotes, waiting chats — only for modules the tenant has on). A highlight's hint gets `.delta--up` / `.delta--down` from its `deltaPct` sign, not plain muted text.
 2. `.pulse` health strip (`pulse--ok` / `--watch` / `--urgent`) with a `.pulse__icon` and a one-line summary
 3. `.queue` of items that need a person (overdue invoices, overdue payments, waiting chats, pending bookings, unreplied Instagram, expiring quotes), each row led by a `.queue__icon`. The "Needs you" heading carries a `.tag` count.
-4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, services, suppliers, payments, inbox, calendar, Instagram, catalog, assistant). Each card gets a module `data-kind` (drives its `--snap` accent + `.snapshot__icon`), a single large `.snapshot__figure` headline number, an optional `.meter` when the number is a ratio, and secondary numbers in a `.snapshot__metrics` grid — not a vertical label/value list. Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
+4. `.home-grid` of `.snapshot` panels — one per enabled operational module (money, pipeline, clients, services, suppliers, employees, payments, inbox, calendar, Instagram, catalog, assistant). Each card gets a module `data-kind` (drives its `--snap` accent + `.snapshot__icon`), a single large `.snapshot__figure` headline number, an optional `.meter` when the number is a ratio, and secondary numbers in a `.snapshot__metrics` grid — not a vertical label/value list. Tenants pick which of these appear under Settings → Home (`GET`/`PUT /app/api/settings/overview`). Hidden cards stay off until turned back on; new modules still show by default.
 5. `.setup-list` only when setup is actually unfinished **and** relevant (CRM-only tenants are not asked to connect WhatsApp)
 
 Home has a **Choose cards** control in `.home-title-row` next to the page title (not in the highlight stats). It opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
 
 ## Services (client work)
 
-`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a compact `.sel` client filter, status chips, and an Invoice selected action. Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
+`/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a compact `.sel` client filter, status chips, and an Invoice selected action. **List / By week / By month** chips switch the same panel to a wrap-up grouped by the performed date (Monday week, calendar month). Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
+
+## Invoices
+
+`/app` Invoices uses the same period chips. **By week** and **By month** group issued invoices (`createdAt`) into paid, pending, overdue, and total. Cancelled rows stay out of the money columns. The list view is unchanged.
 
 ## Suppliers (vendor directory)
 
@@ -92,7 +96,7 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Payments (outgoing bills)
 
-`/app` Payments is invoices, inverted: bills attached to a **supplier**. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` supplier filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment without any suppliers opens the supplier form first.
+`/app` Payments is invoices, inverted: bills attached to a **supplier** or, when that module is on, an **employee**. The form uses `.chip` to pick the payee kind, then a `.sel`. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` payee filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment with neither suppliers nor employees opens the supplier form first.
 
 ## Conversation / assistant
 

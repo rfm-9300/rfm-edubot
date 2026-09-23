@@ -4,8 +4,9 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
-  clientServices: [], filterServiceStatus: '', filterServiceClient: '',
-  suppliers: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
+  clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '',
+  filterInvoicePeriod: '',
+  suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -39,6 +40,55 @@ const fmtDay = iso => {
   return new Date(`${day}T00:00:00`).toLocaleDateString(uiLocale(), { dateStyle: 'short', timeZone: tenantTz() });
 };
 const fmtTime = iso => iso ? new Date(iso).toLocaleTimeString(uiLocale(), { hour: '2-digit', minute: '2-digit', timeZone: tenantTz() }) : '';
+function localDay(iso) {
+  if (!iso) return '';
+  const raw = String(iso);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw;
+  const dt = new Date(raw);
+  if (Number.isNaN(dt.getTime())) return raw.slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', { timeZone: tenantTz(), year: 'numeric', month: '2-digit', day: '2-digit' }).format(dt);
+}
+function periodKey(iso, grain) {
+  const day = localDay(iso);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return '';
+  if (grain === 'month') return day.slice(0, 7);
+  const [y, m, d] = day.split('-').map(Number);
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  const dow = utc.getUTCDay() || 7;
+  utc.setUTCDate(utc.getUTCDate() - dow + 1);
+  const pad = n => String(n).padStart(2, '0');
+  return `${utc.getUTCFullYear()}-${pad(utc.getUTCMonth() + 1)}-${pad(utc.getUTCDate())}`;
+}
+function periodLabel(key, grain) {
+  if (!key) return '—';
+  if (grain === 'month') {
+    const [y, m] = key.split('-').map(Number);
+    return new Date(Date.UTC(y, m - 1, 1)).toLocaleDateString(uiLocale(), { month: 'long', year: 'numeric', timeZone: 'UTC' });
+  }
+  const [y, m, d] = key.split('-').map(Number);
+  const start = new Date(Date.UTC(y, m - 1, d));
+  const end = new Date(start);
+  end.setUTCDate(end.getUTCDate() + 6);
+  const startLabel = start.toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', timeZone: 'UTC' });
+  const endLabel = end.toLocaleDateString(uiLocale(), { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+  return `${startLabel} – ${endLabel}`;
+}
+function groupByPeriod(items, grain, dateOf) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = periodKey(dateOf(item), grain);
+    if (!key) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
+}
+function periodChips(active, attr, labels) {
+  return ['', 'week', 'month'].map(period => `<button class="chip ${active === period ? 'is-on' : ''}" type="button" ${attr}="${period}">${escapeHTML(labels[period])}</button>`).join('');
+}
+function sumEur(items) {
+  return items.reduce((sum, item) => sum + Number(item.totalEur || 0), 0);
+}
 const quoteStatusLabel = code => (CRM.quoteStatus && CRM.quoteStatus[code]) || code;
 const invoiceStatusLabel = code => (CRM.invoiceStatus && CRM.invoiceStatus[code]) || code;
 const paymentStatusLabel = code => (CRM.paymentStatus && CRM.paymentStatus[code]) || invoiceStatusLabel(code);
@@ -186,6 +236,7 @@ function renderNav() {
     catalog: state.catalog.length || o.catalog?.items || 0,
     services: (state.clientServices.filter(s => s.status === 'OPEN').length) || o.services?.openCount || 0,
     suppliers: state.suppliers.length || o.suppliers?.total || 0,
+    employees: state.employees.length || o.employees?.total || 0,
     payments: overduePay || state.payments.length || o.payments?.paymentCount || 0,
     bookings: pendingBookings || state.bookings.length || o.calendar?.thisWeek || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
@@ -194,7 +245,7 @@ function renderNav() {
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'suppliers', 'payments', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
@@ -221,6 +272,8 @@ async function setActive(tab) {
   state.filterInvoiceStatus = '';
   state.filterServiceStatus = '';
   state.filterServiceClient = '';
+  state.filterServicePeriod = '';
+  state.filterInvoicePeriod = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
   try {
@@ -242,13 +295,16 @@ async function loadModule(tab) {
   }
   if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
   if (tab === 'suppliers') state.suppliers = await api('/app/api/crm/suppliers');
+  if (tab === 'employees') state.employees = await api('/app/api/crm/employees');
   if (tab === 'payments') {
-    const [payments, suppliers] = await Promise.all([
+    const [payments, suppliers, employees] = await Promise.all([
       api('/app/api/crm/payments'),
       api('/app/api/crm/suppliers').catch(() => state.suppliers),
+      hasModule('employees') ? api('/app/api/crm/employees').catch(() => state.employees) : Promise.resolve(state.employees),
     ]);
     state.payments = payments;
     state.suppliers = suppliers;
+    if (hasModule('employees')) state.employees = employees;
     state.fetched.payments = true;
     if (hasModule('catalog')) state.catalog = await api('/app/api/crm/standard-items').catch(() => state.catalog);
     if (!state.filterPaymentStatus && state.payments.some(p => p.status === 'OVERDUE')) state.filterPaymentStatus = 'OVERDUE';
@@ -308,10 +364,10 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'payments', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'].includes(state.active);
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
-    invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
+    invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
   };
   $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -320,6 +376,7 @@ function render() {
   if (state.active === 'conversations') return renderConversations(root);
   if (state.active === 'clients') return renderClients(root);
   if (state.active === 'suppliers') return renderSuppliers(root);
+  if (state.active === 'employees') return renderEmployees(root);
   if (state.active === 'services') return renderServices(root);
   if (state.active === 'quotes') return renderQuotes(root);
   if (state.active === 'invoices') return renderInvoices(root);
@@ -475,13 +532,13 @@ function homeCardCopy(id) {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     cash: STR.snapCash, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
     calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
-    suppliers: STR.snapSuppliers, payments: STR.snapPayments, assistant: STR.snapAssistant,
+    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, payments: STR.snapPayments, assistant: STR.snapAssistant,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     cash: STR.homeCard_cashDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
-    suppliers: STR.homeCard_suppliersDesc, payments: STR.homeCard_paymentsDesc, assistant: STR.homeCard_assistantDesc,
+    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, payments: STR.homeCard_paymentsDesc, assistant: STR.homeCard_assistantDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -579,6 +636,13 @@ function renderOverview(root) {
       { label: STR.suppliersNewLastMonth, value: o.suppliers.newLastMonth },
     ] }));
   }
+  if (o.employees && !hidden.has('employees')) {
+    snapshots.push(snapshotPanel({ tab: 'employees', kind: 'employees', icon: '👷', title: STR.snapEmployees, figure: o.employees.total, rows: [
+      { label: STR.snapEmployees, value: o.employees.total },
+      { label: STR.employeesNewMonth, value: o.employees.newThisMonth },
+      { label: STR.employeesNewLastMonth, value: o.employees.newLastMonth },
+    ] }));
+  }
   if (o.payments && !hidden.has('payments')) {
     const paid = o.payments.paidThisMonthCents || 0, toPay = o.payments.outstandingCents || 0;
     const payMeter = (paid || toPay) ? { pct: (paid / (paid + toPay)) * 100 } : null;
@@ -641,7 +705,7 @@ function renderOverview(root) {
       return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><span class="queue__icon queue__icon--info" aria-hidden="true">${setupIcon(s.kind)}</span><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
-  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'suppliers', 'payments', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
+  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'suppliers', 'employees', 'payments', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
   const modulesHtml = snapshots.length
     ? `<div class="home-grid">${snapshots.join('')}</div>`
     : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);
@@ -781,6 +845,28 @@ function renderSuppliers(root) {
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openSupplierForm(state.suppliers.find(s => s.id === r.dataset.supplier))));
 }
 
+function renderEmployees(root) {
+  const t = CRM.employees;
+  const q = state.search.toLowerCase();
+  const rows = (state.employees || [])
+    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''}`.toLowerCase().includes(q))
+    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
+    .join('');
+  const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
+  root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
+    { label: t.total, value: (state.employees || []).length },
+    { label: t.new30, value: new30 },
+  ])) + crmPanel({
+    title: t.directory,
+    tag: (state.employees || []).length,
+    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thRole)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    rows,
+    empty: t.emptyTitle,
+    emptyDesc: t.emptyDesc,
+  });
+  $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openEmployeeForm(state.employees.find(e => e.id === r.dataset.employee))));
+}
+
 function renderServices(root) {
   const t = CRM.services;
   const q = state.search.toLowerCase();
@@ -813,23 +899,46 @@ function renderServices(root) {
   const clientFilter = clientOptions.length
     ? `<select class="sel" data-filter-svc-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
-  const tools = clientFilter
+  const period = state.filterServicePeriod || '';
+  const listed = scoped
+    .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
+    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q));
+  const serviceGroups = period ? groupByPeriod(listed, period, s => s.performedAt || s.createdAt) : [];
+  const summaryRows = period
+    ? serviceGroups.map(([key, items]) => {
+      const billable = items.filter(s => s.status !== 'CANCELLED');
+      const openRows = billable.filter(s => s.status === 'OPEN');
+      const invoicedRows = billable.filter(s => s.status === 'INVOICED');
+      return `<tr>
+        <td class="name">${escapeHTML(periodLabel(key, period))}</td>
+        <td class="num">${items.length}</td>
+        <td class="num">${openRows.length} · ${fmtEUR(sumEur(openRows))}</td>
+        <td class="num">${invoicedRows.length} · ${fmtEUR(sumEur(invoicedRows))}</td>
+        <td class="num">${fmtEUR(sumEur(billable))}</td>
+      </tr>`;
+    }).join('')
+    : '';
+  const tools = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
+    + clientFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
-    + (hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
+    + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
   const filtered = Boolean(clientId || state.filterServiceStatus || q);
+  const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
+  const listHead = `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`;
   root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
     { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
     { label: t.invoiced, value: invoiced.length },
   ])) + crmPanel({
-    title: t.work,
-    tag: scoped.filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus).length,
+    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.work,
+    tag: period ? serviceGroups.length : listed.length,
     tools,
-    head: `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`,
-    rows,
-    empty: filtered ? t.emptyFiltered : t.emptyTitle,
-    emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
+    head: period ? summaryHead : listHead,
+    rows: period ? summaryRows : rows,
+    empty: period ? t.summaryEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
+    emptyDesc: period ? t.summaryEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
+  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; render(); }));
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
@@ -880,8 +989,14 @@ async function openServiceForm(service, presetClientId) {
     </div>
     <div class="form__row form__row--full"><label class="lbl" for="svc-notes">${escapeHTML(t.notes)}</label>
       <textarea class="txt" id="svc-notes" ${editing?.status === 'INVOICED' ? 'readonly' : ''}>${escapeHTML(editing?.notes || '')}</textarea></div>
-    ${editing?.status === 'INVOICED' ? '' : `<button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`}`;
+    ${editing?.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : `<div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>
+      ${editing?.status === 'OPEN' ? `<button class="btn btn--ghost" type="button" id="svc-cancel">${escapeHTML(t.cancel)}</button>` : ''}
+      ${editing ? `<button class="btn btn--danger" type="button" id="svc-delete">${escapeHTML(t.delete)}</button>` : ''}
+    </div>`}`;
   if (clientId && $('#f-client', form)) $('#f-client', form).value = clientId;
+  $('#svc-cancel', form)?.addEventListener('click', () => cancelClientService(editing));
+  $('#svc-delete', form)?.addEventListener('click', () => deleteClientService(editing));
   const source = $('#svc-source', form);
   source?.addEventListener('change', () => {
     const opt = source.selectedOptions[0];
@@ -920,6 +1035,52 @@ async function openServiceForm(service, presetClientId) {
     } catch { if (btn) btn.disabled = false; toast(t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
+}
+
+async function cancelClientService(service) {
+  const t = CRM.services;
+  const ok = await confirmDialog({
+    title: t.cancelConfirmTitle,
+    body: t.cancelConfirmBody({ name: service.name }),
+    okLabel: t.cancelOk,
+  });
+  if (!ok) return;
+  try {
+    const updated = await api(`/app/api/crm/services/${encodeURIComponent(service.id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({
+        name: service.name,
+        notes: service.notes,
+        quantity: service.quantity,
+        unit: service.unit || '',
+        unitPriceEur: service.unitPriceEur,
+        performedAt: (service.performedAt || '').slice(0, 10) || null,
+        status: 'CANCELLED',
+      }),
+    });
+    if (updated.status !== 'CANCELLED') throw new Error('not cancelled');
+    closeDrawer();
+    await loadModule('services');
+    render();
+    toast(t.cancelled);
+  } catch { toast(t.cancelFailed); }
+}
+
+async function deleteClientService(service) {
+  const t = CRM.services;
+  const ok = await confirmDialog({
+    title: t.deleteConfirmTitle,
+    body: t.deleteConfirmBody({ name: service.name }),
+    okLabel: t.deleteOk,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/crm/services/${encodeURIComponent(service.id)}`, { method: 'DELETE' });
+    closeDrawer();
+    await loadModule('services');
+    render();
+    toast(t.deleted);
+  } catch { toast(t.deleteFailed); }
 }
 
 async function invoiceSelectedServices() {
@@ -1055,6 +1216,49 @@ async function openSupplierForm(supplier) {
   openDrawer(editing ? t.editTitle : t.formTitle, form);
 }
 
+async function openEmployeeForm(employee) {
+  const t = CRM.employees;
+  const editing = employee && employee.id ? employee : null;
+  let relatedPayments = [];
+  if (editing && hasModule('payments')) {
+    relatedPayments = await api(`/app/api/crm/payments?employeeId=${encodeURIComponent(editing.id)}`).catch(() => (state.payments || []).filter(p => p.employeeId === editing.id));
+  }
+  const related = [
+    relatedPayments.length ? `<p class="hint">${escapeHTML(t.related)} · ${relatedPayments.map(p => escapeHTML(p.number)).join(', ')}</p>` : '',
+    editing && hasModule('payments') ? `<button class="btn btn--sm" type="button" id="ef-add-payment">${escapeHTML(t.addPayment)}</button>` : '',
+  ].join('');
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row"><label class="lbl" for="ef-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
+      <input class="inp" id="ef-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="ef-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
+      <input class="inp inp--mono" id="ef-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="ef-role">${escapeHTML(t.formRole)}</label>
+      <input class="inp" id="ef-role" placeholder="${escapeHTML(t.phRole)}" value="${escapeHTML(editing?.role || '')}" /></div>
+    ${related}
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
+  $('#ef-add-payment', form)?.addEventListener('click', () => openPaymentForm(null, editing.id));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const name = $('#ef-name', form).value.trim();
+    const phone = $('#ef-phone', form).value.trim();
+    const role = $('#ef-role', form).value.trim() || undefined;
+    if (!name || !phone) return toast(t.validate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      if (editing) await api(`/app/api/crm/employees/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, role }) });
+      else await api('/app/api/crm/employees', { method: 'POST', body: JSON.stringify({ name, phone, role }) });
+      closeDrawer();
+      await loadModule('employees');
+      render();
+      toast(editing ? t.updated : t.created);
+    } catch { btn.disabled = false; toast(t.saveFailed); }
+  });
+  openDrawer(editing ? t.editTitle : t.formTitle, form);
+}
+
 function openCatalogForm(itemId) {
   const editing = itemId ? state.catalog.find(c => c.id === itemId) : null;
   const t = CRM.items;
@@ -1131,9 +1335,24 @@ function clientSelect(clients) {
 
 function supplierSelect(suppliers, selectedId = '') {
   const t = CRM.payments;
-  return `<div class="form__row"><label class="lbl" for="f-supplier">${escapeHTML(t.thSupplier)} <span class="req">●</span></label>
-    <select class="sel" id="f-supplier" required><option value="">${escapeHTML(t.chooseSupplierEmpty)}</option>
+  return `<div class="form__row" id="payee-supplier"><label class="lbl" for="f-supplier">${escapeHTML(t.thSupplier)} <span class="req">●</span></label>
+    <select class="sel" id="f-supplier"><option value="">${escapeHTML(t.chooseSupplierEmpty)}</option>
     ${suppliers.map(s => `<option value="${escapeHTML(s.id)}" ${s.id === selectedId ? 'selected' : ''}>${escapeHTML(s.name)}</option>`).join('')}</select></div>`;
+}
+
+function employeeSelect(employees, selectedId = '') {
+  const t = CRM.payments;
+  return `<div class="form__row" id="payee-employee"><label class="lbl" for="f-employee">${escapeHTML(t.thEmployee)} <span class="req">●</span></label>
+    <select class="sel" id="f-employee"><option value="">${escapeHTML(t.chooseEmployeeEmpty)}</option>
+    ${employees.map(e => `<option value="${escapeHTML(e.id)}" ${e.id === selectedId ? 'selected' : ''}>${escapeHTML(e.name)}</option>`).join('')}</select></div>`;
+}
+
+function payeeName(payment) {
+  return payment.employeeName || payment.supplierName || '';
+}
+
+function payeeId(payment) {
+  return payment.employeeId || payment.supplierId || '';
 }
 
 function lineItemsField(catalog) {
@@ -1311,26 +1530,39 @@ async function openInvoiceForm() {
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
-async function openPaymentForm(presetSupplierId) {
+async function openPaymentForm(presetSupplierId, presetEmployeeId) {
   const t = CRM.payments;
-  let suppliers, catalog;
+  const employeesOn = hasModule('employees');
+  let suppliers, employees, catalog;
   try {
     suppliers = await api('/app/api/crm/suppliers');
+    employees = employeesOn ? await api('/app/api/crm/employees').catch(() => state.employees || []) : [];
     catalog = hasModule('catalog') ? await api('/app/api/crm/standard-items').catch(() => state.catalog || []) : (state.catalog || []);
   } catch { return toast(t.saveFailed); }
   state.suppliers = suppliers;
-  if (!suppliers.length) {
-    toast(t.needSupplier);
+  if (employeesOn) state.employees = employees;
+  if (!suppliers.length && !employees.length) {
+    toast(employeesOn ? t.needPayee : t.needSupplier);
     return openSupplierForm();
   }
-  const selectedId = presetSupplierId || state.filterPaymentSupplier || '';
+  let payee = presetEmployeeId ? 'employee' : 'supplier';
+  if (!presetSupplierId && !presetEmployeeId && !suppliers.length && employees.length) payee = 'employee';
+  const selectedSupplier = presetSupplierId || (!presetEmployeeId ? state.filterPaymentSupplier || '' : '');
   const li = lineItemsField(catalog);
   const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const kindSwitch = employeesOn
+    ? `<div class="form__row form__row--full"><span class="lbl">${escapeHTML(t.payee)}</span><div class="actions">
+        <button class="chip ${payee === 'supplier' ? 'is-on' : ''}" type="button" data-payee="supplier">${escapeHTML(t.paySupplier)}</button>
+        <button class="chip ${payee === 'employee' ? 'is-on' : ''}" type="button" data-payee="employee">${escapeHTML(t.payEmployee)}</button>
+      </div></div>`
+    : '';
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${supplierSelect(suppliers, selectedId)}
+      ${kindSwitch}
+      ${supplierSelect(suppliers, selectedSupplier)}
+      ${employeesOn ? employeeSelect(employees, presetEmployeeId || '') : ''}
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
     </div>
@@ -1338,19 +1570,42 @@ async function openPaymentForm(presetSupplierId) {
     <div class="form__row form__row--full"><label class="lbl" for="p-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
       <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}"></textarea></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
+  const showPayee = kind => {
+    payee = kind;
+    const supplierRow = $('#payee-supplier', form);
+    const employeeRow = $('#payee-employee', form);
+    if (supplierRow) supplierRow.hidden = kind !== 'supplier';
+    if (employeeRow) employeeRow.hidden = kind !== 'employee';
+    $$('[data-payee]', form).forEach(btn => btn.classList.toggle('is-on', btn.dataset.payee === kind));
+  };
+  showPayee(payee);
+  $$('[data-payee]', form).forEach(btn => btn.addEventListener('click', () => {
+    if (btn.dataset.payee === 'supplier' && !suppliers.length) return toast(t.needSupplier);
+    if (btn.dataset.payee === 'employee' && !employees.length) {
+      toast(t.needEmployee);
+      return openEmployeeForm();
+    }
+    showPayee(btn.dataset.payee);
+  }));
   li.wire(form);
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const supplierId = $('#f-supplier', form).value;
     const dueDate = $('#p-due', form).value;
-    if (!supplierId) return toast(t.chooseSupplier);
+    const supplierId = $('#f-supplier', form)?.value || '';
+    const employeeId = $('#f-employee', form)?.value || '';
+    if (payee === 'employee') {
+      if (!employeeId) return toast(t.chooseEmployee);
+    } else if (!supplierId) return toast(t.chooseSupplier);
     if (!dueDate) return toast(t.enterDueDate);
     const items = li.collect(form);
     if (!items.length) return toast(t.addLine);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
+    const body = payee === 'employee'
+      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null }
+      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null };
     try {
-      await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify({ supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null }) });
+      await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
       closeDrawer();
       await loadModule('payments');
       render();
@@ -1486,22 +1741,45 @@ function renderInvoices(root) {
   const paid = state.invoices.filter(i => i.status === 'PAID').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
   const pending = state.invoices.filter(i => i.status === 'PENDING').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
   const overdue = state.invoices.filter(i => i.status === 'OVERDUE').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
-  const tools = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
+  const period = state.filterInvoicePeriod || '';
+  const listed = state.invoices
+    .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
+    .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)}`.toLowerCase().includes(q));
+  const invoiceGroups = period ? groupByPeriod(listed, period, inv => inv.createdAt || inv.dueDate) : [];
+  const summaryRows = invoiceGroups.map(([key, items]) => {
+    const live = items.filter(inv => inv.status !== 'CANCELLED');
+    const paidRows = live.filter(inv => inv.status === 'PAID');
+    const pendingRows = live.filter(inv => inv.status === 'PENDING');
+    const overdueRows = live.filter(inv => inv.status === 'OVERDUE');
+    return `<tr>
+      <td class="name">${escapeHTML(periodLabel(key, period))}</td>
+      <td class="num">${live.length}</td>
+      <td class="num">${fmtEUR(sumEur(paidRows))}</td>
+      <td class="num">${fmtEUR(sumEur(pendingRows))}</td>
+      <td class="num">${fmtEUR(sumEur(overdueRows))}</td>
+      <td class="num">${fmtEUR(sumEur(live))}</td>
+    </tr>`;
+  }).join('');
+  const tools = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth })
+    + `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
+  const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
+  const listHead = `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`;
   root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards([
     { label: t.paid, value: fmtEUR(paid) },
     { label: t.pending, value: fmtEUR(pending) },
     { label: t.overdue, value: fmtEUR(overdue) },
   ])) + crmPanel({
-    title: t.documents,
-    tag: state.invoices.filter(i => !state.filterInvoiceStatus || i.status === state.filterInvoiceStatus).length,
+    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.documents,
+    tag: period ? invoiceGroups.length : listed.length,
     tools,
-    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`,
-    rows,
-    empty: t.emptyTitle,
-    emptyDesc: t.emptyDesc,
+    head: period ? summaryHead : listHead,
+    rows: period ? summaryRows : rows,
+    empty: period ? t.summaryEmpty : t.emptyTitle,
+    emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
   });
   wirePdfButtons(root);
+  $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; render(); }));
   $$('[data-filter-inv]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoiceStatus = btn.dataset.filterInv; render(); }));
   $$('[data-mark-paid]', root).forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();
@@ -1519,19 +1797,23 @@ function renderPayments(root) {
   const all = state.payments || [];
   const names = new Map();
   for (const s of state.suppliers || []) names.set(s.id, s.name);
-  for (const p of all) if (!names.has(p.supplierId)) names.set(p.supplierId, p.supplierName || p.supplierId);
+  for (const e of state.employees || []) names.set(e.id, e.name);
+  for (const p of all) {
+    const id = payeeId(p);
+    if (id && !names.has(id)) names.set(id, payeeName(p) || id);
+  }
   if (state.filterPaymentSupplier && !names.has(state.filterPaymentSupplier)) state.filterPaymentSupplier = '';
   const supplierId = state.filterPaymentSupplier || '';
-  const scoped = supplierId ? all.filter(p => p.supplierId === supplierId) : all;
+  const scoped = supplierId ? all.filter(p => payeeId(p) === supplierId) : all;
   const rows = scoped
     .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
-    .filter(p => !q || `${p.number} ${p.supplierName || ''} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
+    .filter(p => !q || `${p.number} ${payeeName(p)} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
     .map(p => {
       const canMarkPaid = p.status === 'PENDING' || p.status === 'OVERDUE';
       const rowClass = p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '';
       return `<tr class="conversation-row ${rowClass}" data-payment="${escapeHTML(p.id)}">
         <td class="id">${escapeHTML(p.number)}</td>
-        <td class="name">${escapeHTML(p.supplierName || '')}</td>
+        <td class="name">${escapeHTML(payeeName(p))}</td>
         <td>${paymentPill(p.status)}</td>
         <td class="mono muted">${fmtDay(p.dueDate)}</td>
         <td class="num">${fmtEUR(p.totalEur)}</td>
@@ -1545,7 +1827,7 @@ function renderPayments(root) {
   const overdue = scoped.filter(p => p.status === 'OVERDUE').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
   const supplierOptions = [...names.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
   const supplierFilter = supplierOptions.length
-    ? `<select class="sel" data-filter-pay-supplier aria-label="${escapeHTML(t.thSupplier)}"><option value="">${escapeHTML(t.filterSupplierAll)}</option>${supplierOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === supplierId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    ? `<select class="sel" data-filter-pay-supplier aria-label="${escapeHTML(t.thPayee)}"><option value="">${escapeHTML(t.filterPayeeAll)}</option>${supplierOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === supplierId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
   const tools = supplierFilter
     + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
@@ -1559,7 +1841,7 @@ function renderPayments(root) {
     title: t.ledger,
     tag: scoped.filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus).length,
     tools,
-    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thSupplier)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th></th></tr>`,
+    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thPayee)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th></th></tr>`,
     rows,
     empty: filtered ? t.emptyFiltered : t.emptyTitle,
     emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
@@ -1647,7 +1929,7 @@ function openPaymentDetail(id) {
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(pay.supplierName || '')} · ${paymentPill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
+    <p class="hint">${escapeHTML(payeeName(pay))} · ${paymentPill(pay.status)} · ${fmtEUR(pay.totalEur)}</p>
     <p class="hint">${escapeHTML(t.thDueDate)} · ${escapeHTML(fmtDay(pay.dueDate))}</p>
     ${items ? `<ul class="assistant__action-details">${items}</ul>` : ''}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
@@ -2775,6 +3057,7 @@ async function init() {
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();
     if (state.active === 'suppliers') return openSupplierForm();
+    if (state.active === 'employees') return openEmployeeForm();
     if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
     toast(STR.quickCreateSoon);

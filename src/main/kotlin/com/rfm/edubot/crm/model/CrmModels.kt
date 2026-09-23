@@ -44,12 +44,25 @@ data class Supplier(
     val updatedAt: Instant,
 )
 
-/** Money the tenant owes or has paid a supplier. */
+/** Person on the tenant's team. Payments still attach only to a supplier; this directory is the payee list a later payments change can use. */
+data class Employee(
+    @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val number: String,
+    val name: String,
+    val phone: String,
+    val role: String? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+)
+
+/** Outgoing bill. Exactly one of [supplierId] or [employeeId] is set. */
 data class Payment(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
     val number: String,
-    val supplierId: ObjectId,
+    val supplierId: ObjectId? = null,
+    val employeeId: ObjectId? = null,
     val items: List<LineItem>,
     val notes: String? = null,
     val status: PaymentStatus = PaymentStatus.PENDING,

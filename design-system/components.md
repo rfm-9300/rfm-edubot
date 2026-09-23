@@ -135,7 +135,7 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 </div>
 ```
 
-- `data-kind` selects the card's accent color (`--snap`), reusing the same personality-tint idea as nav tabs / `.stat` — see the `[data-kind]` rules in `style.css` (`cash`, `pipeline`, `customers`, `services`, `suppliers`, `payments`, `inbox`, `contacts`, `calendar`, `social`, `catalog`, `assistant`). Reuse a nav tab's hex when the module has a nav tab; keep unlisted kinds on the `var(--accent)` fallback.
+- `data-kind` selects the card's accent color (`--snap`), reusing the same personality-tint idea as nav tabs / `.stat` — see the `[data-kind]` rules in `style.css` (`cash`, `pipeline`, `customers`, `services`, `suppliers`, `employees`, `payments`, `inbox`, `contacts`, `calendar`, `social`, `catalog`, `assistant`). Reuse a nav tab's hex when the module has a nav tab; keep unlisted kinds on the `var(--accent)` fallback.
 - `.snapshot__icon` is a module emoji, matching its nav dot emoji.
 - `.snapshot__figure` is the card's single headline number (display font, large, tinted `--snap`) — not a small `.tag`.
 - `.meter` / `.meter__fill` is optional: a thin progress bar for a card whose primary number is naturally a share of a whole (cash collected vs. outstanding, quote win rate). Omit it for cards without a meaningful ratio.

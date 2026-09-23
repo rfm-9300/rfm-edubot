@@ -27,6 +27,7 @@ data class OverviewDto(
     val catalog: OverviewCatalogDto? = null,
     val services: OverviewServicesDto? = null,
     val suppliers: OverviewSuppliersDto? = null,
+    val employees: OverviewSuppliersDto? = null,
     val payments: OverviewPaymentsDto? = null,
     val assistant: OverviewAssistantDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),

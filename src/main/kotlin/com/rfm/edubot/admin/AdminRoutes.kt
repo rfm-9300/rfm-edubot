@@ -2,6 +2,7 @@ package com.rfm.edubot.admin
 
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
+import com.rfm.edubot.crm.model.Employee
 import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.Quote
@@ -148,8 +149,16 @@ internal data class CreateSupplierRequest(
 )
 
 @Serializable
+internal data class CreateEmployeeRequest(
+    val name: String,
+    val phone: String,
+    val role: String? = null,
+)
+
+@Serializable
 internal data class CreatePaymentRequest(
-    val supplierId: String,
+    val supplierId: String? = null,
+    val employeeId: String? = null,
     val items: List<CreateLineItemRequest>,
     val dueDate: String,
     val notes: String? = null,
@@ -166,11 +175,23 @@ internal data class SupplierDto(
 )
 
 @Serializable
+internal data class EmployeeDto(
+    val id: String,
+    val number: String,
+    val name: String,
+    val phone: String,
+    val role: String? = null,
+    val createdAt: String,
+)
+
+@Serializable
 internal data class PaymentDto(
     val id: String,
     val number: String,
-    val supplierId: String,
-    val supplierName: String,
+    val supplierId: String? = null,
+    val supplierName: String = "",
+    val employeeId: String? = null,
+    val employeeName: String = "",
     val status: String,
     val dueDate: String,
     val totalEur: Double,
@@ -286,6 +307,15 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
 )
 
+internal fun Employee.dto() = EmployeeDto(
+    id = id.toHexString(),
+    number = number,
+    name = name,
+    phone = phone,
+    role = role,
+    createdAt = createdAt.toString(),
+)
+
 internal fun Supplier.dto() = SupplierDto(
     id = id.toHexString(),
     number = number,
@@ -295,11 +325,13 @@ internal fun Supplier.dto() = SupplierDto(
     createdAt = createdAt.toString(),
 )
 
-internal fun Payment.dto(supplier: Supplier?) = PaymentDto(
+internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null) = PaymentDto(
     id = id.toHexString(),
     number = number,
-    supplierId = supplierId.toHexString(),
+    supplierId = supplierId?.toHexString(),
     supplierName = supplier?.name ?: "",
+    employeeId = employeeId?.toHexString(),
+    employeeName = employee?.name ?: "",
     status = status.name,
     dueDate = dueDate.toString(),
     totalEur = totalCents / 100.0,
