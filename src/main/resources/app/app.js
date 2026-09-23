@@ -6,6 +6,7 @@ let state = {
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
+  filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '',
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
   bookings: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: null,
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
@@ -285,11 +286,14 @@ function renderNav() {
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
   const enabled = new Set(state.me.modules);
+  // Financeiro isn't its own toggleable module — it's a combined week/month lens over
+  // invoices + payments, so it shows whenever either of those does.
+  if (enabled.has('invoices') || enabled.has('payments')) enabled.add('financeiro');
   $('#nav').innerHTML = groups.map(g => {
     const items = g.items.filter(m => enabled.has(m));
     if (!items.length) return '';
@@ -316,6 +320,9 @@ async function setActive(tab) {
   state.filterServicePeriodKey = '';
   state.filterInvoicePeriod = '';
   state.filterInvoicePeriodKey = '';
+  state.filterFinanceiroPeriod = '';
+  state.filterFinanceiroPeriodKey = '';
+  state.filterFinanceiroType = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
   try {
@@ -366,6 +373,16 @@ async function loadModule(tab) {
     state.invoices = await api('/app/api/crm/invoices');
     state.fetched.invoices = true;
     if (!state.filterInvoiceStatus && state.invoices.some(i => i.status === 'OVERDUE')) state.filterInvoiceStatus = 'OVERDUE';
+  }
+  if (tab === 'financeiro') {
+    const [invoices, payments] = await Promise.all([
+      hasModule('invoices') ? api('/app/api/crm/invoices') : Promise.resolve(state.invoices),
+      hasModule('payments') ? api('/app/api/crm/payments') : Promise.resolve(state.payments),
+    ]);
+    state.invoices = invoices;
+    state.payments = payments;
+    if (hasModule('invoices')) state.fetched.invoices = true;
+    if (hasModule('payments')) state.fetched.payments = true;
   }
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
   if (tab === 'persona') state.persona = await api('/app/api/persona');
@@ -422,6 +439,7 @@ function render() {
   if (state.active === 'services') return renderServices(root);
   if (state.active === 'quotes') return renderQuotes(root);
   if (state.active === 'invoices') return renderInvoices(root);
+  if (state.active === 'financeiro') return renderFinanceiro(root);
   if (state.active === 'payments') return renderPayments(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
@@ -520,6 +538,8 @@ function highlightValue(h) {
   return String(h.count ?? 0);
 }
 function attentionTitle(item) {
+  if (item.aggregate && item.kind === 'overdue_invoice' && typeof STR.overdueInvoiceN === 'function') return STR.overdueInvoiceN({ n: item.count });
+  if (item.aggregate && item.kind === 'overdue_payment' && typeof STR.overduePaymentN === 'function') return STR.overduePaymentN({ n: item.count });
   if (item.kind === 'assistant_action' && typeof STR.assistantAction === 'function') return STR.assistantAction({ n: Number(item.detail || 0) });
   const map = {
     waiting_chat: STR.waitingChat,
@@ -573,6 +593,20 @@ function attentionIconTone(kind) {
   if (pill === 'pill--info') return 'queue__icon--info';
   if (pill === 'pill--accent') return 'queue__icon--accent';
   return '';
+}
+// Overdue invoices/payments are per-document and uncapped at the source — with a dozen
+// overdue invoices this list would be a dozen near-identical rows. Collapse each kind into
+// one row (count + total) instead; every other kind is already capped small (3-5) upstream
+// and stays specific because each one is its own distinct thing to act on.
+function aggregateAttention(attention, o) {
+  const rows = [];
+  if ((o.cash?.overdueCount || 0) > 0) {
+    rows.push({ kind: 'overdue_invoice', tab: 'invoices', aggregate: true, count: o.cash.overdueCount, amountCents: o.cash.overdueCents });
+  }
+  if ((o.payments?.overdueCount || 0) > 0) {
+    rows.push({ kind: 'overdue_payment', tab: 'payments', aggregate: true, count: o.payments.overdueCount, amountCents: o.payments.overdueCents });
+  }
+  return [...rows, ...attention.filter(n => n.kind !== 'overdue_invoice' && n.kind !== 'overdue_payment')];
 }
 function setupIcon(kind) {
   const map = { wa: '📱', ig: '📸', widget: '🧩', persona: '🎭' };
@@ -634,7 +668,7 @@ function renderOverview(root) {
   const pulseHtml = hidden.has('pulse')
     ? ''
     : `<div class="pulse pulse--${escapeHTML(health)}"><span class="pulse__icon" aria-hidden="true">${healthIcon(health)}</span><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
-  const attention = hidden.has('attention') ? [] : (o.attention || []);
+  const attention = hidden.has('attention') ? [] : aggregateAttention(o.attention || [], o);
   const needsHtml = hidden.has('attention')
     ? ''
     : (attention.length
@@ -660,7 +694,7 @@ function renderOverview(root) {
     }
     const financeMeter = (gained || spent) ? { pct: (gained / (gained + spent)) * 100 } : null;
     snapshots.push(snapshotPanel({
-      tab: hasModule('invoices') ? 'invoices' : 'payments', kind: 'financeiro', icon: '💶', title: STR.snapFinance,
+      tab: 'financeiro', kind: 'financeiro', icon: '💶', title: STR.snapFinance,
       figure: centsEUR(gained - spent), rows: financeRows, meter: financeMeter,
     }));
   }
@@ -1889,6 +1923,88 @@ function renderInvoices(root) {
     if (e.target.closest('[data-pdf-url], [data-mark-paid]')) return;
     openInvoiceDetail(r.dataset.invoice);
   }));
+}
+
+function renderFinanceiro(root) {
+  const t = CRM.financeiro;
+  const period = state.filterFinanceiroPeriod || '';
+  const typeFilter = state.filterFinanceiroType || '';
+  const paidInvoices = hasModule('invoices') ? state.invoices.filter(i => i.status === 'PAID' && i.paidAt) : [];
+  const paidPayments = hasModule('payments') ? state.payments.filter(p => p.status === 'PAID' && p.paidAt) : [];
+  const receivedAll = sumEur(paidInvoices);
+  const spentAll = sumEur(paidPayments);
+
+  const ledgerAll = [
+    ...paidInvoices.map(i => ({ kind: 'in', date: i.paidAt, amount: i.totalEur, who: i.clientName || '—', ref: i.number })),
+    ...paidPayments.map(p => ({ kind: 'out', date: p.paidAt, amount: p.totalEur, who: p.supplierName || p.employeeName || '—', ref: p.number })),
+  ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const ledger = ledgerAll.filter(m => !typeFilter || m.kind === typeFilter);
+
+  const inGroups = period ? groupByPeriod(paidInvoices, period, i => i.paidAt) : [];
+  const outGroups = period ? groupByPeriod(paidPayments, period, p => p.paidAt) : [];
+  const periodKeys = [...new Set([...inGroups.map(([k]) => k), ...outGroups.map(([k]) => k)])].sort((a, b) => b.localeCompare(a));
+  const rollupFor = key => {
+    const received = sumEur(groupItems(inGroups, key));
+    const spent = sumEur(groupItems(outGroups, key));
+    return { received, spent, net: received - spent };
+  };
+  const nowKey = period ? (state.filterFinanceiroPeriodKey || currentPeriodKey(period)) : '';
+  const nowRoll = period ? rollupFor(nowKey) : null;
+  const prevKey = period ? shiftPeriodKey(nowKey, period, -1) : '';
+  const delta = period && periodKeys.includes(prevKey) ? periodDelta(nowRoll.net, rollupFor(prevKey).net) : { text: '', trend: '' };
+
+  const views = periodChips(period, 'data-fin-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
+  const tools = period ? '' : `<button class="chip ${!typeFilter ? 'is-on' : ''}" data-filter-fin="">${escapeHTML(t.filterAll)}</button>`
+    + `<button class="chip ${typeFilter === 'in' ? 'is-on' : ''}" data-filter-fin="in">${escapeHTML(t.received)}</button>`
+    + `<button class="chip ${typeFilter === 'out' ? 'is-on' : ''}" data-filter-fin="out">${escapeHTML(t.spent)}</button>`;
+
+  const financeNav = periodNav(nowKey, period, 'data-fin-period-nav', t);
+  const financeStats = period
+    ? [
+      { label: t.received, value: fmtEUR(nowRoll.received) },
+      { label: t.spent, value: fmtEUR(nowRoll.spent) },
+      { label: t.net, value: fmtEUR(nowRoll.net), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
+    ]
+    : [
+      { label: t.received, value: fmtEUR(receivedAll) },
+      { label: t.spent, value: fmtEUR(spentAll) },
+      { label: t.net, value: fmtEUR(receivedAll - spentAll) },
+    ];
+
+  const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.received)}</th><th class="right">${escapeHTML(t.spent)}</th><th class="right">${escapeHTML(t.net)}</th></tr>`;
+  const listHead = `<tr><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thWho)}</th><th>${escapeHTML(t.thRef)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
+  const summaryRows = period && periodKeys.length
+    ? `<tr class="is-total"><td class="name">${escapeHTML(t.thTotal)}</td><td class="num">${fmtEUR(receivedAll)}</td><td class="num">${fmtEUR(spentAll)}</td><td class="num">${fmtEUR(receivedAll - spentAll)}</td></tr>`
+      + periodKeys.map(key => {
+        const roll = rollupFor(key);
+        return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${fmtEUR(roll.received)}</td><td class="num">${fmtEUR(roll.spent)}</td><td class="num">${fmtEUR(roll.net)}</td></tr>`;
+      }).join('')
+    : '';
+  const ledgerRows = ledger.map(m => `<tr class="conversation-row" data-fin-go="${m.kind === 'in' ? 'invoices' : 'payments'}">
+    <td class="mono muted">${escapeHTML(fmtDay(m.date))} <span class="pill ${m.kind === 'in' ? 'pill--ok' : 'pill--bad'}">${escapeHTML(m.kind === 'in' ? t.received : t.spent)}</span></td>
+    <td class="name">${escapeHTML(m.who)}</td>
+    <td class="mono muted">${escapeHTML(m.ref)}</td>
+    <td class="num">${m.kind === 'out' ? '−' : ''}${fmtEUR(m.amount)}</td>
+  </tr>`).join('');
+
+  root.innerHTML = hero(labels.financeiro, CRM.tabs.financeiro.desc, statCards(financeStats), financeNav) + crmPanel({
+    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.ledger,
+    tag: period ? periodKeys.length : ledger.length,
+    views,
+    tools,
+    head: period ? summaryHead : listHead,
+    rows: period ? summaryRows : ledgerRows,
+    empty: period ? t.summaryEmpty : t.emptyTitle,
+    emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
+  });
+  $$('[data-fin-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterFinanceiroPeriod = btn.dataset.finPeriod; state.filterFinanceiroPeriodKey = ''; render(); }));
+  $$('[data-fin-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
+    const dir = btn.dataset.finPeriodNav;
+    state.filterFinanceiroPeriodKey = dir === 'current' ? '' : shiftPeriodKey(nowKey, period, dir === 'prev' ? -1 : 1);
+    render();
+  }));
+  $$('[data-filter-fin]', root).forEach(btn => btn.addEventListener('click', () => { state.filterFinanceiroType = btn.dataset.filterFin; render(); }));
+  $$('[data-fin-go]', root).forEach(tr => tr.addEventListener('click', () => setActive(tr.dataset.finGo)));
 }
 
 function renderPayments(root) {

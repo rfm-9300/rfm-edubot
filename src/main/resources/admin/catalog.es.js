@@ -4,7 +4,7 @@ window.__I18N_CATALOGS['es'] = {
   common: {
     nav: {
       overview: 'Inicio', conversations: 'Conversaciones', contacts: 'Contactos',
-      clients: 'Clientes', services: 'Servicios', quotes: 'Presupuestos', invoices: 'Facturas', suppliers: 'Proveedores', employees: 'Colaboradores', payments: 'Pagos', catalog: 'Catálogo',
+      clients: 'Clientes', services: 'Servicios', quotes: 'Presupuestos', invoices: 'Facturas', financeiro: 'Finanzas', suppliers: 'Proveedores', employees: 'Colaboradores', payments: 'Pagos', catalog: 'Catálogo',
       persona: 'Persona', settings: 'Ajustes', 'ai-assistant': 'Asistente IA', bookings: 'Reservas', instagram: 'Instagram',
       groupInbox: 'Bandeja', groupBusiness: 'Negocio', groupBot: 'Bot', groupSetup: 'Configuración',
     },
@@ -165,6 +165,7 @@ window.__I18N_CATALOGS['es'] = {
     todayTitle: 'Hoy',
     waitingChat: 'Esperando respuesta', overdueInvoice: 'Factura vencida', pendingBooking: 'Reserva pendiente', instagramWaitingComment: 'Comentario de Instagram',
     dueSoonInvoice: 'Factura a punto de vencer', overduePayment: 'Pago vencido', dueSoonPayment: 'Pago a vencer', quoteExpiring: 'Presupuesto por caducar', assistantAction: p => `${p.n} ${p.n === 1 ? 'acción' : 'acciones'} del asistente pendientes de aprobación`,
+    overdueInvoiceN: p => `${p.n} facturas vencidas`, overduePaymentN: p => `${p.n} pagos vencidos`,
     teachBot: 'Enseñar al bot', setupWidget: 'Añadir el widget web',
     openModule: 'Abrir',
     healthOk: 'Al día', healthWatch: 'Atención', healthUrgent: 'Urgente',
@@ -360,6 +361,7 @@ window.__I18N_CATALOGS['es'] = {
       fornecedores: { title: 'Proveedores', desc: 'Personas y empresas a las que pagas.', newLabel: 'Nuevo proveedor' },
       colaboradores: { title: 'Colaboradores', desc: 'Personas del equipo. Registra un pago desde aquí.', newLabel: 'Nuevo colaborador' },
       pagamentos: { title: 'Pagos', desc: 'Cuentas ligadas a un proveedor o a un colaborador. Márcalas pagadas cuando salga el dinero.', newLabel: 'Nuevo pago' },
+      financeiro: { title: 'Finanzas', desc: 'Dinero recibido y gastado, por semana o por mes.' },
       bookings: { title: 'Reservas', desc: 'Citas, servicios y disponibilidad semanal.', newLabel: 'Nueva cita' },
     },
     clients: {
@@ -467,6 +469,15 @@ window.__I18N_CATALOGS['es'] = {
       dueDate: 'Vencimiento', quoteId: 'ID Presupuesto', quoteIdPlaceholder: 'ID del presupuesto asociado',
       eyebrow: 'Facturas', formTitle: 'Nueva factura', saveLabel: 'Emitir factura',
       chooseClient: 'Elige un cliente', enterDueDate: 'Indica la fecha de vencimiento', addLine: 'Añade al menos una línea', issued: 'Factura emitida',
+    },
+    financeiro: {
+      viewList: 'Lista', byWeek: 'Por semana', byMonth: 'Por mes', summaryWeek: 'Resumen de la semana', summaryMonth: 'Resumen del mes',
+      periodPrev: 'Anterior', periodNext: 'Siguiente', periodCurrent: 'Actual',
+      vsPrev: p => `frente al anterior · ${p.delta}`,
+      thPeriod: 'Periodo', thWhen: 'Fecha', thWho: 'Cliente / Proveedor', thRef: 'Referencia', thTotal: 'Importe',
+      filterAll: 'Todos', received: 'Recibido', spent: 'Gastado', net: 'Neto', ledger: 'Movimientos',
+      summaryEmpty: 'Nada en este resumen', summaryEmptyDesc: 'Los movimientos aparecen aquí cuando una factura o un pago se marca como pagado.',
+      emptyTitle: 'Aún sin movimientos', emptyDesc: 'Los movimientos aparecen aquí cuando una factura o un pago se marca como pagado.',
     },
     lines: {
       client: 'Cliente', chooseClient: '— Elegir cliente —',

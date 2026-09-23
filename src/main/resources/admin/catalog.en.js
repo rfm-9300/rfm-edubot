@@ -5,7 +5,7 @@ window.__I18N_CATALOGS['en'] = {
   common: {
     nav: {
       overview: 'Home', conversations: 'Conversations', contacts: 'Contacts',
-      clients: 'Clients', services: 'Services', quotes: 'Quotes', invoices: 'Invoices', suppliers: 'Suppliers', employees: 'Employees', payments: 'Payments', catalog: 'Catalog',
+      clients: 'Clients', services: 'Services', quotes: 'Quotes', invoices: 'Invoices', financeiro: 'Finances', suppliers: 'Suppliers', employees: 'Employees', payments: 'Payments', catalog: 'Catalog',
       persona: 'Persona', settings: 'Settings', 'ai-assistant': 'AI Assistant', bookings: 'Bookings', instagram: 'Instagram',
       groupInbox: 'Inbox', groupBusiness: 'Business', groupBot: 'Bot', groupSetup: 'Setup',
     },
@@ -166,6 +166,7 @@ window.__I18N_CATALOGS['en'] = {
     todayTitle: 'Today',
     waitingChat: 'Waiting for a reply', overdueInvoice: 'Overdue invoice', pendingBooking: 'Pending booking', instagramWaitingComment: 'Instagram comment',
     dueSoonInvoice: 'Invoice due soon', overduePayment: 'Overdue payment', dueSoonPayment: 'Payment due soon', quoteExpiring: 'Quote expiring', assistantAction: p => `${p.n} assistant ${p.n === 1 ? 'action' : 'actions'} waiting for approval`,
+    overdueInvoiceN: p => `${p.n} overdue invoices`, overduePaymentN: p => `${p.n} overdue payments`,
     teachBot: 'Teach the bot', setupWidget: 'Add the website widget',
     openModule: 'Open',
     healthOk: 'On track', healthWatch: 'Needs attention', healthUrgent: 'Urgent',
@@ -361,6 +362,7 @@ window.__I18N_CATALOGS['en'] = {
       fornecedores: { title: 'Suppliers', desc: 'People and companies you pay.', newLabel: 'New supplier' },
       colaboradores: { title: 'Employees', desc: 'People on your team. Record a payment against them from here.', newLabel: 'New employee' },
       pagamentos: { title: 'Payments', desc: 'Bills attached to a supplier or an employee. Mark paid when the money goes out.', newLabel: 'New payment' },
+      financeiro: { title: 'Finances', desc: 'Money received and spent, by week or by month.' },
       bookings: { title: 'Bookings', desc: 'Appointments, services and weekly availability.', newLabel: 'New booking' },
     },
     clients: {
@@ -468,6 +470,15 @@ window.__I18N_CATALOGS['en'] = {
       dueDate: 'Due date', quoteId: 'Quote ID', quoteIdPlaceholder: 'Associated quote ID',
       eyebrow: 'Invoices', formTitle: 'New invoice', saveLabel: 'Issue invoice',
       chooseClient: 'Choose a client', enterDueDate: 'Enter the due date', addLine: 'Add at least one line', issued: 'Invoice issued',
+    },
+    financeiro: {
+      viewList: 'List', byWeek: 'By week', byMonth: 'By month', summaryWeek: 'Week wrap-up', summaryMonth: 'Month wrap-up',
+      periodPrev: 'Previous', periodNext: 'Next', periodCurrent: 'Current',
+      vsPrev: p => `vs previous · ${p.delta}`,
+      thPeriod: 'Period', thWhen: 'Date', thWho: 'Client / Supplier', thRef: 'Reference', thTotal: 'Amount',
+      filterAll: 'All', received: 'Received', spent: 'Spent', net: 'Net', ledger: 'Transactions',
+      summaryEmpty: 'Nothing in this wrap-up', summaryEmptyDesc: 'Transactions appear here once an invoice or payment is marked paid.',
+      emptyTitle: 'No transactions yet', emptyDesc: 'Transactions appear here once an invoice or payment is marked paid.',
     },
     lines: {
       client: 'Client', chooseClient: '— Choose client —',

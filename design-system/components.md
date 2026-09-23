@@ -211,7 +211,7 @@ When a panel has a control that swaps its whole layout (columns, hero, even the 
 </div>
 ```
 
-Used by Services and Invoices (`design-system/patterns.md`). Don't reuse `.panel__views` for anything that is itself a filter (status, client, supplier) — those stay `.chip`s in `.panel__tools`/`.panel__filters`.
+Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't reuse `.panel__views` for anything that is itself a filter (status, client, supplier) — those stay `.chip`s in `.panel__tools`/`.panel__filters`.
 
 ## Table
 
