@@ -8,8 +8,8 @@ class OverviewHomeLayoutTest {
     @Test
     fun `unknown hidden cards are dropped`() {
         assertEquals(
-            listOf(OverviewHomeLayout.CASH, OverviewHomeLayout.PULSE),
-            OverviewHomeLayout.sanitize(listOf("cash", "nope", "pulse", "cash")),
+            listOf(OverviewHomeLayout.FINANCEIRO, OverviewHomeLayout.PULSE),
+            OverviewHomeLayout.sanitize(listOf("financeiro", "nope", "pulse", "financeiro")),
         )
         assertEquals(emptyList(), OverviewHomeLayout.sanitize(null))
     }
@@ -20,7 +20,7 @@ class OverviewHomeLayoutTest {
             setOf(DashboardModules.OVERVIEW, DashboardModules.INVOICES, DashboardModules.CLIENTS),
         )
         assertEquals(
-            listOf("highlights", "pulse", "attention", "setup", "cash", "customers"),
+            listOf("highlights", "pulse", "attention", "setup", "financeiro", "customers"),
             crmOnly.map { it.id },
         )
         assertTrue(crmOnly.filter { it.group == OverviewHomeLayout.GROUP_SNAPSHOTS }.none { it.id == OverviewHomeLayout.INBOX })
@@ -38,18 +38,18 @@ class OverviewHomeLayoutTest {
     }
 
     @Test
-    fun `suppliers and payments snapshots follow those modules`() {
+    fun `suppliers snapshot follows its module and payments alone enables financeiro`() {
         val options = OverviewHomeLayout.available(
             setOf(DashboardModules.OVERVIEW, DashboardModules.SUPPLIERS, DashboardModules.PAYMENTS),
         )
         assertEquals(
-            listOf("highlights", "pulse", "attention", "setup", "suppliers", "payments"),
+            listOf("highlights", "pulse", "attention", "setup", "financeiro", "suppliers"),
             options.map { it.id },
         )
     }
 
     @Test
-    fun `hiding money drops money highlights but keeps cash for other surfaces`() {
+    fun `hiding money drops money highlights but keeps cash data for other surfaces`() {
         val applied = OverviewHomeLayout.apply(
             overview(
                 cash = cashDto(),
@@ -59,12 +59,12 @@ class OverviewHomeLayoutTest {
                     OverviewHighlightDto(OverviewMath.HIGHLIGHT_PIPELINE, DashboardModules.QUOTES, cents = 50),
                 ),
             ),
-            listOf(OverviewHomeLayout.CASH),
+            listOf(OverviewHomeLayout.FINANCEIRO),
         )
         assertEquals(cashDto().outstandingCents, applied.cash?.outstandingCents)
         assertEquals(pipelineDto().openCents, applied.pipeline?.openCents)
         assertEquals(listOf(OverviewMath.HIGHLIGHT_PIPELINE), applied.highlights.map { it.key })
-        assertEquals(listOf(OverviewHomeLayout.CASH), applied.hiddenCards)
+        assertEquals(listOf(OverviewHomeLayout.FINANCEIRO), applied.hiddenCards)
     }
 
     @Test

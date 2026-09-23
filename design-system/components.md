@@ -143,26 +143,27 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 
 ```html
 <div class="home-grid">
-  <div class="panel snapshot" data-kind="cash">
+  <div class="panel snapshot" data-kind="financeiro">
     <div class="snapshot__head">
       <span class="snapshot__icon" aria-hidden="true">💶</span>
       <div class="snapshot__head-text">
-        <h2 class="panel__title">Money</h2>
-        <div class="snapshot__figure">€ 1.240,00</div>
+        <h2 class="panel__title">Financeiro</h2>
+        <div class="snapshot__figure">€ 75,50</div>
       </div>
       <button class="btn btn--sm snapshot__open" type="button">Open</button>
     </div>
-    <div class="meter"><div class="meter__fill" style="width:62%"></div></div>
+    <div class="meter"><div class="meter__fill" style="width:60%"></div></div>
     <div class="snapshot__metrics">
-      <div class="snapshot__metric"><span class="snapshot__metric-label">Received this month</span><span class="snapshot__metric-value">€ 120,00</span></div>
+      <div class="snapshot__metric"><span class="snapshot__metric-label">Received this month</span><span class="snapshot__metric-value">€ 225,50</span></div>
   </div>
 </div>
 ```
 
-- `data-kind` selects the card's accent color (`--snap`), reusing the same personality-tint idea as nav tabs / `.stat` — see the `[data-kind]` rules in `style.css` (`cash`, `pipeline`, `customers`, `services`, `suppliers`, `employees`, `payments`, `inbox`, `contacts`, `calendar`, `social`, `catalog`, `assistant`). Reuse a nav tab's hex when the module has a nav tab; keep unlisted kinds on the `var(--accent)` fallback.
+- `data-kind` selects the card's accent color (`--snap`), reusing the same personality-tint idea as nav tabs / `.stat` — see the `[data-kind]` rules in `style.css` (`financeiro`, `pipeline`, `customers`, `services`, `suppliers`, `employees`, `inbox`, `contacts`, `calendar`, `social`, `catalog`, `assistant`). Reuse a nav tab's hex when the module has a nav tab; keep unlisted kinds on the `var(--accent)` fallback.
 - `.snapshot__icon` is a module emoji, matching its nav dot emoji.
 - `.snapshot__figure` is the card's single headline number (display font, large, tinted `--snap`) — not a small `.tag`.
-- `.meter` / `.meter__fill` is optional: a thin progress bar for a card whose primary number is naturally a share of a whole (cash collected vs. outstanding, quote win rate). Omit it for cards without a meaningful ratio.
+- `.meter` / `.meter__fill` is optional: a thin progress bar for a card whose primary number is naturally a share of a whole (Financeiro's received vs. spent, quote win rate). Omit it for cards without a meaningful ratio.
+- The Financeiro card (see [patterns.md](patterns.md#home-tenant-snapshot)) is the one snapshot that folds two data sources (`o.cash`, `o.payments`) into a single simple card — received/spent this month as its headline and meter, receivable/payable as the two secondary numbers. Don't reintroduce a separate "Payments" snapshot card; that would bring back the dense, aging-bucket version this replaced.
 - `.snapshot__metrics` is a 2-column grid of secondary numbers (`.snapshot__metric-label` + `.snapshot__metric-value`), not a vertical label/value list. A lone trailing item in an odd-length list spans both columns.
 - Do not replace this with a table.
 

@@ -13,7 +13,7 @@ object OverviewHomeLayout {
     const val PULSE = "pulse"
     const val ATTENTION = "attention"
     const val SETUP = "setup"
-    const val CASH = "cash"
+    const val FINANCEIRO = "financeiro"
     const val PIPELINE = "pipeline"
     const val CUSTOMERS = "customers"
     const val INBOX = "inbox"
@@ -23,14 +23,13 @@ object OverviewHomeLayout {
     const val SERVICES = "services"
     const val SUPPLIERS = "suppliers"
     const val EMPLOYEES = "employees"
-    const val PAYMENTS = "payments"
     const val ASSISTANT = "assistant"
 
     const val GROUP_SECTIONS = "sections"
     const val GROUP_SNAPSHOTS = "snapshots"
 
     val sections = listOf(HIGHLIGHTS, PULSE, ATTENTION, SETUP)
-    val snapshots = listOf(CASH, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, PAYMENTS, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT)
+    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT)
     val all = (sections + snapshots).toSet()
 
     fun sanitize(hidden: List<String>?): List<String> =
@@ -41,13 +40,12 @@ object OverviewHomeLayout {
         fun addSnapshot(id: String, enabled: Boolean) {
             if (enabled) options += OverviewLayoutOptionDto(id, GROUP_SNAPSHOTS)
         }
-        addSnapshot(CASH, DashboardModules.INVOICES in modules)
+        addSnapshot(FINANCEIRO, DashboardModules.INVOICES in modules || DashboardModules.PAYMENTS in modules)
         addSnapshot(PIPELINE, DashboardModules.QUOTES in modules)
         addSnapshot(CUSTOMERS, DashboardModules.CLIENTS in modules)
         addSnapshot(SERVICES, DashboardModules.SERVICES in modules)
         addSnapshot(SUPPLIERS, DashboardModules.SUPPLIERS in modules)
         addSnapshot(EMPLOYEES, DashboardModules.EMPLOYEES in modules)
-        addSnapshot(PAYMENTS, DashboardModules.PAYMENTS in modules)
         addSnapshot(INBOX, DashboardModules.CONVERSATIONS in modules || DashboardModules.CONTACTS in modules)
         addSnapshot(CALENDAR, DashboardModules.BOOKINGS in modules)
         addSnapshot(SOCIAL, DashboardModules.INSTAGRAM in modules)
@@ -81,7 +79,7 @@ object OverviewHomeLayout {
         OverviewMath.HIGHLIGHT_COLLECTED,
         OverviewMath.HIGHLIGHT_OUTSTANDING,
         OverviewMath.HIGHLIGHT_OVERDUE,
-        -> CASH
+        -> FINANCEIRO
         OverviewMath.HIGHLIGHT_PIPELINE,
         OverviewMath.HIGHLIGHT_WIN_RATE,
         -> PIPELINE

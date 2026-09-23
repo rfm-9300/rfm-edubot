@@ -589,15 +589,15 @@ function pulseLine(o) {
 function homeCardCopy(id) {
   const titles = {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
-    cash: STR.snapCash, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
+    financeiro: STR.snapFinance, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
     calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
-    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, payments: STR.snapPayments, assistant: STR.snapAssistant,
+    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
-    cash: STR.homeCard_cashDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
+    financeiro: STR.homeCard_financeDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
-    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, payments: STR.homeCard_paymentsDesc, assistant: STR.homeCard_assistantDesc,
+    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -646,23 +646,23 @@ function renderOverview(root) {
     }).join('')}</div></div>`
     : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
-  if (o.cash && !hidden.has('cash')) {
-    const cashRows = [
-      { label: STR.hl_collected_month, value: centsEUR(o.cash.collectedThisMonthCents) },
-      { label: STR.hl_outstanding, value: centsEUR(o.cash.outstandingCents) },
-      { label: STR.hl_overdue, value: `${centsEUR(o.cash.overdueCents)} · ${o.cash.overdueCount}` },
-      { label: STR.cashDueSoon, value: centsEUR(o.cash.dueSoonCents) },
-      { label: STR.cashIssuedMonth, value: centsEUR(o.cash.issuedThisMonthCents) },
-    ];
-    if (o.cash.agingWeekCents || o.cash.agingMonthCents || o.cash.agingOldCents) {
-      cashRows.push({ label: STR.cashAgingCurrent, value: centsEUR(o.cash.agingCurrentCents) });
-      if (o.cash.agingWeekCents) cashRows.push({ label: STR.cashAgingWeek, value: centsEUR(o.cash.agingWeekCents) });
-      if (o.cash.agingMonthCents) cashRows.push({ label: STR.cashAgingMonth, value: centsEUR(o.cash.agingMonthCents) });
-      if (o.cash.agingOldCents) cashRows.push({ label: STR.cashAgingOld, value: centsEUR(o.cash.agingOldCents) });
+  if ((o.cash || o.payments) && !hidden.has('financeiro')) {
+    const gained = o.cash?.collectedThisMonthCents || 0;
+    const spent = o.payments?.paidThisMonthCents || 0;
+    const financeRows = [];
+    if (o.cash) {
+      financeRows.push({ label: STR.financeGained, value: centsEUR(o.cash.collectedThisMonthCents) });
+      financeRows.push({ label: STR.financeReceivable, value: centsEUR(o.cash.outstandingCents) });
     }
-    const collected = o.cash.collectedThisMonthCents || 0, outstanding = o.cash.outstandingCents || 0;
-    const cashMeter = (collected || outstanding) ? { pct: (collected / (collected + outstanding)) * 100 } : null;
-    snapshots.push(snapshotPanel({ tab: 'invoices', kind: 'cash', icon: '💶', title: STR.snapCash, figure: centsEUR(o.cash.outstandingCents), rows: cashRows, meter: cashMeter }));
+    if (o.payments) {
+      financeRows.push({ label: STR.financeSpent, value: centsEUR(o.payments.paidThisMonthCents) });
+      financeRows.push({ label: STR.financePayable, value: centsEUR(o.payments.outstandingCents) });
+    }
+    const financeMeter = (gained || spent) ? { pct: (gained / (gained + spent)) * 100 } : null;
+    snapshots.push(snapshotPanel({
+      tab: hasModule('invoices') ? 'invoices' : 'payments', kind: 'financeiro', icon: '💶', title: STR.snapFinance,
+      figure: centsEUR(gained - spent), rows: financeRows, meter: financeMeter,
+    }));
   }
   if (o.pipeline && !hidden.has('pipeline')) {
     snapshots.push(snapshotPanel({ tab: 'quotes', kind: 'pipeline', icon: '📝', title: STR.snapPipeline, figure: `${o.pipeline.winRatePct}%`, meter: { pct: o.pipeline.winRatePct }, rows: [
@@ -701,16 +701,6 @@ function renderOverview(root) {
       { label: STR.employeesNewMonth, value: o.employees.newThisMonth },
       { label: STR.employeesNewLastMonth, value: o.employees.newLastMonth },
     ] }));
-  }
-  if (o.payments && !hidden.has('payments')) {
-    const paid = o.payments.paidThisMonthCents || 0, toPay = o.payments.outstandingCents || 0;
-    const payMeter = (paid || toPay) ? { pct: (paid / (paid + toPay)) * 100 } : null;
-    snapshots.push(snapshotPanel({ tab: 'payments', kind: 'payments', icon: '💸', title: STR.snapPayments, figure: centsEUR(o.payments.outstandingCents), rows: [
-      { label: STR.paymentsPaidMonth, value: centsEUR(o.payments.paidThisMonthCents) },
-      { label: STR.paymentsOutstanding, value: centsEUR(o.payments.outstandingCents) },
-      { label: STR.paymentsOverdue, value: `${centsEUR(o.payments.overdueCents)} · ${o.payments.overdueCount}` },
-      { label: STR.paymentsDueSoon, value: centsEUR(o.payments.dueSoonCents) },
-    ], meter: payMeter }));
   }
   if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
     snapshots.push(snapshotPanel({ tab: 'conversations', kind: 'inbox', icon: '💬', title: STR.snapInbox, figure: o.inbox.waiting, rows: [
@@ -764,7 +754,7 @@ function renderOverview(root) {
       return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><span class="queue__icon queue__icon--info" aria-hidden="true">${setupIcon(s.kind)}</span><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
     }).join('')}</div></div>`
     : '';
-  const snapshotsOff = ['cash', 'pipeline', 'customers', 'services', 'suppliers', 'employees', 'payments', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
+  const snapshotsOff = ['financeiro', 'pipeline', 'customers', 'services', 'suppliers', 'employees', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
   const modulesHtml = snapshots.length
     ? `<div class="home-grid">${snapshots.join('')}</div>`
     : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);

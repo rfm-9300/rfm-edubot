@@ -1075,13 +1075,12 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
   align-items: start;
 }
 .snapshot { --snap: var(--accent); }
-.snapshot[data-kind="cash"] { --snap: #14b88a; }
+.snapshot[data-kind="financeiro"] { --snap: #14b88a; }
 .snapshot[data-kind="pipeline"] { --snap: #fbbf24; }
 .snapshot[data-kind="customers"] { --snap: #ff7a8a; }
 .snapshot[data-kind="services"] { --snap: #fb923c; }
 .snapshot[data-kind="suppliers"] { --snap: #818cf8; }
 .snapshot[data-kind="employees"] { --snap: #06b6d4; }
-.snapshot[data-kind="payments"] { --snap: #f97316; }
 .snapshot[data-kind="inbox"] { --snap: #38bdf8; }
 .snapshot[data-kind="contacts"] { --snap: #2dd4a8; }
 .snapshot[data-kind="calendar"] { --snap: #a3e635; }
