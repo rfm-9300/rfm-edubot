@@ -383,6 +383,7 @@ Render login **inside** `#view` so the sidebar/topbar chrome can remain or clear
 | `.chat__log` | Scrollable transcript |
 | `.chat__msg chat__msg--user` | Outgoing (gradient) |
 | `.chat__msg chat__msg--bot` | Incoming (surface + border) |
+| `.chat__msg--rich` | Bot bubble with escaped markdown (bold, lists, `###` headings, `` `code` ``) |
 | `.chat__typing` | Italic muted |
 | `.chat__form` + `.chat__input` | Composer (pill input) |
 | `.assistant` | Two-column assistant shell |

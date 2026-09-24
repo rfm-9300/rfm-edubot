@@ -190,27 +190,8 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
 }
 
 internal object DashboardAssistantToolPolicy {
-    private val moduleByTool = mapOf(
-        "search_clients" to DashboardModules.CLIENTS,
-        "create_client" to DashboardModules.CLIENTS,
-        "list_service_templates" to DashboardModules.QUOTES,
-        "list_standard_items" to DashboardModules.CATALOG,
-        "create_quote" to DashboardModules.QUOTES,
-        "update_quote" to DashboardModules.QUOTES,
-        "list_quotes" to DashboardModules.QUOTES,
-        "sum_quotes_by_client" to DashboardModules.QUOTES,
-        "create_invoice" to DashboardModules.INVOICES,
-        "list_invoices" to DashboardModules.INVOICES,
-        "mark_invoice_paid" to DashboardModules.INVOICES,
-        "sum_invoices_by_client" to DashboardModules.INVOICES,
-        "list_booking_services" to DashboardModules.BOOKINGS,
-        "list_availability" to DashboardModules.BOOKINGS,
-        "list_available_slots" to DashboardModules.BOOKINGS,
-        "list_bookings" to DashboardModules.BOOKINGS,
-        "create_booking" to DashboardModules.BOOKINGS,
-        "cancel_booking" to DashboardModules.BOOKINGS,
-        "confirm_booking" to DashboardModules.BOOKINGS,
-    )
+    /** CRM + booking tools the assistant can offer. Shared with WhatsApp CRM so module ownership cannot drift. */
+    val moduleByTool: Map<String, String> = CrmTools.MODULE_OF_TOOL + BookingTools.MODULE_OF_TOOL
 
     private val readOnlyToolNames = CrmTools.READ_ONLY_TOOL_NAMES + BookingTools.READ_ONLY_TOOL_NAMES
 
@@ -223,11 +204,26 @@ internal object DashboardAssistantToolPolicy {
     fun isReadOnly(toolName: String): Boolean = toolName in readOnlyToolNames
 }
 
+internal fun interface AssistantChatCompleter {
+    suspend fun complete(messages: List<ChatMessage>, tools: List<ToolDefinition>, modelOverride: String?): AiResponse
+}
+
 internal class DashboardAssistantService(
     private val mongo: MongoModule,
-    private val aiClient: AiClient,
+    private val completeChat: AssistantChatCompleter,
     val repository: DashboardAssistantRepository = DashboardAssistantRepository(mongo),
 ) {
+    constructor(
+        mongo: MongoModule,
+        aiClient: AiClient,
+        repository: DashboardAssistantRepository = DashboardAssistantRepository(mongo),
+    ) : this(
+        mongo,
+        AssistantChatCompleter { messages, tools, modelOverride ->
+            aiClient.complete(messages, tools, modelOverride = modelOverride)
+        },
+        repository,
+    )
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("DashboardAssistantService")
 
@@ -285,7 +281,7 @@ internal class DashboardAssistantService(
         extra?.let(context::add)
 
         repeat(4) {
-            when (val response = aiClient.complete(context, definitions, modelOverride = tenant.openrouterModel)) {
+            when (val response = completeChat.complete(context, definitions, tenant.openrouterModel)) {
                 is AiResponse.Text -> {
                     repository.addMessage(tenant.id, ownerKey, threadId, "assistant", response.content)
                     return
@@ -318,10 +314,10 @@ internal class DashboardAssistantService(
                 }
             }
         }
-        val fallback = aiClient.complete(
+        val fallback = completeChat.complete(
             context + ChatMessage(role = "system", content = "Answer the user now without calling tools."),
             emptyList(),
-            modelOverride = tenant.openrouterModel,
+            tenant.openrouterModel,
         )
         val content = (fallback as? AiResponse.Text)?.content ?: "Unable to complete this request."
         repository.addMessage(tenant.id, ownerKey, threadId, "assistant", content)
