@@ -1,7 +1,7 @@
 plugins {
     kotlin("jvm") version "2.0.21"
     kotlin("plugin.serialization") version "2.0.21"
-    id("io.ktor.plugin") version "3.0.1"
+    id("io.ktor.plugin") version "3.6.0"
 }
 
 group = "com.rfm.edubot"
