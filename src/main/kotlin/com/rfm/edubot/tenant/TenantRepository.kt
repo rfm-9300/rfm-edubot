@@ -108,6 +108,7 @@ class TenantRepository(mongoModule: MongoModule) {
         overviewHiddenCards = getList("overviewHiddenCards", String::class.java).orEmpty(),
         rateLimitPerHour = getInteger("rateLimitPerHour") ?: 30,
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
+        monthlyTokenBudget = getLong("monthlyTokenBudget") ?: 2_000_000L,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
         documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
         savedDocumentTemplates = getList("savedDocumentTemplates", Document::class.java).orEmpty()
@@ -128,6 +129,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("overviewHiddenCards", overviewHiddenCards)
             .append("rateLimitPerHour", rateLimitPerHour)
             .append("rateLimitPerDay", rateLimitPerDay)
+            .append("monthlyTokenBudget", monthlyTokenBudget)
             .append("status", status.name)
             .append("documentTemplate", documentTemplate.toDocument())
             .append("savedDocumentTemplates", savedDocumentTemplates.map { it.toDocument() })

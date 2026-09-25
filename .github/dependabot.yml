@@ -1,0 +1,37 @@
+version: 2
+updates:
+  # Server (Ktor/Kotlin JVM) dependencies.
+  - package-ecosystem: "gradle"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+
+  # Mobile (Kotlin Multiplatform) dependencies — separate Gradle build, see mobile/build.gradle.kts.
+  - package-ecosystem: "gradle"
+    directory: "/mobile"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    labels:
+      - "dependencies"
+      - "mobile"
+
+  # Docker base images (Dockerfile).
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+
+  # GitHub Actions used in CI/CD itself.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    labels:
+      - "dependencies"
+      - "ci"

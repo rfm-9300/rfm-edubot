@@ -132,10 +132,10 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p ~/whatsapp-bot"
           scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            docker-compose.prod.yml scripts/remote-deploy.sh \
+            docker-compose.prod.yml scripts/remote-deploy.sh scripts/backup-mongo.sh scripts/restore-mongo.sh scripts/healthcheck-alert.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:~/whatsapp-bot/"
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh"
+            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh ~/whatsapp-bot/backup-mongo.sh ~/whatsapp-bot/restore-mongo.sh ~/whatsapp-bot/healthcheck-alert.sh"
       - name: Pull and restart app
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -143,10 +143,12 @@ jobs:
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
           TAG: ${{ needs.publish.outputs.image_tag }}
+          DEPLOY_ALERT_WEBHOOK_URL: ${{ secrets.DEPLOY_ALERT_WEBHOOK_URL }}
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             "export GHCR_TOKEN=$(printf '%q' "$GHCR_TOKEN"); \
              export GHCR_USERNAME=$(printf '%q' "$GHCR_USERNAME"); \
              export TAG=$(printf '%q' "$TAG"); \
+             export DEPLOY_ALERT_WEBHOOK_URL=$(printf '%q' "$DEPLOY_ALERT_WEBHOOK_URL"); \
              ~/whatsapp-bot/remote-deploy.sh"

@@ -1,6 +1,7 @@
 package com.rfm.edubot.tenant
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.bookings.AvailabilityRepository
 import com.rfm.edubot.bookings.BookingRepository
 import com.rfm.edubot.bookings.BookingScheduler
@@ -112,6 +113,8 @@ class TenantPipelineFactory(
             openrouterModel = tenant.openrouterModel,
             compiledPersona = compiledPersona,
             enabledModules = modules,
+            tenantUsage = TenantUsageRepository(mongo, tenant.id),
+            monthlyTokenBudget = tenant.monthlyTokenBudget,
         )
     }
 }

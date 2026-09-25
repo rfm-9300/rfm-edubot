@@ -35,6 +35,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "crm.invoices",
                 "crm.sequences",
                 "crm.standard_items",
+                "tenant_usage",
             ).forEach { name -> try { db.createCollection(name) } catch (_: Exception) {} }
 
             val tenants = db.getCollection<Document>("tenants")
@@ -157,6 +158,9 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val instagramMedia = db.getCollection<Document>("instagram.media")
             instagramMedia.createIndex(Document("tenantId", 1).append("mediaId", 1), IndexOptions().unique(true))
             instagramMedia.createIndex(Document("tenantId", 1).append("publishedAt", -1))
+
+            val tenantUsage = db.getCollection<Document>("tenant_usage")
+            tenantUsage.createIndex(Document("tenantId", 1).append("period", 1), IndexOptions().unique(true))
 
             val instagramComments = db.getCollection<Document>("instagram.comments")
             instagramComments.createIndex(Document("tenantId", 1).append("commentId", 1), IndexOptions().unique(true))

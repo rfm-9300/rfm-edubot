@@ -49,6 +49,19 @@ PR / merge to main (excluding mobile-only and docs-only changes)
 
 Manual re-run: GitHub → Actions → **Deploy WhatsApp Bot** → Run workflow.
 
+### Automatic rollback
+
+`scripts/remote-deploy.sh` records the tag of every deploy that passed health
+checks in `~/whatsapp-bot/.last-good-tag`. If a new deploy's health checks
+fail, the script automatically redeploys that previous tag and re-checks
+health, instead of leaving the broken container running. The CI job still
+fails either way (a failed deploy is a failed deploy), but prod is left on
+the last tag known to be healthy rather than on the broken one.
+
+If the rollback itself also fails health checks, the script exits loudly and
+prod may be down — that's the one case that needs a human immediately (see
+Uptime monitoring below).
+
 Mobile-only changes on `main` do not trigger this workflow (`paths-ignore: mobile/**`).
 
 ### One-time GitHub secrets
@@ -61,6 +74,7 @@ Add these as repository secrets, or as secrets on the `production` environment:
 | `DEPLOY_USER` | SSH user that can run Docker in `~/whatsapp-bot` |
 | `DEPLOY_SSH_KEY` | Private key whose public key is in that user's `authorized_keys` |
 | `DEPLOY_SSH_KNOWN_HOSTS` | Optional. Output of `ssh-keyscan -H <DEPLOY_HOST>`. If unset, CI uses `ssh-keyscan` at deploy time. |
+| `DEPLOY_ALERT_WEBHOOK_URL` | Optional. A Slack or Discord incoming-webhook URL. If set, `remote-deploy.sh` posts a message on deploy failure/rollback. |
 
 Do **not** put production `.env` values in GitHub. Secrets stay on the VPS.
 
@@ -224,6 +238,65 @@ Then reload the website Caddy container:
 ```bash
 ssh hillsong-vps "cd ~/websites-thebots && docker compose exec web caddy reload --config /etc/caddy/Caddyfile"
 ```
+
+## Backups
+
+MongoDB is the only durable store (users, conversations, CRM clients/quotes/
+invoices/payments, tenant config). There is no managed-DB automatic backup —
+`scripts/backup-mongo.sh` and `scripts/restore-mongo.sh` are the whole story.
+
+### One-time setup on the VPS
+
+```bash
+ssh hillsong-vps "chmod +x ~/whatsapp-bot/backup-mongo.sh"
+ssh hillsong-vps "crontab -l 2>/dev/null; echo '17 3 * * * cd ~/whatsapp-bot && ./backup-mongo.sh >> backup.log 2>&1'" | ssh hillsong-vps "crontab -"
+```
+
+This writes a gzipped `mongodump` archive to `~/whatsapp-bot/backups/` nightly
+and prunes local copies older than 14 days (`RETENTION_DAYS`).
+
+**This alone does not protect against losing the VPS itself** — local backups
+sitting next to the database they back up survive accidental `docker volume
+rm` but not disk failure or the box disappearing. Strongly recommended:
+install `rclone`, configure a remote (S3-compatible bucket, Backblaze B2,
+etc.), and set `RCLONE_REMOTE` (e.g. in a small wrapper or cron env) so each
+backup is also copied off-box. Without an off-box copy, "backups" only
+protects against operator error, not infrastructure loss.
+
+### Restoring
+
+```bash
+ssh hillsong-vps "cd ~/whatsapp-bot && ./restore-mongo.sh backups/mongo-<timestamp>.archive.gz"
+```
+
+Destructive (`mongorestore --drop`) — it asks for a typed confirmation before running.
+
+### Verifying backups actually work
+
+A backup nobody has restored is a hope, not a backup. Periodically (e.g.
+quarterly) restore the latest archive into a throwaway local `mongo`
+container and sanity-check collection counts against `mocks/mongo/README.md`
+patterns, or just confirm `crm.clients` / `crm.invoices` document counts look
+right.
+
+## Uptime monitoring
+
+`scripts/healthcheck-alert.sh` polls `/ready` and posts to
+`DEPLOY_ALERT_WEBHOOK_URL` only on state *changes* (up→down, down→up), so it
+won't spam. This is independent of deploys — it's what tells you the app
+crashed or Mongo became unreachable outside of a deploy.
+
+### One-time setup on the VPS
+
+```bash
+ssh hillsong-vps "chmod +x ~/whatsapp-bot/healthcheck-alert.sh"
+ssh hillsong-vps "crontab -l 2>/dev/null; echo '*/5 * * * * cd ~/whatsapp-bot && DEPLOY_ALERT_WEBHOOK_URL=<url> ./healthcheck-alert.sh >> healthcheck.log 2>&1'" | ssh hillsong-vps "crontab -"
+```
+
+`scripts/remote-deploy.sh` and `scripts/healthcheck-alert.sh` are copied to
+the VPS by the deploy workflow (see "Sync compose files" in `deploy.yml`) but
+the cron entries above are one-time manual setup — CI does not install cron
+jobs.
 
 ## Failure Rules
 

@@ -4,6 +4,7 @@ import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
+import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.ProfileLookupClient
 import com.rfm.edubot.bookings.BookingTools
@@ -53,6 +54,8 @@ class MessagePipeline(
     private val openrouterModel: String? = null,
     private val compiledPersona: String? = null,
     private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
+    private val tenantUsage: TenantUsageRepository? = null,
+    private val monthlyTokenBudget: Long = Long.MAX_VALUE,
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -137,6 +140,30 @@ class MessagePipeline(
                 createdAt = SystemClock.now(),
             )
             messages.insert(userMessage)
+
+            if (tenantUsage != null && tenantUsage.tokensUsedThisMonth() >= monthlyTokenBudget) {
+                log.warn(
+                    "Tenant exceeded monthly OpenRouter token budget; skipping LLM call: tenantId={}, budget={}",
+                    inbound.tenantId,
+                    monthlyTokenBudget,
+                )
+                val budgetReply = "No momento não conseguimos responder automaticamente — atingimos o limite de uso deste mês. Nossa equipe já foi avisada."
+                val assistantMessage = Message(
+                    tenantId = inbound.tenantId,
+                    conversationId = conversation.id,
+                    channel = inbound.platform,
+                    waId = user.waId,
+                    role = UserRole.ASSISTANT,
+                    content = MessageContent.Text(budgetReply),
+                    status = MessageStatus.DELIVERED,
+                    createdAt = SystemClock.now(),
+                )
+                messages.insert(assistantMessage)
+                responder.sendText(user.waId, budgetReply)
+                conversations.bumpActivity(conversation.id)
+                deduplicationService.markProcessed(inbound.eventId)
+                return
+            }
 
             val contextMessages = buildContext(conversation, inbound.messageText).toMutableList()
             val confirmationReply = isConfirmationReplyToCrmPrompt(inbound.messageText, contextMessages)
@@ -233,7 +260,16 @@ class MessagePipeline(
                 when (aiResponse) {
                     is AiResponse.Text -> {
                         replyText = aiResponse.content
-                        tokenUsage = aiResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) }
+                        // Accumulate across tool-loop iterations - each iteration is a separate
+                        // OpenRouter call, and undercounting here would make the monthly token
+                        // budget below silently under-enforce on exactly the multi-call CRM flows
+                        // that cost the most.
+                        tokenUsage = aiResponse.usage?.let {
+                            TokenUsage(
+                                prompt = (tokenUsage?.prompt ?: 0) + it.prompt_tokens,
+                                completion = (tokenUsage?.completion ?: 0) + it.completion_tokens,
+                            )
+                        } ?: tokenUsage
                         responseId = aiResponse.responseId
                         completed = true
                     }
@@ -244,7 +280,16 @@ class MessagePipeline(
                         } else if (iterations == 2) {
                             responder.sendText(user.waId, "Quase pronto, gerando o documento...")
                         }
-                        tokenUsage = aiResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) }
+                        // Accumulate across tool-loop iterations - each iteration is a separate
+                        // OpenRouter call, and undercounting here would make the monthly token
+                        // budget below silently under-enforce on exactly the multi-call CRM flows
+                        // that cost the most.
+                        tokenUsage = aiResponse.usage?.let {
+                            TokenUsage(
+                                prompt = (tokenUsage?.prompt ?: 0) + it.prompt_tokens,
+                                completion = (tokenUsage?.completion ?: 0) + it.completion_tokens,
+                            )
+                        } ?: tokenUsage
                         responseId = aiResponse.responseId
                         contextMessages.add(aiResponse.message)
                         for (call in aiResponse.calls) {
@@ -298,7 +343,12 @@ class MessagePipeline(
                 )
                 if (finalResponse is AiResponse.Text) {
                     replyText = finalResponse.content
-                    tokenUsage = finalResponse.usage?.let { TokenUsage(prompt = it.prompt_tokens, completion = it.completion_tokens) } ?: tokenUsage
+                    tokenUsage = finalResponse.usage?.let {
+                        TokenUsage(
+                            prompt = (tokenUsage?.prompt ?: 0) + it.prompt_tokens,
+                            completion = (tokenUsage?.completion ?: 0) + it.completion_tokens,
+                        )
+                    } ?: tokenUsage
                     responseId = finalResponse.responseId
                 }
             }
@@ -322,6 +372,7 @@ class MessagePipeline(
             sendCreatedDocuments(user.waId, createdDocuments, responder)
 
             conversations.bumpActivity(conversation.id, tokenUsage)
+            tokenUsage?.let { tenantUsage?.recordUsage((it.prompt + it.completion).toLong()) }
 
             deduplicationService.markProcessed(inbound.eventId)
 

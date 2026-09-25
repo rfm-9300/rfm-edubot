@@ -13,7 +13,6 @@ mobile/.kotlin
 
 *.iml
 .DS_Store
-/.env.example
 .claude
 .opencode
 /deploy.sh

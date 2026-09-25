@@ -17,6 +17,14 @@ data class Tenant(
     val overviewHiddenCards: List<String> = emptyList(),
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
+    /**
+     * Hard monthly OpenRouter token budget (prompt + completion). Once this tenant's usage for
+     * the current calendar month (UTC) reaches this, MessagePipeline stops calling the LLM and
+     * sends a fixed fallback message instead, so a bug or a single high-volume tenant can't run
+     * up an unbounded bill. 2,000,000 is a starting guess (~1500-4000 typical messages/month on
+     * the default cheap models) - tune per tenant as real usage data comes in.
+     */
+    val monthlyTokenBudget: Long = 2_000_000L,
     val status: TenantStatus = TenantStatus.ACTIVE,
     /** Branding + copy used when generating quote/invoice PDFs. */
     val documentTemplate: DocumentTemplate = DocumentTemplate(),

@@ -86,6 +86,7 @@ fun Route.tenantAdminRoutes(
                     enabledModules = DashboardModules.sanitize(request.enabledModules),
                     rateLimitPerHour = request.rateLimitPerHour,
                     rateLimitPerDay = request.rateLimitPerDay,
+                    monthlyTokenBudget = request.monthlyTokenBudget,
                     createdAt = now,
                     updatedAt = now,
                 )
@@ -109,6 +110,7 @@ fun Route.tenantAdminRoutes(
                     Updates.set("openrouterModel", request.openrouterModel?.trim()?.takeIf { it.isNotBlank() }),
                     Updates.set("rateLimitPerHour", request.rateLimitPerHour),
                     Updates.set("rateLimitPerDay", request.rateLimitPerDay),
+                    Updates.set("monthlyTokenBudget", request.monthlyTokenBudget),
                     Updates.set("updatedAt", now.toDate()),
                 )
                 updates.add(Updates.set("enabledModules", DashboardModules.sanitize(request.enabledModules)))
@@ -386,6 +388,7 @@ private data class TenantCreateRequest(
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
+    val monthlyTokenBudget: Long = 2_000_000L,
     val channels: List<ChannelBindingRequest> = emptyList(),
     val enabledModules: List<String>? = null,
 )
@@ -398,6 +401,7 @@ private data class TenantUpdateRequest(
     val openrouterModel: String? = null,
     val rateLimitPerHour: Int = 30,
     val rateLimitPerDay: Int = 200,
+    val monthlyTokenBudget: Long = 2_000_000L,
     val channels: List<ChannelBindingRequest>? = null,
     val enabledModules: List<String>? = null,
 )
@@ -436,6 +440,7 @@ private data class TenantDto(
     val availableModules: List<String>,
     val rateLimitPerHour: Int,
     val rateLimitPerDay: Int,
+    val monthlyTokenBudget: Long,
     val status: String,
     val channels: List<ChannelBindingDto>,
     val createdAt: String,
@@ -475,6 +480,7 @@ private fun Tenant.dto() = TenantDto(
     availableModules = DashboardModules.availableFor(),
     rateLimitPerHour = rateLimitPerHour,
     rateLimitPerDay = rateLimitPerDay,
+    monthlyTokenBudget = monthlyTokenBudget,
     status = status.name,
     channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank(), it.displayName, it.wabaId, it.source) },
     createdAt = createdAt.toString(),
