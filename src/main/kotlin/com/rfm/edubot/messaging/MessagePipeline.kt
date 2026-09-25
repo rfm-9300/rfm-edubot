@@ -27,6 +27,7 @@ import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.model.TenantTimeZones
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -56,6 +57,7 @@ class MessagePipeline(
     private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
     private val tenantUsage: TenantUsageRepository? = null,
     private val monthlyTokenBudget: Long = Long.MAX_VALUE,
+    private val timezoneId: String = TenantTimeZones.DEFAULT,
 ) {
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
@@ -229,10 +231,7 @@ class MessagePipeline(
             if (bookingTools != null) {
                 contextMessages.add(
                     1,
-                    ChatMessage(
-                        role = "system",
-                        content = "Booking tools are enabled for this tenant. Use list_booking_services and list_available_slots before create_booking. Summarize the proposed appointment and wait for explicit confirmation before write tools.",
-                    ),
+                    ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE),
                 )
             }
 
@@ -398,6 +397,8 @@ class MessagePipeline(
                 content = if (persona != null) "<persona>\n$persona\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
             )
         )
+        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.currentDateTimeContext(timezoneId)))
+
         SystemPrompts.crmPromptFor(enabledModules)?.let { crmPrompt ->
             contextMessages.add(ChatMessage(role = "system", content = crmPrompt))
         }

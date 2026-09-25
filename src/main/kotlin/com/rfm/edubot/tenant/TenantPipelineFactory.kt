@@ -115,6 +115,7 @@ class TenantPipelineFactory(
             enabledModules = modules,
             tenantUsage = TenantUsageRepository(mongo, tenant.id),
             monthlyTokenBudget = tenant.monthlyTokenBudget,
+            timezoneId = tenant.timezone,
         )
     }
 }

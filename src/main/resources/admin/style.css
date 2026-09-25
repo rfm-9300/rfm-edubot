@@ -683,6 +683,7 @@ html[data-theme="dark"] .lbl .req { color: var(--accent); }
 .inp::placeholder, .txt::placeholder { color: var(--ink-faint); font-weight: 600; }
 .inp:hover, .sel:hover, .txt:hover { border-color: var(--hairline-strong); }
 .inp:focus, .sel:focus, .txt:focus { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); background: var(--surface); }
+.inp:disabled, .sel:disabled, .txt:disabled { background: var(--surface-2); color: var(--ink-faint); cursor: not-allowed; }
 .inp--mono  { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .inp--right { text-align: right; }
 .txt { height: auto; min-height: 84px; padding: 10px 13px; resize: vertical; line-height: 1.5; }

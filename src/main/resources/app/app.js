@@ -28,6 +28,10 @@ const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+// AI chat bubbles render as plain pre-wrapped text (see .chat__msg in style.css), but the model
+// writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
+// else (numbered/bulleted lines, line breaks) already reads fine as plain text under pre-wrap.
+const renderChatText = (s = '') => escapeHTML(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
 const slugify = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const uiLocale = () => (window.I18N && I18N.locale()) || 'pt-PT';
 const fmtEUR = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
@@ -2258,7 +2262,7 @@ function renderAssistant(root) {
   const current = state.assistantThread;
   const threadRows = state.assistantThreads.map(t => `<button class="assistant__thread ${current?.thread.id === t.id ? 'is-active' : ''}" data-assistant-thread="${t.id}" type="button"><strong>${escapeHTML(t.title)}</strong><span>${escapeHTML(fmtDate(t.updatedAt))}</span></button>`).join('');
   const messages = (current?.messages || []).map(m => {
-    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>` : '';
+    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>` : '';
     if (!m.action) return bubble;
     const pending = m.action.status === 'PENDING';
     const details = assistantActionDetails(m.action);
@@ -2462,7 +2466,7 @@ function renderPersonaChatLog(busy = false) {
     log.innerHTML = `<div class="chat__empty">${escapeHTML(STR.chatEmpty)}</div>`;
     return;
   }
-  log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${escapeHTML(m.content)}</div>`).join('')
+  log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>`).join('')
     + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }
@@ -3284,6 +3288,15 @@ async function init() {
     toast(STR.quickCreateSoon);
   });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });
+  // setActive() sets location.hash itself on a nav click, so this only ever has real work to do
+  // for hash changes it didn't cause: browser Back/Forward, or a same-document navigation to a
+  // #tab URL. Without this listener the URL bar updates but the visible tab silently doesn't.
+  window.addEventListener('hashchange', () => {
+    if (!token) return;
+    const tab = (location.hash || '').replace('#', '') || 'overview';
+    if (tab === state.active) return;
+    setActive(tab);
+  });
   if (!token) return renderLogin();
   state.active = (location.hash || '').replace('#', '') || 'overview';
   try { await bootAuthed(); } catch { renderLogin(); }
