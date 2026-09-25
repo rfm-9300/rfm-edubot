@@ -50,7 +50,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.9.0")
 
-    implementation("com.typesafe:config:1.4.3")
+    implementation("com.typesafe:config:1.4.9")
     implementation("at.favre.lib:bcrypt:0.10.2")
 
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
