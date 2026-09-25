@@ -48,7 +48,7 @@ dependencies {
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
     implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.9.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.11.0")
 
     implementation("com.typesafe:config:1.4.3")
     implementation("at.favre.lib:bcrypt:0.10.2")
