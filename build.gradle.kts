@@ -62,8 +62,8 @@ dependencies {
     testImplementation("org.jetbrains.kotlin:kotlin-test-junit5:2.0.21")
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
-    testImplementation("org.testcontainers:mongodb:1.20.3")
-    testImplementation("org.testcontainers:junit-jupiter:1.20.3")
+    testImplementation("org.testcontainers:mongodb:1.21.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.21.4")
 }
 
 tasks.named<JavaExec>("run") {
