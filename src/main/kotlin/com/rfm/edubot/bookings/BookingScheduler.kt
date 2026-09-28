@@ -199,20 +199,24 @@ class BookingScheduler(
         }
     }
 
-    /** A completed booking becomes an open Serviços row on its client, ready to invoice. */
+    /**
+     * A completed booking becomes an open Serviços row on its client, ready to invoice. Bookings made
+     * before prices were snapshotted have none, so they bill at the service's current catalog price.
+     */
     private suspend fun billCompleted(booking: Booking): Booking {
         val rows = crm.clientServices ?: return booking
         val clientId = booking.clientId ?: return booking
         val performedAt = booking.startAt.toLocalDateTime(zone).date
         val row = booking.clientServiceId?.let { rows.findById(it) } ?: rows.findByBookingId(booking.id)
+        val service = services.findById(booking.serviceId)
         val linked = when {
             row == null -> rows.create(
                 clientId = clientId,
                 name = booking.serviceName.ifBlank { booking.serviceId },
                 notes = booking.notes,
                 quantity = 1.0,
-                unit = services.findById(booking.serviceId)?.unit.orEmpty(),
-                unitPriceCents = booking.priceCents ?: 0,
+                unit = service?.unit.orEmpty(),
+                unitPriceCents = booking.priceCents ?: service?.priceCents ?: 0,
                 bookingServiceId = null,
                 catalogItemId = booking.serviceId,
                 performedAt = performedAt,

@@ -16,6 +16,7 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.DatePeriod
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
@@ -164,6 +165,28 @@ class BookingFlowTest {
         assertEquals(row.id, again.clientServiceId, "re-completing reopens the same row")
         assertEquals(ClientServiceStatus.OPEN, rows.findById(row.id)!!.status)
         assertEquals(1, rows.list(clientId = booking.clientId).size)
+    }
+
+    @Test
+    fun `a booking stored without a price bills at the catalog price`() = runBlocking<Unit> {
+        val tenant = tenant()
+        val id = ObjectId()
+        val start = at(day(1), 10)
+        val created = Instant.parse("2026-08-01T09:00:00Z")
+        insert(
+            "bookings.appointments",
+            Document("_id", id).append("tenantId", tenant.id).append("catalogItemId", "srv-consulta").append("serviceName", "Consulta")
+                .append("contactName", "Legacy").append("contactPhone", "+351 917 000 000")
+                .append("startAt", date(start)).append("endAt", date(start.plus(60, DateTimeUnit.MINUTE)))
+                .append("status", "CONFIRMED").append("source", "WHATSAPP")
+                .append("createdAt", date(created)).append("updatedAt", date(created)),
+        )
+
+        val done = deps(tenant).scheduler.setStatus(id, BookingStatus.COMPLETED)
+
+        val row = assertNotNull(done.clientServiceId?.let { ClientServiceRepository(mongoModule, tenant.id).findById(it) })
+        assertEquals(35_00, row.unitPriceCents)
+        assertEquals("sessão", row.unit)
     }
 
     @Test

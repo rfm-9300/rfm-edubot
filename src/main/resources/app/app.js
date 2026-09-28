@@ -3643,6 +3643,11 @@ function findLoadedBooking(id) {
 function bookingServiceName(b) {
   return b.serviceName || state.bookingServices.find(s => s.id === b.serviceId)?.name || '';
 }
+// Bookings made before prices were snapshotted have none; the server bills those at the catalog price too.
+function bookingPrice(b) {
+  if (b.priceEur != null) return b.priceEur;
+  return state.bookingServices.find(s => s.id === b.serviceId)?.priceEur ?? null;
+}
 function bookingMinutes(b) { return Math.max(0, Math.round((new Date(b.endAt) - new Date(b.startAt)) / 60000)); }
 function bookingTimeRange(b) { return `${fmtTime(b.startAt)}–${fmtTime(b.endAt)}`; }
 function bookingWhen(b) {
@@ -3677,7 +3682,7 @@ function renderBookings(root) {
   const live = weekBookings().filter(b => b.status !== 'CANCELLED');
   const todays = state.bookingUpcoming.filter(b => b.status !== 'CANCELLED' && bookingLocal(b).slice(0, 10) === today);
   const pending = pendingUpcomingBookings();
-  const weekValue = live.filter(b => b.status !== 'NO_SHOW').reduce((sum, b) => sum + Number(b.priceEur || 0), 0);
+  const weekValue = live.filter(b => b.status !== 'NO_SHOW').reduce((sum, b) => sum + Number(bookingPrice(b) || 0), 0);
   const stats = statCards([
     { label: STR.bookingsStatToday, value: todays.length },
     { label: STR.bookingsStatWeek, value: live.length },
@@ -3832,7 +3837,7 @@ function bookingAgendaHtml() {
       <td class="mono">${escapeHTML(bookingTimeRange(b))}</td>
       <td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td>
       <td>${escapeHTML(bookingServiceName(b))}</td>
-      <td class="num">${b.priceEur != null ? fmtEUR(b.priceEur) : '—'}</td>
+      <td class="num">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : '—'}</td>
       <td>${bookingPill(b.status)}</td>
       <td class="right">${action}</td>
     </tr>`;
@@ -3919,7 +3924,7 @@ async function openBookingDetail(b) {
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    ${detailHead(b.contactName, bookingPill(b.status), b.priceEur || 0, bookingTone(b.status))}
+    ${detailHead(b.contactName, bookingPill(b.status), bookingPrice(b) || 0, bookingTone(b.status))}
     ${detailMeta([
       { label: STR.bookingsThWhen, value: bookingWhen(b) },
       { label: STR.bookingsService, value: [bookingServiceName(b), minutes ? fmtMinutes(minutes) : ''].filter(Boolean).join(' · ') },
@@ -3952,7 +3957,7 @@ function invoiceBooking(b) {
   form.className = 'form';
   const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   form.innerHTML = `
-    <p class="hint">${escapeHTML([b.contactName, bookingServiceName(b), fmtEUR(b.priceEur || 0)].filter(Boolean).join(' · '))}</p>
+    <p class="hint">${escapeHTML([b.contactName, bookingServiceName(b), fmtEUR(bookingPrice(b) || 0)].filter(Boolean).join(' · '))}</p>
     <div class="form__row"><label class="lbl" for="bk-due">${escapeHTML(t.invoiceDue)} <span class="req">●</span></label>
       <input class="inp" id="bk-due" type="date" required value="${due}" /></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsInvoice)}</button>`;
@@ -4003,7 +4008,7 @@ function openBookingForm(booking = null, opts = {}) {
       <div class="form__row"><label class="lbl" for="bk-duration">${escapeHTML(STR.bookingsDurationShort)}</label>
         <input class="inp inp--mono" type="number" min="5" step="5" id="bk-duration" value="${editing ? bookingMinutes(editing) : (preset?.durationMinutes || 30)}" /></div>
       <div class="form__row"><label class="lbl" for="bk-price">${escapeHTML(STR.bookingsPrice)}</label>
-        <input class="inp inp--mono inp--right" type="number" min="0" step="0.01" id="bk-price" value="${editing ? (editing.priceEur ?? '') : (preset?.priceEur ?? '')}" /></div>
+        <input class="inp inp--mono inp--right" type="number" min="0" step="0.01" id="bk-price" value="${editing ? (bookingPrice(editing) ?? '') : (preset?.priceEur ?? '')}" /></div>
       <div class="form__row form__row--full suggest-host"><label class="lbl" for="bk-name">${escapeHTML(STR.bookingsContactName)} <span class="req">●</span></label>
         <input class="inp" id="bk-name" autocomplete="off" required value="${escapeHTML(editing?.contactName || opts.client?.name || '')}" />
         <div class="suggest" id="bk-suggest-name" hidden></div></div>
