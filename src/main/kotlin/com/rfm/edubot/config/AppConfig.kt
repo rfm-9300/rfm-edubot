@@ -66,8 +66,26 @@ data class AppConfig(
         val jwtSecret: String,
         val jwtIssuer: String = "wabot-platform",
         val jwtExpiryHours: Int = 24,
-        val adminPasswordHash: String,
-    )
+        /** Blank turns password login off. */
+        val adminPasswordHash: String = "",
+        val googleSignIn: GoogleSignInConfig = GoogleSignInConfig(),
+    ) {
+        val passwordLoginEnabled: Boolean get() = adminPasswordHash.isNotBlank()
+    }
+
+    /**
+     * Backoffice sign-in with Google through Firebase Auth. The web values are public (they go to the
+     * browser); access is decided server-side by [allowedEmails].
+     */
+    data class GoogleSignInConfig(
+        val firebaseProjectId: String = "",
+        val webApiKey: String = "",
+        val authDomain: String = "",
+        val appId: String = "",
+        val allowedEmails: Set<String> = emptySet(),
+    ) {
+        val enabled: Boolean get() = firebaseProjectId.isNotBlank() && webApiKey.isNotBlank() && allowedEmails.isNotEmpty()
+    }
 
     companion object {
         private val log = LoggerFactory.getLogger("AppConfig")
@@ -117,8 +135,18 @@ data class AppConfig(
                 jwtSecret = getRequired(config, "app.admin.jwtSecret"),
                 jwtIssuer = config.getString("app.admin.jwtIssuer"),
                 jwtExpiryHours = config.getInt("app.admin.jwtExpiryHours"),
-                adminPasswordHash = getRequired(config, "app.admin.adminPasswordHash"),
+                adminPasswordHash = getOptional(config, "app.admin.adminPasswordHash"),
+                googleSignIn = GoogleSignInConfig(
+                    firebaseProjectId = getOptional(config, "app.admin.google.firebaseProjectId").trim(),
+                    webApiKey = getOptional(config, "app.admin.google.webApiKey").trim(),
+                    authDomain = getOptional(config, "app.admin.google.authDomain").trim(),
+                    appId = getOptional(config, "app.admin.google.appId").trim(),
+                    allowedEmails = parseEmails(getOptional(config, "app.admin.google.allowedEmails")),
+                ),
             )
+            if (!adminConfig.passwordLoginEnabled && !adminConfig.googleSignIn.enabled) {
+                log.warn("No backoffice sign-in method is configured: set ADMIN_EMAILS and FIREBASE_* for Google, or ADMIN_PASSWORD_HASH")
+            }
 
             logStartupKeys(config)
 
@@ -145,6 +173,9 @@ data class AppConfig(
         private fun getOptional(config: Config, path: String): String =
             if (config.hasPath(path)) config.getString(path) else ""
 
+        internal fun parseEmails(raw: String): Set<String> =
+            raw.split(',', ';', ' ').map { it.trim().lowercase() }.filter { it.contains('@') }.toSet()
+
         private fun logStartupKeys(config: Config) {
             val keys = listOf(
                 "ktor.deployment.port",
@@ -167,6 +198,11 @@ data class AppConfig(
                 "app.admin.jwtIssuer",
                 "app.admin.jwtExpiryHours",
                 "app.admin.adminPasswordHash",
+                "app.admin.google.firebaseProjectId",
+                "app.admin.google.webApiKey",
+                "app.admin.google.authDomain",
+                "app.admin.google.appId",
+                "app.admin.google.allowedEmails",
                 "app.pdf.storagePath",
             )
 

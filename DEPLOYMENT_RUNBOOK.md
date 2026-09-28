@@ -259,16 +259,33 @@ and prunes local copies older than 14 days (`RETENTION_DAYS`).
 
 Status: installed in root's crontab on `hillsong-vps` since 2026-09-28, with
 `APP_DIR=/root/whatsapp-bot` set explicitly in the cron line. The first archive
-was restore-tested into a throwaway container. No off-box copy yet
-(`RCLONE_REMOTE` is unset).
+was restore-tested into a throwaway container.
 
-**This alone does not protect against losing the VPS itself** — local backups
-sitting next to the database they back up survive accidental `docker volume
-rm` but not disk failure or the box disappearing. Strongly recommended:
-install `rclone`, configure a remote (S3-compatible bucket, Backblaze B2,
-etc.), and set `RCLONE_REMOTE` (e.g. in a small wrapper or cron env) so each
-backup is also copied off-box. Without an off-box copy, "backups" only
-protects against operator error, not infrastructure loss.
+### Off-box copy (Google Cloud Storage)
+
+Since 2026-09-28 every archive is also copied to `gs://thebotslab-backups/mongo/`
+(Firebase/GCP project `thebotslab`, billing account "Minha conta de faturamento",
+€5 budget alert). The cron line sets `RCLONE_REMOTE=gcs:thebotslab-backups/mongo`.
+
+- Bucket: `europe-west1`, private (uniform access, public access prevention),
+  objects deleted after 90 days, 7-day soft delete.
+- The VPS authenticates as `vps-backup@thebotslab.iam.gserviceaccount.com` with a key
+  at `~/whatsapp-bot/secrets/gcs-backup.json` (mode 600). That account has only
+  `storage.objectCreator` + `storage.objectViewer` on this bucket: it can upload and
+  read but **not delete**, so a compromised VPS cannot wipe the off-box copies.
+- rclone (Ubuntu package) remote `gcs` lives in `/root/.config/rclone/rclone.conf`
+  (`service_account_file`, `bucket_policy_only`, `no_check_bucket`).
+- Check it: `gcloud storage ls -l gs://thebotslab-backups/mongo/` (as `abizaria@gmail.com`).
+- Rotate the key: create a new one with `gcloud iam service-accounts keys create`,
+  replace the file on the VPS, then delete the old key id.
+
+Restoring from the bucket (when the VPS copy is gone):
+
+```bash
+gcloud storage cp gs://thebotslab-backups/mongo/mongo-<timestamp>.archive.gz .
+scp mongo-<timestamp>.archive.gz hillsong-vps:~/whatsapp-bot/backups/
+ssh hillsong-vps "cd ~/whatsapp-bot && ./restore-mongo.sh backups/mongo-<timestamp>.archive.gz"
+```
 
 ### Restoring
 
@@ -310,6 +327,25 @@ ssh hillsong-vps "crontab -l 2>/dev/null; echo '*/5 * * * * cd ~/whatsapp-bot &&
 the VPS by the deploy workflow (see "Sync compose files" in `deploy.yml`) but
 the cron entries above are one-time manual setup — CI does not install cron
 jobs.
+
+## Backoffice sign-in (Google via Firebase)
+
+`/backoffice` (and `/admin`, which redirects there) signs in with Google through
+Firebase Auth, project `thebotslab`. The browser gets a Firebase ID token and posts
+it to `POST /admin/auth/google`; the server checks Google's signature, the project,
+and that the verified email is in `ADMIN_EMAILS`, then issues the usual admin JWT.
+
+- VPS `.env`: `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
+  `FIREBASE_APP_ID` (public web config, from
+  `firebase apps:sdkconfig WEB --project thebotslab`) and `ADMIN_EMAILS`
+  (comma-separated). After editing, recreate the app:
+  `cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml up -d app`.
+- Allowed sign-in domains (Firebase Auth): `thebotslab.eu`, `thebotslab.pt` and their
+  `www.` hosts. A new host must be added there first, or sign-in fails with
+  `auth/unauthorized-domain`. `localhost` is not allowed.
+- Password login is a fallback while `ADMIN_PASSWORD_HASH` is set; remove the variable
+  to turn it off. `GET /admin/auth/config` shows which methods are active.
+- Refused sign-ins are logged by `AdminAuth` with the reason and email.
 
 ## Failure Rules
 

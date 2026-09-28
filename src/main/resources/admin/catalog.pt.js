@@ -569,7 +569,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
   },
 
   backoffice: {
-    login: { eyebrow: 'thebots.lab / platform', title: 'Backoffice', desc: 'Acesso de operador para gerir bots, tenants e equipas.', password: 'Password', submit: 'Entrar', invalid: 'Login inválido' },
+    login: { eyebrow: 'thebots.lab / platform', title: 'Backoffice', desc: 'Acesso de operador para gerir bots, tenants e equipas.', password: 'Password', submit: 'Entrar', invalid: 'Login inválido', google: 'Continuar com Google', or: 'ou use a password de administrador', notAllowed: 'Esta conta Google não tem acesso ao backoffice', googleFailed: 'Não foi possível entrar com o Google', cancelled: 'Início de sessão cancelado', unavailable: 'Não há nenhum método de acesso configurado.' },
     cancel: 'Cancelar', save: 'Guardar', confirm: 'Confirmar', delete: 'Eliminar', loadError: 'Erro ao carregar',
     error: p => `Erro: ${p.msg}`,
     kpiActive: 'Activos', kpiMessages: 'Mensagens', searchPlaceholder: 'Procurar tenant…', themeAria: 'Mudar tema',
