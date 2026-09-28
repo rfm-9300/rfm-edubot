@@ -79,7 +79,7 @@ class MessagePipeline(
                 val existing = conversations.findByWaId(inbound.waId, inbound.platform)
                 if (existing == null) {
                     val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
-                    messages.insert(
+                    messages.insertIfAbsent(
                         Message(
                             tenantId = inbound.tenantId,
                             conversationId = conversation.id,
@@ -101,7 +101,7 @@ class MessagePipeline(
 
             val existingConversation = conversations.findByWaId(inbound.waId, inbound.platform)
             if (existingConversation != null && !existingConversation.autoReplyEnabled) {
-                messages.insert(
+                messages.insertIfAbsent(
                     Message(
                         tenantId = inbound.tenantId,
                         conversationId = existingConversation.id,
@@ -141,7 +141,8 @@ class MessagePipeline(
                 status = MessageStatus.RECEIVED,
                 createdAt = SystemClock.now(),
             )
-            messages.insert(userMessage)
+            // A message re-queued after a restart may already be stored; carry on so it still gets its reply.
+            messages.insertIfAbsent(userMessage)
 
             if (tenantUsage != null && tenantUsage.tokensUsedThisMonth() >= monthlyTokenBudget) {
                 log.warn(

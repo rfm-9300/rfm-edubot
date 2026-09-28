@@ -82,8 +82,6 @@ import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
 import io.ktor.server.application.call
 import io.ktor.server.auth.authenticate
-import io.ktor.server.auth.jwt.JWTPrincipal
-import io.ktor.server.auth.principal
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
 import io.ktor.server.response.respond
@@ -148,30 +146,35 @@ fun Route.dashboardRoutes(
             call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid credentials"))
             return@post
         }
+        val tenant = tenantRepository.findById(user.tenantId)
+        if (tenant == null || !DashboardAccessPolicy.allows(tenant, user, DashboardAccessPolicy.TENANT_USER)) {
+            call.respond(HttpStatusCode.Forbidden, mapOf("error" to "account inactive"))
+            return@post
+        }
         dashboardUsers.markLogin(user.id, SystemClock.now())
         val admin = runtimeConfig.get().admin
-        call.respond(DashboardLoginResponse(token = dashboardToken(admin, user, "tenant", admin.jwtExpiryHours)))
+        call.respond(DashboardLoginResponse(token = dashboardToken(admin, user, DashboardAccessPolicy.TENANT_USER, admin.jwtExpiryHours)))
     }
 
     authenticate("dashboard") {
         route("/app/api") {
             get("/me") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 call.respond(MeDto(ctx.tenant.dto(), ctx.user?.dto(), DashboardModules.effectiveFor(ctx.tenant), ctx.principalType))
             }
             get("/overview") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.OVERVIEW)) return@get call.respond(HttpStatusCode.Forbidden)
                 val extended = call.request.queryParameters["extended"] == "1"
                 call.respond(OverviewService(mongo).build(ctx.tenant, extended))
             }
             get("/contacts") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONTACTS)) return@get call.respond(HttpStatusCode.Forbidden)
                 call.respond(UserRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"]).map { it.dto() })
             }
             patch("/contacts/{id}/status") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@patch
+                val ctx = call.dashboardContext() ?: return@patch
                 if (!ctx.requireModule(DashboardModules.CONTACTS)) return@patch call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<ContactStatusRequest>()
                 val user = UserRepository(mongo, ctx.tenant.id).setStatus(ObjectId(call.parameters["id"]), UserStatus.valueOf(request.status))
@@ -179,7 +182,7 @@ fun Route.dashboardRoutes(
                 call.respond(user.dto())
             }
             get("/conversations") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
                 val conversations = ConversationRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"])
                 val displayNames = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(conversations.map { it.userId })
@@ -187,13 +190,13 @@ fun Route.dashboardRoutes(
                 call.respond(conversations.map { it.dto(displayNames[it.userId], lastMessages[it.id]) })
             }
             get("/conversations/{id}/messages") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
                 val convo = ConversationRepository(mongo, ctx.tenant.id).findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
                 call.respond(MessageRepository(mongo, ctx.tenant.id).threadByConversation(convo.id).map { it.dto() })
             }
             patch("/conversations/{id}/auto-reply") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@patch
+                val ctx = call.dashboardContext() ?: return@patch
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@patch call.respond(HttpStatusCode.Forbidden)
                 val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
                     ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
@@ -205,7 +208,7 @@ fun Route.dashboardRoutes(
                 call.respond(conversation.dto(displayName, last))
             }
             post("/conversations/{id}/messages") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
                 val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
                     ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
@@ -245,13 +248,13 @@ fun Route.dashboardRoutes(
                 call.respond(HttpStatusCode.Created, message.dto())
             }
             get("/persona") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@get call.respond(HttpStatusCode.Forbidden)
                 val repo = PersonaRepository(mongo)
                 call.respond(personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
             }
             put("/persona") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
+                val ctx = call.dashboardContext() ?: return@put
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@put call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<PersonaUpdateRequest>()
                 val repo = PersonaRepository(mongo)
@@ -260,7 +263,7 @@ fun Route.dashboardRoutes(
                 call.respond(personaDto(persona, repo.listSources(ctx.tenant.id)))
             }
             post("/persona/sources") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
                 val content = call.receive<PersonaSourceRequest>().content.trim()
                 if (content.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "content is required"))
@@ -270,7 +273,7 @@ fun Route.dashboardRoutes(
                 call.respond(HttpStatusCode.Accepted, personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
             }
             post("/persona/sources/file") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
                 var filename: String? = null
                 var bytes: ByteArray? = null
@@ -295,21 +298,21 @@ fun Route.dashboardRoutes(
                 call.respond(HttpStatusCode.Accepted, personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
             }
             delete("/persona/sources/{id}") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                val ctx = call.dashboardContext() ?: return@delete
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@delete call.respond(HttpStatusCode.Forbidden)
                 val repo = PersonaRepository(mongo)
                 if (!repo.deleteSource(ctx.tenant.id, ObjectId(call.parameters["id"]))) return@delete call.respond(HttpStatusCode.NotFound)
                 call.respond(mapOf("deleted" to true))
             }
             post("/persona/rebuild") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
                 personaCompiler.rebuild(ctx.tenant.id, ctx.tenant.openrouterModel)
                 val repo = PersonaRepository(mongo)
                 call.respond(personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
             }
             post("/persona/test") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<PersonaTestRequest>()
                 val history = request.messages.filter { it.content.isNotBlank() }.takeLast(20)
@@ -318,7 +321,7 @@ fun Route.dashboardRoutes(
                 call.respond(PersonaTestResponse(reply))
             }
             get("/web-widget") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
                 call.respond(ctx.tenant.binding(Platform.WEB).toWebWidgetDto())
             }
@@ -327,7 +330,7 @@ fun Route.dashboardRoutes(
             // tenant's embedded snippet never breaks. ChannelBindingService re-indexes the registry and
             // evicts the pipeline so the new channel is live without a restart.
             post("/web-widget") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
                 val request = runCatching { call.receive<WebWidgetRequest>() }.getOrDefault(WebWidgetRequest())
                 val existing = ctx.tenant.binding(Platform.WEB)
@@ -350,7 +353,7 @@ fun Route.dashboardRoutes(
             // scoped to the authenticated tenant. Instagram's Meta-side deauthorize webhook
             // (InstagramMetaCallbacks) converges on the same ChannelBindingService.remove call.
             delete("/channels/{platform}/{externalId}") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                val ctx = call.dashboardContext() ?: return@delete
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
                 val platform = call.parameters["platform"]?.uppercase()?.let { runCatching { Platform.valueOf(it) }.getOrNull() }
                     ?: return@delete call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid platform"))
@@ -362,7 +365,7 @@ fun Route.dashboardRoutes(
             // Tenant-selectable UI language. Persisted on the tenant so it becomes the default for every
             // dashboard session; the browser keeps a per-session override (localStorage.uiLocale).
             post("/settings/locale") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<LocaleRequest>()
                 if (request.locale !in TenantLocales.SUPPORTED) {
@@ -373,12 +376,12 @@ fun Route.dashboardRoutes(
                 call.respond(mapOf("locale" to updated.locale))
             }
             get("/settings/overview") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
                 call.respond(OverviewHomeLayout.dto(ctx.tenant))
             }
             put("/settings/overview") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
+                val ctx = call.dashboardContext() ?: return@put
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@put call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<OverviewLayoutRequest>()
                 val hidden = OverviewHomeLayout.sanitize(request.hidden)
@@ -387,12 +390,12 @@ fun Route.dashboardRoutes(
                 call.respond(OverviewHomeLayout.dto(updated))
             }
             get("/settings/document-template") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
                 call.respond(ctx.tenant.documentTemplate.dto(ctx.tenant.name))
             }
             put("/settings/document-template") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@put
+                val ctx = call.dashboardContext() ?: return@put
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@put call.respond(HttpStatusCode.Forbidden)
                 val request = call.receive<DocumentTemplateRequest>()
                 val next = request.toTemplate(ctx.tenant.documentTemplate)
@@ -402,7 +405,7 @@ fun Route.dashboardRoutes(
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
             post("/settings/document-template/logo") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
                 var filename: String? = null
                 var bytes: ByteArray? = null
@@ -431,7 +434,7 @@ fun Route.dashboardRoutes(
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
             delete("/settings/document-template/logo") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                val ctx = call.dashboardContext() ?: return@delete
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
                 ctx.tenant.documentTemplate.logoPath?.let { runCatching { Files.deleteIfExists(Path.of(it)) } }
                 val next = ctx.tenant.documentTemplate.copy(logoPath = null)
@@ -441,7 +444,7 @@ fun Route.dashboardRoutes(
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
             get("/settings/document-template/logo") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
                 val path = ctx.tenant.documentTemplate.logoPath?.let(Path::of)
                     ?: return@get call.respond(HttpStatusCode.NotFound)
@@ -454,12 +457,12 @@ fun Route.dashboardRoutes(
                 call.respondBytes(Files.readAllBytes(path), contentType)
             }
             get("/settings/document-template/presets") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
+                val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
                 call.respond(ctx.tenant.designPresets())
             }
             post("/settings/document-template/presets") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
                 val name = call.receive<SaveDesignPresetRequest>().name.trim().take(60)
                 if (name.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required"))
@@ -480,7 +483,7 @@ fun Route.dashboardRoutes(
                 call.respond(updated.designPresets())
             }
             delete("/settings/document-template/presets/{id}") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@delete
+                val ctx = call.dashboardContext() ?: return@delete
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@delete call.respond(HttpStatusCode.Forbidden)
                 val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
                 val updated = tenantRepository.removeSavedDocumentTemplate(ctx.tenant.slug, id, SystemClock.now())
@@ -488,7 +491,7 @@ fun Route.dashboardRoutes(
                 call.respond(updated.designPresets())
             }
             post("/settings/document-template/presets/{id}/apply") {
-                val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@post
+                val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@post call.respond(HttpStatusCode.Forbidden)
                 val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                 val preset = BuiltInDesignTemplates.find(id) ?: ctx.tenant.savedDocumentTemplates.find { it.id == id }
@@ -504,10 +507,10 @@ fun Route.dashboardRoutes(
                 pipelineFactory.evict(updated.id)
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
-            dashboardAssistantRoutes(mongo, tenantRepository, dashboardUsers, aiClient)
-            crmRoutes(mongo, tenantRepository, dashboardUsers, runtimeConfig)
+            dashboardAssistantRoutes(mongo, aiClient)
+            crmRoutes(mongo, runtimeConfig)
             installBookingRoutes {
-                val ctx = dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
+                val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
                     ?: run {
                         respond(HttpStatusCode.Forbidden)
                         return@installBookingRoutes null
@@ -515,7 +518,7 @@ fun Route.dashboardRoutes(
                 bookingDeps(mongo, ctx.tenant, BookingSource.DASHBOARD)
             }
             installInstagramSocialRoutes {
-                val ctx = dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INSTAGRAM) }
+                val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.INSTAGRAM) }
                     ?: run {
                         respond(HttpStatusCode.Forbidden)
                         return@installInstagramSocialRoutes null
@@ -574,12 +577,12 @@ fun Route.dashboardImpersonationRoute(
         post("/admin/api/tenants/{slug}/impersonate") {
             val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val tenant = tenantRepository.findBySlug(slug) ?: return@post call.respond(HttpStatusCode.NotFound)
-            call.respond(DashboardLoginResponse(token = dashboardToken(runtimeConfig.get().admin, tenant, "operator-imp", 1)))
+            call.respond(DashboardLoginResponse(token = dashboardToken(runtimeConfig.get().admin, tenant, DashboardAccessPolicy.OPERATOR_IMPERSONATION, 1)))
         }
     }
 }
 
-private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantRepository, dashboardUsers: DashboardUserRepository, runtimeConfig: RuntimeConfig) {
+private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
     fun tenantDeps(ctx: DashboardContext): CrmDeps = CrmDeps(
         clients = ClientRepository(mongo, ctx.tenant.id),
         quotes = QuoteRepository(mongo, ctx.tenant.id),
@@ -595,19 +598,19 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
 
     route("/crm") {
         get("/clients") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             call.respond(deps.clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
         }
         post("/clients") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
         }
         patch("/clients/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateClientRequest>()
@@ -616,38 +619,38 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(client.dto())
         }
         get("/standard-items") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             call.respond(deps.standardItems.search(call.request.queryParameters["q"], call.request.queryParameters["type"]))
         }
         post("/standard-items") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<StandardItemRequest>()
             call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
         }
         post("/standard-items/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<StandardItemRequest>()
             call.respond(deps.standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         delete("/standard-items/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest)
             if (!deps.standardItems.delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
             call.respond(mapOf("deleted" to true))
         }
         get("/quotes") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val rows = deps.quotes.list(call.request.queryParameters["clientId"]?.let { ObjectId(it) }, call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { QuoteStatus.valueOf(it.uppercase()) })
             call.respond(rows.map { it.dto(deps.clients.findById(it.clientId)) })
         }
         post("/quotes") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateQuoteRequest>()
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
@@ -656,13 +659,13 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(HttpStatusCode.Created, quote.dto(client))
         }
         get("/quotes/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.respond(quote.dto(deps.clients.findById(quote.clientId)))
         }
         patch("/quotes/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<QuoteStatusRequest>()
             val status = runCatching { QuoteStatus.valueOf(request.status.uppercase()) }.getOrNull()
@@ -672,7 +675,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(quote.dto(deps.clients.findById(quote.clientId)))
         }
         post("/quotes/{id}/invoice") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) && it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) && it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@post call.respond(HttpStatusCode.NotFound)
             val request = call.receive<ConvertQuoteRequest>()
@@ -684,20 +687,20 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(HttpStatusCode.Created, invoice.dto(client))
         }
         get("/quotes/{id}/pdf") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val quote = deps.quotes.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
             val client = deps.clients.findById(quote.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.respondGeneratedPdf { deps.pdfGenerator.generateQuote(quote, client, deps.documentTemplate) }
         }
         get("/invoices") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val rows = deps.invoices.list(call.request.queryParameters["clientId"]?.let { ObjectId(it) }, call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { InvoiceStatus.valueOf(it.uppercase()) })
             call.respond(rows.map { it.dto(deps.clients.findById(it.clientId)) })
         }
         post("/invoices") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateInvoiceRequest>()
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
@@ -706,34 +709,34 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(HttpStatusCode.Created, invoice.dto(client))
         }
         get("/invoices/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
             val quoteNumber = invoice.quoteId?.let { deps.quotes.findById(it)?.number }
             call.respond(invoice.dto(deps.clients.findById(invoice.clientId), quoteNumber))
         }
         get("/invoices/{id}/pdf") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
             val client = deps.clients.findById(invoice.clientId) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.respondGeneratedPdf { deps.pdfGenerator.generateInvoice(invoice, client, deps.documentTemplate) }
         }
         patch("/invoices/{id}/paid") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val invoice = deps.invoices.markPaid(ObjectId(call.parameters["id"])) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(invoice.dto(deps.clients.findById(invoice.clientId)))
         }
         get("/services") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
             val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
             call.respond(deps.clientServices.list(clientId, status).map { it.dto(deps.clients.findById(it.clientId)) })
         }
         post("/services") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateClientServiceRequest>()
             val clientId = runCatching { ObjectId(request.clientId) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client required"))
@@ -753,7 +756,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(HttpStatusCode.Created, service.dto(client))
         }
         post("/services/invoice") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf {
+            val ctx = call.dashboardContext()?.takeIf {
                 it.requireModule(DashboardModules.SERVICES) && it.requireModule(DashboardModules.INVOICES)
             } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
@@ -774,7 +777,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             }
         }
         patch("/services/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<UpdateClientServiceRequest>()
@@ -792,7 +795,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(service.dto(deps.clients.findById(service.clientId)))
         }
         delete("/services/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
             when (deps.clientServices.delete(id)) {
@@ -802,19 +805,19 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             }
         }
         get("/suppliers") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             call.respond(deps.suppliers.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
         }
         post("/suppliers") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             call.respond(HttpStatusCode.Created, deps.suppliers.create(request.name, request.phone, request.address).dto())
         }
         patch("/suppliers/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateSupplierRequest>()
@@ -823,19 +826,19 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(supplier.dto())
         }
         get("/employees") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             call.respond(deps.employees.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
         }
         post("/employees") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateEmployeeRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             call.respond(HttpStatusCode.Created, deps.employees.create(request.name, request.phone, request.role).dto())
         }
         patch("/employees/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateEmployeeRequest>()
@@ -844,7 +847,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(employee.dto())
         }
         get("/payments") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val supplierId = call.request.queryParameters["supplierId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
             val employeeId = call.request.queryParameters["employeeId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
@@ -852,7 +855,7 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(deps.payments.list(supplierId, employeeId, status).map { deps.paymentDto(it) })
         }
         post("/payments") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreatePaymentRequest>()
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
@@ -877,14 +880,14 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
             call.respond(HttpStatusCode.Created, deps.paymentDto(payment))
         }
         get("/payments/{id}") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
             val payment = deps.payments.findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
             call.respond(deps.paymentDto(payment))
         }
         patch("/payments/{id}/paid") {
-            val ctx = call.dashboardContext(tenantRepository, dashboardUsers)?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val payment = deps.payments.markPaid(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
@@ -892,19 +895,6 @@ private fun Route.crmRoutes(mongo: MongoModule, tenantRepository: TenantReposito
         }
     }
 }
-
-internal suspend fun io.ktor.server.application.ApplicationCall.dashboardContext(tenantRepository: TenantRepository, users: DashboardUserRepository): DashboardContext? {
-    val principal = this.principal<JWTPrincipal>() ?: return null
-    val tenantId = ObjectId(principal.payload.getClaim("tenantId").asString())
-    val tenant = tenantRepository.findById(tenantId) ?: run { respond(HttpStatusCode.NotFound); return null }
-    val typ = principal.payload.getClaim("typ").asString()
-    val user = principal.payload.subject?.takeIf { typ == "tenant" }?.let { users.findById(ObjectId(it)) }
-    return DashboardContext(tenant, user, typ)
-}
-
-internal data class DashboardContext(val tenant: Tenant, val user: DashboardUser?, val principalType: String)
-
-internal fun DashboardContext.requireModule(id: String): Boolean = id in DashboardModules.effectiveFor(tenant)
 
 private suspend fun CrmDeps.paymentDto(payment: com.rfm.edubot.crm.model.Payment) = payment.dto(
     supplier = payment.supplierId?.let { suppliers.findById(it) },

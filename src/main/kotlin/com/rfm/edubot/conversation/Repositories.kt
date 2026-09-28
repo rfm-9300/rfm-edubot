@@ -1,5 +1,7 @@
 package com.rfm.edubot.conversation
 
+import com.mongodb.ErrorCategory
+import com.mongodb.MongoWriteException
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.IndexOptions
@@ -245,6 +247,16 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         collection.insertOne(doc)
         log.debug("Inserted message: id={}, role={}", message.id, message.role)
         return message
+    }
+
+    /** Like [insert], but returns false instead of throwing when this tenant already stored the same `waMessageId`. */
+    suspend fun insertIfAbsent(message: Message): Boolean = try {
+        insert(message)
+        true
+    } catch (e: MongoWriteException) {
+        if (e.error.category != ErrorCategory.DUPLICATE_KEY) throw e
+        log.info("Message already stored: waMessageId={}", message.waMessageId)
+        false
     }
 
     suspend fun lastN(conversationId: ObjectId, n: Int): List<Message> {

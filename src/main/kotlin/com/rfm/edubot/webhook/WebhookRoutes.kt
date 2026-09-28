@@ -124,17 +124,7 @@ private suspend fun handleWhatsAppWebhook(
 
             value.messages?.let { messages ->
                 for (message in messages) {
-                    if (deduplicationService.isDuplicate(message.id, body, tenant.id)) {
-                        log.debug("Skipping duplicate message: id={}", message.id)
-                        continue
-                    }
-                    val messageText = message.text?.body
-                    if (messageText.isNullOrBlank()) {
-                        log.debug("Skipping non-text message: type={}", message.type)
-                        continue
-                    }
-
-                    messageQueue.enqueue(
+                    val inbound = message.text?.body?.takeIf { it.isNotBlank() }?.let { messageText ->
                         InboundMessage(
                             tenantId = tenant.id,
                             phoneNumberId = phoneNumberId,
@@ -147,7 +137,17 @@ private suspend fun handleWhatsAppWebhook(
                             timestamp = message.timestamp,
                             eventId = message.id,
                         )
-                    )
+                    }
+                    if (deduplicationService.isDuplicate(message.id, body, tenant.id, inbound)) {
+                        log.debug("Skipping duplicate message: id={}", message.id)
+                        continue
+                    }
+                    if (inbound == null) {
+                        log.debug("Skipping non-text message: type={}", message.type)
+                        continue
+                    }
+
+                    messageQueue.enqueue(inbound)
                     log.info("Enqueued WhatsApp message: tenant={} from={} id={}", tenant.slug, message.from, message.id)
                 }
             }
@@ -200,25 +200,24 @@ private suspend fun handleInstagramWebhook(
             val sender = (if (message.isSelf) messaging.recipient else messaging.sender)?.id?.takeIf { it.isNotBlank() } ?: continue
             val mid = message.mid?.takeIf { it.isNotBlank() } ?: continue
             val text = message.text?.takeIf { it.isNotBlank() } ?: continue
-            if (deduplicationService.isDuplicate(mid, body, tenant.id)) {
+            val inbound = InboundMessage(
+                tenantId = tenant.id,
+                phoneNumberId = instagramAccountId,
+                platform = Platform.INSTAGRAM,
+                channelExternalId = instagramAccountId,
+                waId = sender,
+                waMessageId = mid,
+                messageText = text,
+                timestamp = entry.time?.toString().orEmpty(),
+                eventId = mid,
+                registerOnly = message.isSelf,
+            )
+            if (deduplicationService.isDuplicate(mid, body, tenant.id, inbound)) {
                 log.debug("Skipping duplicate Instagram message: mid={}", mid)
                 continue
             }
 
-            messageQueue.enqueue(
-                InboundMessage(
-                    tenantId = tenant.id,
-                    phoneNumberId = instagramAccountId,
-                    platform = Platform.INSTAGRAM,
-                    channelExternalId = instagramAccountId,
-                    waId = sender,
-                    waMessageId = mid,
-                    messageText = text,
-                    timestamp = entry.time?.toString().orEmpty(),
-                    eventId = mid,
-                    registerOnly = message.isSelf,
-                )
-            )
+            messageQueue.enqueue(inbound)
             log.info("Enqueued Instagram message: tenant={} from={} mid={} self={}", tenant.slug, sender, mid, message.isSelf)
         }
     }

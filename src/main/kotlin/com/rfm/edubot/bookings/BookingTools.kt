@@ -4,6 +4,7 @@ import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.bookings.model.BookingStatus
+import com.rfm.edubot.dashboard.DashboardModules
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
@@ -233,5 +234,6 @@ class BookingTools(
         )
         val WRITE_TOOL_NAMES = setOf("create_booking", "cancel_booking", "confirm_booking")
         val TOOL_NAMES = READ_ONLY_TOOL_NAMES + WRITE_TOOL_NAMES
+        val MODULE_OF_TOOL: Map<String, String> = TOOL_NAMES.associateWith { DashboardModules.BOOKINGS }
     }
 }

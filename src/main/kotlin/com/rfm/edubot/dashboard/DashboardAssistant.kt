@@ -191,27 +191,7 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
 }
 
 internal object DashboardAssistantToolPolicy {
-    private val moduleByTool = mapOf(
-        "search_clients" to DashboardModules.CLIENTS,
-        "create_client" to DashboardModules.CLIENTS,
-        "list_service_templates" to DashboardModules.QUOTES,
-        "list_standard_items" to DashboardModules.CATALOG,
-        "create_quote" to DashboardModules.QUOTES,
-        "update_quote" to DashboardModules.QUOTES,
-        "list_quotes" to DashboardModules.QUOTES,
-        "sum_quotes_by_client" to DashboardModules.QUOTES,
-        "create_invoice" to DashboardModules.INVOICES,
-        "list_invoices" to DashboardModules.INVOICES,
-        "mark_invoice_paid" to DashboardModules.INVOICES,
-        "sum_invoices_by_client" to DashboardModules.INVOICES,
-        "list_booking_services" to DashboardModules.BOOKINGS,
-        "list_availability" to DashboardModules.BOOKINGS,
-        "list_available_slots" to DashboardModules.BOOKINGS,
-        "list_bookings" to DashboardModules.BOOKINGS,
-        "create_booking" to DashboardModules.BOOKINGS,
-        "cancel_booking" to DashboardModules.BOOKINGS,
-        "confirm_booking" to DashboardModules.BOOKINGS,
-    )
+    private val moduleByTool = CrmTools.MODULE_OF_TOOL + BookingTools.MODULE_OF_TOOL
 
     private val readOnlyToolNames = CrmTools.READ_ONLY_TOOL_NAMES + BookingTools.READ_ONLY_TOOL_NAMES
 

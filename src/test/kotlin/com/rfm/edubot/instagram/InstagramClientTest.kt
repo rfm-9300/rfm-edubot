@@ -34,7 +34,7 @@ class InstagramClientTest {
     }
 
     @Test
-    fun `send text reports Graph delivery failure`() = runBlocking {
+    fun `send text reports Graph delivery failure`() = runBlocking<Unit> {
         val http = HttpClient(MockEngine) {
             engine {
                 addHandler {
@@ -53,7 +53,7 @@ class InstagramClientTest {
     }
 
     @Test
-    fun `send text rejects account without token`() = runBlocking {
+    fun `send text rejects account without token`() = runBlocking<Unit> {
         assertFailsWith<OutboundDeliveryException> {
             InstagramClient("", "ig-account-1").sendText("user-1", "Hello")
         }

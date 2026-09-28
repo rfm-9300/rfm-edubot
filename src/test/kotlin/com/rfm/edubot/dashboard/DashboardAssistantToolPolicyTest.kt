@@ -1,6 +1,7 @@
 package com.rfm.edubot.dashboard
 
 import com.rfm.edubot.ai.ToolDefinition
+import com.rfm.edubot.crm.CrmTools
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -27,6 +28,23 @@ class DashboardAssistantToolPolicyTest {
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("create_invoice", listOf(DashboardModules.CLIENTS)))
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("list_invoices", listOf(DashboardModules.INVOICES)))
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("unknown", DashboardModules.catalog))
+    }
+
+    @Test
+    fun `assistant gates every CRM tool by the same module as the WhatsApp bot`() {
+        val definitions = CrmTools.MODULE_OF_TOOL.keys.map { ToolDefinition(it, it, buildJsonObject {}) }
+        for (module in DashboardModules.catalog) {
+            val expected = CrmTools.MODULE_OF_TOOL.filterValues { it == module }.keys
+            val actual = DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(module)).map { it.name }.toSet()
+            assertEquals(expected, actual, "tools exposed for module $module")
+        }
+    }
+
+    @Test
+    fun `service templates follow the catalog module, where the CRM prompt describes them`() {
+        val definitions = listOf(ToolDefinition("list_service_templates", "list_service_templates", buildJsonObject {}))
+        assertEquals(1, DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(DashboardModules.CATALOG)).size)
+        assertEquals(0, DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(DashboardModules.QUOTES)).size)
     }
 
     @Test

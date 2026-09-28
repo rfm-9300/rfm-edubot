@@ -2,7 +2,6 @@ package com.rfm.edubot.dashboard
 
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.persistence.MongoModule
-import com.rfm.edubot.tenant.TenantRepository
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
 import io.ktor.server.request.receive
@@ -17,31 +16,29 @@ import org.bson.types.ObjectId
 
 internal fun Route.dashboardAssistantRoutes(
     mongo: MongoModule,
-    tenantRepository: TenantRepository,
-    dashboardUsers: DashboardUserRepository,
     aiClient: AiClient,
 ) {
     val service = DashboardAssistantService(mongo, aiClient)
 
     route("/assistant") {
         get("/threads") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@get
+            val ctx = call.assistantContext() ?: return@get
             call.respond(service.repository.listThreads(ctx.tenant.id, ctx.ownerKey).map { it.dto() })
         }
         post("/threads") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@post
+            val ctx = call.assistantContext() ?: return@post
             val request = runCatching { call.receive<CreateAssistantThreadRequest>() }.getOrDefault(CreateAssistantThreadRequest())
             call.respond(HttpStatusCode.Created, service.repository.createThread(ctx.tenant.id, ctx.ownerKey, request.title).dto())
         }
         get("/threads/{id}") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@get
+            val ctx = call.assistantContext() ?: return@get
             val threadId = call.parameters["id"].toObjectId() ?: return@get call.respond(HttpStatusCode.BadRequest)
             val thread = service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId)
                 ?: return@get call.respond(HttpStatusCode.NotFound)
             call.respond(AssistantThreadDetailDto(thread.dto(), service.repository.listMessages(ctx.tenant.id, ctx.ownerKey, threadId).map { it.dto() }))
         }
         post("/threads/{id}/messages") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@post
+            val ctx = call.assistantContext() ?: return@post
             val threadId = call.parameters["id"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) == null) return@post call.respond(HttpStatusCode.NotFound)
             val content = call.receive<AssistantMessageRequest>().content.trim()
@@ -52,7 +49,7 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/confirm") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@post
+            val ctx = call.assistantContext() ?: return@post
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (!service.confirm(ctx.tenant, ctx.ownerKey, threadId, ctx.modules, actionId)) {
@@ -61,7 +58,7 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/cancel") {
-            val ctx = call.assistantContext(tenantRepository, dashboardUsers) ?: return@post
+            val ctx = call.assistantContext() ?: return@post
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (!service.repository.cancelAction(ctx.tenant.id, ctx.ownerKey, threadId, actionId)) {
@@ -78,11 +75,8 @@ private data class AssistantRouteContext(val context: DashboardContext) {
     val ownerKey get() = context.user?.id?.toHexString() ?: "impersonated:${context.principalType}"
 }
 
-private suspend fun io.ktor.server.application.ApplicationCall.assistantContext(
-    tenantRepository: TenantRepository,
-    dashboardUsers: DashboardUserRepository,
-): AssistantRouteContext? {
-    val ctx = dashboardContext(tenantRepository, dashboardUsers) ?: return null
+private suspend fun io.ktor.server.application.ApplicationCall.assistantContext(): AssistantRouteContext? {
+    val ctx = dashboardContext() ?: return null
     if (!ctx.requireModule(DashboardModules.AI_ASSISTANT)) {
         respond(HttpStatusCode.Forbidden)
         return null

@@ -7,6 +7,10 @@ import com.auth0.jwt.interfaces.DecodedJWT
 import com.auth0.jwt.interfaces.JWTVerifier
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
+import com.rfm.edubot.dashboard.DashboardUserRepository
+import com.rfm.edubot.dashboard.attachDashboardContext
+import com.rfm.edubot.dashboard.resolveDashboardContext
+import com.rfm.edubot.tenant.TenantRepository
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
 import io.ktor.server.application.install
@@ -21,7 +25,7 @@ import kotlinx.datetime.Clock
 import kotlinx.serialization.Serializable
 import java.util.Date
 
-fun Application.configureAdminAuth(runtime: RuntimeConfig) {
+fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantRepository, dashboardUsers: DashboardUserRepository) {
     val dynamicVerifier = object : JWTVerifier {
         override fun verify(token: String): DecodedJWT = verifierFor(runtime.get().admin).verify(token)
         override fun verify(jwt: DecodedJWT): DecodedJWT = verifierFor(runtime.get().admin).verify(jwt)
@@ -36,9 +40,9 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig) {
         jwt("dashboard") {
             verifier(dynamicVerifier)
             validate { credential ->
-                val typ = credential.payload.getClaim("typ").asString()
-                val tenantId = credential.payload.getClaim("tenantId").asString()
-                if ((typ == "tenant" || typ == "operator-imp") && !tenantId.isNullOrBlank()) JWTPrincipal(credential.payload) else null
+                val context = resolveDashboardContext(credential.payload, tenants, dashboardUsers) ?: return@validate null
+                attachDashboardContext(context)
+                JWTPrincipal(credential.payload)
             }
         }
     }

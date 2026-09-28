@@ -110,6 +110,7 @@ class MessagePipelineTest {
 
         // Defaults every test relies on unless it overrides them.
         coEvery { messages.insert(any()) } answers { firstArg() }
+        coEvery { messages.insertIfAbsent(any()) } returns true
         coEvery { messages.lastNByWaId(any(), any(), any()) } returns emptyList()
         coEvery { conversations.bumpActivity(any(), any()) } returns Unit
         coEvery { deduplicationService.markProcessed(any()) } returns Unit
@@ -161,7 +162,7 @@ class MessagePipelineTest {
 
         pipeline.handle(inbound(eventId = "evt-register").copy(registerOnly = true), responder)
 
-        coVerify(exactly = 1) { messages.insert(any()) }
+        coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
         coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
         coVerify(exactly = 0) { responder.sendText(any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-register") }
@@ -177,7 +178,7 @@ class MessagePipelineTest {
 
         pipeline.handle(inbound(), responder)
 
-        coVerify(exactly = 1) { messages.insert(any()) }
+        coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
         coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
         coVerify(exactly = 0) { responder.sendText(any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
@@ -214,6 +215,25 @@ class MessagePipelineTest {
 
         coVerify(exactly = 1) { responder.sendText(u.waId, "Oi! Tudo bem, e você?") }
         coVerify(exactly = 1) { conversations.bumpActivity(convo.id, any()) }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+        coVerify(exactly = 0) { deduplicationService.markFailed(any()) }
+    }
+
+    @Test
+    fun `a message re-queued after a restart still gets its reply when it was already stored`() = runBlocking {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        coEvery { conversations.findByWaId(any(), any()) } returns null
+        val convo = conversation(u.id)
+        coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
+        every { rateLimiter.tryAcquire(any()) } returns RateDecision.Accept
+        coEvery { messages.insertIfAbsent(any()) } returns false
+        coEvery { aiClient.complete(any(), any(), any(), any()) } returns
+            AiResponse.Text(content = "Oi! Tudo bem, e você?", usage = null, responseId = "resp-1")
+
+        pipeline.handle(inbound("oi, tudo bem?"), responder)
+
+        coVerify(exactly = 1) { responder.sendText(u.waId, "Oi! Tudo bem, e você?") }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
         coVerify(exactly = 0) { deduplicationService.markFailed(any()) }
     }

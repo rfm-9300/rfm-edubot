@@ -15,6 +15,7 @@ import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
+import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
 import com.rfm.edubot.legal.legalRoutes
@@ -56,6 +57,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.datetime.Clock
 import org.slf4j.LoggerFactory
+import kotlin.time.Duration.Companion.minutes
 
 fun main(args: Array<String>) {
     val baseConfig = AppConfig.load()
@@ -72,11 +74,6 @@ fun main(args: Array<String>) {
     embeddedServer(Netty, port = runtimeConfig.get().port, host = "0.0.0.0") {
         bootstrapModule(runtimeConfig, mongoModule)
     }.start(wait = true)
-
-    Runtime.getRuntime().addShutdownHook(Thread {
-        log.info("Shutting down...")
-        mongoModule.shutdown()
-    })
 }
 
 fun Application.module() {
@@ -90,7 +87,14 @@ fun Application.module() {
     bootstrapModule(runtimeConfig, mongoModule)
 }
 
+/**
+ * How far back startup looks for messages a previous run accepted but never finished. Older ones are
+ * left alone so a restart never answers a customer's long-stale message.
+ */
+private val INBOUND_REPLAY_WINDOW = 30.minutes
+
 private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModule: MongoModule) {
+    val bootedAt = Clock.System.now()
     val appConfig = runtimeConfig.get()
     val tenantRepository = TenantRepository(mongoModule)
     val dashboardUserRepository = DashboardUserRepository(mongoModule)
@@ -134,6 +138,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
     )
 
+    val conversationLanes = ConversationLanes(pipelineScope)
     pipelineScope.launch {
         for (inbound in messageQueue.receiveChannel()) {
             val tenant = tenantRegistry.byExternalId(inbound.platform, inbound.channelExternalId)
@@ -148,7 +153,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
                 continue
             }
             val pipeline = pipelineFactory.getOrCreate(tenant)
-            launch {
+            conversationLanes.submit("${tenant.id}:${inbound.platform}:${inbound.waId}") {
                 try {
                     pipeline.handle(inbound, responder)
                 } catch (e: Exception) {
@@ -163,12 +168,27 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             }
         }
     }
+    // Runs before routing is installed so re-queued messages stay ahead of new ones from the same customer.
+    kotlinx.coroutines.runBlocking {
+        val log = LoggerFactory.getLogger("PipelineConsumer")
+        try {
+            val unfinished = deduplicationService.unprocessedInbound(bootedAt - INBOUND_REPLAY_WINDOW, bootedAt)
+            if (unfinished.isNotEmpty()) log.warn("Re-queuing {} inbound messages a previous run accepted but never finished", unfinished.size)
+            unfinished.forEach { messageQueue.enqueue(it) }
+        } catch (e: Exception) {
+            log.error("Could not re-queue unfinished inbound messages: {}", e.message, e)
+        }
+    }
+    monitor.subscribe(ApplicationStopped) {
+        LoggerFactory.getLogger("Application").info("Shutting down...")
+        mongoModule.shutdown()
+    }
 
     configureMonitoring()
     configureSerialization()
     configureStatusPages()
     configureWebSockets()
-    configureAdminAuth(runtimeConfig)
+    configureAdminAuth(runtimeConfig, tenantRepository, dashboardUserRepository)
 
     routing {
         get("/health") {
