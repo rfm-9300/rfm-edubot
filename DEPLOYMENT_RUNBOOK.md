@@ -139,11 +139,17 @@ ssh hillsong-vps "chmod +x ~/whatsapp-bot/remote-deploy.sh && TAG=latest ~/whats
 
 `scripts/remote-deploy.sh` pulls the image and runs `docker compose up -d --remove-orphans`.
 It does **not** `compose down` the whole stack, so Mongo is not bounced on every deploy.
+After health checks pass it deletes older `whatsapp-bot` images, keeping the new one and the
+previous known-good one (the rollback target), so deploys don't fill the disk.
+
+When running Compose by hand, pin `TAG` to `.last-good-tag`. Unset, it falls back
+to `:latest`, which is not necessarily what is deployed: CI deploys by commit SHA,
+and a deploy that fails health checks rolls back while `:latest` keeps the failed build.
 
 Emergency full recreate (still does not delete volumes):
 
 ```bash
-ssh hillsong-vps "cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml down && docker compose -f docker-compose.prod.yml up -d"
+ssh hillsong-vps 'cd ~/whatsapp-bot && export TAG=$(cat .last-good-tag) && docker compose -f docker-compose.prod.yml pull && docker compose -f docker-compose.prod.yml down && docker compose -f docker-compose.prod.yml up -d'
 ```
 
 ### Step 4 - Verify
@@ -338,13 +344,15 @@ and that the verified email is in `ADMIN_EMAILS`, then issues the usual admin JW
 - VPS `.env`: `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
   `FIREBASE_APP_ID` (public web config, from
   `firebase apps:sdkconfig WEB --project thebotslab`) and `ADMIN_EMAILS`
-  (comma-separated). After editing, recreate the app:
-  `cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml up -d app`.
+  (comma-separated). After editing, recreate the app on the deployed tag:
+  `cd ~/whatsapp-bot && TAG=$(cat .last-good-tag) docker compose -f docker-compose.prod.yml up -d app`.
 - Allowed sign-in domains (Firebase Auth): `thebotslab.eu`, `thebotslab.pt` and their
   `www.` hosts. A new host must be added there first, or sign-in fails with
   `auth/unauthorized-domain`. `localhost` is not allowed.
-- Password login is a fallback while `ADMIN_PASSWORD_HASH` is set; remove the variable
-  to turn it off. `GET /admin/auth/config` shows which methods are active.
+- Password login is off in production (since 2026-09-28): `ADMIN_PASSWORD_HASH` is not set.
+  If Google sign-in ever breaks, set it again in `.env` (see `.env.example` for generating the
+  bcrypt hash) and recreate the app with the command above. `GET /admin/auth/config` shows which
+  methods are active.
 - Refused sign-ins are logged by `AdminAuth` with the reason and email.
 
 ## Failure Rules

@@ -2,7 +2,9 @@
 set -euo pipefail
 
 # Runs on the production VPS. Pulls the published image and recreates the app
-# container without deleting Mongo volumes or touching .env.
+# container without deleting Mongo volumes or touching .env. After a healthy
+# deploy it removes older images of this repository, keeping the new one and
+# the rollback target.
 #
 # On a failed health check, automatically rolls back to the last tag that
 # passed health checks, so a bad merge doesn't leave prod down. The script
@@ -67,6 +69,25 @@ wait_for_health() {
   return 1
 }
 
+# Removes every image of REGISTRY_IMAGE except the given tags. Best-effort: the
+# deploy has already passed health checks, so a failure here must not fail it.
+prune_old_images() {
+  local keep_ids="" tag ref id removed=0
+  for tag in "$@"; do
+    keep_ids+=" $(docker image inspect -f '{{.Id}}' "${REGISTRY_IMAGE}:${tag}" 2>/dev/null || true)"
+  done
+  while read -r ref id; do
+    [[ " ${keep_ids} " == *" ${id} "* ]] && continue
+    [[ "$ref" == *":<none>" ]] && ref="$id"
+    if docker rmi "$ref" >/dev/null 2>&1; then
+      removed=$((removed + 1))
+    else
+      echo "Could not remove old image ${ref}" >&2
+    fi
+  done < <(docker images --no-trunc --format '{{.Repository}}:{{.Tag}} {{.ID}}' "$REGISTRY_IMAGE")
+  echo "Removed ${removed} old image tag(s) of ${REGISTRY_IMAGE}; kept: $*"
+}
+
 # Previous known-good tag, so we can roll back to it if this deploy fails.
 # Falls back to "latest" if this is the first deploy since this script's rollback logic shipped.
 previous_tag="latest"
@@ -86,6 +107,7 @@ echo "Waiting for /health and /ready..."
 if wait_for_health; then
   docker compose -f "${COMPOSE_FILE}" ps
   echo "$TAG" > "$LAST_GOOD_TAG_FILE"
+  prune_old_images "$TAG" "$previous_tag" || true
   exit 0
 fi
 
