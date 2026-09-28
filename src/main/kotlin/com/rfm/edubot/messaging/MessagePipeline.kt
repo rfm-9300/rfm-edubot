@@ -7,7 +7,9 @@ import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.ProfileLookupClient
+import com.rfm.edubot.bookings.BookingCallContext
 import com.rfm.edubot.bookings.BookingTools
+import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
@@ -27,6 +29,7 @@ import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.TenantTimeZones
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -229,10 +232,15 @@ class MessagePipeline(
             var useTools = shouldUseCrmTools(inbound.messageText) || shouldUseBookingTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
             var feedbackSent = false
             val toolDefinitions = crmTools.definitionsFor(enabledModules) + (bookingTools?.definitions ?: emptyList())
+            val bookingContext = BookingCallContext(
+                source = inbound.platform.bookingSource(),
+                customerName = user.displayName?.takeIf { it.isNotBlank() } ?: profileName,
+                customerPhone = if (inbound.platform == Platform.WHATSAPP) "+${user.waId}" else null,
+            )
             if (bookingTools != null) {
                 contextMessages.add(
                     1,
-                    ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE),
+                    ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE + "\n" + SystemPrompts.bookingCustomerNote(bookingContext.customerName, bookingContext.customerPhone)),
                 )
             }
 
@@ -301,7 +309,7 @@ class MessagePipeline(
                                         put("message", "Before creating or updating records, summarize the proposed data and ask the user to confirm with 'pode gerar' or 'confirmo'.")
                                     }
                                 } else if (bookingTools?.knows(call.name) == true) {
-                                    bookingTools.execute(call)
+                                    bookingTools.execute(call, bookingContext)
                                 } else {
                                     crmTools.execute(call)
                                 }
@@ -578,6 +586,8 @@ class MessagePipeline(
             "reserv",
             "cancelar marc",
             "cancelar agend",
+            "cita",
+            "reschedul",
         ).any { it in text }
     }
 
@@ -588,9 +598,16 @@ class MessagePipeline(
         "create_invoice",
         "mark_invoice_paid",
         "create_booking",
+        "reschedule_booking",
         "cancel_booking",
         "confirm_booking",
     )
+
+    private fun Platform.bookingSource(): BookingSource = when (this) {
+        Platform.WHATSAPP -> BookingSource.WHATSAPP
+        Platform.INSTAGRAM -> BookingSource.INSTAGRAM
+        Platform.WEB -> BookingSource.WEB
+    }
 
     private fun hasExplicitConfirmation(message: String, contextMessages: List<ChatMessage>): Boolean {
         val text = message.lowercase()

@@ -7,6 +7,7 @@ import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.Supplier
+import com.rfm.edubot.crm.MIN_BOOKING_MINUTES
 import com.rfm.edubot.crm.StandardItem
 import io.ktor.http.*
 import io.ktor.server.application.*
@@ -80,14 +81,19 @@ internal data class StandardItemRequest(
     val description: String,
     val unit: String,
     val defaultUnitPriceEur: Double,
+    val durationMinutes: Int? = null,
+    val bookable: Boolean? = null,
 ) {
-    fun toStandardItem(itemId: String) = StandardItem(
+    /** Omitted booking fields keep [existing]'s values, so clients that don't know them never reset them. */
+    fun toStandardItem(itemId: String, existing: StandardItem? = null) = StandardItem(
         id = itemId.trim(),
         type = type.trim().lowercase(),
         category = category.trim(),
         description = description.trim(),
         unit = unit.trim(),
         defaultUnitPriceEur = defaultUnitPriceEur,
+        durationMinutes = durationMinutes?.takeIf { it >= MIN_BOOKING_MINUTES } ?: existing?.durationMinutes,
+        bookable = bookable ?: existing?.bookable ?: false,
     )
 }
 
@@ -239,6 +245,7 @@ internal data class ClientServiceDto(
     val invoiceId: String? = null,
     val bookingServiceId: String? = null,
     val catalogItemId: String? = null,
+    val bookingId: String? = null,
     val performedAt: String? = null,
     val createdAt: String,
 )
@@ -288,6 +295,7 @@ internal fun com.rfm.edubot.crm.model.ClientService.dto(client: Client?) = Clien
     invoiceId = invoiceId?.toHexString(),
     bookingServiceId = bookingServiceId?.toHexString(),
     catalogItemId = catalogItemId,
+    bookingId = bookingId?.toHexString(),
     performedAt = performedAt?.toString(),
     createdAt = createdAt.toString(),
 )

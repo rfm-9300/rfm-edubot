@@ -56,5 +56,7 @@ class DashboardAssistantToolPolicyTest {
         assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("create_booking", listOf(DashboardModules.BOOKINGS)))
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("list_bookings", listOf(DashboardModules.BOOKINGS)))
         assertTrue(DashboardAssistantToolPolicy.isReadOnly("list_available_slots"))
+        assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("reschedule_booking", listOf(DashboardModules.BOOKINGS)))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("reschedule_booking", listOf(DashboardModules.CLIENTS)))
     }
 }

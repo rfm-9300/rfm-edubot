@@ -618,6 +618,12 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val client = deps.clients.update(id, request.name, request.phone, request.address) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(client.dto())
         }
+        get("/clients/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            call.respond(deps.clients.findById(id)?.dto() ?: return@get call.respond(HttpStatusCode.NotFound))
+        }
         get("/standard-items") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
@@ -634,7 +640,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<StandardItemRequest>()
-            call.respond(deps.standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound))
+            val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
+            call.respond(deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         delete("/standard-items/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@delete call.respond(HttpStatusCode.Forbidden)

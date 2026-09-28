@@ -26,8 +26,29 @@ object SystemPrompts {
     """.trimIndent()
 
     /** Note injected whenever booking tools are offered, shared by the WhatsApp pipeline and the dashboard assistant. */
-    val BOOKING_TOOLS_NOTE =
-        "Booking tools are enabled for this tenant. Use list_booking_services and list_available_slots before create_booking. Summarize the proposed appointment and wait for explicit confirmation before write tools."
+    val BOOKING_TOOLS_NOTE = """
+        Booking tools are enabled for this tenant. Bookable services come from the company catalog: call list_booking_services for their ids, durations and prices.
+        Before proposing a time, call list_available_slots and only offer times it returns. Times are in the tenant timezone; say them as local times (e.g. "Friday at 10:30").
+        When booking for an existing CRM client, find them with search_clients (if available) and pass client_id.
+        Summarize service, day, time and price once, and wait for explicit confirmation before create_booking, reschedule_booking, cancel_booking or confirm_booking.
+        To move an appointment use reschedule_booking — never cancel and re-create it. Never say a booking was made, moved or cancelled unless the tool result confirms it.
+    """.trimIndent()
+
+    /** Who the conversation is with, so the model books for them without asking for details the channel already gave. */
+    fun bookingCustomerNote(name: String?, phone: String?): String {
+        val hasName = !name.isNullOrBlank()
+        val hasPhone = !phone.isNullOrBlank()
+        return when {
+            hasName && hasPhone ->
+                "This conversation is with the customer $name, phone $phone. When they book for themselves, omit contact_name and contact_phone — create_booking fills them in. Don't ask for details you already have."
+            hasPhone ->
+                "This conversation is with the customer on phone $phone (name unknown). When they book for themselves, ask for their name, pass it as contact_name and omit contact_phone."
+            hasName ->
+                "This conversation is with the customer $name; their phone is unknown in this channel. Ask for it before create_booking and pass it as contact_phone (contact_name can be omitted)."
+            else ->
+                "The customer's name and phone are unknown in this channel: ask for both before create_booking and pass them as contact_name and contact_phone."
+        }
+    }
 
     /**
      * Tells the model what "today" actually is. Neither the WhatsApp pipeline nor the dashboard

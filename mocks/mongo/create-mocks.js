@@ -83,6 +83,9 @@ const standardItems = [
   { id: "mat-tinta-acrilica", type: "material", category: "Fachadas", description: "Tinta acrilica exterior premium", unit: "l", defaultUnitPriceEur: 12 },
   { id: "srv-membrana-liquida", type: "service", category: "Coberturas", description: "Aplicacao de membrana liquida impermeabilizante", unit: "m2", defaultUnitPriceEur: 22 },
   { id: "mat-membrana-liquida", type: "material", category: "Coberturas", description: "Membrana liquida elastica", unit: "kg", defaultUnitPriceEur: 7.5 },
+  // Bookable services: Bookings offers catalog services that have a duration and the bookable flag.
+  { id: "srv-consultation", type: "service", category: "Marcações", description: "Consultation", unit: "sessão", defaultUnitPriceEur: 60, durationMinutes: 60, bookable: true },
+  { id: "srv-site-visit", type: "service", category: "Marcações", description: "Site visit", unit: "visita", defaultUnitPriceEur: 45, durationMinutes: 90, bookable: true },
 ];
 
 const users = [
@@ -404,27 +407,6 @@ if (seedTenantId) {
   payments.forEach((item) => { item.tenantId = seedTenantId; });
 }
 
-const bookingServices = seedTenantId ? [
-  {
-    _id: ids.bookingServices.consult,
-    tenantId: seedTenantId,
-    name: "Consultation",
-    durationMinutes: 60,
-    active: true,
-    createdAt: now,
-    updatedAt: now,
-  },
-  {
-    _id: ids.bookingServices.visit,
-    tenantId: seedTenantId,
-    name: "Site visit",
-    durationMinutes: 90,
-    active: true,
-    createdAt: now,
-    updatedAt: now,
-  },
-] : [];
-
 const bookingAvailability = seedTenantId ? [
   { _id: oid("665f61000000000000000001"), tenantId: seedTenantId, dayOfWeek: 1, startLocal: "09:00", endLocal: "17:00" },
   { _id: oid("665f61000000000000000002"), tenantId: seedTenantId, dayOfWeek: 2, startLocal: "09:00", endLocal: "17:00" },
@@ -437,10 +419,12 @@ const bookingAppointments = seedTenantId ? [
   {
     _id: ids.bookings.b1,
     tenantId: seedTenantId,
-    serviceId: ids.bookingServices.consult,
+    catalogItemId: "srv-consultation",
+    serviceName: "Consultation",
+    priceCents: cents(60),
     clientId: ids.clients.hillsong,
-    contactName: "Maria Silva",
-    contactPhone: "+351910000002",
+    contactName: "Hillsong Portugal",
+    contactPhone: "+351910100001",
     startAt: date("2026-05-21T09:00:00.000Z"),
     endAt: date("2026-05-21T10:00:00.000Z"),
     status: "CONFIRMED",
@@ -452,10 +436,12 @@ const bookingAppointments = seedTenantId ? [
   {
     _id: ids.bookings.b2,
     tenantId: seedTenantId,
-    serviceId: ids.bookingServices.visit,
+    catalogItemId: "srv-site-visit",
+    serviceName: "Site visit",
+    priceCents: cents(45),
     clientId: ids.clients.martins,
-    contactName: "Joao Costa",
-    contactPhone: "+351910000003",
+    contactName: "Martins Digital Lda",
+    contactPhone: "+351910100002",
     startAt: date("2026-05-22T14:00:00.000Z"),
     endAt: date("2026-05-22T15:30:00.000Z"),
     status: "PENDING",
@@ -509,7 +495,6 @@ insertMany("crm.sequences", [
   { name: "employee_number", value: 2 },
   { name: "payment_number", value: 3 },
 ].map((item) => seedTenantId ? { ...item, tenantId: seedTenantId } : item));
-insertMany("bookings.services", bookingServices);
 insertMany("bookings.availability", bookingAvailability);
 insertMany("bookings.appointments", bookingAppointments);
 
@@ -527,7 +512,7 @@ const summary = {
   crm_payments: target.getCollection("crm.payments").countDocuments({ _id: { $in: payments.map((item) => item._id) } }),
   crm_standard_items: target.getCollection("crm.standard_items").countDocuments({ id: { $in: standardItems.map((item) => item.id) } }),
   crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: ["client_number", "quote_number", "invoice_number", "supplier_number", "employee_number", "payment_number"] } }),
-  booking_services: target.getCollection("bookings.services").countDocuments({ _id: { $in: Object.values(ids.bookingServices) } }),
+  bookable_services: target.getCollection("crm.standard_items").countDocuments({ id: { $in: ["srv-consultation", "srv-site-visit"] }, bookable: true }),
   booking_availability: target.getCollection("bookings.availability").countDocuments({ _id: { $in: bookingAvailability.map((item) => item._id) } }),
   booking_appointments: target.getCollection("bookings.appointments").countDocuments({ _id: { $in: Object.values(ids.bookings) } }),
 };

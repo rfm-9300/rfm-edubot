@@ -10,11 +10,8 @@ import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
-import com.rfm.edubot.bookings.AvailabilityRepository
-import com.rfm.edubot.bookings.BookingRepository
-import com.rfm.edubot.bookings.BookingScheduler
-import com.rfm.edubot.bookings.BookingServiceRepository
 import com.rfm.edubot.bookings.BookingTools
+import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
@@ -322,18 +319,7 @@ internal class DashboardAssistantService(
             InvoiceRepository(mongo, tenant.id),
             StandardItemRepository(mongo, tenant.id),
         )
-        val bookingServices = BookingServiceRepository(mongo, tenant.id)
-        val availability = AvailabilityRepository(mongo, tenant.id)
-        val bookings = BookingRepository(mongo, tenant.id)
-        val booking = BookingTools(
-            services = bookingServices,
-            availability = availability,
-            bookings = bookings,
-            scheduler = BookingScheduler(bookingServices, availability, bookings, tenant.timezone),
-            timezoneId = tenant.timezone,
-            source = BookingSource.ASSISTANT,
-        )
-        return AssistantToolFacade(crm, booking)
+        return AssistantToolFacade(crm, bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools())
     }
 
     private class AssistantToolFacade(private val crm: CrmTools, private val booking: BookingTools) {

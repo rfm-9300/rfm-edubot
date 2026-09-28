@@ -2,11 +2,7 @@ package com.rfm.edubot.tenant
 
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.TenantUsageRepository
-import com.rfm.edubot.bookings.AvailabilityRepository
-import com.rfm.edubot.bookings.BookingRepository
-import com.rfm.edubot.bookings.BookingScheduler
-import com.rfm.edubot.bookings.BookingServiceRepository
-import com.rfm.edubot.bookings.BookingTools
+import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.config.RuntimeConfig
@@ -81,21 +77,7 @@ class TenantPipelineFactory(
         val invoices = InvoiceRepository(mongo, tenant.id)
         val items = StandardItemRepository(mongo, tenant.id)
         val compiledPersona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions }
-        val bookingTools = if (DashboardModules.BOOKINGS in modules) {
-            val bookingServices = BookingServiceRepository(mongo, tenant.id)
-            val availability = AvailabilityRepository(mongo, tenant.id)
-            val bookings = BookingRepository(mongo, tenant.id)
-            BookingTools(
-                services = bookingServices,
-                availability = availability,
-                bookings = bookings,
-                scheduler = BookingScheduler(bookingServices, availability, bookings, tenant.timezone),
-                timezoneId = tenant.timezone,
-                source = BookingSource.WHATSAPP,
-            )
-        } else {
-            null
-        }
+        val bookingTools = if (DashboardModules.BOOKINGS in modules) bookingDeps(mongo, tenant, BookingSource.WHATSAPP).tools() else null
         return MessagePipeline(
             users = UserRepository(mongo, tenant.id),
             conversations = ConversationRepository(mongo, tenant.id),

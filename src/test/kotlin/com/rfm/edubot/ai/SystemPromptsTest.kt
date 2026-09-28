@@ -48,4 +48,14 @@ class SystemPromptsTest {
         val prompt = SystemPrompts.crmPromptFor(setOf(DashboardModules.CLIENTS))!!
         assertFalse(prompt.contains("portugues brasileiro"))
     }
+
+    @Test
+    fun `booking customer note never asks for a phone the channel already gave`() {
+        val whatsApp = SystemPrompts.bookingCustomerNote("Inês", "+351915000000")
+        assertTrue(whatsApp.contains("+351915000000"))
+        assertTrue(whatsApp.contains("omit contact_name and contact_phone"))
+        assertTrue(SystemPrompts.bookingCustomerNote("Inês", null).contains("phone is unknown"))
+        assertTrue(SystemPrompts.bookingCustomerNote(null, null).contains("ask for both"))
+        assertTrue(SystemPrompts.BOOKING_TOOLS_NOTE.contains("reschedule_booking"))
+    }
 }

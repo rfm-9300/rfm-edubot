@@ -28,6 +28,9 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         return collection.find(scoped(Filters.`in`("_id", ids))).toList().map { it.toClientService() }
     }
 
+    suspend fun findByBookingId(bookingId: ObjectId): ClientService? =
+        collection.find(scoped(Filters.eq("bookingId", bookingId))).firstOrNull()?.toClientService()
+
     suspend fun list(clientId: ObjectId? = null, status: ClientServiceStatus? = null): List<ClientService> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
@@ -49,6 +52,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         bookingServiceId: ObjectId?,
         catalogItemId: String?,
         performedAt: LocalDate?,
+        bookingId: ObjectId? = null,
     ): ClientService {
         val now = SystemClock.now()
         val qty = quantity.takeIf { it > 0 } ?: 1.0
@@ -63,6 +67,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             totalCents = clientServiceTotals(qty, unitPriceCents),
             bookingServiceId = bookingServiceId,
             catalogItemId = catalogItemId?.trim()?.takeIf { it.isNotBlank() },
+            bookingId = bookingId,
             performedAt = performedAt,
             createdAt = now,
             updatedAt = now,

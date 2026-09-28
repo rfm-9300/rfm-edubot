@@ -1264,19 +1264,53 @@ html[data-theme="dark"] .pulse--urgent { background: color-mix(in srgb, var(--ba
   border-right: 1px solid var(--line);
 }
 .cal-grid__dayhead { padding: 10px 8px; background: var(--surface-2, var(--surface)); font-size: 12px; font-weight: 700; }
+.cal-grid__dayhead.is-today { color: var(--accent-deep); box-shadow: inset 0 -2px 0 var(--accent); }
 .cal-grid__hour { padding: 8px 6px; font-size: 11px; color: var(--ink-mute); }
 .cal-grid__cell { min-height: 52px; padding: 4px; cursor: pointer; vertical-align: top; }
+.cal-grid__cell.is-today { background: color-mix(in srgb, var(--accent) 4%, transparent); }
+.cal-grid__cell.is-closed { background: repeating-linear-gradient(-45deg, var(--surface-2) 0 6px, transparent 6px 12px); }
 .cal-grid__cell:hover { background: color-mix(in srgb, var(--accent) 8%, transparent); }
 .cal-event {
-  display: block; width: 100%; margin: 0 0 4px; padding: 5px 6px; border: 0; border-radius: 8px;
-  background: color-mix(in srgb, var(--accent) 18%, var(--surface)); color: var(--ink);
-  font-size: 11px; text-align: left; cursor: pointer;
+  display: flex; flex-direction: column; gap: 1px; width: 100%; margin: 0 0 4px; padding: 5px 7px; border: 0; border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 16%, var(--surface)); box-shadow: inset 3px 0 0 var(--accent); color: var(--ink);
+  font-size: 11px; line-height: 1.3; text-align: left; cursor: pointer;
 }
-.cal-event--confirmed { background: color-mix(in srgb, #2f9e44 22%, var(--surface)); }
-.cal-event--pending { background: color-mix(in srgb, #f08c00 22%, var(--surface)); }
-.cal-event--cancelled { opacity: .55; text-decoration: line-through; }
-.cal-event--completed { background: color-mix(in srgb, var(--ink-mute) 18%, var(--surface)); }
-.booking-avail-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+.cal-event:focus-visible { outline: none; box-shadow: inset 3px 0 0 var(--accent), 0 0 0 3px var(--accent-soft); }
+.cal-event__time { font-size: 10.5px; color: var(--ink-mute); }
+.cal-event__who { font-weight: 800; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-event__what { color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cal-event--confirmed { background: var(--ok-soft); box-shadow: inset 3px 0 0 var(--ok); }
+.cal-event--pending { background: var(--warn-soft); box-shadow: inset 3px 0 0 var(--warn); }
+.cal-event--completed { background: var(--info-soft); box-shadow: inset 3px 0 0 var(--info); }
+.cal-event--no-show { background: var(--bad-soft); box-shadow: inset 3px 0 0 var(--bad); }
+.cal-event--cancelled { background: var(--surface-2); box-shadow: inset 3px 0 0 var(--ink-faint); opacity: .6; }
+.cal-event--cancelled .cal-event__who { text-decoration: line-through; }
+html[data-theme="dark"] .cal-grid__dayhead.is-today { color: var(--accent); }
+.booking-avail { display: grid; gap: 8px; }
+.booking-avail-row { display: grid; grid-template-columns: 1.3fr 1fr 1fr 30px; gap: 8px; align-items: center; }
+.booking-avail-row--head { margin-bottom: -4px; }
+.booking-services__duration { max-width: 96px; }
+.slot-picks { display: flex; flex-wrap: wrap; gap: 6px; min-height: 28px; align-items: center; }
+.suggest-host { position: relative; }
+.suggest {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 5; margin-top: 4px;
+  display: grid; padding: 4px; border: 1px solid var(--line); border-radius: var(--r-sm);
+  background: var(--surface); box-shadow: var(--shadow-md);
+}
+.suggest[hidden] { display: none; }
+.suggest__item {
+  display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: var(--r-xs);
+  background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
+}
+.suggest__item span { color: var(--ink-mute); font-size: 12px; }
+.suggest__item:hover, .suggest__item:focus-visible { background: var(--surface-2); outline: none; }
+.tbl tbody tr.is-day td,
+.tbl tbody tr.is-day:hover td {
+  padding: 8px 18px; background: var(--surface-2); color: var(--ink-mute); cursor: default;
+  font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase;
+}
+.form__check { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--ink-2); cursor: pointer; }
+.form__check input { width: 16px; height: 16px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 
 /* Document template studio */
 .tpl { padding: 18px; margin-bottom: 18px; }
@@ -1765,7 +1799,9 @@ html[data-layout="minimal"] .drawer__title { font-size: 18px; font-weight: 600; 
 html[data-layout="minimal"] .drawer__foot { background: var(--surface); }
 html[data-layout="minimal"] .detail__meta-label,
 html[data-layout="minimal"] .snapshot__metric-label,
-html[data-layout="minimal"] .assistant__action-label { font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+html[data-layout="minimal"] .assistant__action-label,
+html[data-layout="minimal"] .tbl tbody tr.is-day td { font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+html[data-layout="minimal"] .cal-event { border-radius: 6px; }
 html[data-layout="minimal"] .toast { border-radius: 10px; }
 html[data-layout="minimal"] .auth__card { border-radius: 16px; }
 html[data-layout="minimal"] .auth__mark { border-radius: 10px; box-shadow: none; }

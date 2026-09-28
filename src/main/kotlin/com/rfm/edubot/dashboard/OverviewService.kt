@@ -3,7 +3,6 @@ package com.rfm.edubot.dashboard
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.Projections
 import com.rfm.edubot.bookings.BookingRepository
-import com.rfm.edubot.bookings.BookingServiceRepository
 import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
@@ -222,15 +221,13 @@ class OverviewService(private val mongo: MongoModule) {
             .filter { it.status != BookingStatus.CANCELLED }
             .sortedBy { it.startAt }
             .take(OverviewMath.AGENDA_LIMIT)
-        if (today.isEmpty()) return emptyList()
-        val services = BookingServiceRepository(mongo, tenantId).list().associate { it.id to it.name }
         return today.map {
             OverviewAgendaItemDto(
                 id = it.id.toHexString(),
                 startAt = it.startAt.toString(),
                 endAt = it.endAt.toString(),
                 contactName = it.contactName,
-                service = services[it.serviceId].orEmpty(),
+                service = it.serviceName,
                 status = it.status.name,
             )
         }

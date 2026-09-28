@@ -108,7 +108,7 @@ graph TD
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
 | `crm/` | Client, quote, invoice, supplier, payment models/repositories, CRM tool executor, PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio) |
-| `bookings/` | Bookable services, weekly availability, appointments, slot engine, booking tools |
+| `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
 | `channel/` | `OutboundClient` interface and per-channel capability flags used by the pipeline |
@@ -156,8 +156,8 @@ Login refuses inactive accounts with `403`.
 Optional `services` module (also on whenever `clients` is on): client-attached work in
 `crm.client_services`. Managers record priced rows on a client, cancel or delete rows that are not yet invoiced, and group open rows into one
 invoice via `POST /app/api/crm/services/invoice`. Invoiced rows stay attached to that invoice. Delete is `DELETE /app/api/crm/services/{id}` (409 when the row is invoiced). Cancel is `PATCH /app/api/crm/services/{id}` with `status: CANCELLED`. The Services table filters by client
-(client-side; `GET /app/api/crm/services?clientId=` is also available). Booking service types
-stay under Bookings.
+(client-side; `GET /app/api/crm/services?clientId=` is also available). Completing a booking adds an
+open row here (see Bookings); such rows carry `bookingId`.
 
 ### Suppliers and payments
 
@@ -173,10 +173,43 @@ Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the 
 
 ### Bookings
 
-Optional `bookings` module: weekly availability, bookable services, conflict-checked appointments.
-Instants are stored in UTC; wall times use `Tenant.timezone` (IANA, default `Europe/Lisbon`).
+Optional `bookings` module: weekly opening hours, conflict-checked appointments, and the CRM links
+below. Instants are stored in UTC; wall times use `Tenant.timezone` (IANA, default `Europe/Lisbon`).
 Surfaces: `/app/api/bookings/*`, admin mirror `/admin/api/tenants/{slug}/bookings/*`, WhatsApp
 `BookingTools` (only when the module is enabled), and dashboard assistant tools mapped to `bookings`.
+
+- **Services are catalog services.** A `crm.standard_items` row of type `service` is bookable when
+  `bookable = true` and `durationMinutes >= 5`. `GET/POST /bookings/services` read and write those
+  catalog rows (`BookableServiceRepository`); there is no separate booking-services list. The old
+  `bookings.services` collection is legacy: `BookingCatalogMigration` runs at startup, moves each
+  row into its tenant's catalog (onto a same-named service when one exists), repoints appointments
+  and Serviços rows, and stamps the legacy row with `catalogItemId`. Nothing is deleted.
+- **A booking snapshots** the catalog item id (`catalogItemId`), `serviceName` and `priceCents`,
+  so history survives catalog edits. Rows written before the migration are read through a fallback.
+- **Clients.** With `clients` on, every booking gets a `clientId`: a chosen client, a client whose
+  phone matches (formatting ignored, last 9 digits), or a new client.
+- **Billing.** Marking a booking `COMPLETED` creates (or reopens) one open `crm.client_services` row
+  for its client at the booking price, linked both ways (`bookingId` / `clientServiceId`). Moving it
+  away from `COMPLETED` cancels that row unless it was already invoiced.
+- **Rules** (`BookingScheduler`, serialized per tenant by an in-process lock — single instance):
+  `PENDING`/`CONFIRMED`/`COMPLETED` hold their slot, `CANCELLED`/`NO_SHOW` free it; reactivating a
+  freed booking re-checks overlaps; rescheduling keeps the booking's own length. Customer sources
+  (`WHATSAPP`, `INSTAGRAM`, `WEB`) must be in the future and inside the opening hours; staff sources
+  (`DASHBOARD`, `ADMIN`, `ASSISTANT`) may override both. Errors return stable `{error}` codes
+  (`conflict`, `outside_hours`, `in_past`, `service_not_bookable`, `contact_required`, …).
+- **Conversations.** The pipeline passes the chat's customer to the tools (`BookingCallContext`):
+  source = channel, and on WhatsApp the customer's phone, so `create_booking` needs no contact
+  details for someone booking for themselves. `reschedule_booking` moves an appointment.
+
+```mermaid
+flowchart LR
+    CAT["Catalog service\n(bookable + duration + price)"] -->|booked as| BK["Booking\nsnapshot: name, price"]
+    CH["Dashboard · Assistant ·\nWhatsApp · Instagram · Web"] -->|create / reschedule| BK
+    BK -->|match phone or create| CL["Client"]
+    BK -->|COMPLETED| SV["Serviços row\n(open, bookingId)"]
+    SV -->|invoice| INV["Invoice"]
+    CL --- SV
+```
 
 ### Instagram
 
@@ -199,16 +232,16 @@ reconnect before comments work. App Review for that permission is a separate sub
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
-| `crm.client_services` | Client-attached work; open rows can be billed together | `tenantId+clientId+status` |
+| `crm.client_services` | Client-attached work; open rows can be billed together; `bookingId` when made by completing a booking | `tenantId+clientId+status`; partial `tenantId+bookingId` |
 | `crm.suppliers` | Vendor directory the tenant pays | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores) for a later payments payee | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering counters | unique on `name` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
-| `bookings.services` | Bookable services (name, duration, active) | `tenantId`, `active` |
+| `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
-| `bookings.appointments` | Bookings with UTC start/end and status | `tenantId`, `startAt` |
+| `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |

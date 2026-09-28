@@ -7,6 +7,7 @@ import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
+import com.rfm.edubot.bookings.BookingCatalogMigration
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
@@ -99,6 +100,13 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     val tenantRepository = TenantRepository(mongoModule)
     val dashboardUserRepository = DashboardUserRepository(mongoModule)
     val defaultTenant = kotlinx.coroutines.runBlocking { TenantSeeder(mongoModule, tenantRepository, appConfig).run() }
+    kotlinx.coroutines.runBlocking {
+        try {
+            BookingCatalogMigration(mongoModule).run()
+        } catch (e: Exception) {
+            LoggerFactory.getLogger("Application").warn("Booking catalog migration failed; bookings keep reading legacy services: {}", e.message)
+        }
+    }
     val tenantRegistry = TenantRegistry(tenantRepository)
     kotlinx.coroutines.runBlocking { tenantRegistry.initialize() }
 

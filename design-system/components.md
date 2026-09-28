@@ -243,7 +243,7 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 
 Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
-Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). Clickable rows may use `.conversation-row`.
+Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda. Clickable rows may use `.conversation-row`.
 
 ## Empty
 
@@ -293,6 +293,23 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans.
 - Fields: `.inp` `.sel` `.txt`. Money/IDs: `.inp--mono` `.inp--right`.
 - Labels: `.lbl` uppercase. Required: `.req`. Optional: `.opt`.
+- A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
+
+### Suggestions under a field
+
+Type-ahead matches for an existing record (e.g. a CRM client under a booking's name/phone):
+
+```html
+<div class="form__row suggest-host">
+  <label class="lbl" for="bk-name">Contact name</label>
+  <input class="inp" id="bk-name" autocomplete="off" />
+  <div class="suggest">
+    <button class="suggest__item" type="button"><strong>Ana Silva</strong><span class="mono">+351 912 345 678</span></button>
+  </div>
+</div>
+```
+
+`.suggest` floats under its `.suggest-host` row (`hidden` when empty). Keep focus in the input on `mousedown` so a click still picks the row.
 
 ## Line items
 
@@ -500,7 +517,33 @@ The isolated embed under `resources/widget/` accepts `data-title`, `data-subtitl
 
 ## Bookings calendar
 
-Reuse `.booking-toolbar`, `.cal-grid`, `.cal-event`, `.cal-event--confirmed|pending|cancelled|completed`. Do not introduce a third-party calendar skin.
+Reuse `.booking-toolbar`, `.cal-grid`, `.cal-event`. Do not introduce a third-party calendar skin.
+
+```html
+<div class="booking-toolbar">
+  <div class="booking-toolbar__views"><!-- Week / Agenda: .btn.btn--sm, active = .btn--primary --></div>
+  <div class="booking-toolbar__nav period-nav"><!-- ‹ label › and "This week" once navigated away --></div>
+  <div class="booking-toolbar__actions"><!-- Services · Opening hours --></div>
+</div>
+<div class="panel cal-wrap"><div class="cal-grid">
+  <div class="cal-grid__dayhead is-today">…</div>
+  <div class="cal-grid__cell is-today" data-booking-slot="2026-09-28T10:00">
+    <button class="cal-event cal-event--confirmed" type="button">
+      <span class="cal-event__time mono">10:00–11:00</span>
+      <span class="cal-event__who">Ana Silva</span>
+      <span class="cal-event__what">Consulta</span>
+    </button>
+  </div>
+  <div class="cal-grid__cell is-closed"></div>
+</div></div>
+```
+
+- Status modifiers: `.cal-event--pending|confirmed|completed|no-show|cancelled`, tinted from `--warn` / `--ok` / `--info` / `--bad` / `--ink-faint` (soft fill + 3px inset bar). No raw hex.
+- `.is-today` marks today's column (accent underline on the head, faint tint on cells). `.is-closed` hatches hours outside the opening hours — staff can still click it to book.
+- Grid cells, day keys and prefilled times are **tenant-local** (`Tenant.timezone`), never the browser zone.
+- Opening-hours editor rows: `.booking-avail` > `.booking-avail-row` (day `.sel`, from/to `.inp`, remove `.iconbtn--danger`); `.booking-avail-row--head` carries the column labels.
+- Free-time picker in the booking drawer: `.slot-picks` of `.chip` buttons (picked = `.is-on`).
+- Agenda list: day group rows are `tr.is-day` (surface band, uppercase label in classic, sentence case in minimal).
 
 ## Document template studio
 

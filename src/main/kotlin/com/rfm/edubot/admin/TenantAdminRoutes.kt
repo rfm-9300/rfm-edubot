@@ -229,7 +229,8 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
                     val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
                     val request = call.receive<StandardItemRequest>()
-                    val item = deps.standardItems.update(id, request.toStandardItem(id)) ?: return@post call.respond(HttpStatusCode.NotFound)
+                    val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
+                    val item = deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound)
                     call.respond(item)
                 }
                 delete("/standard-items/{id}") {

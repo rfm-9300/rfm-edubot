@@ -45,6 +45,23 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
         return collection.find(filter).limit(20).toList().map { it.toClient() }
     }
 
+    /**
+     * The client with this phone however it was typed ("+351 912 345 678" = "912345678"): numbers of
+     * 9+ digits match on their last 9 digits, shorter ones must match exactly.
+     */
+    suspend fun findByPhone(phone: String): Client? {
+        val digits = phone.filter(Char::isDigit)
+        if (digits.length < 6) return null
+        val key = if (digits.length >= 9) digits.takeLast(9) else digits
+        val pattern = key.toList().joinToString("\\D*") + "\\D*$"
+        return collection.find(scoped(Filters.regex("phone", pattern))).limit(20).toList()
+            .map { it.toClient() }
+            .firstOrNull { client ->
+                val stored = client.phone.filter(Char::isDigit)
+                if (key.length == 9) stored.length >= 9 && stored.takeLast(9) == key else stored == key
+            }
+    }
+
     suspend fun update(id: ObjectId, name: String, phone: String, address: String?): Client? {
         val now = SystemClock.now()
         val doc = collection.findOneAndUpdate(
@@ -339,6 +356,14 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
         return collection.find(filter).sort(Document("type", 1).append("category", 1).append("description", 1)).toList().map { it.toStandardItem() }
     }
 
+    suspend fun findById(id: String): StandardItem? =
+        collection.find(scoped(Filters.eq("id", id))).firstOrNull()?.toStandardItem()
+
+    suspend fun findByIds(ids: Collection<String>): List<StandardItem> {
+        if (ids.isEmpty()) return emptyList()
+        return collection.find(scoped(Filters.`in`("id", ids.toList()))).toList().map { it.toStandardItem() }
+    }
+
     suspend fun create(item: StandardItem): StandardItem {
         collection.insertOne(item.toDocument())
         return item
@@ -353,6 +378,8 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
                 Updates.set("description", item.description),
                 Updates.set("unit", item.unit),
                 Updates.set("defaultUnitPriceEur", item.defaultUnitPriceEur),
+                Updates.set("durationMinutes", item.durationMinutes),
+                Updates.set("bookable", item.bookable),
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
@@ -361,6 +388,17 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
 
     suspend fun delete(id: String): Boolean = collection.deleteOne(scoped(Filters.eq("id", id))).deletedCount > 0
 
+    /** A `srv-<slug>` id not yet used by this tenant, matching what the dashboard catalog form generates. */
+    suspend fun freeServiceId(name: String): String {
+        val base = "srv-" + catalogSlug(name).take(40).trimEnd('-').ifBlank { "service" }
+        if (findById(base) == null) return base
+        for (n in 2..99) {
+            val candidate = "$base-$n"
+            if (findById(candidate) == null) return candidate
+        }
+        return "srv-${ObjectId().toHexString()}"
+    }
+
     private fun Document.toStandardItem() = StandardItem(
         id = getString("id"),
         type = getString("type"),
@@ -368,6 +406,8 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
         description = getString("description"),
         unit = getString("unit"),
         defaultUnitPriceEur = getDoubleValue("defaultUnitPriceEur"),
+        durationMinutes = (get("durationMinutes") as? Number)?.toInt(),
+        bookable = getBoolean("bookable") ?: false,
     )
 
     private fun StandardItem.toDocument() = Document("id", id)
@@ -377,6 +417,8 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
         .append("description", description)
         .append("unit", unit)
         .append("defaultUnitPriceEur", defaultUnitPriceEur)
+        .append("durationMinutes", durationMinutes)
+        .append("bookable", bookable)
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
