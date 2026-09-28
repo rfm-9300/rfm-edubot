@@ -8,7 +8,7 @@ set -euo pipefail
 #
 # Run on the VPS with the app stack up (mongo service running).
 
-APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+APP_DIR="${APP_DIR:-$HOME/whatsapp-bot}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 
 archive="${1:?Usage: restore-mongo.sh <path-to-archive.gz>}"
@@ -16,6 +16,8 @@ if [[ ! -f "$archive" ]]; then
   echo "No such file: $archive" >&2
   exit 1
 fi
+# Absolute before the cd below, so a path relative to the caller's directory still resolves.
+archive="$(cd "$(dirname "$archive")" && pwd)/$(basename "$archive")"
 
 cd "$APP_DIR"
 

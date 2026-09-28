@@ -12,8 +12,9 @@ set -euo pipefail
 #   HEALTH_URL                default: http://localhost:8080/ready
 #   DEPLOY_ALERT_WEBHOOK_URL   required to actually send alerts; without it this just logs.
 #   STATE_FILE                default: $APP_DIR/.healthcheck-state (contents: "up" or "down")
+#   APP_DIR                   default: $HOME/whatsapp-bot (the production app directory)
 
-APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+APP_DIR="${APP_DIR:-$HOME/whatsapp-bot}"
 HEALTH_URL="${HEALTH_URL:-http://localhost:8080/ready}"
 DEPLOY_ALERT_WEBHOOK_URL="${DEPLOY_ALERT_WEBHOOK_URL:-}"
 STATE_FILE="${STATE_FILE:-$APP_DIR/.healthcheck-state}"

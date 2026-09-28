@@ -154,7 +154,9 @@ ssh hillsong-vps "cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml
 ```
 
 Port `8080` is not published on the host. Probe the container IP (the remote
-script already does this) or:
+script already does this) or use the command below. Do not use
+`https://thebotslab.eu/health` for this: the shared Caddy does not route `/health`
+or `/ready` to the bot, so it answers with the marketing site and a `200`.
 
 ```bash
 ssh hillsong-vps 'cid=$(cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml ps -q app); ip=$(docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{println}}{{end}}" "$cid" | awk "NF{print;exit}"); curl -fsS "http://$ip:8080/health" && echo && curl -fsS "http://$ip:8080/ready"'
@@ -255,6 +257,11 @@ ssh hillsong-vps "crontab -l 2>/dev/null; echo '17 3 * * * cd ~/whatsapp-bot && 
 This writes a gzipped `mongodump` archive to `~/whatsapp-bot/backups/` nightly
 and prunes local copies older than 14 days (`RETENTION_DAYS`).
 
+Status: installed in root's crontab on `hillsong-vps` since 2026-09-28, with
+`APP_DIR=/root/whatsapp-bot` set explicitly in the cron line. The first archive
+was restore-tested into a throwaway container. No off-box copy yet
+(`RCLONE_REMOTE` is unset).
+
 **This alone does not protect against losing the VPS itself** — local backups
 sitting next to the database they back up survive accidental `docker volume
 rm` but not disk failure or the box disappearing. Strongly recommended:
@@ -285,6 +292,12 @@ right.
 `DEPLOY_ALERT_WEBHOOK_URL` only on state *changes* (up→down, down→up), so it
 won't spam. This is independent of deploys — it's what tells you the app
 crashed or Mongo became unreachable outside of a deploy.
+
+Not installed yet (as of 2026-09-28), and it will not work as-is: its default
+`HEALTH_URL` is `http://localhost:8080/ready` on the host, but
+`docker-compose.prod.yml` does not publish port `8080`, so every check would
+fail. It first needs to probe the app container's IP the way
+`scripts/remote-deploy.sh` does.
 
 ### One-time setup on the VPS
 

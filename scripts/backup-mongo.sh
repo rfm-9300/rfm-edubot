@@ -8,14 +8,14 @@ set -euo pipefail
 #   17 3 * * * cd ~/whatsapp-bot && ./backup-mongo.sh >> backup.log 2>&1
 #
 # Config (env or edit below):
-#   APP_DIR              default: script's own directory
+#   APP_DIR              default: $HOME/whatsapp-bot (the production app directory)
 #   COMPOSE_FILE         default: docker-compose.prod.yml
 #   BACKUP_DIR           default: $APP_DIR/backups
 #   RETENTION_DAYS       default: 14 (local copies older than this are deleted)
 #   RCLONE_REMOTE        optional, e.g. "s3:my-bucket/whatsapp-bot-backups"
 #                         if set, the archive is also copied off-box with `rclone copy`.
 
-APP_DIR="${APP_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+APP_DIR="${APP_DIR:-$HOME/whatsapp-bot}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
 BACKUP_DIR="${BACKUP_DIR:-$APP_DIR/backups}"
 RETENTION_DAYS="${RETENTION_DAYS:-14}"
