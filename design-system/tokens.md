@@ -63,6 +63,29 @@ Theme persistence: `admin/theme.js` writes `html[data-theme]` from `localStorage
 
 Status `*-soft` values on dark are `rgba(color, 0.12)`.
 
+## Layout skins (`html[data-layout]`)
+
+A second axis next to the theme. `classic` (default) is everything above. `minimal` is an optional clean CRM skin: neutral canvas, hairline cards, one accent, no gradients / glow / emoji.
+
+- `admin/theme.js` writes `html[data-layout]` from `localStorage.uiLayout` (`"classic"` | `"minimal"`) before first paint, **only on pages whose `<html>` already declares `data-layout`** (today: `/app/index.html`). The backoffice never switches.
+- Toggle: `#btn-layout` in the topbar, or Settings → Appearance. Both call `UIPrefs.setLayout()`, which fires a `ui:layout` event (`ui:theme` for the theme).
+- Minimal overrides tokens on `html[data-layout="minimal"]` (light) and `html[data-layout="minimal"][data-theme="dark"]`. The dark block must redeclare **every** color the light block sets — both selectors otherwise tie with `html[data-theme="dark"]` and the later one wins.
+
+| Token | Minimal light | Minimal dark |
+|---|---|---|
+| `--bg` / `--surface` / `--surface-2` | `#f5f6f8` / `#ffffff` / `#f8f9fb` | `#0c0e12` / `#111318` / `#161a20` |
+| `--line` / `--line-soft` / `--hairline-strong` | `#e4e7ec` / `#eef0f3` / `#d0d5dd` | white 8% / 5% / 14% |
+| `--ink` / `--ink-2` / `--ink-mute` / `--ink-faint` | `#101828` / `#344054` / `#667085` / `#98a2b3` | `#f0f1f3` / `#c1c5cd` / `#858b96` / `#5d636e` |
+| `--accent` / `--accent-deep` / `--accent-ink` | `#5b4bdb` / `#4b3cc4` / `#ffffff` | `#ffd60a` / `#e6c009` / `#0b0d0f` |
+| `--ok` `--warn` `--bad` `--info` | `#12b76a` `#f79009` `#f04438` `#2e90fa` (inks darker) | `#32d583` `#fdb022` `#f97066` `#53b1fd` (inks lighter) |
+| `--grad` / `--grad-hover` | solid `--accent` / `--accent-deep` | same |
+| `--glow-accent` | transparent (no glow) | same |
+| `--r-xs` … `--r-lg` | `6` / `8` / `10` / `12px` | inherited from light |
+| `--sidebar` | `240px` | inherited |
+| `--shadow-*` | hairline-soft ink | black 40–60% |
+
+`--ink-faint` is decorative in minimal (bars, placeholders); text uses `--ink-mute` or darker. Components that read tokens restyle for free; add a `html[data-layout="minimal"]` rule only for what tokens can't express (uppercase labels, emoji, literal `999px` radii, heavy font weights).
+
 On dark, text that sits on an accent tint should use `var(--accent)` (not `--accent-deep`). Existing overrides: `.panel__title .tag`, `.pill--accent`, `.drawer__eyebrow`, `.auth__eyebrow`, `.pdf:hover`, `.lines__total .v`.
 
 ## Type

@@ -148,6 +148,45 @@ class OverviewMathTest {
     }
 
     @Test
+    fun `trend months end with the current month and cross year boundaries`() {
+        assertEquals(
+            listOf("2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02"),
+            OverviewMath.trendMonthKeys(LocalDate(2026, 2, 10)),
+        )
+        assertEquals(listOf("2026-09"), OverviewMath.trendMonthKeys(LocalDate(2026, 9, 30), count = 1))
+    }
+
+    @Test
+    fun `trend days are the last fourteen local days oldest first`() {
+        val days = OverviewMath.trendDayKeys(LocalDate(2026, 3, 2))
+        assertEquals(14, days.size)
+        assertEquals("2026-02-17", days.first())
+        assertEquals("2026-03-02", days.last())
+    }
+
+    @Test
+    fun `month key follows the tenant timezone`() {
+        val lateUtc = Instant.parse("2026-09-30T23:30:00Z")
+        assertEquals("2026-10", OverviewMath.monthKey(lateUtc, TimeZone.of("Europe/Lisbon")))
+        assertEquals("2026-09", OverviewMath.monthKey(lateUtc, TimeZone.of("America/Sao_Paulo")))
+    }
+
+    @Test
+    fun `trend windows start at local midnight`() {
+        val lisbon = TimeZone.of("Europe/Lisbon")
+        assertEquals(LocalDate(2026, 4, 1).atStartOfDayIn(lisbon), OverviewMath.monthsBackStart(LocalDate(2026, 9, 28), lisbon, 6))
+        assertEquals(LocalDate(2026, 9, 15).atStartOfDayIn(lisbon), OverviewMath.daysBackStart(LocalDate(2026, 9, 28), lisbon, 14))
+    }
+
+    @Test
+    fun `series keep every bucket and fill gaps with zero`() {
+        val flow = OverviewMath.monthFlow(listOf("2026-08", "2026-09"), mapOf("2026-09" to 500L), mapOf("2026-08" to 120L, "2026-07" to 999L))
+        assertEquals(listOf(OverviewMonthFlowDto("2026-08", 0, 120), OverviewMonthFlowDto("2026-09", 500, 0)), flow)
+        val days = OverviewMath.dayCounts(listOf("2026-09-27", "2026-09-28"), mapOf("2026-09-28" to 4L))
+        assertEquals(listOf(OverviewDayCountDto("2026-09-27", 0), OverviewDayCountDto("2026-09-28", 4)), days)
+    }
+
+    @Test
     fun `window uses the tenant timezone for calendar day boundaries`() {
         val now = Instant.parse("2026-09-21T02:30:00Z")
         val lisbon = OverviewMath.window(now, "Europe/Lisbon")

@@ -37,6 +37,21 @@ object OverviewMath {
     const val HIGHLIGHT_CONTACTS = "contacts"
     const val HIGHLIGHT_UNREPLIED = "instagram_unreplied"
 
+    const val RECENT_INVOICE_PAID = "invoice_paid"
+    const val RECENT_INVOICE_ISSUED = "invoice_issued"
+    const val RECENT_PAYMENT_PAID = "payment_paid"
+    const val RECENT_QUOTE_ACCEPTED = "quote_accepted"
+    const val RECENT_QUOTE_CREATED = "quote_created"
+    const val RECENT_CLIENT_CREATED = "client_created"
+    const val RECENT_BOOKING_CREATED = "booking_created"
+
+    const val TREND_MONTHS = 6
+    const val TREND_DAYS = 14
+    const val TOP_CLIENT_MONTHS = 12
+    const val TOP_CLIENTS = 5
+    const val RECENT_LIMIT = 8
+    const val AGENDA_LIMIT = 8
+
     data class Window(
         val zone: TimeZone,
         val now: Instant,
@@ -124,6 +139,33 @@ object OverviewMath {
         if (status == "OVERDUE") return true
         return status == "PENDING" && dueDate != null && dueDate < today
     }
+
+    fun monthKey(date: LocalDate): String = date.toString().substring(0, 7)
+
+    fun monthKey(at: Instant, zone: TimeZone): String = monthKey(at.toLocalDateTime(zone).date)
+
+    /** `YYYY-MM` for the [count] calendar months ending with the one containing [today], oldest first. */
+    fun trendMonthKeys(today: LocalDate, count: Int = TREND_MONTHS): List<String> {
+        val first = LocalDate(today.year, today.month, 1).minus(DatePeriod(months = count - 1))
+        return (0 until count).map { monthKey(first.plus(DatePeriod(months = it))) }
+    }
+
+    /** `YYYY-MM-DD` for the [count] days ending with [today], oldest first. */
+    fun trendDayKeys(today: LocalDate, count: Int = TREND_DAYS): List<String> =
+        (count - 1 downTo 0).map { today.minus(DatePeriod(days = it)).toString() }
+
+    /** Start of a trailing window of [months] calendar months that includes the current one. */
+    fun monthsBackStart(today: LocalDate, zone: TimeZone, months: Int): Instant =
+        LocalDate(today.year, today.month, 1).minus(DatePeriod(months = months - 1)).atStartOfDayIn(zone)
+
+    fun daysBackStart(today: LocalDate, zone: TimeZone, days: Int): Instant =
+        today.minus(DatePeriod(days = days - 1)).atStartOfDayIn(zone)
+
+    fun monthFlow(keys: List<String>, inByMonth: Map<String, Long>, outByMonth: Map<String, Long>): List<OverviewMonthFlowDto> =
+        keys.map { OverviewMonthFlowDto(it, inByMonth[it] ?: 0L, outByMonth[it] ?: 0L) }
+
+    fun dayCounts(keys: List<String>, byDay: Map<String, Long>): List<OverviewDayCountDto> =
+        keys.map { OverviewDayCountDto(it, byDay[it] ?: 0L) }
 
     fun setupItems(
         modules: Set<String>,

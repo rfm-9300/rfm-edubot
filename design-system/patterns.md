@@ -31,6 +31,8 @@ Head assets (order matters):
 5. `/admin/i18n.js`
 6. Page script `defer` at end of `<body>`
 
+`/app` declares `<html data-layout="classic">`, which opts it into the layout switch ([tokens.md](tokens.md#layout-skins-htmldata-layout)); `/backoffice` does not and always stays classic. Every `/app` screen must read well in both layouts × both themes.
+
 ## List module (default screen)
 
 Used by clients, quotes, invoices, catalog, tenants:
@@ -82,6 +84,18 @@ Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-
 
 Home has a **Choose cards** control in `.home-title-row` next to the page title (not in the highlight stats). It opens Settings → Home. Snapshot clicks set `data-go` (and optional `data-conversation` / `data-settings`) then switch module. Data comes from `GET /app/api/overview`; do not fan out to every module list to render Home.
 
+## Home (minimal layout)
+
+With `html[data-layout="minimal"]`, `renderOverview` hands off to `renderOverviewMinimal`: a CRM cockpit, clean but dense. Same hidden-card ids as the classic Home (Settings → Home drives both). Data comes from one call, `GET /app/api/overview?extended=1`, which adds `cashFlow`, `activity`, `agenda`, `recent` and `topClients`; the classic layout never requests them. Empty lists are omitted from the JSON, so treat a missing array as empty.
+
+1. `.dash__head`: tenant-local date, time-of-day greeting, health line (`pulse`), then **Choose cards** and up to three quick-create buttons (first one primary). Quick create switches to the module, then opens its existing drawer form.
+2. `.dash-kpis` (`highlights`): up to five processed numbers — received (with vs-last-month delta and a 6-month spark), to collect (overdue in red), net (received − spent, when payments exist), open pipeline, waiting chats (14-day spark), then bookings today / clients. Each respects its module card being hidden.
+3. Setup row (`setup`) as a `.panel--card` of `.btn--sm` actions, only when unfinished.
+4. `.dash-grid`, priority order via `data-order`: 1 Needs you (`attention`, main) · 2 Today (`calendar`, side) · 3 Cash flow (`financeiro`, main) · 4 Receivables & payables (`financeiro`, side) · 5 Pipeline (`pipeline`) · 6 Inbox (`inbox`) · 7 Top clients (`customers`, needs invoices) · 8 Recent activity (visible while one of its source cards is). After render, `balanceDashColumns` may move one of cards 4–8 to even out column heights; 1–3 never move.
+5. `.dash-tiles` for services, suppliers, employees, catalog, Instagram, assistant (and clients when not already a KPI).
+
+Rows deep-link: `data-go` switches module and `data-open` opens that invoice / quote / payment / client / booking. A single overdue invoice or payment keeps its own row; two or more collapse into one count row. Money aggregates use whole euros; per-document amounts keep cents. Relative times and dates come from `Intl.RelativeTimeFormat`, never catalog strings.
+
 ## Services (client work)
 
 `/app` Services is a CRM table of work attached to a **client**, not the booking-type catalog. Recipe: `.view__hero` + stats (open / invoiced) + `.crm` panel with a `.panel__views` **List / By week / By month** switch (see [components.md](components.md#panel-with-a-view-switch-list--by-week--by-month)) and a `.panel__filters` row underneath holding a compact `.sel` client filter, status chips, and an Invoice selected action. The view switch and the filters are deliberately separate rows — switching period reshapes the whole panel (hero, stat row, table columns), so it must not look like just another chip next to status/client. By week and By month replace the hero with a **selected** period (Monday week or calendar month, current by default): jobs, open €, invoiced €, and total, with a vs-previous hint on the total. A `.period-nav` (see [components.md](components.md#hero-with-a-period-navigator)) sits above the hero stats with ‹ / › to step to any period that has a row below and a "Current" jump back — it isn't locked to today's period. The table is that history — a `.is-total` row, then one row per period (jobs and euros in separate columns). The row matching the nav's selected period uses `.is-current`. Cancelled rows stay out of the money. List view hero stays all-time. Stats and rows follow the chosen client. Rows use a leading checkbox (`.tbl td.check`) so several open rows for the same client can become one invoice. New/edit opens the drawer (New service prefills the filtered client). Prefill from catalog or booking service types is optional; the client is required.
@@ -120,7 +134,7 @@ Optional `instagram` module. Work queue first, not an Insights wall:
 
 ## Settings (tenant)
 
-Chip tabs (`.settings-tabs`): Home · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
+Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Layout and Theme; both are browser preferences (localStorage) applied through `UIPrefs`, not tenant settings. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
 
 ## Document template studio
 

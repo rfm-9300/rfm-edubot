@@ -1,7 +1,9 @@
 package com.rfm.edubot.dashboard
 
 import com.mongodb.client.model.Filters
+import com.mongodb.client.model.Projections
 import com.rfm.edubot.bookings.BookingRepository
+import com.rfm.edubot.bookings.BookingServiceRepository
 import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
@@ -16,17 +18,24 @@ import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantTimeZones
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import org.bson.Document
+import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
 
 class OverviewService(private val mongo: MongoModule) {
-    suspend fun build(tenant: Tenant): OverviewDto = coroutineScope {
+    /**
+     * [extended] adds the trend/agenda/feed blocks the minimal Home layout draws. They cost a few
+     * extra queries, so the classic layout never asks for them. Blocks for hidden cards are skipped.
+     */
+    suspend fun build(tenant: Tenant, extended: Boolean = false): OverviewDto = coroutineScope {
         val modules = DashboardModules.effectiveFor(tenant).toSet()
         val window = OverviewMath.window(SystemClock.now(), TenantTimeZones.normalize(tenant.timezone))
         val tenantFilter = Filters.eq("tenantId", tenant.id)
@@ -81,6 +90,25 @@ class OverviewService(private val mongo: MongoModule) {
                 false
             }
         }
+
+        val hidden = OverviewHomeLayout.sanitize(tenant.overviewHiddenCards).toSet()
+        fun wants(card: String) = extended && card !in hidden
+        val cashFlow = async {
+            val money = DashboardModules.INVOICES in modules || DashboardModules.PAYMENTS in modules
+            if (money && wants(OverviewHomeLayout.FINANCEIRO)) cashFlow(tenant.id, window, modules) else emptyList()
+        }
+        val activity = async {
+            val inboxOn = DashboardModules.CONVERSATIONS in modules || DashboardModules.CONTACTS in modules
+            if (inboxOn && wants(OverviewHomeLayout.INBOX)) activity(tenant.id, window) else emptyList()
+        }
+        val agenda = async {
+            if (DashboardModules.BOOKINGS in modules && wants(OverviewHomeLayout.CALENDAR)) agenda(tenant.id, window) else emptyList()
+        }
+        val topClients = async {
+            val billing = DashboardModules.INVOICES in modules && DashboardModules.CLIENTS in modules
+            if (billing && wants(OverviewHomeLayout.CUSTOMERS)) topClients(tenant.id, window) else emptyList()
+        }
+        val recent = async { if (extended) recent(tenant.id, modules, hidden) else emptyList() }
 
         val cashDto = cash.await()
         val pipelineDto = pipeline.await()
@@ -142,9 +170,162 @@ class OverviewService(private val mongo: MongoModule) {
                 payments = paymentsDto,
                 assistant = assistantDto,
                 setup = setup,
+                cashFlow = cashFlow.await(),
+                activity = activity.await(),
+                agenda = agenda.await(),
+                recent = recent.await(),
+                topClients = topClients.await(),
             ),
             tenant.overviewHiddenCards,
         )
+    }
+
+    private suspend fun cashFlow(tenantId: ObjectId, window: OverviewMath.Window, modules: Set<String>): List<OverviewMonthFlowDto> = coroutineScope {
+        val keys = OverviewMath.trendMonthKeys(window.today)
+        val from = OverviewMath.monthsBackStart(window.today, window.zone, keys.size)
+        val received = async {
+            if (DashboardModules.INVOICES in modules) paidByMonth("crm.invoices", tenantId, from, window.nextMonthStart, window.zone) else emptyMap()
+        }
+        val spent = async {
+            if (DashboardModules.PAYMENTS in modules) paidByMonth("crm.payments", tenantId, from, window.nextMonthStart, window.zone) else emptyMap()
+        }
+        OverviewMath.monthFlow(keys, received.await(), spent.await())
+    }
+
+    private suspend fun paidByMonth(collection: String, tenantId: ObjectId, from: Instant, to: Instant, zone: TimeZone): Map<String, Long> =
+        coll(collection).find(paidBetween(tenantId, from, to))
+            .projection(Projections.include("totalCents", "paidAt", "updatedAt"))
+            .toList()
+            .mapNotNull { doc ->
+                val at = doc.getDate("paidAt") ?: doc.getDate("updatedAt") ?: return@mapNotNull null
+                OverviewMath.monthKey(Instant.fromEpochMilliseconds(at.time), zone) to doc.get("totalCents").asLong()
+            }
+            .groupBy({ it.first }, { it.second })
+            .mapValues { (_, cents) -> cents.sum() }
+
+    private suspend fun activity(tenantId: ObjectId, window: OverviewMath.Window): List<OverviewDayCountDto> {
+        val keys = OverviewMath.trendDayKeys(window.today)
+        val from = OverviewMath.daysBackStart(window.today, window.zone, keys.size)
+        val range = Document("\$gte", Date(from.toEpochMilliseconds())).append("\$lt", Date(window.tomorrowStart.toEpochMilliseconds()))
+        val localDay = Document("\$dateToString", Document("format", "%Y-%m-%d").append("date", "\$createdAt").append("timezone", window.zone.id))
+        val pipeline = listOf(
+            Document("\$match", Document("tenantId", tenantId).append("createdAt", range)),
+            Document("\$group", Document("_id", localDay).append("count", Document("\$sum", 1))),
+        )
+        val byDay = coll("messages").aggregate<Document>(pipeline).toList()
+            .associate { (it.getString("_id") ?: "") to it.get("count").asLong() }
+        return OverviewMath.dayCounts(keys, byDay)
+    }
+
+    private suspend fun agenda(tenantId: ObjectId, window: OverviewMath.Window): List<OverviewAgendaItemDto> {
+        val today = BookingRepository(mongo, tenantId).list(from = window.todayStart, to = window.tomorrowStart)
+            .filter { it.status != BookingStatus.CANCELLED }
+            .sortedBy { it.startAt }
+            .take(OverviewMath.AGENDA_LIMIT)
+        if (today.isEmpty()) return emptyList()
+        val services = BookingServiceRepository(mongo, tenantId).list().associate { it.id to it.name }
+        return today.map {
+            OverviewAgendaItemDto(
+                id = it.id.toHexString(),
+                startAt = it.startAt.toString(),
+                endAt = it.endAt.toString(),
+                contactName = it.contactName,
+                service = services[it.serviceId].orEmpty(),
+                status = it.status.name,
+            )
+        }
+    }
+
+    private suspend fun topClients(tenantId: ObjectId, window: OverviewMath.Window): List<OverviewTopClientDto> {
+        val from = OverviewMath.monthsBackStart(window.today, window.zone, OverviewMath.TOP_CLIENT_MONTHS)
+        val paidOnly = Document("\$cond", listOf(Document("\$eq", listOf("\$status", "PAID")), "\$totalCents", 0L))
+        val pipeline = listOf(
+            Document(
+                "\$match",
+                Document("tenantId", tenantId)
+                    .append("status", Document("\$ne", "CANCELLED"))
+                    .append("createdAt", Document("\$gte", Date(from.toEpochMilliseconds()))),
+            ),
+            Document(
+                "\$group",
+                Document("_id", "\$clientId")
+                    .append("billed", Document("\$sum", "\$totalCents"))
+                    .append("paid", Document("\$sum", paidOnly))
+                    .append("count", Document("\$sum", 1)),
+            ),
+            Document("\$sort", Document("billed", -1).append("_id", 1)),
+            Document("\$limit", OverviewMath.TOP_CLIENTS),
+        )
+        val rows = coll("crm.invoices").aggregate<Document>(pipeline).toList()
+        val names = clientNames(tenantId, rows.mapNotNull { it.get("_id") as? ObjectId })
+        return rows.mapNotNull { row ->
+            val id = row.get("_id") as? ObjectId ?: return@mapNotNull null
+            OverviewTopClientDto(
+                id = id.toHexString(),
+                name = names[id].orEmpty(),
+                billedCents = row.get("billed").asLong(),
+                paidCents = row.get("paid").asLong(),
+                invoiceCount = row.get("count").asLong().toInt(),
+            )
+        }
+    }
+
+    /** Latest events across the modules whose Home card is visible, newest first. */
+    private suspend fun recent(tenantId: ObjectId, modules: Set<String>, hidden: Set<String>): List<OverviewRecentItemDto> = coroutineScope {
+        val none = CompletableDeferred(emptyList<Document>())
+        fun latest(collection: String, filter: Bson?, sortField: String) = async {
+            val scoped = listOfNotNull(Filters.eq("tenantId", tenantId), filter)
+            coll(collection).find(Filters.and(scoped)).sort(Document(sortField, -1)).limit(OverviewMath.RECENT_LIMIT).toList()
+        }
+        val money = OverviewHomeLayout.FINANCEIRO !in hidden
+        val invoicesOn = DashboardModules.INVOICES in modules && money
+        val paymentsOn = DashboardModules.PAYMENTS in modules && money
+        val quotesOn = DashboardModules.QUOTES in modules && OverviewHomeLayout.PIPELINE !in hidden
+        val clientsOn = DashboardModules.CLIENTS in modules && OverviewHomeLayout.CUSTOMERS !in hidden
+        val bookingsOn = DashboardModules.BOOKINGS in modules && OverviewHomeLayout.CALENDAR !in hidden
+        val paidFilter = Filters.and(Filters.eq("status", "PAID"), Filters.ne("paidAt", null))
+
+        val paidInvoices = if (invoicesOn) latest("crm.invoices", paidFilter, "paidAt") else none
+        val issuedInvoices = if (invoicesOn) latest("crm.invoices", Filters.ne("status", "CANCELLED"), "createdAt") else none
+        val paidPayments = if (paymentsOn) latest("crm.payments", paidFilter, "paidAt") else none
+        val acceptedQuotes = if (quotesOn) latest("crm.quotes", Filters.eq("status", "ACEITO"), "updatedAt") else none
+        val createdQuotes = if (quotesOn) latest("crm.quotes", null, "createdAt") else none
+        val newClients = if (clientsOn) latest("crm.clients", null, "createdAt") else none
+        val newBookings = if (bookingsOn) latest("bookings.appointments", Filters.ne("status", "CANCELLED"), "createdAt") else none
+
+        val billed = paidInvoices.await() + issuedInvoices.await() + acceptedQuotes.await() + createdQuotes.await()
+        val payments = paidPayments.await()
+        val clients = clientNames(tenantId, billed.mapNotNull { it.getObjectIdOrNull("clientId") }.toSet())
+        val suppliers = supplierNames(tenantId, payments.mapNotNull { it.getObjectIdOrNull("supplierId") }.toSet())
+        val staff = employeeNames(tenantId, payments.mapNotNull { it.getObjectIdOrNull("employeeId") }.toSet())
+
+        fun clientOf(doc: Document) = doc.getObjectIdOrNull("clientId")?.let { clients[it] }
+        fun event(kind: String, tab: String, doc: Document, atField: String, name: String?): Pair<Long, OverviewRecentItemDto>? {
+            val at = doc.getDate(atField) ?: return null
+            return at.time to OverviewRecentItemDto(
+                kind = kind,
+                tab = tab,
+                id = doc.getObjectId("_id").toHexString(),
+                number = doc.getString("number"),
+                name = name?.takeIf { it.isNotBlank() },
+                amountCents = doc.get("totalCents")?.asLong(),
+                at = Instant.fromEpochMilliseconds(at.time).toString(),
+            )
+        }
+        val events = buildList {
+            paidInvoices.await().forEach { add(event(OverviewMath.RECENT_INVOICE_PAID, DashboardModules.INVOICES, it, "paidAt", clientOf(it))) }
+            issuedInvoices.await().forEach { add(event(OverviewMath.RECENT_INVOICE_ISSUED, DashboardModules.INVOICES, it, "createdAt", clientOf(it))) }
+            payments.forEach { doc ->
+                val payee = doc.getObjectIdOrNull("employeeId")?.let { staff[it] }
+                    ?: doc.getObjectIdOrNull("supplierId")?.let { suppliers[it] }
+                add(event(OverviewMath.RECENT_PAYMENT_PAID, DashboardModules.PAYMENTS, doc, "paidAt", payee))
+            }
+            acceptedQuotes.await().forEach { add(event(OverviewMath.RECENT_QUOTE_ACCEPTED, DashboardModules.QUOTES, it, "updatedAt", clientOf(it))) }
+            createdQuotes.await().forEach { add(event(OverviewMath.RECENT_QUOTE_CREATED, DashboardModules.QUOTES, it, "createdAt", clientOf(it))) }
+            newClients.await().forEach { add(event(OverviewMath.RECENT_CLIENT_CREATED, DashboardModules.CLIENTS, it, "createdAt", it.getString("name"))) }
+            newBookings.await().forEach { add(event(OverviewMath.RECENT_BOOKING_CREATED, DashboardModules.BOOKINGS, it, "createdAt", it.getString("contactName"))) }
+        }.filterNotNull()
+        events.sortedByDescending { it.first }.take(OverviewMath.RECENT_LIMIT).map { it.second }
     }
 
     private suspend fun cash(tenantId: ObjectId, window: OverviewMath.Window): OverviewCashDto {
@@ -613,18 +794,19 @@ class OverviewService(private val mongo: MongoModule) {
     }
 
     private suspend fun sumPaid(collection: String, tenantId: ObjectId, from: Instant, to: Instant): Pair<Long, Int> {
-        val docs = coll(collection).find(
-            Filters.and(
-                Filters.eq("tenantId", tenantId),
-                Filters.eq("status", "PAID"),
-                Filters.or(
-                    Filters.and(Filters.gte("paidAt", Date(from.toEpochMilliseconds())), Filters.lt("paidAt", Date(to.toEpochMilliseconds()))),
-                    Filters.and(Filters.exists("paidAt", false), Filters.gte("updatedAt", Date(from.toEpochMilliseconds())), Filters.lt("updatedAt", Date(to.toEpochMilliseconds()))),
-                ),
-            ),
-        ).toList()
+        val docs = coll(collection).find(paidBetween(tenantId, from, to)).toList()
         return docs.sumOf { it.get("totalCents").asLong() } to docs.size
     }
+
+    /** PAID in [from, to) by `paidAt`; legacy rows without `paidAt` fall back to `updatedAt`. */
+    private fun paidBetween(tenantId: ObjectId, from: Instant, to: Instant): Bson = Filters.and(
+        Filters.eq("tenantId", tenantId),
+        Filters.eq("status", "PAID"),
+        Filters.or(
+            Filters.and(Filters.gte("paidAt", Date(from.toEpochMilliseconds())), Filters.lt("paidAt", Date(to.toEpochMilliseconds()))),
+            Filters.and(Filters.exists("paidAt", false), Filters.gte("updatedAt", Date(from.toEpochMilliseconds())), Filters.lt("updatedAt", Date(to.toEpochMilliseconds()))),
+        ),
+    )
 
     private suspend fun sumCreated(collection: String, tenantId: ObjectId, from: Instant, to: Instant): Long {
         val pipeline = listOf(

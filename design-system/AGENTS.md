@@ -29,6 +29,7 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 - Do not use inline `style=""` for colors, type, or spacing that tokens already cover.
 - Do not invent a new button / pill / modal primitive when `.btn`, `.pill`, `.drawer`, `.confirm` exist.
 - Do not skip the dark-theme check. If a rule assumes light (shadow, border, SVG stroke), add an `html[data-theme="dark"]` override.
+- Do not skip the layout check on `/app`: classic and `html[data-layout="minimal"]`, each in light and dark. Prefer tokens so minimal restyles for free; add a `html[data-layout="minimal"]` rule only for what tokens cannot express, and keep the minimal layout emoji-free.
 
 ## Decision tree
 
@@ -52,6 +53,7 @@ Need copy?
 
 - [ ] Reused shared classes; no one-off palette
 - [ ] Light and dark both readable (contrast on pills, buttons, empty states, tables)
+- [ ] `/app` screens checked in the classic and minimal layouts
 - [ ] `max-width: 920px` does not overflow the shell
 - [ ] Strings in all three catalogs; no raw UI literals in JS/HTML
 - [ ] Dynamic text escaped

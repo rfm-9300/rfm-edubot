@@ -32,6 +32,57 @@ data class OverviewDto(
     val assistant: OverviewAssistantDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),
     val hiddenCards: List<String> = emptyList(),
+    /** Filled only for `GET /overview?extended=1` (the minimal Home layout); empty otherwise. */
+    val cashFlow: List<OverviewMonthFlowDto> = emptyList(),
+    val activity: List<OverviewDayCountDto> = emptyList(),
+    val agenda: List<OverviewAgendaItemDto> = emptyList(),
+    val recent: List<OverviewRecentItemDto> = emptyList(),
+    val topClients: List<OverviewTopClientDto> = emptyList(),
+)
+
+/** Money received (paid invoices) and spent (paid payments) in one tenant-local calendar month. */
+@Serializable
+data class OverviewMonthFlowDto(
+    val month: String,
+    val inCents: Long,
+    val outCents: Long,
+)
+
+@Serializable
+data class OverviewDayCountDto(
+    val day: String,
+    val count: Long,
+)
+
+@Serializable
+data class OverviewAgendaItemDto(
+    val id: String,
+    val startAt: String,
+    val endAt: String,
+    val contactName: String,
+    val service: String,
+    val status: String,
+)
+
+/** One business event for the activity feed. Copy is composed client-side from [kind]. */
+@Serializable
+data class OverviewRecentItemDto(
+    val kind: String,
+    val tab: String,
+    val id: String,
+    val number: String? = null,
+    val name: String? = null,
+    val amountCents: Long? = null,
+    val at: String,
+)
+
+@Serializable
+data class OverviewTopClientDto(
+    val id: String,
+    val name: String,
+    val billedCents: Long,
+    val paidCents: Long,
+    val invoiceCount: Int,
 )
 
 @Serializable

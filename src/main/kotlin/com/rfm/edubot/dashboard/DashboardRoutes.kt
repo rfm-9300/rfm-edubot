@@ -162,7 +162,8 @@ fun Route.dashboardRoutes(
             get("/overview") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get
                 if (!ctx.requireModule(DashboardModules.OVERVIEW)) return@get call.respond(HttpStatusCode.Forbidden)
-                call.respond(OverviewService(mongo).build(ctx.tenant))
+                val extended = call.request.queryParameters["extended"] == "1"
+                call.respond(OverviewService(mongo).build(ctx.tenant, extended))
             }
             get("/contacts") {
                 val ctx = call.dashboardContext(tenantRepository, dashboardUsers) ?: return@get

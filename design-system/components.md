@@ -80,6 +80,8 @@ Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `s
 
 Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
 
+On pages that support layouts (`/app`), `#btn-layout` (`.iconbtn.iconbtn--theme`) sits right before the theme button. `theme.js` fills its icon and localized label (`common.layoutToMinimal` / `common.layoutToClassic`); leave it empty in markup.
+
 ## View hero + stats
 
 ```html
@@ -417,7 +419,47 @@ Thin progress bar for a card whose headline number is a share of a whole (win ra
 
 `.meter__fill` width is a JS-computed percentage (clamp 0–100), not a token. Inside `.snapshot`, its fill color follows that card's `--snap` tint automatically. Only add a meter where the ratio is meaningful — most panels don't need one.
 
-Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive.
+Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive. Settings → Appearance uses the same list for Layout (classic / minimal) and Theme (light / dark), each section a `.panel` with `.panel__body`.
+
+## Card panel
+
+A `.panel` whose content is not a table:
+
+```html
+<section class="panel panel--card">
+  <header class="panel__head">
+    <h2 class="panel__title">Cash flow</h2>
+    <div class="panel__tools"><span class="panel__meta">Last 6 months</span><button class="btn btn--sm btn--ghost" type="button">Open →</button></div>
+  </header>
+  <div class="panel__body">…</div>
+</section>
+```
+
+- `.panel__body` pads the content; `.panel__body--flush` drops the padding for edge-to-edge row lists.
+- `.panel__meta` is muted head text (period, count) next to the tools.
+- `.panel--card` (minimal Home) removes the head divider and makes the ghost "Open →" link borderless. Inside a padded card body, `.worklist` / `.rank` bleed to the card edges automatically.
+
+## Minimal Home (dashboard)
+
+Building blocks of the minimal-layout Home ([patterns.md](patterns.md#home-minimal-layout)). All live under `.dash`, read tokens only, and take a semantic tone through `data-tone="accent|ok|info|warn|late|bad|neutral|muted"` (sets `--tone`) instead of per-color classes.
+
+| Block | Role |
+|---|---|
+| `.dash__head` · `.dash__date` · `.dash__title` · `.dash__status--ok\|watch\|urgent` (+ `.dash__dot`, `.dash__sep`) · `.dash__actions` | Date eyebrow, greeting, health line, quick-create buttons |
+| `.dash-kpis` > `button.dash-kpi` (`__label` `__value` `__value--warn` `__meta` `__meta--bad`, optional `.spark`) | One hairline strip of up to 5 KPIs; cells share 1px grid gaps; one row on desktop, two columns under 700px (a lone last cell spans) |
+| `.dash-grid` > `.dash-col` × 2 (`.dash-grid--single`) | Wide main + side column; under 1100px the columns become `display: contents` and cards sort by `data-order` |
+| `.worklist` > `li` > `button.worklist__item` (`__dot` `__main` `__title` `__detail` `__side` `__meta` `__meta--amount` `__when`) | Needs-you queue, activity feed, overdue rows. `data-go` + optional `data-open` deep-links to a record |
+| `.agenda` > `.agenda__item` (`__time` `__rail` `__main` `__who` `__what`, `.is-past` / `.is-now`) | Today's bookings on a timeline rail |
+| `.bars` (`__scale` `__plot` `__pair` `__bar` `__labels` `__label.is-current`) | Grouped month columns; bar height is an inline `%` like `.meter__fill`; `role="img"` + a text `aria-label` |
+| `svg.spark` (`__line` `__area`, `.spark--tall`) | Trend line in the accent color, built in JS |
+| `.segbar` > `.segbar__seg` + `.legend` / `.legend--rows` (`__item` `__swatch` `__value`) | Receivables aging split and its key |
+| `.hbars` > `.hbars__row` (`__label` `__track` `__fill` `__value`) | Pipeline stages |
+| `.rank` > `button.rank__item` (`__pos` `__name` `__value` `__bar` `__fill` `__fill--billed` `__meta`) | Top clients, billed vs paid |
+| `.dash-split` · `.dash-figures` · `.dash-figure` (`--lg` `--end`, `__value--bad\|warn`, `__label`) | Headline numbers inside a card |
+| `dl.dash-facts` (`--row`) · `.dash-sub` · `.dash-empty` (`--center`) · `.dash-axis` | Key/value rows, sub-heading, quiet empty line, sparkline axis |
+| `.dash-tiles` > `button.dash-tile` (`__label` `__value` `__meta`) | Small module tiles for modules without a card |
+
+Do not reuse these as classic Home components, and do not add emoji to them — the minimal layout is emoji-free.
 
 ## Media thumb
 
