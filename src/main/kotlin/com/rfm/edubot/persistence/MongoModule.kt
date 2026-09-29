@@ -42,6 +42,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
             tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true).sparse(true))
             tenants.createIndex(Document("slug", 1), IndexOptions().unique(true))
             tenants.createIndex(Document("channels.platform", 1).append("channels.externalId", 1))
+            tenants.createIndex(
+                Document("parentTenantId", 1),
+                IndexOptions().partialFilterExpression(Document("parentTenantId", Document("\$type", "objectId"))),
+            )
 
             val dashboardUsers = db.getCollection<Document>("dashboard_users")
             dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))

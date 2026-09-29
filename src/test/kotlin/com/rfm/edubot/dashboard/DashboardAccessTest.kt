@@ -60,6 +60,17 @@ class DashboardAccessTest {
     }
 
     @Test
+    fun `a user of the first company opens the tenant's other active companies, and no one else's`() {
+        val first = tenant()
+        val second = tenant().copy(parentTenantId = first.id)
+        val owner = user(first)
+        assertTrue(DashboardAccessPolicy.allows(second, owner, DashboardAccessPolicy.TENANT_USER))
+        assertFalse(DashboardAccessPolicy.allows(second.copy(status = TenantStatus.SUSPENDED), owner, DashboardAccessPolicy.TENANT_USER))
+        assertFalse(DashboardAccessPolicy.allows(tenant().copy(parentTenantId = ObjectId()), owner, DashboardAccessPolicy.TENANT_USER))
+        assertFalse(DashboardAccessPolicy.allows(first, user(tenant()), DashboardAccessPolicy.TENANT_USER))
+    }
+
+    @Test
     fun `operators can open active and suspended tenants but not deleted ones`() {
         assertTrue(DashboardAccessPolicy.allows(tenant(TenantStatus.ACTIVE), null, DashboardAccessPolicy.OPERATOR_IMPERSONATION))
         assertTrue(DashboardAccessPolicy.allows(tenant(TenantStatus.SUSPENDED), null, DashboardAccessPolicy.OPERATOR_IMPERSONATION))

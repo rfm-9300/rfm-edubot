@@ -14,6 +14,7 @@ import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
+import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
@@ -249,6 +250,10 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         dashboardAccountRoutes(
             tenantRepository = tenantRepository,
             dashboardUsers = dashboardUserRepository,
+            runtimeConfig = runtimeConfig,
+        )
+        dashboardCompanyRoutes(
+            tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,
         )
         adminRoutes()

@@ -144,7 +144,19 @@ fun Route.dashboardRoutes(
         route("/app/api") {
             get("/me") {
                 val ctx = call.dashboardContext() ?: return@get
-                call.respond(MeDto(ctx.tenant.dto(), ctx.user?.dto(), DashboardModules.effectiveFor(ctx.tenant), ctx.principalType))
+                val companies = tenantRepository.findCompanies(ctx.tenant.primaryTenantId)
+                call.respond(
+                    MeDto(
+                        tenant = ctx.tenant.dto(),
+                        user = ctx.user?.dto(),
+                        modules = DashboardModules.effectiveFor(ctx.tenant),
+                        principalType = ctx.principalType,
+                        companies = companies
+                            .filter { DashboardAccessPolicy.allows(it, ctx.user, ctx.principalType) }
+                            .map { CompanyMeDto(it.id.toHexString(), it.name, it.slug, primary = it.parentTenantId == null) },
+                        companyLimit = companies.companyLimit(ctx.tenant),
+                    ),
+                )
             }
             get("/overview") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -518,11 +530,12 @@ fun Route.dashboardImpersonationRoute(
     dashboardUsers: DashboardUserRepository,
     runtimeConfig: RuntimeConfig,
 ) {
+    // Users belong to the tenant's first company, whichever of its companies the operator opened.
     authenticate("admin-jwt") {
         get("/admin/api/tenants/{slug}/dashboard-users") {
             val slug = call.parameters["slug"] ?: return@get call.respond(HttpStatusCode.BadRequest)
             val tenant = tenantRepository.findBySlug(slug) ?: return@get call.respond(HttpStatusCode.NotFound)
-            call.respond(dashboardUsers.listByTenant(tenant.id).map { it.dto() })
+            call.respond(dashboardUsers.listByTenant(tenant.primaryTenantId).map { it.dto() })
         }
         post("/admin/api/tenants/{slug}/dashboard-users") {
             val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -534,7 +547,7 @@ fun Route.dashboardImpersonationRoute(
             }
             val now = SystemClock.now()
             val user = DashboardUser(
-                tenantId = tenant.id,
+                tenantId = tenant.primaryTenantId,
                 email = request.email.trim().lowercase(),
                 passwordHash = BCrypt.withDefaults().hashToString(12, request.password.toCharArray()),
                 role = DashboardUserRole.valueOf(request.role),
@@ -546,7 +559,7 @@ fun Route.dashboardImpersonationRoute(
             val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val tenant = tenantRepository.findBySlug(slug) ?: return@post call.respond(HttpStatusCode.NotFound)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val user = dashboardUsers.setStatus(ObjectId(id), tenant.id, DashboardUserStatus.DISABLED)
+            val user = dashboardUsers.setStatus(ObjectId(id), tenant.primaryTenantId, DashboardUserStatus.DISABLED)
                 ?: return@post call.respond(HttpStatusCode.NotFound)
             call.respond(user.dto())
         }
@@ -554,7 +567,7 @@ fun Route.dashboardImpersonationRoute(
             val slug = call.parameters["slug"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             val tenant = tenantRepository.findBySlug(slug) ?: return@post call.respond(HttpStatusCode.NotFound)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val user = dashboardUsers.setStatus(ObjectId(id), tenant.id, DashboardUserStatus.ACTIVE)
+            val user = dashboardUsers.setStatus(ObjectId(id), tenant.primaryTenantId, DashboardUserStatus.ACTIVE)
                 ?: return@post call.respond(HttpStatusCode.NotFound)
             call.respond(user.dto())
         }
@@ -1228,7 +1241,16 @@ private suspend fun runPersonaTest(
 
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
-@Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)
+@Serializable private data class MeDto(
+    val tenant: TenantMeDto,
+    val user: DashboardUserDto?,
+    val modules: List<String>,
+    val principalType: String,
+    /** The tenant's companies this session can switch to, the current one included. */
+    val companies: List<CompanyMeDto>,
+    val companyLimit: Int,
+)
+@Serializable private data class CompanyMeDto(val id: String, val name: String, val slug: String, val primary: Boolean)
 @Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
 @Serializable private data class ChannelMeDto(
     val platform: String,

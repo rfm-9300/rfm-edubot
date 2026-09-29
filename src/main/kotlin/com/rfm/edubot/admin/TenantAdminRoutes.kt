@@ -25,6 +25,7 @@ import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
+import com.rfm.edubot.tenant.model.TenantCompanies
 import com.rfm.edubot.tenant.model.TenantStatus
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -87,6 +88,7 @@ fun Route.tenantAdminRoutes(
                     rateLimitPerHour = request.rateLimitPerHour,
                     rateLimitPerDay = request.rateLimitPerDay,
                     monthlyTokenBudget = request.monthlyTokenBudget,
+                    maxCompanies = request.maxCompanies.coerceIn(1, TenantCompanies.MAX),
                     createdAt = now,
                     updatedAt = now,
                 )
@@ -114,6 +116,9 @@ fun Route.tenantAdminRoutes(
                     Updates.set("updatedAt", now.toDate()),
                 )
                 updates.add(Updates.set("enabledModules", DashboardModules.sanitize(request.enabledModules)))
+                if (current.parentTenantId == null) {
+                    request.maxCompanies?.let { updates.add(Updates.set("maxCompanies", it.coerceIn(1, TenantCompanies.MAX))) }
+                }
                 request.locale?.let { updates.add(Updates.set("locale", com.rfm.edubot.tenant.model.TenantLocales.normalize(it))) }
                 request.timezone?.let { updates.add(Updates.set("timezone", com.rfm.edubot.tenant.model.TenantTimeZones.normalize(it))) }
                 request.channels?.let {
@@ -325,11 +330,17 @@ fun Route.tenantAdminRoutes(
     }
 }
 
+/** A tenant's other companies follow its first company; changing one of them changes only that one. */
 private suspend fun setStatus(repo: TenantRepository, registry: TenantRegistry, factory: TenantPipelineFactory, slug: String?, status: TenantStatus): Tenant? {
     if (slug.isNullOrBlank()) return null
-    val updated = repo.setStatus(slug, status, SystemClock.now()) ?: return null
-    if (status == TenantStatus.ACTIVE || status == TenantStatus.SUSPENDED) registry.put(updated) else registry.remove(updated)
-    factory.evict(updated.id)
+    val now = SystemClock.now()
+    val updated = repo.setStatus(slug, status, now) ?: return null
+    val others = if (updated.parentTenantId == null) repo.findCompanies(updated.id).filter { it.id != updated.id } else emptyList()
+    val changed = listOf(updated) + others.mapNotNull { repo.setStatus(it.slug, status, now) }
+    for (tenant in changed) {
+        if (status == TenantStatus.ACTIVE || status == TenantStatus.SUSPENDED) registry.put(tenant) else registry.remove(tenant)
+        factory.evict(tenant.id)
+    }
     return updated
 }
 
@@ -395,6 +406,7 @@ private data class TenantCreateRequest(
     val monthlyTokenBudget: Long = 2_000_000L,
     val channels: List<ChannelBindingRequest> = emptyList(),
     val enabledModules: List<String>? = null,
+    val maxCompanies: Int = 1,
 )
 
 @Serializable
@@ -408,6 +420,8 @@ private data class TenantUpdateRequest(
     val monthlyTokenBudget: Long = 2_000_000L,
     val channels: List<ChannelBindingRequest>? = null,
     val enabledModules: List<String>? = null,
+    /** Null keeps the current limit. Ignored on a tenant's extra companies. */
+    val maxCompanies: Int? = null,
 )
 
 @Serializable
@@ -447,6 +461,9 @@ private data class TenantDto(
     val monthlyTokenBudget: Long,
     val status: String,
     val channels: List<ChannelBindingDto>,
+    /** Set on a tenant's extra companies: the id of its first company. */
+    val parentTenantId: String?,
+    val maxCompanies: Int,
     val createdAt: String,
     val updatedAt: String,
 )
@@ -487,6 +504,8 @@ private fun Tenant.dto() = TenantDto(
     monthlyTokenBudget = monthlyTokenBudget,
     status = status.name,
     channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank(), it.displayName, it.wabaId, it.source) },
+    parentTenantId = parentTenantId?.toHexString(),
+    maxCompanies = maxCompanies,
     createdAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
 )

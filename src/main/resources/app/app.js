@@ -3,7 +3,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
-  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null,
+  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '',
@@ -309,6 +309,7 @@ async function startDashboardSession(newToken) {
 async function renderLogin() {
   $('#nav').innerHTML = '';
   $('#btn-account').hidden = true;
+  renderCompanySwitch();
   if (!$('#drawer')?.hidden) closeDrawer({ dismissed: true });
   const google = (await loadAuthConfig()).google || null;
   if (google) prepareGoogleSignIn(google).catch(() => {});
@@ -518,6 +519,109 @@ function openAccountPassword() {
   openDrawer(STR.accountPassword, body);
 }
 
+// ── Companies: a tenant can hold several, each with its own data ─────────────────
+// Switching swaps the session token for one scoped to the other company and reloads, so nothing
+// the previous company loaded survives in `state`.
+const companiesEnabled = () => (state.me?.companyLimit || 1) > 1 || (state.me?.companies || []).length > 1;
+
+function renderCompanySwitch() {
+  const brand = $('#brand');
+  const switchable = Boolean(token) && (state.me?.companies || []).length > 1;
+  brand.disabled = !switchable;
+  brand.title = switchable ? STR.companySwitchAria : '';
+}
+
+function companyErrorText(err, fallback) {
+  const key = `companyErr_${err?.code || ''}`;
+  return err?.code && STR[key] !== `app.${key}` ? STR[key] : fallback;
+}
+
+function companyRow(c, current, openable) {
+  const suspended = c.status === 'SUSPENDED';
+  const tone = c.id === current ? 'ok' : suspended ? 'warn' : 'neutral';
+  const side = c.id === current ? `<span class="pill pill--ok">${escapeHTML(STR.companyCurrent)}</span>`
+    : suspended ? `<span class="pill pill--warn">${escapeHTML(STR.companyStatusSUSPENDED)}</span>`
+    : escapeHTML(STR.companyOpen);
+  const detail = [c.slug, c.primary ? STR.companyFirst : ''].filter(Boolean).join(' · ');
+  return `<li><button class="worklist__item" type="button" data-company="${escapeHTML(c.id)}" data-tone="${tone}"${c.id === current ? ' aria-current="true"' : ''}${c.id === current || !openable ? ' disabled' : ''}>
+    <span class="worklist__dot" aria-hidden="true"></span>
+    <span class="worklist__main"><span class="worklist__title">${escapeHTML(c.name)}</span><span class="worklist__detail">${escapeHTML(detail)}</span></span>
+    <span class="worklist__side"><span class="worklist__meta">${side}</span></span>
+  </button></li>`;
+}
+
+async function switchCompany(button) {
+  button.disabled = true;
+  try {
+    const res = await api(`/app/api/companies/${encodeURIComponent(button.dataset.company)}/switch`, { method: 'POST' });
+    localStorage.setItem('dashboardToken', res.token);
+    location.reload();
+  } catch (err) {
+    button.disabled = false;
+    if (err.message !== 'unauthorized') toast(companyErrorText(err, STR.companySwitchFailed));
+  }
+}
+
+function openCompanySwitcher() {
+  const companies = state.me?.companies || [];
+  if (companies.length < 2) return;
+  const body = document.createElement('div');
+  body.className = 'record';
+  body.innerHTML = `<section class="panel"><ul class="worklist">${companies.map(c => companyRow(c, state.me.tenant.id, true)).join('')}</ul></section>
+    ${hasModule('settings') ? `<div class="actions"><button class="btn btn--ghost" type="button" data-company-manage>${escapeHTML(STR.companiesManage)}</button></div>` : ''}`;
+  openDrawer(STR.companiesSwitchTitle, body, false, { eyebrow: state.me.tenant.name });
+  $$('[data-company]', body).forEach(b => b.addEventListener('click', () => switchCompany(b)));
+  $('[data-company-manage]', body)?.addEventListener('click', () => {
+    closeDrawer({ dismissed: true });
+    state.settingsSection = 'companies';
+    setActive('settings');
+  });
+}
+
+function companiesPanel() {
+  const data = state.companies;
+  if (!data) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.companiesLoadFailed)}</p></div></div>`;
+  const openable = new Set((state.me?.companies || []).map(c => c.id));
+  const used = data.companies.length;
+  const add = !data.canManage ? `<p class="hint">${escapeHTML(STR.companiesAdminOnly)}</p>`
+    : used >= data.limit ? `<p class="hint">${escapeHTML(STR.companiesLimitReached({ limit: data.limit }))}</p>`
+    : `<form class="form" id="company-form">
+        <div class="form__row"><label class="lbl" for="company-name">${escapeHTML(STR.companyNameLabel)}</label><input class="inp" id="company-name" maxlength="80" autocomplete="organization" required /></div>
+        <p class="hint">${escapeHTML(STR.companyAddHint)}</p>
+        <div class="actions"><button class="btn btn--primary" type="submit">${escapeHTML(STR.companyCreate)}</button></div>
+      </form>`;
+  return `<div class="record">
+    <section class="panel">
+      <header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.companiesTitle)} <span class="tag">${escapeHTML(STR.companiesUsage({ used, limit: data.limit }))}</span></h2></header>
+      <div class="panel__body"><p class="hint">${escapeHTML(STR.companiesDesc)}</p></div>
+      <ul class="worklist">${data.companies.map(c => companyRow(c, data.current, openable.has(c.id))).join('')}</ul>
+    </section>
+    <section class="panel">
+      <header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.companyAddTitle)}</h2></header>
+      <div class="panel__body">${add}</div>
+    </section>
+  </div>`;
+}
+
+function wireCompaniesPanel(root) {
+  $$('[data-company]', root).forEach(b => b.addEventListener('click', () => switchCompany(b)));
+  const form = $('#company-form', root);
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const company = await api('/app/api/companies', { method: 'POST', body: JSON.stringify({ name: $('#company-name', form).value }) });
+      [state.me, state.companies] = await Promise.all([api('/app/api/me'), api('/app/api/companies')]);
+      toast(STR.companyCreated({ name: company.name }));
+      render();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(companyErrorText(err, STR.companyCreateFailed));
+    }
+  });
+}
+
 async function bootAuthed() {
   state.me = await api('/app/api/me');
   // Adopt the tenant's language (unless the user picked an explicit override this session), then
@@ -691,6 +795,7 @@ async function loadModule(tab) {
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
     state.documentTemplate = await api('/app/api/settings/document-template').catch(() => null);
     state.overviewLayout = await api('/app/api/settings/overview').catch(() => ({ hidden: [], available: [] }));
+    state.companies = companiesEnabled() ? await api('/app/api/companies').catch(() => null) : null;
   }
   if (tab === 'bookings') {
     if (!state.bookingWeekStart) state.bookingWeekStart = periodKey(todayKey(), 'week');
@@ -717,6 +822,7 @@ async function loadModule(tab) {
 
 function render() {
   renderNav();
+  renderCompanySwitch();
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
@@ -4107,7 +4213,7 @@ function renderSettings(root) {
   const ig = channels.find(c => c.platform === 'INSTAGRAM');
   const web = state.webWidget || { publicKey: null, allowedOrigins: [] };
   const draft = widgetDraft();
-  const section = state.settingsSection || 'channels';
+  const section = state.settingsSection === 'companies' && !companiesEnabled() ? 'channels' : (state.settingsSection || 'channels');
   const tabs = [
     ['home', STR.settingsHome],
     ['appearance', STR.settingsAppearance],
@@ -4115,6 +4221,7 @@ function renderSettings(root) {
     ['widget', STR.settingsWidget],
     ['language', STR.settingsLanguage],
     ['documents', STR.settingsDocuments],
+    ...(companiesEnabled() ? [['companies', STR.settingsCompanies]] : []),
   ];
   const chips = `<div class="settings-tabs">${tabs.map(([id, label]) => `<button type="button" class="chip ${section === id ? 'is-on' : ''}" data-settings="${id}">${escapeHTML(label)}</button>`).join('')}</div>`;
   const channelsPanel = `<div class="panel" style="padding:18px;margin-bottom:18px">
@@ -4237,6 +4344,7 @@ function renderSettings(root) {
     : section === 'widget' ? widgetPanel
     : section === 'language' ? languagePanel
     : section === 'documents' ? renderDocumentTemplatePanel()
+    : section === 'companies' ? companiesPanel()
     : channelsPanel;
   root.innerHTML = `${hero(labels.settings, STR.settingsDesc)}${chips}${body}`;
   $$('[data-settings]', root).forEach(b => b.addEventListener('click', () => { state.settingsSection = b.dataset.settings; render(); }));
@@ -4302,6 +4410,7 @@ function renderSettings(root) {
     catch { toast(STR.webGenerateFailed); }
   });
   if (section === 'documents') wireDocumentTemplateForm();
+  if (section === 'companies') wireCompaniesPanel(root);
 }
 
 function renderDocumentTemplatePanel() {
@@ -5328,6 +5437,7 @@ async function init() {
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
+  $('#brand').addEventListener('click', () => { drawerTrail = []; openCompanySwitcher(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
     if (state.active === 'clients') return openClientForm();

@@ -146,7 +146,7 @@ effective module list and returns `403 Forbidden` when its module is disabled.
 
 Before any module check, the `dashboard` JWT validator (`dashboard/DashboardAccess.kt`) loads the
 token's tenant and user and returns `401` unless the tenant is `ACTIVE` and the user exists, belongs
-to that tenant, and is `ACTIVE`. Operator impersonation tokens also open `SUSPENDED` tenants (for
+to that tenant's first company (see Companies below), and is `ACTIVE`. Operator impersonation tokens also open `SUSPENDED` tenants (for
 support) but never `DELETED` ones. This covers every route under `authenticate("dashboard")`, so
 suspending a tenant or disabling a user takes effect on the next request rather than at token expiry.
 Login refuses inactive accounts with `403`.
@@ -187,6 +187,45 @@ password need the current password. Turning the password off (`password/disable`
 again from Google-only needs a Google sign-in to the linked account from the last 5 minutes: that
 proves the Google account works before it becomes the only way in. New passwords need 8 characters
 and at most 72 bytes (BCrypt). The mobile app still signs in with a password only.
+
+### Companies
+
+A tenant can hold several companies with separate data. Each company is its own `Tenant` document,
+so every existing `tenantId` scope (clients, invoices, conversations, channels, persona, modules,
+document template, token budget) is per company, with no change to the data layer. The tenant's
+first company is the one without `parentTenantId`; the others point at it. `Tenant.primaryTenantId`
+is the first company's id for all of them.
+
+- **Limit.** Only the backoffice sets `maxCompanies` (1 to 20, first company included) on the first
+  company. Administrators (and operators opening the dashboard) add companies from Settings →
+  Companies (`POST /app/api/companies`, `409 company_limit` past the limit, `403 not_allowed` for
+  members, gated by the `settings` module). A new company starts empty, without channels, and
+  copies the first company's modules, rate limits, token budget, model, locale and timezone. The
+  limit check runs under an in-process per-tenant lock (single app instance, like bookings).
+- **Users.** `dashboard_users.tenantId` always points at the first company, and the access policy
+  lets a user open every company whose `primaryTenantId` equals it. The backoffice's user endpoints
+  resolve any company's slug to its first company.
+- **Sign-in and switching.** Sign-in (password or Google) always opens the first company. The sidebar
+  company name opens a switcher when `/app/api/me` lists more than one company;
+  `POST /app/api/companies/{id}/switch` answers a token for the other company with the same subject,
+  role, type and expiry, so switching never extends a session. The browser stores it and reloads,
+  so nothing the previous company loaded stays in memory.
+- **Lifecycle.** Suspending, activating or deleting the first company in the backoffice does the
+  same to its other (non-deleted) companies; changing an extra company changes only that one.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (/app)
+    participant S as Ktor
+    participant M as MongoDB
+    B->>S: POST /app/api/companies/{id}/switch (token for company A)
+    S->>S: validator: company A ACTIVE, user of A's first company
+    S->>M: company B by id
+    S->>S: B has A's primaryTenantId, B ACTIVE
+    S-->>B: token for B (same sub, role, typ, exp)
+    B->>B: store token, reload
+    B->>S: GET /app/api/me (token for B)
+```
 
 ### Services
 

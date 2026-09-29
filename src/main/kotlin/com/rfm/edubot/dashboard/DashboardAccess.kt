@@ -18,7 +18,7 @@ internal object DashboardAccessPolicy {
 
     fun allows(tenant: Tenant, user: DashboardUser?, principalType: String): Boolean = when (principalType) {
         TENANT_USER -> tenant.status == TenantStatus.ACTIVE &&
-            user != null && user.tenantId == tenant.id && user.status == DashboardUserStatus.ACTIVE
+            user != null && user.tenantId == tenant.primaryTenantId && user.status == DashboardUserStatus.ACTIVE
         // Platform operators can still open a suspended tenant for support.
         OPERATOR_IMPERSONATION -> tenant.status != TenantStatus.DELETED
         else -> false
@@ -57,4 +57,4 @@ internal fun ApplicationCall.dashboardContext(): DashboardContext? = attributes.
 
 internal fun DashboardContext.requireModule(id: String): Boolean = id in DashboardModules.effectiveFor(tenant)
 
-private fun String.toObjectIdOrNull(): ObjectId? = runCatching { ObjectId(this) }.getOrNull()
+internal fun String.toObjectIdOrNull(): ObjectId? = runCatching { ObjectId(this) }.getOrNull()

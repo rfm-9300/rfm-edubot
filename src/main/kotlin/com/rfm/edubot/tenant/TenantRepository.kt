@@ -42,6 +42,15 @@ class TenantRepository(mongoModule: MongoModule) {
     suspend fun findAll(): List<Tenant> =
         collection.find().toList().map { it.toTenant() }
 
+    /** The companies a tenant holds that aren't deleted, its first company first. */
+    suspend fun findCompanies(primaryTenantId: ObjectId): List<Tenant> =
+        collection.find(
+            Filters.and(
+                Filters.or(Filters.eq("_id", primaryTenantId), Filters.eq("parentTenantId", primaryTenantId)),
+                Filters.ne("status", TenantStatus.DELETED.name),
+            )
+        ).sort(Document("createdAt", 1)).toList().map { it.toTenant() }.sortedBy { it.parentTenantId != null }
+
     suspend fun create(tenant: Tenant): Tenant {
         collection.insertOne(tenant.toDocument())
         return tenant
@@ -110,6 +119,8 @@ class TenantRepository(mongoModule: MongoModule) {
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         monthlyTokenBudget = getLong("monthlyTokenBudget") ?: 2_000_000L,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
+        parentTenantId = getObjectId("parentTenantId"),
+        maxCompanies = (get("maxCompanies") as? Number)?.toInt() ?: 1,
         documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
         savedDocumentTemplates = getList("savedDocumentTemplates", Document::class.java).orEmpty()
             .mapNotNull { it.toSavedDocumentTemplate() },
@@ -131,10 +142,12 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("rateLimitPerDay", rateLimitPerDay)
             .append("monthlyTokenBudget", monthlyTokenBudget)
             .append("status", status.name)
+            .append("maxCompanies", maxCompanies)
             .append("documentTemplate", documentTemplate.toDocument())
             .append("savedDocumentTemplates", savedDocumentTemplates.map { it.toDocument() })
             .append("createdAt", createdAt.toDate())
             .append("updatedAt", updatedAt.toDate())
+            .appendIfNotNull("parentTenantId", parentTenantId)
         if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
         return doc
     }

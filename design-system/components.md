@@ -40,6 +40,8 @@ Strings in examples are placeholders — real copy goes through i18n.
 
 Mark is 40×40, gradient, display font. Surfaces: CRM SVG house, app `"AI"`, backoffice `"BO"`. Keep that 2-letter / SVG convention.
 
+`/app` renders the brand as the company switcher: `button.brand.brand--switch` with `span` children and a `.brand__chevron`. It stays `disabled` (looks exactly like the plain brand, no chevron) until the tenant holds more than one company; enabled, it hovers on `--surface-2` and opens the "Switch company" drawer, a `.record` > `.panel` > `.worklist` of companies (current one `data-tone="ok"` with a "Current" pill). Settings → Companies reuses the same rows.
+
 ## Nav
 
 ```html

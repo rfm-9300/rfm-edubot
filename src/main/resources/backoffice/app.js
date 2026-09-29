@@ -357,9 +357,25 @@ function bindPlatformSettings() {
   });
 }
 
+// A tenant's extra companies are tenants too; they list right under the tenant's first company.
+const companiesOf = primaryId => state.tenants.filter(t => t.parentTenantId === primaryId && t.status !== 'DELETED');
+
+function tenantCompanyLine(t) {
+  if (t.parentTenantId) {
+    const primary = state.tenants.find(p => p.id === t.parentTenantId);
+    return `<div class="muted">${escapeHTML(T.companyOf({ name: primary?.name || t.parentTenantId }))}</div>`;
+  }
+  const used = 1 + companiesOf(t.id).length;
+  return used > 1 || t.maxCompanies > 1 ? `<div class="muted">${escapeHTML(T.companiesTag({ used, limit: t.maxCompanies }))}</div>` : '';
+}
+
 function renderTenants() {
   const q = state.search.toLowerCase();
-  const rows = state.tenants.filter(t => !q || `${t.name} ${t.slug} ${t.phoneNumberId} ${(t.channels || []).map(c => `${c.platform} ${c.externalId}`).join(' ')}`.toLowerCase().includes(q));
+  const order = new Map(state.tenants.map((t, i) => [t.id, i]));
+  const group = t => order.get(t.parentTenantId) ?? order.get(t.id);
+  const rows = state.tenants
+    .filter(t => !q || `${t.name} ${t.slug} ${t.phoneNumberId} ${(t.channels || []).map(c => `${c.platform} ${c.externalId}`).join(' ')}`.toLowerCase().includes(q))
+    .sort((a, b) => (group(a) - group(b)) || (Boolean(a.parentTenantId) - Boolean(b.parentTenantId)) || (order.get(a.id) - order.get(b.id)));
   $('#tenant-count').textContent = state.tenants.length;
   $('#kpi-active').textContent = state.tenants.filter(t => t.status === 'ACTIVE').length;
   $('#kpi-messages').textContent = Object.values(state.stats).reduce((sum, s) => sum + Number(s.messages || 0), 0);
@@ -374,7 +390,7 @@ function renderTenants() {
         const s = state.stats[t.slug] || {};
         const pillClass = t.status === 'ACTIVE' ? 'pill--ok' : t.status === 'SUSPENDED' ? 'pill--warn' : 'pill--bad';
         return `<tr>
-          <td class="name">${escapeHTML(t.name)}</td>
+          <td class="name">${escapeHTML(t.name)}${tenantCompanyLine(t)}</td>
           <td class="id">${escapeHTML(t.slug)}</td>
           <td>${channelBadges(t.channels)}</td>
           <td><span class="pill ${pillClass}">${escapeHTML(t.status)}</span></td>
@@ -382,7 +398,7 @@ function renderTenants() {
           <td class="mono muted">${fmtDate(s.lastMessageAt)}</td>
           <td class="right"><div class="actions">
             <button class="btn btn--sm" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>
-            <button class="btn btn--sm btn--ghost" data-users="${escapeHTML(t.slug)}">${escapeHTML(T.users)}</button>
+            ${t.parentTenantId ? '' : `<button class="btn btn--sm btn--ghost" data-users="${escapeHTML(t.slug)}">${escapeHTML(T.users)}</button>`}
             <button class="btn btn--sm btn--ghost" data-edit="${escapeHTML(t.slug)}">${escapeHTML(T.edit)}</button>
             ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${escapeHTML(t.slug)}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${escapeHTML(t.slug)}">${escapeHTML(T.activate)}</button>`}
             <button class="btn btn--sm btn--ghost" data-reload="${escapeHTML(t.slug)}">${escapeHTML(T.reload)}</button>
@@ -424,9 +440,12 @@ async function openDashboard(slug) {
 
 async function usersDrawer(slug) {
   const users = await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users`);
+  const tenant = state.tenants.find(t => t.slug === slug);
+  const severalCompanies = tenant && (tenant.maxCompanies > 1 || companiesOf(tenant.id).length > 0);
   const wrap = document.createElement('div');
   wrap.className = 'form';
   wrap.innerHTML = `
+    ${severalCompanies ? `<p class="hint">${escapeHTML(T.usersAllCompanies)}</p>` : ''}
     <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
       ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
         <td class="name">${escapeHTML(u.email)}</td><td>${escapeHTML(u.role)}</td><td>${escapeHTML(u.status)}</td>
@@ -466,6 +485,7 @@ function tenantForm(editing) {
       <div class="form__row"><label class="lbl">${escapeHTML(T.modelOverride)}</label><input class="inp inp--mono" id="t-model" value="${escapeHTML(editing?.openrouterModel || '')}" placeholder="${escapeHTML(T.modelPlaceholder)}" /></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerHour)}</label><input class="inp inp--mono" id="t-hour" type="number" value="${editing?.rateLimitPerHour || 30}" /></div>
       <div class="form__row"><label class="lbl">${escapeHTML(T.ratePerDay)}</label><input class="inp inp--mono" id="t-day" type="number" value="${editing?.rateLimitPerDay || 200}" /></div>
+      ${editing?.parentTenantId ? '' : `<div class="form__row form__row--full"><label class="lbl" for="t-companies">${escapeHTML(T.maxCompaniesLabel)}</label><input class="inp inp--mono" id="t-companies" type="number" min="1" max="20" value="${editing?.maxCompanies || 1}" /><div class="hint">${escapeHTML(T.maxCompaniesHint)}</div></div>`}
     </div>
     <div class="form__row">
       <div class="row" style="justify-content:space-between">
@@ -522,6 +542,8 @@ function tenantForm(editing) {
         channels: collectChannels(wrap, Boolean(editing)),
         enabledModules: collectModules(wrap),
       };
+      const maxCompanies = $('#t-companies', wrap);
+      if (maxCompanies) payload.maxCompanies = Number(maxCompanies.value || 1);
       if (!payload.name) { toast(T.nameRequired); return false; }
       if (payload.channels.some(c => c.platform === 'INSTAGRAM' && !editing && !c.accessToken)) { toast(T.igNeedsToken); return false; }
       try {
@@ -730,15 +752,22 @@ function handleOAuthPopup() {
   return true;
 }
 
+// Suspending, activating or deleting a tenant's first company does the same to its other companies.
+function otherCompaniesNote(slug) {
+  const tenant = state.tenants.find(t => t.slug === slug);
+  const n = tenant && !tenant.parentTenantId ? companiesOf(tenant.id).length : 0;
+  return n > 0 ? ` ${T.cascadeNote({ n })}` : '';
+}
+
 async function lifecycle(slug, action, title, okLabel, danger = true) {
-  if (!await confirmDialog({ title, body: T.tenantLine({ slug }), okLabel, danger })) return;
+  if (!await confirmDialog({ title, body: T.tenantLine({ slug }) + otherCompaniesNote(slug), okLabel, danger })) return;
   await api(`/admin/api/tenants/${encodeURIComponent(slug)}/${action}`, { method: 'POST' });
   await loadAll();
   renderTenants();
 }
 
 async function deleteTenant(slug) {
-  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ slug }), okLabel: T.delete })) return;
+  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ slug }) + otherCompaniesNote(slug), okLabel: T.delete })) return;
   await api(`/admin/api/tenants/${encodeURIComponent(slug)}`, { method: 'DELETE' });
   await loadAll();
   renderTenants();

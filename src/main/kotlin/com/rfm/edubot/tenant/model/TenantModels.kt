@@ -26,6 +26,13 @@ data class Tenant(
      */
     val monthlyTokenBudget: Long = 2_000_000L,
     val status: TenantStatus = TenantStatus.ACTIVE,
+    /**
+     * A tenant can hold several companies, each one a [Tenant] with its own data. The extra companies
+     * point at the tenant's first company here; the first company has none.
+     */
+    val parentTenantId: ObjectId? = null,
+    /** How many companies the tenant may hold, the first one included. Only read on the first company. */
+    val maxCompanies: Int = 1,
     /** Branding + copy used when generating quote/invoice PDFs. */
     val documentTemplate: DocumentTemplate = DocumentTemplate(),
     /** Named designs (accent/decor/layout only) the tenant saved for reuse across document templates. */
@@ -36,7 +43,17 @@ data class Tenant(
     val phoneNumberId: String
         get() = binding(Platform.WHATSAPP)?.externalId.orEmpty()
 
+    /** The tenant's first company. Dashboard users belong to it and open every company it holds. */
+    val primaryTenantId: ObjectId
+        get() = parentTenantId ?: id
+
     fun binding(platform: Platform): ChannelBinding? = channels.firstOrNull { it.platform == platform }
+}
+
+object TenantCompanies {
+    /** Upper bound for the backoffice's per-tenant company limit. */
+    const val MAX = 20
+    const val MAX_NAME_LENGTH = 80
 }
 
 /**
