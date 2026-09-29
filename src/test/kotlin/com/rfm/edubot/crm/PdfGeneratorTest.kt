@@ -115,6 +115,32 @@ class PdfGeneratorTest {
     }
 
     @Test
+    fun `client tax number prints beside the client number in every design`() {
+        val withNif = client.copy(taxId = "123456789")
+        val quote = quote(listOf(item("Pintura", 1000.0)))
+        val documents = listOf("historical" to generator.generateQuote(quote, withNif)) +
+            BuiltInDesignTemplates.ALL.map { design ->
+                design.name to generator.generateQuote(
+                    quote,
+                    withNif,
+                    DocumentTemplate(
+                        companyName = "RoPaint Lda",
+                        accentColor = design.accentColor,
+                        showDecor = design.showDecor,
+                        layout = design.layout,
+                        style = design.style,
+                    ),
+                )
+            }
+        documents.forEach { (name, bytes) ->
+            val text = Loader.loadPDF(bytes).use { PDFTextStripper().getText(it) }
+            assertTrue(text.contains("CLT-001") && text.contains("NIF 123456789"), "$name misses the client reference: $text")
+            val overlaps = overlappingRuns(bytes)
+            assertTrue(overlaps.isEmpty(), "$name prints the NIF on top of other text: $overlaps")
+        }
+    }
+
+    @Test
     fun `clear style prints quantity and unit price as columns`() {
         val design = BuiltInDesignTemplates.find("builtin-clear")!!
         val template = DocumentTemplate(

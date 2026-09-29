@@ -346,6 +346,57 @@ Wide editor: `.drawer__panel--wide`. Footer:
 
 Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
+`openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from a client record replaces the eyebrow with `.drawer__back` (the client's name; the ← glyph is CSS) and comes back to the record when it closes itself after an action (save, mark paid, convert). Closing by hand (×, scrim, Escape) leaves the record.
+
+```html
+<div class="drawer__eyebrow"><button class="drawer__back" type="button" aria-label="Back to Ana Ribeiro">Ana Ribeiro</button></div>
+```
+
+## Client record
+
+The client drawer in `/app` is a record, not a form ([patterns.md](patterns.md#clients-directory--record)):
+
+```html
+<div class="client-record">
+  <section class="client-card">
+    <div class="client-card__head">
+      <span class="client-card__avatar" aria-hidden="true">AR</span>
+      <div class="client-card__who">
+        <div class="client-card__lines">
+          <span class="client-card__line mono">+351 911 222 333</span>
+          <a class="client-card__line" href="mailto:ana@example.pt">ana@example.pt</a>
+        </div>
+        <p class="client-card__since">Client since 28/09/26 · 2 visits · last activity yesterday</p>
+      </div>
+      <button class="btn btn--sm btn--ghost" type="button">Edit</button>
+    </div>
+    <div class="client-card__contact"><a class="btn btn--sm" href="tel:+351911222333">Call</a></div>
+    <div class="client-card__notes"><span class="client-card__notes-label">Notes</span>Prefers afternoons.</div>
+  </section>
+  <div class="client-kpis" data-count="4">
+    <div class="client-kpi" data-tone="bad">
+      <span class="client-kpi__label">Outstanding</span>
+      <span class="client-kpi__value">€ 140,00</span>
+      <span class="client-kpi__sub">€ 95,00 overdue</span>
+    </div>
+  </div>
+  <section class="panel"><header class="panel__head"><h2 class="panel__title">Needs attention <span class="tag">3</span></h2></header><ul class="worklist">…</ul></section>
+  <div class="chip-tabs" role="tablist">
+    <button class="chip is-on" type="button" role="tab">Activity</button>
+    <button class="chip" type="button" role="tab">Invoices<span class="chip__count">3</span></button>
+  </div>
+  <div class="client-record__pane" role="tabpanel">…</div>
+  <div class="drawer__foot client-record__foot"><button class="btn btn--sm" type="button"><span class="btn__plus">+</span> New booking</button></div>
+</div>
+```
+
+- `.client-kpis` holds up to four `.client-kpi`; `data-count` sets the columns (two below 560px). `data-tone="bad|warn|info"` colors the value. Values sit at the bottom of the cell so they line up when a label wraps.
+- The attention list and the Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.client-record` as it does in `.dash`. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`.
+- `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip.
+- Tab panes reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
+- The create actions are a sticky `.drawer__foot` at the end of the record.
+- `.hint--warn` is a warning-colored hint, e.g. "another client already uses this phone" under the client form's phone field.
+
 ## Confirm
 
 ```html

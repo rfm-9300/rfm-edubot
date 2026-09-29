@@ -214,7 +214,8 @@ fun Route.tenantAdminRoutes(
             route("/tenants/{slug}") {
                 get("/clients") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@get
-                    call.respond(deps.clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
+                    val q = call.request.queryParameters["q"].orEmpty()
+                    call.respond(deps.clients.search(q, limit = if (q.isBlank()) 2000 else 50).map { it.dto() })
                 }
                 get("/standard-items") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@get
@@ -248,7 +249,9 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-                    call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
+                    request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    val client = deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                    call.respond(HttpStatusCode.Created, client.dto())
                 }
                 get("/quotes") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.QUOTES) ?: return@get

@@ -40,12 +40,36 @@ internal suspend fun io.ktor.server.application.ApplicationCall.respondGenerated
     respondBytes(generate(), ContentType.Application.Pdf)
 }
 
+/** Also the PATCH body: omitted [email], [taxId] and [notes] keep what is stored; an empty string clears them. */
 @Serializable
 internal data class CreateClientRequest(
     val name: String,
     val phone: String,
     val address: String? = null,
-)
+    val email: String? = null,
+    val taxId: String? = null,
+    val notes: String? = null,
+) {
+    /** Stable error code for the first invalid optional field, or null. */
+    fun detailsError(): String? {
+        val mail = email?.trim().orEmpty()
+        return when {
+            mail.length > MAX_EMAIL || (mail.isNotEmpty() && !EMAIL_SHAPE.matches(mail)) -> "invalid_email"
+            (taxId?.trim()?.length ?: 0) > MAX_TAX_ID -> "tax_id_too_long"
+            (notes?.trim()?.length ?: 0) > MAX_NOTES -> "notes_too_long"
+            (address?.trim()?.length ?: 0) > MAX_ADDRESS -> "address_too_long"
+            else -> null
+        }
+    }
+
+    companion object {
+        const val MAX_EMAIL = 254
+        const val MAX_TAX_ID = 32
+        const val MAX_NOTES = 4000
+        const val MAX_ADDRESS = 300
+        private val EMAIL_SHAPE = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
+    }
+}
 
 @Serializable
 internal data class CreateQuoteRequest(
@@ -104,7 +128,11 @@ internal data class ClientDto(
     val name: String,
     val phone: String,
     val address: String? = null,
+    val email: String? = null,
+    val taxId: String? = null,
+    val notes: String? = null,
     val createdAt: String,
+    val updatedAt: String? = null,
 )
 
 @Serializable
@@ -213,7 +241,11 @@ internal fun Client.dto() = ClientDto(
     name = name,
     phone = phone,
     address = address,
+    email = email,
+    taxId = taxId,
+    notes = notes,
     createdAt = createdAt.toString(),
+    updatedAt = updatedAt.toString(),
 )
 
 internal fun Quote.dto(client: Client?) = QuoteDto(

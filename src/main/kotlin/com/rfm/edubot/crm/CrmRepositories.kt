@@ -28,21 +28,34 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
 
     suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
-    suspend fun search(query: String): List<Client> {
+    suspend fun search(query: String, limit: Int = 20): List<Client> {
         val trimmed = query.trim()
         val filter = if (trimmed.isBlank()) {
             Filters.eq("tenantId", tenantId)
         } else {
+            val contains = ".*${Regex.escape(trimmed)}.*"
+            val digits = trimmed.filter(Char::isDigit)
+            // "912345678" should find "+351 912 345 678": match the digits with any separators between them.
+            val phoneDigits = if (digits.length >= 3 && trimmed.all { it.isDigit() || it in " +-()." }) {
+                Filters.regex("phone", digits.toList().joinToString("\\D*"))
+            } else {
+                null
+            }
             scoped(
                 Filters.or(
-                    Filters.regex("number", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
+                    listOfNotNull(
+                        Filters.regex("number", contains, "i"),
+                        Filters.regex("name", contains, "i"),
+                        Filters.regex("phone", contains, "i"),
+                        Filters.regex("address", contains, "i"),
+                        Filters.regex("email", contains, "i"),
+                        Filters.regex("taxId", contains, "i"),
+                        phoneDigits,
+                    )
                 )
             )
         }
-        return collection.find(filter).limit(20).toList().map { it.toClient() }
+        return collection.find(filter).limit(limit).toList().map { it.toClient() }
     }
 
     /**
@@ -62,28 +75,64 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
             }
     }
 
-    suspend fun update(id: ObjectId, name: String, phone: String, address: String?): Client? {
+    /**
+     * [address] is replaced as given (null clears it). [email], [taxId] and [notes] are only written when
+     * not null, so callers that don't send them keep the stored values; a blank string clears them.
+     */
+    suspend fun update(
+        id: ObjectId,
+        name: String,
+        phone: String,
+        address: String?,
+        email: String? = null,
+        taxId: String? = null,
+        notes: String? = null,
+    ): Client? {
         val now = SystemClock.now()
+        val updates = mutableListOf(
+            Updates.set("name", name.trim()),
+            Updates.set("phone", phone.trim()),
+            Updates.set("address", address.cleaned()),
+            Updates.set("updatedAt", now.toDate()),
+        )
+        email?.let { updates += Updates.set("email", it.cleaned()) }
+        taxId?.let { updates += Updates.set("taxId", it.cleaned()) }
+        notes?.let { updates += Updates.set("notes", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
-            Updates.combine(
-                Updates.set("name", name.trim()),
-                Updates.set("phone", phone.trim()),
-                Updates.set("address", address?.trim()?.takeIf { it.isNotBlank() }),
-                Updates.set("updatedAt", now.toDate()),
-            ),
+            Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
         return doc?.toClient()
     }
 
-    suspend fun create(name: String, phone: String, address: String? = null): Client {
+    suspend fun create(
+        name: String,
+        phone: String,
+        address: String? = null,
+        email: String? = null,
+        taxId: String? = null,
+        notes: String? = null,
+    ): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"
-        val client = Client(tenantId = tenantId, number = number, name = name.trim(), phone = phone.trim(), address = address?.trim()?.takeIf { it.isNotBlank() }, createdAt = now, updatedAt = now)
+        val client = Client(
+            tenantId = tenantId,
+            number = number,
+            name = name.trim(),
+            phone = phone.trim(),
+            address = address.cleaned(),
+            email = email.cleaned(),
+            taxId = taxId.cleaned(),
+            notes = notes.cleaned(),
+            createdAt = now,
+            updatedAt = now,
+        )
         collection.insertOne(client.toDocument())
         return client
     }
+
+    private fun String?.cleaned(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 
     private fun Document.toClient() = Client(
         id = getObjectId("_id"),
@@ -92,6 +141,9 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
         name = getString("name"),
         phone = getString("phone"),
         address = getString("address"),
+        email = getString("email"),
+        taxId = getString("taxId"),
+        notes = getString("notes"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
     )
@@ -102,6 +154,9 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
         .append("name", name)
         .append("phone", phone)
         .append("address", address)
+        .append("email", email)
+        .append("taxId", taxId)
+        .append("notes", notes)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
 

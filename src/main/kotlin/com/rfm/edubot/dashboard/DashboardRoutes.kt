@@ -600,14 +600,25 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
         get("/clients") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
-            call.respond(deps.clients.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
+            val q = call.request.queryParameters["q"].orEmpty()
+            // The Clients page, and the client pickers in the quote/invoice forms, list the whole directory.
+            call.respond(deps.clients.search(q, limit = if (q.isBlank()) CLIENT_DIRECTORY_LIMIT else 50).map { it.dto() })
+        }
+        get("/clients/by-phone") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val phone = call.request.queryParameters["phone"].orEmpty()
+            val client = deps.clients.findByPhone(phone) ?: return@get call.respond(HttpStatusCode.NotFound, mapOf("error" to "client_not_found"))
+            call.respond(client.dto())
         }
         post("/clients") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            call.respond(HttpStatusCode.Created, deps.clients.create(request.name, request.phone, request.address).dto())
+            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val client = deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+            call.respond(HttpStatusCode.Created, client.dto())
         }
         patch("/clients/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
@@ -615,7 +626,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val client = deps.clients.update(id, request.name, request.phone, request.address) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val client = deps.clients.update(id, request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(client.dto())
         }
         get("/clients/{id}") {
@@ -923,6 +936,7 @@ private data class CrmDeps(
 
 private const val MAX_LOGO_BYTES = 2 * 1024 * 1024
 private const val MAX_SAVED_PRESETS = 20
+private const val CLIENT_DIRECTORY_LIMIT = 2000
 
 @Serializable
 private data class DocumentTemplateRequest(

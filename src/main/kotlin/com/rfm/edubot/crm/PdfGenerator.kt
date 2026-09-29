@@ -372,8 +372,8 @@ class PdfGenerator {
         text(cs, sanitize(client.name).uppercase(), MARGIN, H - 246f, 12f, bold, ink)
         text(cs, sanitize(client.phone), MARGIN, H - 263f, 10f, regular, inkMuted)
         var clientY = H - 279f
-        if (client.number.isNotBlank()) {
-            text(cs, sanitize(client.number), MARGIN, clientY, 9f, regular, inkMuted)
+        clientReference(client)?.let { ref ->
+            text(cs, sanitize(ref), MARGIN, clientY, 9f, regular, inkMuted)
             clientY -= 16f
         }
         val address = client.address?.takeIf { it.isNotBlank() }
@@ -412,8 +412,8 @@ class PdfGenerator {
             y -= 17f
             text(cs, sanitize(client.phone), block.x, y, 10f, regular, inkMuted)
             y -= 16f
-            if (client.number.isNotBlank()) {
-                text(cs, sanitize(client.number), block.x, y, 9f, regular, inkMuted)
+            clientReference(client)?.let { ref ->
+                text(cs, sanitize(ref), block.x, y, 9f, regular, inkMuted)
                 y -= 14f
             }
             client.address?.takeIf { it.isNotBlank() }?.let { address ->
@@ -675,8 +675,8 @@ class PdfGenerator {
                 text(cs, sanitize(client.phone), block.x + pad, y, 8f, regular, inkMuted)
                 y -= 11f
             }
-            if (client.number.isNotBlank()) {
-                text(cs, sanitize(client.number), block.x + pad, y, 8f, regular, inkMuted)
+            clientReference(client)?.let { ref ->
+                text(cs, sanitize(ref), block.x + pad, y, 8f, regular, inkMuted)
                 y -= 11f
             }
             client.address?.takeIf { it.isNotBlank() }?.let { address ->
@@ -921,6 +921,13 @@ class PdfGenerator {
     }
 
     // ── Text helpers ──────────────────────────────────────────────────
+
+    /** Client number and tax number share one line, so a NIF never makes the client block taller. */
+    private fun clientReference(client: Client): String? =
+        listOfNotNull(
+            client.number.takeIf { it.isNotBlank() },
+            client.taxId?.takeIf { it.isNotBlank() }?.let { "NIF $it" },
+        ).joinToString("  ·  ").takeIf { it.isNotBlank() }
 
     private fun wrap(value: String, font: PDFont, size: Float, maxWidth: Float): List<String> {
         val words = sanitize(value).split(Regex("\\s+")).filter { it.isNotBlank() }

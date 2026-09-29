@@ -12,6 +12,11 @@ data class Client(
     val name: String,
     val phone: String,
     val address: String? = null,
+    val email: String? = null,
+    /** Tax number (NIF in Portugal); printed on quotes and invoices. */
+    val taxId: String? = null,
+    /** Staff-only notes. Never expose them to the customer-facing bot tools. */
+    val notes: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

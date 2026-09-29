@@ -1273,10 +1273,7 @@ async function dashGo(el) {
   if (go === 'invoices') return openInvoiceDetail(open);
   if (go === 'quotes') return openQuoteDetail(open);
   if (go === 'payments') return openPaymentDetail(open);
-  if (go === 'clients') {
-    const client = state.clients.find(c => c.id === open);
-    if (client) openClientForm(client);
-  }
+  if (go === 'clients') return openClientDrawer(open);
   if (go === 'bookings') return openBookingById(open);
 }
 
@@ -1372,9 +1369,14 @@ async function openInboxThread(id, root) {
 }
 function renderClients(root) {
   const t = CRM.clients;
-  const q = state.search.toLowerCase();
+  const q = state.search.trim().toLowerCase();
+  const qDigits = phoneDigits(q);
+  const matches = c => !q
+    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${c.address || ''} ${c.email || ''} ${c.taxId || ''}`.toLowerCase().includes(q)
+    || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
   const rows = state.clients
-    .filter(c => !q || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${c.address || ''}`.toLowerCase().includes(q))
+    .filter(matches)
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
     .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML(c.address || '')}</td><td class="mono muted">${escapeHTML(c.phone)}</td><td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
@@ -1389,7 +1391,7 @@ function renderClients(root) {
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
-  $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientForm(state.clients.find(c => c.id === r.dataset.client))));
+  $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(state.clients.find(c => c.id === r.dataset.client) || r.dataset.client)));
 }
 
 function renderSuppliers(root) {
@@ -1551,7 +1553,8 @@ function serviceSourceOptions() {
 async function openServiceForm(service, presetClientId) {
   const t = CRM.services;
   const editing = service && service.id ? service : null;
-  if (!state.clients.length && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => []);
+  const missingPreset = presetClientId && !state.clients.some(c => c.id === presetClientId);
+  if ((!state.clients.length || missingPreset) && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
   if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
   const sources = serviceSourceOptions();
@@ -1704,57 +1707,578 @@ async function invoiceSelectedServices() {
   });
   openDrawer(t.invoiceSelected, form);
 }
+// ── Client record ──────────────────────────────────────────────────────────────
+// A client opens as a record: who they are and how to reach them, what they owe, what's next, then
+// the full history. Edit is one click away. Drawers opened from here come back to it (drawerReturn).
+let clientRecord = null;
+const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const phoneDigits = p => String(p || '').replace(/\D/g, '');
+// Same rule as the server's findByPhone: numbers of 9+ digits compare on their last 9 digits.
+const phoneKey = p => { const d = phoneDigits(p); return d.length >= 9 ? d.slice(-9) : d; };
+const sumBy = (list, key) => list.reduce((t, x) => t + Number(x[key] || 0), 0);
+const telHref = phone => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
+const mapsHref = address => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+function clientInitials(name) {
+  const words = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!words.length) return '?';
+  return (words[0][0] + (words.length > 1 ? words[words.length - 1][0] : '')).toUpperCase();
+}
+// wa.me needs the country code; a number typed without one is Portuguese, the product's market.
+function waHref(phone) {
+  const raw = String(phone || '').trim();
+  const digits = phoneDigits(raw);
+  const intl = raw.startsWith('00') ? digits.slice(2) : (!raw.startsWith('+') && digits.length === 9 ? `351${digits}` : digits);
+  return `https://wa.me/${intl}`;
+}
+// Home counts a pending invoice past its due date as overdue; the record agrees with Home.
+function invoiceIsOverdue(inv, today = todayKey()) {
+  return inv.status === 'OVERDUE' || (inv.status === 'PENDING' && !!inv.dueDate && inv.dueDate.slice(0, 10) < today);
+}
+const effectiveInvoiceStatus = inv => (invoiceIsOverdue(inv) ? 'OVERDUE' : inv.status);
+
+function matchConversation(client, list) {
+  const key = phoneKey(client.phone);
+  if (key.length < 6) return null;
+  return list
+    .filter(c => c.channel === 'WHATSAPP' && phoneKey(c.waId) === key)
+    .sort((a, b) => String(b.lastMessageAt || '').localeCompare(String(a.lastMessageAt || '')))[0] || null;
+}
+
+// The booking form and legacy booking prices read the bookable services and opening hours,
+// which only the Bookings page loads.
+async function ensureBookingData() {
+  if (!hasModule('bookings') || state.bookingServices.length) return;
+  const [services, availability] = await Promise.all([
+    api('/app/api/bookings/services').catch(() => []),
+    api('/app/api/bookings/availability').catch(() => []),
+  ]);
+  state.bookingServices = services;
+  state.bookingAvailability = availability;
+}
+
+async function loadClientRecord(id) {
+  const q = encodeURIComponent(id);
+  const related = (module, path) => (hasModule(module) ? api(path).catch(() => []) : Promise.resolve([]));
+  const conversations = !hasModule('conversations') ? Promise.resolve([])
+    : state.fetched.conversations ? Promise.resolve(state.conversations)
+    : api('/app/api/conversations').catch(() => []);
+  const [client, quotes, invoices, services, bookings, chats] = await Promise.all([
+    api(`/app/api/crm/clients/${q}`).catch(() => null),
+    related('quotes', `/app/api/crm/quotes?clientId=${q}`),
+    related('invoices', `/app/api/crm/invoices?clientId=${q}`),
+    related('services', `/app/api/crm/services?clientId=${q}`),
+    related('bookings', `/app/api/bookings?clientId=${q}`),
+    conversations,
+    ensureBookingData(),
+  ]);
+  return {
+    client,
+    quotes: quotes || [],
+    invoices: invoices || [],
+    services: services || [],
+    bookings: bookings || [],
+    conversation: client ? matchConversation(client, chats || []) : null,
+  };
+}
+
+function clientMoney(r) {
+  const today = todayKey();
+  const live = r.invoices.filter(i => i.status !== 'CANCELLED');
+  const unpaid = live.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE');
+  const overdue = unpaid.filter(i => invoiceIsOverdue(i, today)).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+  const openWork = r.services.filter(s => s.status === 'OPEN');
+  const openQuotes = r.quotes.filter(q => q.status === 'PENDENTE' || q.status === 'SENT');
+  return {
+    billed: sumBy(live, 'totalEur'),
+    paid: sumBy(live.filter(i => i.status === 'PAID'), 'totalEur'),
+    unpaid,
+    outstanding: sumBy(unpaid, 'totalEur'),
+    overdue,
+    overdueTotal: sumBy(overdue, 'totalEur'),
+    openWork,
+    openWorkTotal: sumBy(openWork, 'totalEur'),
+    openQuotes,
+    openQuotesTotal: sumBy(openQuotes, 'totalEur'),
+  };
+}
+
+function clientBookingsSplit(r) {
+  const now = Date.now();
+  const sorted = [...r.bookings].sort((a, b) => a.startAt.localeCompare(b.startAt));
+  const isLive = b => b.status === 'PENDING' || b.status === 'CONFIRMED';
+  const upcoming = sorted.filter(b => isLive(b) && new Date(b.endAt || b.startAt).getTime() >= now);
+  return {
+    upcoming,
+    past: sorted.filter(b => !upcoming.includes(b)).reverse(),
+    // Staff never marked these done or no-show, so they were never billed either.
+    unclosed: sorted.filter(b => isLive(b) && new Date(b.endAt || b.startAt).getTime() < now),
+    visits: r.bookings.filter(b => b.status === 'COMPLETED').length,
+    noShows: r.bookings.filter(b => b.status === 'NO_SHOW').length,
+  };
+}
+
+function clientLastActivity(r) {
+  const now = Date.now();
+  return [
+    ...r.bookings.filter(b => b.status !== 'CANCELLED').map(b => b.startAt),
+    ...r.services.map(s => s.performedAt || s.createdAt),
+    ...r.quotes.map(q => q.createdAt),
+    ...r.invoices.flatMap(i => [i.createdAt, i.paidAt]),
+    r.conversation?.lastMessageAt,
+  ].filter(s => s && new Date(s).getTime() <= now).sort().pop() || null;
+}
+
+function clientRowHtml(item) {
+  const side = [
+    item.pill ? `<span class="worklist__meta">${item.pill}</span>` : '',
+    item.amount != null ? `<span class="worklist__meta worklist__meta--amount">${fmtEUR(item.amount)}</span>` : '',
+    item.when ? `<span class="worklist__when">${escapeHTML(item.when)}</span>` : '',
+  ].join('');
+  return `<li><button class="worklist__item" type="button" data-client-open="${escapeHTML(item.open)}" data-tone="${item.tone || 'neutral'}">
+    <span class="worklist__dot" aria-hidden="true"></span>
+    <span class="worklist__main"><span class="worklist__title">${escapeHTML(item.title)}</span>${item.detail ? `<span class="worklist__detail">${escapeHTML(item.detail)}</span>` : ''}</span>
+    <span class="worklist__side">${side}</span>
+  </button></li>`;
+}
+
+function clientCardHtml(r, bk) {
+  const c = r.client;
+  const last = clientLastActivity(r);
+  const since = [
+    STR.clientSince({ date: fmtDay(c.createdAt) }),
+    bk.visits ? STR.clientVisits({ n: bk.visits }) : '',
+    bk.noShows ? STR.bookingsClientNoShows({ n: bk.noShows }) : '',
+    last ? STR.clientLastActivity({ when: relTime(last) }) : '',
+  ].filter(Boolean).join(' · ');
+  const lines = [
+    `<span class="client-card__line mono">${escapeHTML(c.phone)}</span>`,
+    c.email ? `<a class="client-card__line" href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>` : '',
+    c.address ? `<a class="client-card__line" href="${escapeHTML(mapsHref(c.address))}" target="_blank" rel="noopener">${escapeHTML(c.address)}</a>` : '',
+    c.taxId ? `<span class="client-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: c.taxId }))}</span>` : '',
+  ].filter(Boolean).join('');
+  const contact = [
+    phoneDigits(c.phone).length >= 6 ? `<a class="btn btn--sm" href="${escapeHTML(telHref(c.phone))}">${escapeHTML(STR.clientCall)}</a>` : '',
+    phoneDigits(c.phone).length >= 9 ? `<a class="btn btn--sm" href="${escapeHTML(waHref(c.phone))}" target="_blank" rel="noopener">${escapeHTML(STR.clientWhatsApp)}</a>` : '',
+    r.conversation ? `<button class="btn btn--sm" type="button" data-client-open="chat">${escapeHTML(STR.clientOpenChat)}${r.conversation.waiting ? ` <span class="pill pill--warn">${escapeHTML(STR.waiting)}</span>` : ''}</button>` : '',
+  ].join('');
+  return `<section class="client-card">
+    <div class="client-card__head">
+      <span class="client-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(c.name))}</span>
+      <div class="client-card__who">
+        <div class="client-card__lines">${lines}</div>
+        <p class="client-card__since">${escapeHTML(since)}</p>
+      </div>
+      <button class="btn btn--sm btn--ghost" type="button" data-client-edit>${escapeHTML(STR.clientEditAction)}</button>
+    </div>
+    ${contact ? `<div class="client-card__contact">${contact}</div>` : ''}
+    ${c.notes ? `<div class="client-card__notes"><span class="client-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(c.notes)}</div>` : ''}
+  </section>`;
+}
+
+function clientKpisHtml(m, bk) {
+  const cells = [];
+  if (hasModule('invoices')) {
+    cells.push({
+      label: STR.clientKpiOutstanding,
+      value: fmtEUR(m.outstanding),
+      sub: m.overdueTotal ? STR.clientKpiOverdue({ amount: fmtEUR(m.overdueTotal) })
+        : m.unpaid.length ? STR.clientKpiUnpaid({ n: m.unpaid.length }) : STR.clientKpiNothingDue,
+      tone: m.overdueTotal ? 'bad' : m.outstanding ? 'warn' : '',
+    });
+  }
+  if (hasModule('bookings')) {
+    const next = bk.upcoming[0];
+    const key = next ? bookingLocal(next).slice(0, 10) : '';
+    const relative = next ? relativeDayLabel(key) : '';
+    cells.push({
+      label: STR.clientKpiNextBooking,
+      value: next ? relative || fmtDayKey(key, { day: 'numeric', month: 'short' }) : '—',
+      sub: next
+        ? [relative ? '' : capFirst(fmtDayKey(key, { weekday: 'short' })), fmtTime(next.startAt), bookingServiceName(next)].filter(Boolean).join(' · ')
+        : STR.clientKpiNoBooking,
+    });
+  }
+  if (hasModule('services')) {
+    cells.push({
+      label: STR.clientKpiUnbilled,
+      value: fmtEUR(m.openWorkTotal),
+      sub: STR.clientKpiServices({ n: m.openWork.length }),
+      tone: m.openWork.length ? 'warn' : '',
+    });
+  }
+  if (hasModule('invoices')) cells.push({ label: STR.clientKpiBilled, value: fmtEUR(m.billed), sub: STR.clientKpiPaid({ amount: fmtEUR(m.paid) }) });
+  if (hasModule('quotes')) {
+    cells.push({
+      label: STR.clientKpiQuotes,
+      value: fmtEUR(m.openQuotesTotal),
+      sub: STR.clientKpiOpenQuotes({ n: m.openQuotes.length }),
+      tone: m.openQuotes.length ? 'info' : '',
+    });
+  }
+  const shown = cells.slice(0, 4);
+  if (!shown.length) return '';
+  return `<div class="client-kpis" data-count="${shown.length}">${shown.map(k => `<div class="client-kpi"${k.tone ? ` data-tone="${k.tone}"` : ''} title="${escapeHTML(`${k.label}: ${k.value} · ${k.sub}`)}">
+    <span class="client-kpi__label">${escapeHTML(k.label)}</span>
+    <span class="client-kpi__value">${escapeHTML(k.value)}</span>
+    <span class="client-kpi__sub">${escapeHTML(k.sub)}</span>
+  </div>`).join('')}</div>`;
+}
+
+function clientAttention(r, m, bk) {
+  const today = todayKey();
+  const items = [];
+  m.overdue.forEach(i => items.push({
+    tone: 'bad', title: STR.clientAttnOverdue({ number: i.number }), detail: STR.clientAttnOverdueDetail({ when: relDay(i.dueDate) }),
+    amount: i.totalEur, open: `invoice:${i.id}`,
+  }));
+  bk.unclosed.forEach(b => items.push({
+    tone: 'late', title: STR.clientAttnUnclosed, detail: [bookingWhen(b), bookingServiceName(b)].filter(Boolean).join(' · '), open: `booking:${b.id}`,
+  }));
+  bk.upcoming.filter(b => b.status === 'PENDING').forEach(b => items.push({
+    tone: 'warn', title: STR.clientAttnPendingBooking, detail: [bookingWhen(b), bookingServiceName(b)].filter(Boolean).join(' · '), open: `booking:${b.id}`,
+  }));
+  if (m.openWork.length) {
+    items.push({
+      tone: 'warn', title: STR.clientAttnUnbilled({ n: m.openWork.length }), detail: m.openWork.map(s => s.name).join(', '),
+      amount: m.openWorkTotal, open: hasModule('invoices') ? 'invoice-open-work' : 'tab:services',
+    });
+  }
+  m.openQuotes.forEach(q => {
+    const expired = !!q.validUntil && q.validUntil.slice(0, 10) < today;
+    items.push({
+      tone: expired ? 'late' : 'info',
+      title: q.status === 'SENT' ? STR.clientAttnQuote({ number: q.number }) : STR.clientAttnQuoteDraft({ number: q.number }),
+      detail: q.validUntil
+        ? (expired ? STR.clientAttnQuoteExpired({ when: relDay(q.validUntil) }) : STR.clientValidUntil({ date: fmtDay(q.validUntil) }))
+        : STR.clientCreatedOn({ date: fmtDay(q.createdAt) }),
+      amount: q.totalEur, open: `quote:${q.id}`,
+    });
+  });
+  const soon = addDayKey(today, 7);
+  m.unpaid.filter(i => !invoiceIsOverdue(i, today) && i.dueDate && i.dueDate.slice(0, 10) <= soon).forEach(i => items.push({
+    tone: 'warn', title: STR.clientAttnDueSoon({ number: i.number }), detail: STR.clientDueWhen({ when: relDay(i.dueDate) }),
+    amount: i.totalEur, open: `invoice:${i.id}`,
+  }));
+  return items;
+}
+
+function clientActivity(r, bk) {
+  const upcoming = bk.upcoming.map(b => ({
+    tone: bookingTone(b.status) || 'neutral', title: bookingServiceName(b) || STR.clientKindBooking,
+    detail: `${STR.clientKindBooking} · ${bookingWhen(b)}`, pill: bookingPill(b.status), amount: bookingPrice(b), open: `booking:${b.id}`,
+  }));
+  const past = [];
+  bk.past.forEach(b => past.push({
+    at: b.startAt, tone: bookingTone(b.status) || 'muted', title: bookingServiceName(b) || STR.clientKindBooking,
+    detail: `${STR.clientKindBooking} · ${bookingWhen(b)}`, pill: bookingPill(b.status), amount: bookingPrice(b), open: `booking:${b.id}`,
+  }));
+  r.services.forEach(s => past.push({
+    at: s.performedAt || s.createdAt, tone: { OPEN: 'warn', INVOICED: 'ok' }[s.status] || 'muted', title: s.name,
+    detail: [STR.clientKindService, fmtDay(s.performedAt || s.createdAt), s.bookingId ? CRM.services.fromBooking : ''].filter(Boolean).join(' · '),
+    pill: servicePill(s.status), amount: s.totalEur, open: `service:${s.id}`,
+  }));
+  r.quotes.forEach(q => past.push({
+    at: q.createdAt, tone: quoteTone(q.status) || 'accent', title: STR.clientEvtQuote({ number: q.number }),
+    detail: STR.clientCreatedOn({ date: fmtDay(q.createdAt) }), pill: quotePill(q.status), amount: q.totalEur, open: `quote:${q.id}`,
+  }));
+  r.invoices.forEach(i => {
+    const status = effectiveInvoiceStatus(i);
+    past.push({
+      at: i.createdAt, tone: invoiceTone(status) || 'muted', title: STR.clientEvtInvoice({ number: i.number }),
+      detail: STR.clientIssuedOn({ date: fmtDay(i.createdAt) }), pill: invoicePill(status), amount: i.totalEur, open: `invoice:${i.id}`,
+    });
+    if (i.status === 'PAID' && i.paidAt) {
+      past.push({
+        at: i.paidAt, tone: 'ok', title: STR.clientEvtPaid({ number: i.number }), detail: fmtDay(i.paidAt), amount: i.totalEur, open: `invoice:${i.id}`,
+      });
+    }
+  });
+  if (r.conversation) {
+    past.push({
+      at: r.conversation.lastMessageAt, tone: r.conversation.waiting ? 'warn' : 'info', title: STR.clientEvtChat,
+      detail: r.conversation.lastPreview || '', when: relTime(r.conversation.lastMessageAt), open: 'chat',
+    });
+  }
+  past.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  return { upcoming, past: past.slice(0, 40) };
+}
+
+function clientTable(head, rows) {
+  return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+function clientEmpty(title, act, actLabel) {
+  return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(title)}</p>${act ? `<button class="btn btn--sm" type="button" data-client-act="${act}"><span class="btn__plus">+</span> ${escapeHTML(actLabel)}</button>` : ''}</div></div>`;
+}
+
+function clientPaneHtml(r, m, bk) {
+  if (r.tab === 'bookings') {
+    if (!r.bookings.length) return clientEmpty(STR.clientNoBookings, 'booking', STR.bookingsNewForClient);
+    const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-client-open="booking:${escapeHTML(b.id)}">
+      <td>${escapeHTML(bookingWhen(b))}</td><td class="name">${escapeHTML(bookingServiceName(b))}</td><td>${bookingPill(b.status)}</td>
+      <td class="num right">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : ''}</td></tr>`;
+    const group = (label, list) => (list.length ? `<tr class="is-day"><td colspan="4">${escapeHTML(label)}</td></tr>${list.map(row).join('')}` : '');
+    return clientTable(
+      [[STR.bookingsThWhen], [STR.bookingsThService], [STR.bookingsThStatus], [CRM.quotes.thTotal, 'right']],
+      group(STR.clientUpcoming, bk.upcoming) + group(STR.clientPast, bk.past),
+    );
+  }
+  if (r.tab === 'services') {
+    if (!r.services.length) return clientEmpty(STR.clientNoServices, 'service', CRM.services.addForClient);
+    const t = CRM.services;
+    const rows = [...r.services]
+      .sort((a, b) => String(b.performedAt || b.createdAt).localeCompare(String(a.performedAt || a.createdAt)))
+      .map(s => `<tr class="conversation-row${s.status === 'CANCELLED' ? ' is-draft' : s.status === 'INVOICED' ? ' is-paid' : ''}" data-client-open="service:${escapeHTML(s.id)}">
+        <td class="mono">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
+        <td class="name">${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
+        <td>${servicePill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
+    const invoiceOpen = m.openWork.length && hasModule('invoices')
+      ? `<div class="client-record__pane-foot"><button class="btn btn--sm btn--accent" type="button" data-client-act="invoice-open-work">${escapeHTML(STR.clientInvoiceOpenWork({ amount: fmtEUR(m.openWorkTotal) }))}</button></div>` : '';
+    return clientTable([[t.thWhen], [t.thService], [t.thStatus], [t.thTotal, 'right']], rows) + invoiceOpen;
+  }
+  if (r.tab === 'quotes') {
+    if (!r.quotes.length) return clientEmpty(STR.clientNoQuotes, 'quote', CRM.tabs.orcamentos.newLabel);
+    const t = CRM.quotes;
+    const rows = r.quotes.map(q => `<tr class="conversation-row${q.status === 'ACEITO' ? ' is-paid' : ''}" data-client-open="quote:${escapeHTML(q.id)}">
+      <td class="id">${escapeHTML(q.number)}</td><td class="mono">${escapeHTML(fmtDay(q.createdAt))}</td>
+      <td class="mono muted">${escapeHTML(q.validUntil ? fmtDay(q.validUntil) : '—')}</td><td>${quotePill(q.status)}</td>
+      <td class="num right">${fmtEUR(q.totalEur)}</td></tr>`).join('');
+    return clientTable([[t.thNumber], [STR.clientThDate], [t.thValidUntil], [t.thStatus], [t.thTotal, 'right']], rows);
+  }
+  if (r.tab === 'invoices') {
+    if (!r.invoices.length) return clientEmpty(STR.clientNoInvoices, 'invoice', CRM.tabs.faturas.newLabel);
+    const t = CRM.invoices;
+    const rows = r.invoices.map(i => {
+      const status = effectiveInvoiceStatus(i);
+      const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
+      return `<tr class="conversation-row${marker}" data-client-open="invoice:${escapeHTML(i.id)}">
+        <td class="id">${escapeHTML(i.number)}</td><td class="mono">${escapeHTML(fmtDay(i.createdAt))}</td>
+        <td class="mono muted">${escapeHTML(fmtDay(i.dueDate))}</td><td>${invoicePill(status)}</td><td class="num right">${fmtEUR(i.totalEur)}</td></tr>`;
+    }).join('');
+    return clientTable([[t.thNumber], [STR.clientThDate], [t.thDueDate], [t.thStatus], [t.thTotal, 'right']], rows);
+  }
+  const ev = clientActivity(r, bk);
+  if (!ev.upcoming.length && !ev.past.length) {
+    return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.clientActivityEmpty)}</p><p class="empty__desc">${escapeHTML(STR.clientActivityEmptyDesc)}</p></div></div>`;
+  }
+  const group = (label, list) => (list.length ? `<li class="worklist__group">${escapeHTML(label)}</li>${list.map(clientRowHtml).join('')}` : '');
+  return `<div class="panel"><ul class="worklist">${group(STR.clientUpcoming, ev.upcoming)}${group(STR.clientHistory, ev.past)}</ul></div>`;
+}
+
+function clientTabs(r) {
+  const tabs = [['activity', STR.clientTabActivity, 0]];
+  if (hasModule('bookings')) tabs.push(['bookings', labels.bookings, r.bookings.length]);
+  if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
+  if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
+  if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
+  if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
+  return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-client-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
+}
+
+function renderClientRecord(focusTab = false) {
+  const r = clientRecord;
+  const body = r?.el;
+  if (!body || !body.isConnected) return;
+  const m = clientMoney(r);
+  const bk = clientBookingsSplit(r);
+  const attention = clientAttention(r, m, bk);
+  const acts = [
+    hasModule('bookings') ? ['booking', STR.bookingsNewForClient] : null,
+    hasModule('services') ? ['service', CRM.services.addForClient] : null,
+    hasModule('quotes') ? ['quote', CRM.tabs.orcamentos.newLabel] : null,
+    hasModule('invoices') ? ['invoice', CRM.tabs.faturas.newLabel] : null,
+  ].filter(Boolean);
+  body.innerHTML = `
+    ${clientCardHtml(r, bk)}
+    ${clientKpisHtml(m, bk)}
+    ${attention.length ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.clientAttention)} <span class="tag">${attention.length}</span></h2></header><ul class="worklist">${attention.map(clientRowHtml).join('')}</ul></section>` : ''}
+    ${clientTabs(r)}
+    <div class="client-record__pane" role="tabpanel">${clientPaneHtml(r, m, bk)}</div>
+    ${acts.length ? `<div class="drawer__foot client-record__foot">${acts.map(([k, l]) => `<button class="btn btn--sm" type="button" data-client-act="${k}"><span class="btn__plus">+</span> ${escapeHTML(l)}</button>`).join('')}</div>` : ''}`;
+  $('[data-client-edit]', body)?.addEventListener('click', () => openFromClient(() => openClientForm(r.client)));
+  $$('[data-client-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.clientTab; renderClientRecord(true); }));
+  $$('[data-client-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.clientOpen)));
+  $$('[data-client-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.clientAct)));
+  if (focusTab) $('[data-client-tab].is-on', body)?.focus();
+}
+
+function openFromClient(open) {
+  const c = clientRecord?.client;
+  if (c) {
+    const tab = clientRecord.tab;
+    drawerReturn = { label: c.name, open: () => openClientDrawer(c.id, tab) };
+  }
+  open();
+}
+
+function openClientItem(ref) {
+  const r = clientRecord;
+  if (!r) return;
+  const [kind, id] = ref.split(':');
+  if (kind === 'chat') return openClientConversation(r.conversation);
+  if (kind === 'tab') { r.tab = id; return renderClientRecord(true); }
+  if (kind === 'invoice-open-work') return openFromClient(() => openInvoiceOpenWork(r.client, r.services.filter(s => s.status === 'OPEN')));
+  if (kind === 'invoice') return openFromClient(() => openInvoiceDetail(id));
+  if (kind === 'quote') return openFromClient(() => openQuoteDetail(id));
+  if (kind === 'booking') {
+    const booking = r.bookings.find(b => b.id === id);
+    return booking && openFromClient(() => openBookingDetail(booking));
+  }
+  if (kind === 'service') {
+    const service = r.services.find(s => s.id === id);
+    return service && openFromClient(() => openServiceForm(service));
+  }
+}
+
+function clientAct(kind) {
+  const c = clientRecord?.client;
+  if (!c) return;
+  if (kind === 'booking') return openFromClient(() => openBookingForm(null, { client: c }));
+  if (kind === 'service') return openFromClient(() => openServiceForm(null, c.id));
+  if (kind === 'quote') return openFromClient(() => openQuoteForm({ client: c }));
+  if (kind === 'invoice') return openFromClient(() => openInvoiceForm({ client: c }));
+  if (kind === 'invoice-open-work') return openClientItem('invoice-open-work');
+}
+
+async function openClientConversation(conversation) {
+  if (!conversation) return;
+  closeDrawer({ dismissed: true });
+  const asset = (state.me?.tenant.channels || []).find(a => a.platform === conversation.channel);
+  if (asset) rememberAsset(asset.externalId);
+  state.selectedConversation = conversation.id;
+  await setActive('conversations');
+}
+
+async function openClientDrawer(ref, tab) {
+  const id = typeof ref === 'string' ? ref : ref?.id;
+  if (!id) return;
+  drawerReturn = null;
+  const known = (typeof ref === 'object' && ref) || state.clients.find(c => c.id === id) || null;
+  const body = document.createElement('div');
+  body.className = 'client-record';
+  body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
+  const eyebrow = c => [STR.clientEyebrow, c?.number].filter(Boolean).join(' · ');
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
+  const record = await loadClientRecord(id);
+  if (gen !== drawerGen) return;
+  if (!record.client) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
+  clientRecord = { ...record, el: body, tab: tab || (clientRecord?.client?.id === id ? clientRecord.tab : 'activity') };
+  $('#drawer-title').textContent = record.client.name;
+  renderDrawerEyebrow(eyebrow(record.client));
+  renderClientRecord();
+}
+
+function openInvoiceOpenWork(client, services) {
+  const t = CRM.services;
+  const form = document.createElement('form');
+  form.className = 'form';
+  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const rows = services.map(s => `<tr>
+    <td class="check"><input type="checkbox" data-pick="${escapeHTML(s.id)}" data-eur="${Number(s.totalEur || 0)}" checked aria-label="${escapeHTML(s.name)}" /></td>
+    <td class="name">${escapeHTML(s.name)}</td><td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
+    <td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(client.name)}</p>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl"><tbody>${rows}</tbody></table></div></div>
+    <div class="form__row"><label class="lbl" for="ow-due">${escapeHTML(t.invoiceDue)} <span class="req">●</span></label>
+      <input class="inp" id="ow-due" type="date" required value="${due}" /></div>
+    <div class="actions"><button class="btn btn--primary" type="submit" id="ow-submit"></button></div>`;
+  const submit = $('#ow-submit', form);
+  const refresh = () => {
+    const picked = $$('[data-pick]:checked', form);
+    submit.textContent = STR.clientIssueInvoice({ amount: fmtEUR(picked.reduce((sum, i) => sum + Number(i.dataset.eur), 0)) });
+    submit.disabled = !picked.length;
+  };
+  $$('[data-pick]', form).forEach(i => i.addEventListener('change', refresh));
+  refresh();
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const serviceIds = $$('[data-pick]:checked', form).map(i => i.dataset.pick);
+    const dueDate = $('#ow-due', form).value;
+    if (!serviceIds.length) return toast(t.invoiceNeedRows);
+    if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    submit.disabled = true;
+    try {
+      const invoice = await api('/app/api/crm/services/invoice', { method: 'POST', body: JSON.stringify({ clientId: client.id, serviceIds, dueDate }) });
+      closeDrawer();
+      toast(t.issuedFrom({ number: invoice.number }));
+      if (state.fetched.invoices) state.invoices = await api('/app/api/crm/invoices').catch(() => state.invoices);
+      if (state.active === 'services') await loadModule('services').catch(() => {});
+      render();
+    } catch { submit.disabled = false; toast(t.invoiceFailed); }
+  });
+  openDrawer(STR.clientInvoiceOpenWorkTitle, form);
+}
+
+function wireDuplicatePhone(form, editingId) {
+  const input = $('#cf-phone', form);
+  const hint = $('#cf-dup', form);
+  let timer;
+  let seq = 0;
+  const check = async () => {
+    const mine = ++seq;
+    if (phoneKey(input.value).length < 9) { hint.hidden = true; return; }
+    const found = await api(`/app/api/crm/clients/by-phone?phone=${encodeURIComponent(input.value)}`).catch(() => null);
+    if (mine !== seq) return;
+    if (!found || found.id === editingId) { hint.hidden = true; return; }
+    hint.innerHTML = `${escapeHTML(STR.clientDuplicate({ name: found.name, number: found.number }))} <button class="btn btn--sm btn--ghost" type="button" data-open-dup>${escapeHTML(STR.clientOpenExisting)}</button>`;
+    hint.hidden = false;
+    $('[data-open-dup]', hint).addEventListener('click', () => openClientDrawer(found));
+  };
+  input.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(check, 350); });
+  if (input.value) check();
+}
+
 async function openClientForm(client) {
   const editing = client && client.id ? client : null;
-  let relatedQuotes = [];
-  let relatedInvoices = [];
-  let relatedServices = [];
-  let relatedBookings = [];
-  if (editing) {
-    if (hasModule('quotes')) relatedQuotes = await api(`/app/api/crm/quotes?clientId=${encodeURIComponent(editing.id)}`).catch(() => state.quotes.filter(q => q.clientId === editing.id));
-    if (hasModule('invoices')) relatedInvoices = await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(editing.id)}`).catch(() => state.invoices.filter(i => i.clientId === editing.id));
-    if (hasModule('services')) relatedServices = await api(`/app/api/crm/services?clientId=${encodeURIComponent(editing.id)}`).catch(() => (state.clientServices || []).filter(s => s.clientId === editing.id));
-    if (hasModule('bookings')) relatedBookings = await api(`/app/api/bookings?clientId=${encodeURIComponent(editing.id)}`).catch(() => []);
-  }
-  const related = [
-    relatedQuotes.length ? `<p class="hint">${escapeHTML(labels.quotes)} · ${relatedQuotes.map(q => escapeHTML(q.number)).join(', ')}</p>` : '',
-    relatedInvoices.length ? `<p class="hint">${escapeHTML(labels.invoices)} · ${relatedInvoices.map(i => escapeHTML(i.number)).join(', ')}</p>` : '',
-    relatedServices.length ? `<p class="hint">${escapeHTML(CRM.services.related)} · ${relatedServices.map(s => escapeHTML(s.name)).join(', ')}</p>` : '',
-    relatedBookings.length ? `<p class="hint">${escapeHTML(labels.bookings)} · ${escapeHTML(clientBookingSummary(relatedBookings))}</p>` : '',
-    editing && hasModule('services') ? `<button class="btn btn--sm" type="button" id="cf-add-service">${escapeHTML(CRM.services.addForClient)}</button>` : '',
-    editing && hasModule('bookings') ? `<button class="btn btn--sm" type="button" id="cf-add-booking">${escapeHTML(STR.bookingsNewForClient)}</button>` : '',
-  ].join('');
+  const field = ({ id, label, value, attrs = '', cls = 'inp', required = false }) => `<div class="form__row"><label class="lbl" for="${id}">${escapeHTML(label)}${required ? ' <span class="req">●</span>' : ''}</label>
+    <input class="${cls}" id="${id}" value="${escapeHTML(value || '')}" ${attrs} /></div>`;
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
-    <div class="form__row"><label class="lbl" for="cf-name">${escapeHTML(STR.clientFormName)} <span class="req">●</span></label>
-      <input class="inp" id="cf-name" required placeholder="${escapeHTML(STR.clientPhName)}" value="${escapeHTML(editing?.name || '')}" /></div>
-    <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
-      <input class="inp inp--mono" id="cf-phone" required placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
-    <div class="form__row"><label class="lbl" for="cf-address">${escapeHTML(STR.clientFormAddress)}</label>
-      <input class="inp" id="cf-address" placeholder="${escapeHTML(STR.clientPhAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
-    ${related}
-    <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientEdit : STR.clientSave)}</button>`;
-  $('#cf-add-service', form)?.addEventListener('click', () => openServiceForm(null, editing.id));
-  $('#cf-add-booking', form)?.addEventListener('click', () => openBookingForm(null, { client: editing }));
+    <div class="form__grid">
+      ${field({ id: 'cf-name', label: STR.clientFormName, value: editing?.name, required: true, attrs: `required maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
+      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
+      <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="cf-phone" type="tel" required maxlength="40" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(editing?.phone || '')}" />
+        <p class="hint hint--warn" id="cf-dup" hidden></p></div>
+      ${field({ id: 'cf-email', label: STR.clientFormEmail, value: editing?.email, attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
+      <div class="form__row form__row--full"><label class="lbl" for="cf-address">${escapeHTML(STR.clientFormAddress)}</label>
+        <input class="inp" id="cf-address" maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="cf-notes">${escapeHTML(STR.clientFormNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <textarea class="txt" id="cf-notes" maxlength="4000" placeholder="${escapeHTML(STR.clientPhNotes)}">${escapeHTML(editing?.notes || '')}</textarea>
+        <p class="hint">${escapeHTML(STR.clientNotesHint)}</p></div>
+    </div>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : STR.clientSave)}</button>
+      ${editing ? `<button class="btn btn--ghost" type="button" data-cf-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
+    </div>`;
+  wireDuplicatePhone(form, editing?.id);
+  $('[data-cf-cancel]', form)?.addEventListener('click', () => closeDrawer());
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const name = $('#cf-name', form).value.trim();
-    const phone = $('#cf-phone', form).value.trim();
-    const address = $('#cf-address', form).value.trim() || undefined;
-    if (!name || !phone) return toast(STR.clientValidate);
+    const val = sel => $(sel, form).value.trim();
+    const payload = {
+      name: val('#cf-name'), phone: val('#cf-phone'), taxId: val('#cf-tax'), email: val('#cf-email'),
+      address: val('#cf-address'), notes: val('#cf-notes'),
+    };
+    if (!payload.name || !payload.phone) return toast(STR.clientValidate);
+    if (payload.email && !EMAIL_SHAPE.test(payload.email)) return toast(STR.clientInvalidEmail);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      if (editing) await api(`/app/api/crm/clients/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, address }) });
-      else await api('/app/api/crm/clients', { method: 'POST', body: JSON.stringify({ name, phone, address }) });
-      closeDrawer();
-      await loadModule('clients');
-      render();
-      toast(editing ? STR.clientUpdated : STR.clientCreated({ name }));
-    } catch { btn.disabled = false; toast(editing ? STR.clientUpdateFailed : STR.clientCreateFailed); }
+      const saved = editing
+        ? await api(`/app/api/crm/clients/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) })
+        : await api('/app/api/crm/clients', { method: 'POST', body: JSON.stringify(payload) });
+      toast(editing ? STR.clientUpdated : STR.clientCreated({ name: saved.name }));
+      if (state.active === 'clients') { await loadModule('clients').catch(() => {}); render(); }
+      if (editing) closeDrawer();
+      else openClientDrawer(saved);
+    } catch (err) {
+      btn.disabled = false;
+      toast(err?.code === 'invalid_email' ? STR.clientInvalidEmail : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
+    }
   });
-  openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form);
+  openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { eyebrow: STR.clientEyebrow });
 }
 
 async function openSupplierForm(supplier) {
@@ -1928,11 +2452,14 @@ async function deleteCatalogItem(id) {
 }
 
 // Shared client picker + line-items editor for quotes and invoices.
-function clientSelect(clients) {
+function clientSelect(clients, selectedId = '') {
+  const list = [...clients].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
   return `<div class="form__row"><label class="lbl" for="f-client">${escapeHTML(STR.lineClient)} <span class="req">●</span></label>
     <select class="sel" id="f-client" required><option value="">${escapeHTML(STR.lineChooseClient)}</option>
-    ${clients.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
+    ${list.map(c => `<option value="${escapeHTML(c.id)}"${c.id === selectedId ? ' selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
 }
+// A form opened from a client record keeps that client even if the directory list doesn't have it yet.
+const withClient = (clients, client) => (client && !clients.some(c => c.id === client.id) ? [client, ...clients] : clients);
 
 function supplierSelect(suppliers, selectedId = '') {
   const t = CRM.payments;
@@ -2061,18 +2588,20 @@ function wirePdfButtons(root) {
   });
 }
 
-async function openQuoteForm() {
+async function openQuoteForm(opts = {}) {
   let clients, catalog;
   try {
-    clients = await api('/app/api/crm/clients');
-    catalog = await api('/app/api/crm/standard-items').catch(() => []);
+    [clients, catalog] = await Promise.all([
+      api('/app/api/crm/clients'),
+      api('/app/api/crm/standard-items').catch(() => []),
+    ]);
   } catch { return toast(STR.quoteCreateFailed); }
   const li = lineItemsField(catalog);
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${clientSelect(clients)}
+      ${clientSelect(withClient(clients, opts.client), opts.client?.id)}
       <div class="form__row"><label class="lbl" for="q-valid">${escapeHTML(STR.quoteValidUntil)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <input class="inp inp--mono" id="q-valid" type="date" /></div>
     </div>
@@ -2100,18 +2629,20 @@ async function openQuoteForm() {
   openDrawer(STR.quoteFormTitle, form, true);
 }
 
-async function openInvoiceForm() {
+async function openInvoiceForm(opts = {}) {
   let clients, catalog;
   try {
-    clients = await api('/app/api/crm/clients');
-    catalog = await api('/app/api/crm/standard-items').catch(() => []);
+    [clients, catalog] = await Promise.all([
+      api('/app/api/crm/clients'),
+      api('/app/api/crm/standard-items').catch(() => []),
+    ]);
   } catch { return toast(STR.invoiceCreateFailed); }
   const li = lineItemsField(catalog);
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${clientSelect(clients)}
+      ${clientSelect(withClient(clients, opts.client), opts.client?.id)}
       <div class="form__row"><label class="lbl" for="i-due">${escapeHTML(STR.invoiceDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="i-due" type="date" required /></div>
       <div class="form__row form__row--full"><label class="lbl" for="i-quote">${escapeHTML(STR.invoiceQuoteId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
@@ -3440,13 +3971,18 @@ function handleOAuthPopup() {
 
 let drawerPrevFocus = null;
 let drawerKeyHandler = null;
+let drawerGen = 0;
+// Set while a drawer was opened from a client record: its head shows the way back, and when it closes
+// itself after an action (save, mark paid, convert…) the record reopens with fresh data. Closing it by
+// hand (×, scrim, Escape) goes back to the page instead.
+let drawerReturn = null;
 
 function drawerFocusables(panel) {
   return [...panel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
     .filter(el => !el.hidden && el.offsetParent !== null);
 }
 
-function closeDrawer() {
+function closeDrawer(opts = {}) {
   const root = $('#drawer');
   if (root) {
     root.hidden = true;
@@ -3455,24 +3991,43 @@ function closeDrawer() {
       drawerKeyHandler = null;
     }
   }
+  const back = opts.dismissed ? null : drawerReturn;
+  drawerReturn = null;
+  if (back) {
+    // The caller may open another drawer right after closing this one; only come back if it didn't.
+    const gen = drawerGen;
+    setTimeout(() => { if (drawerGen === gen && $('#drawer')?.hidden) back.open(); }, 0);
+    return;
+  }
   const prev = drawerPrevFocus;
   drawerPrevFocus = null;
   if (prev && typeof prev.focus === 'function') prev.focus();
 }
 
-function openDrawer(title, body, wide = false) {
+function renderDrawerEyebrow(text) {
+  const el = $('#drawer .drawer__eyebrow');
+  if (!el) return;
+  if (!drawerReturn) { el.textContent = text || STR.dashboardWord; return; }
+  const back = drawerReturn;
+  el.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(STR.clientBackAria({ name: back.label }))}">${escapeHTML(back.label)}</button>`;
+  $('.drawer__back', el).addEventListener('click', () => { drawerReturn = null; back.open(); });
+}
+
+function openDrawer(title, body, wide = false, opts = {}) {
   const root = $('#drawer');
   const panel = $('.drawer__panel', root);
   if (drawerKeyHandler) root.removeEventListener('keydown', drawerKeyHandler);
-  drawerPrevFocus = document.activeElement;
+  if (root.hidden) drawerPrevFocus = document.activeElement;
+  drawerGen += 1;
   panel.classList.toggle('drawer__panel--wide', wide);
+  renderDrawerEyebrow(opts.eyebrow);
   $('#drawer-title').textContent = title;
   $('#drawer-body').innerHTML = '';
   $('#drawer-body').appendChild(body);
   root.hidden = false;
-  $$('[data-close]', root).forEach(b => { b.onclick = closeDrawer; });
+  $$('[data-close]', root).forEach(b => { b.onclick = () => closeDrawer({ dismissed: true }); });
   drawerKeyHandler = e => {
-    if (e.key === 'Escape') { e.preventDefault(); closeDrawer(); return; }
+    if (e.key === 'Escape') { e.preventDefault(); closeDrawer({ dismissed: true }); return; }
     if (e.key !== 'Tab') return;
     const list = drawerFocusables(panel);
     if (!list.length) return;
@@ -3486,6 +4041,7 @@ function openDrawer(title, body, wide = false) {
     const preferred = body.querySelector('input, select, textarea, button');
     (preferred || drawerFocusables(panel)[0])?.focus();
   });
+  return drawerGen;
 }
 
 function igThumb(url) {
@@ -3662,20 +4218,6 @@ function withinOpeningHours(dayKey, time, minutes) {
   const start = hhmmMinutes(time);
   return state.bookingAvailability.some(r => r.dayOfWeek === isoWeekday(dayKey) && hhmmMinutes(r.startLocal) <= start && start + minutes <= hhmmMinutes(r.endLocal));
 }
-function clientBookingSummary(list) {
-  const now = Date.now();
-  const live = list.filter(b => b.status !== 'CANCELLED');
-  const next = live
-    .filter(b => new Date(b.startAt).getTime() >= now && b.status !== 'NO_SHOW')
-    .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
-  const noShows = live.filter(b => b.status === 'NO_SHOW').length;
-  return [
-    next ? STR.bookingsClientNext({ when: bookingWhen(next) }) : '',
-    STR.bookingsClientTotal({ n: live.length }),
-    noShows ? STR.bookingsClientNoShows({ n: noShows }) : '',
-  ].filter(Boolean).join(' · ');
-}
-
 function renderBookings(root) {
   const days = weekDayKeys();
   const today = todayKey();
@@ -3892,11 +4434,9 @@ async function changeBookingStatus(id, status) {
   }
 }
 
-async function openClientById(id) {
-  const client = await api(`/app/api/crm/clients/${encodeURIComponent(id)}`).catch(() => null);
-  if (!client) return toast(STR.loadFailed);
-  if (state.active !== 'clients') await setActive('clients');
-  openClientForm(client);
+// The record opens over whatever page the user is on, so they keep their place.
+function openClientById(id) {
+  if (id && hasModule('clients')) openClientDrawer(id);
 }
 
 async function openBookingDetail(b) {
@@ -3937,7 +4477,7 @@ async function openBookingDetail(b) {
       ${actions.join('')}
       ${canInvoice ? `<button class="btn btn--sm btn--accent" type="button" data-booking-invoice>${escapeHTML(STR.bookingsInvoice)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-booking-edit>${escapeHTML(STR.bookingsEditAction)}</button>
-      ${b.clientId && hasModule('clients') ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-client>${escapeHTML(STR.bookingsOpenClient)}</button>` : ''}
+      ${b.clientId && hasModule('clients') && !drawerReturn ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-client>${escapeHTML(STR.bookingsOpenClient)}</button>` : ''}
     </div>`;
   $$('[data-set-status]', body).forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -3947,7 +4487,7 @@ async function openBookingDetail(b) {
   }));
   $('[data-booking-invoice]', body)?.addEventListener('click', () => invoiceBooking(b));
   $('[data-booking-edit]', body)?.addEventListener('click', () => openBookingForm(b));
-  $('[data-booking-client]', body)?.addEventListener('click', () => { closeDrawer(); openClientById(b.clientId); });
+  $('[data-booking-client]', body)?.addEventListener('click', () => openClientById(b.clientId));
   openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
 }
 

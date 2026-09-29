@@ -183,7 +183,8 @@
     if (id === 'client') {
       return `<div class="tpl-kicker">${esc(S.docTplClientLabel)}</div>
         <div class="tpl-name">${esc(S.docTplSampleClient).toUpperCase()}</div>
-        <div class="tpl-sub">${esc(S.docTplSamplePhone)}</div>`;
+        <div class="tpl-sub">${esc(S.docTplSamplePhone)}</div>
+        <div class="tpl-sub">${esc(S.docTplSampleClientRef)}</div>`;
     }
     if (id === 'items') {
       if (ruled) {

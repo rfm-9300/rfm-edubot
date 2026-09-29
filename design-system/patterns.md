@@ -54,7 +54,7 @@ Used by clients, quotes, invoices, catalog, tenants:
 5. Focus first input after open
 6. Close via `[data-close]`, scrim, and Escape; trap Tab inside the panel; restore focus on close
 7. Wide (`.drawer__panel--wide`) for line-item editors
-8. Quote / invoice / client rows open the drawer for status, convert, or edit — not a new page
+8. Quote / invoice rows open the drawer for status, convert, or edit; a client row opens the client record — not a new page
 
 ## Login
 
@@ -111,7 +111,19 @@ Rows deep-link: `data-go` switches module and `data-open` opens that invoice / q
 5. Agenda view: next 60 days as one table grouped by `tr.is-day`, with status chips (All / Pending / Confirmed / Completed / No-show / Cancelled) and the topbar search.
 6. A booking opens a **detail drawer** first (`.detail__head` + `.detail__meta` + `.detail__foot`): Confirm, Mark done, No-show, Cancel (through `.confirm`), Reopen, Invoice (once done and billed), Edit, Open client. Edit shows the form: service, date + time with `.slot-picks` free times, duration, price, contact with client `.suggest`, status, notes.
 7. Marking a booking done adds an open Serviços row for its client (price = the booking's price); Reopen cancels that row if it isn't invoiced yet. Customer bookings (WhatsApp, Instagram, website chat) must fit the opening hours and be in the future; staff can override both.
-8. Every booking gets a CRM client when the Clients module is on: the contact is matched by phone (formatting ignored) or created. The client drawer lists the next booking, total and no-shows, with a New booking action.
+8. Every booking gets a CRM client when the Clients module is on: the contact is matched by phone (formatting ignored) or created. The client record shows the next booking, visits and no-shows, flags past bookings nobody closed, and books for that client.
+
+## Clients (directory + record)
+
+`/app` Clients is the directory recipe (hero + stats + table), sorted by name; the search also matches email, NIF and phone digits typed without spaces. The list holds the whole directory (the API used to stop at 20). A row opens the client **record** in the drawer, not an edit form ([components.md](components.md#client-record)):
+
+1. Profile card: initials, contact lines (email opens mail, address opens Maps), NIF, "client since · visits · no-shows · last activity", Edit. Then Call, WhatsApp (`wa.me`; a number typed without a country code is Portuguese) and Open chat when a WhatsApp conversation matches the phone (last 9 digits, like bookings), and the staff notes.
+2. Money strip, up to four cells, each only with its module on, in this order: outstanding (a pending invoice past its due date counts as overdue, as on Home), next booking, to invoice (open Serviços), billed. In proposal (open quotes) only fills a free cell.
+3. Needs attention, only when something does: overdue invoices, past bookings never marked done or no-show (so never billed), bookings to confirm, open work to invoice (one click to an "Invoice open work" form with the rows ticked), quotes awaiting a reply or not sent yet, invoices due within 7 days.
+4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices. Every row opens its own drawer.
+5. A sticky create bar: New booking, Add service, New quote, New invoice, each prefilled with the client.
+
+Drawers opened from the record show `← client` and return to it (same tab, fresh data) once they save; ×, scrim and Escape leave it. Edit holds name, NIF, phone, email, address and notes ("only your team sees these"). The phone field warns when another client has the number but does not block, since families share phones. A new client opens its record after saving. Staff notes never reach the bot's CRM tools. The NIF prints on quotes and invoices on the client-number line.
 
 ## Invoices
 

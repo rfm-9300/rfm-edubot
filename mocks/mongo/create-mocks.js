@@ -231,8 +231,8 @@ const quote3Items = [
 ];
 
 const clients = [
-  { _id: ids.clients.hillsong, number: "CLT-001", name: "Hillsong Portugal", phone: "+351910100001", address: "Rua das Flores 10, 1200-001 Lisboa", createdAt: date("2026-05-01T09:10:00.000Z"), updatedAt: now },
-  { _id: ids.clients.martins, number: "CLT-002", name: "Martins Digital Lda", phone: "+351910100002", address: "Av. da Liberdade 45, 1250-140 Lisboa", createdAt: date("2026-05-02T11:30:00.000Z"), updatedAt: now },
+  { _id: ids.clients.hillsong, number: "CLT-001", name: "Hillsong Portugal", phone: "+351910100001", address: "Rua das Flores 10, 1200-001 Lisboa", email: "geral@hillsong.pt", taxId: "501234567", notes: "Contact the office manager before 17:00. Invoices go to the finance team.", createdAt: date("2026-05-01T09:10:00.000Z"), updatedAt: now },
+  { _id: ids.clients.martins, number: "CLT-002", name: "Martins Digital Lda", phone: "+351910100002", address: "Av. da Liberdade 45, 1250-140 Lisboa", email: "ola@martinsdigital.pt", taxId: "514567890", createdAt: date("2026-05-02T11:30:00.000Z"), updatedAt: now },
   { _id: ids.clients.oliveira, number: "CLT-003", name: "Condominio Rua Oliveira", phone: "+351910100003", address: "Rua Oliveira 22, 4000-300 Porto", createdAt: date("2026-05-04T15:00:00.000Z"), updatedAt: now },
   { _id: ids.clients.costa, number: "CLT-004", name: "Costa & Filhos Comercio", phone: "+351910100004", address: "Estrada Nacional 8, 2400-100 Leiria", createdAt: date("2026-05-07T13:15:00.000Z"), updatedAt: now },
 ];
