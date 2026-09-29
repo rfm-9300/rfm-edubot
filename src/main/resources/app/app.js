@@ -1529,7 +1529,7 @@ function renderServices(root) {
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
   $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pick-service]')) return;
-    openServiceForm(state.clientServices.find(s => s.id === r.dataset.service));
+    openServiceDetail(state.clientServices.find(s => s.id === r.dataset.service) || r.dataset.service);
   }));
   $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
 }
@@ -1576,18 +1576,23 @@ async function openServiceForm(service, presetClientId) {
       <div class="form__row"><label class="lbl" for="svc-price">${escapeHTML(t.price)} <span class="req">●</span></label>
         <input class="inp inp--mono inp--right" id="svc-price" type="number" min="0" step="0.01" required value="${editing?.unitPriceEur ?? ''}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
       <div class="form__row"><label class="lbl" for="svc-when">${escapeHTML(t.when)}</label>
-        <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing?.performedAt || '').slice(0, 10))}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+        <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing ? editing.performedAt || '' : todayKey()).slice(0, 10))}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
     </div>
     <div class="form__row form__row--full"><label class="lbl" for="svc-notes">${escapeHTML(t.notes)}</label>
       <textarea class="txt" id="svc-notes" ${editing?.status === 'INVOICED' ? 'readonly' : ''}>${escapeHTML(editing?.notes || '')}</textarea></div>
-    ${editing?.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : `<div class="actions">
-      <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>
-      ${editing?.status === 'OPEN' ? `<button class="btn btn--ghost" type="button" id="svc-cancel">${escapeHTML(t.cancel)}</button>` : ''}
-      ${editing ? `<button class="btn btn--danger" type="button" id="svc-delete">${escapeHTML(t.delete)}</button>` : ''}
+    ${editing?.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : `<p class="hint" id="svc-total"></p>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
+      ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
     </div>`}`;
   if (clientId && $('#f-client', form)) $('#f-client', form).value = clientId;
-  $('#svc-cancel', form)?.addEventListener('click', () => cancelClientService(editing));
-  $('#svc-delete', form)?.addEventListener('click', () => deleteClientService(editing));
+  $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
+  const totalHint = $('#svc-total', form);
+  const refreshTotal = () => {
+    if (totalHint) totalHint.textContent = `${t.thTotal}: ${fmtEUR(Number($('#svc-qty', form).value || 0) * Number($('#svc-price', form).value || 0))}`;
+  };
+  ['#svc-qty', '#svc-price'].forEach(sel => $(sel, form)?.addEventListener('input', refreshTotal));
+  refreshTotal();
   const source = $('#svc-source', form);
   source?.addEventListener('change', () => {
     const opt = source.selectedOptions[0];
@@ -1595,6 +1600,7 @@ async function openServiceForm(service, presetClientId) {
     $('#svc-name', form).value = opt.dataset.name || '';
     if (opt.dataset.price) $('#svc-price', form).value = opt.dataset.price;
     if (opt.dataset.unit) $('#svc-unit', form).value = opt.dataset.unit;
+    refreshTotal();
   });
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -1638,15 +1644,7 @@ async function cancelClientService(service) {
   try {
     const updated = await api(`/app/api/crm/services/${encodeURIComponent(service.id)}`, {
       method: 'PATCH',
-      body: JSON.stringify({
-        name: service.name,
-        notes: service.notes,
-        quantity: service.quantity,
-        unit: service.unit || '',
-        unitPriceEur: service.unitPriceEur,
-        performedAt: (service.performedAt || '').slice(0, 10) || null,
-        status: 'CANCELLED',
-      }),
+      body: JSON.stringify(servicePatch(service, 'CANCELLED')),
     });
     if (updated.status !== 'CANCELLED') throw new Error('not cancelled');
     closeDrawer();
@@ -1671,6 +1669,75 @@ async function deleteClientService(service) {
     render();
     toast(t.deleted);
   } catch { toast(t.deleteFailed); }
+}
+
+const serviceTrailEntry = s => ({ key: `service:${s.id}`, label: s.name, open: () => openServiceDetail(s.id) });
+// PATCH replaces notes with whatever is sent, so a status change resends the whole row.
+const servicePatch = (s, status) => ({
+  name: s.name, notes: s.notes, quantity: s.quantity, unit: s.unit || '', unitPriceEur: s.unitPriceEur,
+  performedAt: (s.performedAt || '').slice(0, 10) || null, status,
+});
+
+// A service opens as a detail (who, what, where it came from, where it was billed), like an invoice;
+// Edit is one of its actions.
+async function openServiceDetail(ref) {
+  const t = CRM.services;
+  const id = typeof ref === 'string' ? ref : ref?.id;
+  if (!id) return;
+  const known = (typeof ref === 'object' && ref) || (state.clientServices || []).find(s => s.id === id) || null;
+  const service = await api(`/app/api/crm/services/${encodeURIComponent(id)}`).catch(() => known);
+  if (!service) return toast(STR.loadFailed);
+  const [invoice, booking] = await Promise.all([
+    service.invoiceId && hasModule('invoices') ? api(`/app/api/crm/invoices/${encodeURIComponent(service.invoiceId)}`).catch(() => null) : null,
+    service.bookingId && hasModule('bookings') ? api(`/app/api/bookings/${encodeURIComponent(service.bookingId)}`).catch(() => null) : null,
+  ]);
+  const here = serviceTrailEntry(service);
+  const isOpen = service.status === 'OPEN';
+  const tone = { OPEN: 'warn', INVOICED: 'ok' }[service.status] || '';
+  const clientLink = hasModule('clients') && !!service.clientId && !linksBackTo(`client:${service.clientId}`);
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `
+    ${detailHead(service.clientName, servicePill(service.status), service.totalEur, tone, clientLink)}
+    ${detailMeta([
+      { label: t.when, value: service.performedAt ? fmtDay(service.performedAt) : '—' },
+      { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
+      booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
+      invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
+      { label: STR.detailCreated, value: fmtDay(service.createdAt) },
+    ])}
+    ${service.notes ? `<p class="hint">${escapeHTML(service.notes)}</p>` : ''}
+    ${service.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : ''}
+    <div class="detail__foot">
+      ${isOpen && hasModule('invoices') ? `<button class="btn btn--sm btn--accent" type="button" data-svc-invoice>${escapeHTML(t.invoiceNow)}</button>` : ''}
+      ${isOpen ? `<button class="btn btn--sm" type="button" data-svc-edit>${escapeHTML(STR.clientEditAction)}</button>` : ''}
+      ${service.status === 'CANCELLED' && !service.bookingId ? `<button class="btn btn--sm" type="button" data-svc-reopen>${escapeHTML(t.reopen)}</button>` : ''}
+      ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
+      ${booking && !linksBackTo(`booking:${booking.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-booking>${escapeHTML(t.openBooking)}</button>` : ''}
+      ${isOpen ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-cancel>${escapeHTML(t.cancel)}</button>` : ''}
+      ${service.status !== 'INVOICED' ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-delete>${escapeHTML(t.delete)}</button>` : ''}
+    </div>`;
+  $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(service.clientId)));
+  $('[data-svc-edit]', body)?.addEventListener('click', () => openFrom(here, () => openServiceForm(service)));
+  $('[data-svc-invoice]', body)?.addEventListener('click', () => openFrom(here, async () => {
+    const open = await api(`/app/api/crm/services?clientId=${encodeURIComponent(service.clientId)}&status=OPEN`).catch(() => [service]);
+    openInvoiceOpenWork({ id: service.clientId, name: service.clientName }, open, [service.id]);
+  }));
+  $('[data-svc-open-invoice]', body)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
+  $('[data-svc-open-booking]', body)?.addEventListener('click', () => openFrom(here, () => openBookingDetail(booking)));
+  $('[data-svc-cancel]', body)?.addEventListener('click', () => cancelClientService(service));
+  $('[data-svc-delete]', body)?.addEventListener('click', () => deleteClientService(service));
+  $('[data-svc-reopen]', body)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      await api(`/app/api/crm/services/${encodeURIComponent(service.id)}`, { method: 'PATCH', body: JSON.stringify(servicePatch(service, 'OPEN')) });
+      toast(t.reopened);
+      if (state.active === 'services') { await loadModule('services').catch(() => {}); render(); }
+      openServiceDetail(service.id);
+    } catch { btn.disabled = false; toast(t.reopenFailed); }
+  });
+  openDrawer(service.name, body);
 }
 
 async function invoiceSelectedServices() {
@@ -2156,7 +2223,7 @@ function openClientItem(ref) {
   }
   if (kind === 'service') {
     const service = r.services.find(s => s.id === id);
-    return service && openFromClient(() => openServiceForm(service));
+    return service && openFromClient(() => openServiceDetail(service));
   }
 }
 
@@ -2197,13 +2264,14 @@ async function openClientDrawer(ref, tab) {
   renderClientRecord();
 }
 
-function openInvoiceOpenWork(client, services) {
+// Every open row starts ticked, unless `preselect` names the ones to tick (the others stay listed).
+function openInvoiceOpenWork(client, services, preselect = null) {
   const t = CRM.services;
   const form = document.createElement('form');
   form.className = 'form';
   const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   const rows = services.map(s => `<tr>
-    <td class="check"><input type="checkbox" data-pick="${escapeHTML(s.id)}" data-eur="${Number(s.totalEur || 0)}" checked aria-label="${escapeHTML(s.name)}" /></td>
+    <td class="check"><input type="checkbox" data-pick="${escapeHTML(s.id)}" data-eur="${Number(s.totalEur || 0)}" ${!preselect || preselect.includes(s.id) ? 'checked' : ''} aria-label="${escapeHTML(s.name)}" /></td>
     <td class="name">${escapeHTML(s.name)}</td><td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
     <td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
   form.innerHTML = `
@@ -4668,6 +4736,7 @@ async function openBookingDetail(b) {
       ${actions.join('')}
       ${canInvoice ? `<button class="btn btn--sm btn--accent" type="button" data-booking-invoice>${escapeHTML(STR.bookingsInvoice)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-booking-edit>${escapeHTML(STR.bookingsEditAction)}</button>
+      ${b.clientServiceId && hasModule('services') && !linksBackTo(`service:${b.clientServiceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-service>${escapeHTML(STR.bookingsOpenService)}</button>` : ''}
     </div>`;
   $$('[data-set-status]', body).forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -4677,14 +4746,13 @@ async function openBookingDetail(b) {
   }));
   $('[data-booking-invoice]', body)?.addEventListener('click', () => invoiceBooking(b));
   $('[data-booking-edit]', body)?.addEventListener('click', () => openBookingForm(b));
-  $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(
-    {
-      key: `booking:${b.id}`,
-      label: bookingServiceName(b) || STR.bookingsEdit,
-      open: async () => openBookingDetail(await api(`/app/api/bookings/${encodeURIComponent(b.id)}`).catch(() => b)),
-    },
-    () => openClientDrawer(b.clientId),
-  ));
+  const here = {
+    key: `booking:${b.id}`,
+    label: bookingServiceName(b) || STR.bookingsEdit,
+    open: async () => openBookingDetail(await api(`/app/api/bookings/${encodeURIComponent(b.id)}`).catch(() => b)),
+  };
+  $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(b.clientId)));
+  $('[data-booking-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(b.clientServiceId)));
   openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
 }
 

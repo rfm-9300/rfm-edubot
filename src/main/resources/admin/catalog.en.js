@@ -389,7 +389,7 @@ window.__I18N_CATALOGS['en'] = {
     bookingsClientNoShows: p => `${p.n} ${p.n === 1 ? 'no-show' : 'no-shows'}`,
     bookingsToConfirm: 'To confirm', bookingsToConfirmAll: 'See all',
     bookingsConfirm: 'Confirm', bookingsDecline: 'Decline', bookingsComplete: 'Mark done', bookingsNoShow: 'No-show',
-    bookingsCancel: 'Cancel booking', bookingsReopen: 'Reopen', bookingsEditAction: 'Edit', bookingsBack: 'Back',
+    bookingsCancel: 'Cancel booking', bookingsReopen: 'Reopen', bookingsEditAction: 'Edit', bookingsBack: 'Back', bookingsOpenService: 'Open service',
     bookingsInvoice: 'Invoice', bookingsInvoiced: 'Invoiced', bookingsBilled: 'Added to Services, ready to invoice.',
     bookingsCancelConfirmTitle: 'Cancel this booking?', bookingsCancelConfirmBody: p => `${p.name} · ${p.when}. The time becomes free for other bookings.`,
     bookingsCancelOk: 'Cancel booking',
@@ -515,6 +515,7 @@ window.__I18N_CATALOGS['en'] = {
       issuedFrom: p => `Invoice ${p.number} issued from services`,
       invoiceFailed: 'Could not invoice these services',
       addForClient: 'Add service',
+      invoiceNow: 'Invoice', reopen: 'Reopen', reopened: 'Service reopened', reopenFailed: 'Could not reopen the service', openBooking: 'Open booking',
     },
     suppliers: {
       total: 'Total', new30: 'New · 30d', directory: 'Directory', filterAll: 'All suppliers',

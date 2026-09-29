@@ -389,7 +389,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     bookingsClientNoShows: p => `${p.n} ${p.n === 1 ? 'falta' : 'faltas'}`,
     bookingsToConfirm: 'Por confirmar', bookingsToConfirmAll: 'Ver todas',
     bookingsConfirm: 'Confirmar', bookingsDecline: 'Recusar', bookingsComplete: 'Concluir', bookingsNoShow: 'Faltou',
-    bookingsCancel: 'Cancelar marcação', bookingsReopen: 'Reabrir', bookingsEditAction: 'Editar', bookingsBack: 'Voltar',
+    bookingsCancel: 'Cancelar marcação', bookingsReopen: 'Reabrir', bookingsEditAction: 'Editar', bookingsBack: 'Voltar', bookingsOpenService: 'Abrir serviço',
     bookingsInvoice: 'Faturar', bookingsInvoiced: 'Faturada', bookingsBilled: 'Adicionada a Serviços, pronta a faturar.',
     bookingsCancelConfirmTitle: 'Cancelar esta marcação?', bookingsCancelConfirmBody: p => `${p.name} · ${p.when}. O horário fica livre para outras marcações.`,
     bookingsCancelOk: 'Cancelar marcação',
@@ -515,6 +515,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
       issuedFrom: p => `Fatura ${p.number} emitida a partir dos serviços`,
       invoiceFailed: 'Não foi possível faturar estes serviços',
       addForClient: 'Adicionar serviço',
+      invoiceNow: 'Faturar', reopen: 'Reabrir', reopened: 'Serviço reaberto', reopenFailed: 'Não foi possível reabrir o serviço', openBooking: 'Abrir marcação',
     },
     suppliers: {
       total: 'Total', new30: 'Novos · 30d', directory: 'Diretório', filterAll: 'Todos os fornecedores',

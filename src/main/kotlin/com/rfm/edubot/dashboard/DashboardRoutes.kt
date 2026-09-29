@@ -762,6 +762,13 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
             call.respond(deps.clientServices.list(clientId, status).map { it.dto(deps.clients.findById(it.clientId)) })
         }
+        get("/services/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            val service = deps.clientServices.findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+            call.respond(service.dto(deps.clients.findById(service.clientId)))
+        }
         post("/services") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
