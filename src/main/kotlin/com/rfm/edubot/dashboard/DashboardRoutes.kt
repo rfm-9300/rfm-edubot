@@ -140,23 +140,6 @@ fun Route.dashboardRoutes(
     channelBindingService: ChannelBindingService,
     instagramSocial: InstagramSocialService,
 ) {
-    post("/app/auth/login") {
-        val request = call.receive<DashboardLoginRequest>()
-        val user = dashboardUsers.findByEmail(request.email)
-        if (user == null || user.status != DashboardUserStatus.ACTIVE || !BCrypt.verifyer().verify(request.password.toCharArray(), user.passwordHash).verified) {
-            call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid credentials"))
-            return@post
-        }
-        val tenant = tenantRepository.findById(user.tenantId)
-        if (tenant == null || !DashboardAccessPolicy.allows(tenant, user, DashboardAccessPolicy.TENANT_USER)) {
-            call.respond(HttpStatusCode.Forbidden, mapOf("error" to "account inactive"))
-            return@post
-        }
-        dashboardUsers.markLogin(user.id, SystemClock.now())
-        val admin = runtimeConfig.get().admin
-        call.respond(DashboardLoginResponse(token = dashboardToken(admin, user, DashboardAccessPolicy.TENANT_USER, admin.jwtExpiryHours)))
-    }
-
     authenticate("dashboard") {
         route("/app/api") {
             get("/me") {
@@ -1143,7 +1126,7 @@ private fun logoExtension(filename: String): String? = when (filename.substringA
     else -> null
 }
 
-private fun dashboardToken(config: AppConfig.AdminConfig, user: DashboardUser, typ: String, expiryHours: Int): String = JWT.create()
+internal fun dashboardToken(config: AppConfig.AdminConfig, user: DashboardUser, typ: String, expiryHours: Int): String = JWT.create()
     .withIssuer(config.jwtIssuer)
     .withSubject(user.id.toHexString())
     .withClaim("tenantId", user.tenantId.toHexString())
@@ -1243,7 +1226,6 @@ private suspend fun runPersonaTest(
     return reply
 }
 
-@Serializable private data class DashboardLoginRequest(val email: String, val password: String)
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(val tenant: TenantMeDto, val user: DashboardUserDto?, val modules: List<String>, val principalType: String)

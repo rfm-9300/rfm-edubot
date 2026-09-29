@@ -18,7 +18,8 @@ import java.util.concurrent.TimeUnit
  * Checks a Firebase Auth ID token the way Firebase documents for third-party JWT libraries: RS256
  * signed by Google's securetoken keys, audience = project id, issuer =
  * `https://securetoken.google.com/<project>`, not expired, `auth_time` in the past, a subject. On top
- * of that, the account must have signed in with Google and have a verified email on the allowlist.
+ * of that, the account must have signed in with Google and have a verified email (on the allowlist,
+ * for the backoffice).
  */
 class FirebaseIdTokenVerifier(private val keys: RSAKeyProvider = googleSecureTokenKeys()) {
 
@@ -27,11 +28,22 @@ class FirebaseIdTokenVerifier(private val keys: RSAKeyProvider = googleSecureTok
         data class Rejected(val reason: String, val email: String? = null) : Result
     }
 
-    fun verify(idToken: String, config: AppConfig.GoogleSignInConfig): Result {
+    /** Backoffice: the verified Google email must be on the operator allowlist. */
+    fun verify(idToken: String, config: AppConfig.GoogleSignInConfig): Result =
+        verify(idToken, config.firebaseProjectId, config.allowedEmails)
+
+    /**
+     * Tenant dashboard: any verified Google account passes; the caller matches it to one of its users.
+     * [maxAuthAgeSeconds] demands a sign-in that recent, for confirming account changes.
+     */
+    fun identify(idToken: String, config: AppConfig.GoogleSignInConfig, maxAuthAgeSeconds: Long? = null): Result =
+        verify(idToken, config.firebaseProjectId, allowedEmails = null, maxAuthAgeSeconds)
+
+    private fun verify(idToken: String, projectId: String, allowedEmails: Set<String>?, maxAuthAgeSeconds: Long? = null): Result {
         val token = try {
             JWT.require(Algorithm.RSA256(keys))
-                .withIssuer("https://securetoken.google.com/${config.firebaseProjectId}")
-                .withAudience(config.firebaseProjectId)
+                .withIssuer("https://securetoken.google.com/$projectId")
+                .withAudience(projectId)
                 .acceptLeeway(LEEWAY_SECONDS)
                 .build()
                 .verify(idToken)
@@ -46,7 +58,8 @@ class FirebaseIdTokenVerifier(private val keys: RSAKeyProvider = googleSecureTok
             authTime == null || authTime > Instant.now().epochSecond + LEEWAY_SECONDS -> Result.Rejected(INVALID_TOKEN)
             provider != GOOGLE_PROVIDER -> Result.Rejected(NOT_GOOGLE, email)
             email.isNullOrBlank() || token.getClaim("email_verified").asBoolean() != true -> Result.Rejected(EMAIL_NOT_VERIFIED, email)
-            email !in config.allowedEmails -> Result.Rejected(NOT_ALLOWED, email)
+            allowedEmails != null && email !in allowedEmails -> Result.Rejected(NOT_ALLOWED, email)
+            maxAuthAgeSeconds != null && authTime < Instant.now().epochSecond - maxAuthAgeSeconds -> Result.Rejected(STALE_SIGN_IN, email)
             else -> Result.Allowed(email, token.subject)
         }
     }
@@ -56,6 +69,7 @@ class FirebaseIdTokenVerifier(private val keys: RSAKeyProvider = googleSecureTok
         const val NOT_GOOGLE = "not_google_sign_in"
         const val EMAIL_NOT_VERIFIED = "email_not_verified"
         const val NOT_ALLOWED = "not_allowed"
+        const val STALE_SIGN_IN = "stale_sign_in"
 
         private const val GOOGLE_PROVIDER = "google.com"
         private const val LEEWAY_SECONDS = 60L

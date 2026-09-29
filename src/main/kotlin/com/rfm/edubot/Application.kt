@@ -13,6 +13,7 @@ import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardUserRepository
+import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
@@ -241,6 +242,11 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             instagramSocial = instagramSocial,
         )
         dashboardImpersonationRoute(
+            tenantRepository = tenantRepository,
+            dashboardUsers = dashboardUserRepository,
+            runtimeConfig = runtimeConfig,
+        )
+        dashboardAccountRoutes(
             tenantRepository = tenantRepository,
             dashboardUsers = dashboardUserRepository,
             runtimeConfig = runtimeConfig,

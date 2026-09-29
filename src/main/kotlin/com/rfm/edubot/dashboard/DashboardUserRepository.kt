@@ -1,5 +1,7 @@
 package com.rfm.edubot.dashboard
 
+import com.mongodb.ErrorCategory
+import com.mongodb.MongoServerException
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
@@ -23,6 +25,41 @@ class DashboardUserRepository(mongoModule: MongoModule) {
 
     suspend fun findById(id: ObjectId): DashboardUser? =
         collection.find(Filters.eq("_id", id)).firstOrNull()?.toDashboardUser()
+
+    suspend fun findByGoogleUid(uid: String): DashboardUser? =
+        collection.find(Filters.eq("googleUid", uid)).firstOrNull()?.toDashboardUser()
+
+    enum class LinkResult { LINKED, TAKEN, NOT_FOUND }
+
+    /** Attaches a Google account to [id]. A Google account belongs to one user at most (unique index). */
+    suspend fun linkGoogle(id: ObjectId, uid: String, email: String): LinkResult {
+        findByGoogleUid(uid)?.let { if (it.id != id) return LinkResult.TAKEN }
+        return try {
+            val updated = collection.updateOne(
+                Filters.eq("_id", id),
+                Updates.combine(Updates.set("googleUid", uid), Updates.set("googleEmail", email.trim().lowercase())),
+            )
+            if (updated.matchedCount == 0L) LinkResult.NOT_FOUND else LinkResult.LINKED
+        } catch (e: MongoServerException) {
+            if (ErrorCategory.fromErrorCode(e.code) != ErrorCategory.DUPLICATE_KEY) throw e
+            LinkResult.TAKEN
+        }
+    }
+
+    suspend fun unlinkGoogle(id: ObjectId): DashboardUser? =
+        collection.findOneAndUpdate(
+            Filters.eq("_id", id),
+            Updates.combine(Updates.unset("googleUid"), Updates.unset("googleEmail")),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toDashboardUser()
+
+    /** A null [hash] turns password sign-in off for the user. */
+    suspend fun setPasswordHash(id: ObjectId, hash: String?): DashboardUser? =
+        collection.findOneAndUpdate(
+            Filters.eq("_id", id),
+            if (hash == null) Updates.unset("passwordHash") else Updates.set("passwordHash", hash),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toDashboardUser()
 
     suspend fun listByTenant(tenantId: ObjectId): List<DashboardUser> =
         collection.find(Filters.eq("tenantId", tenantId)).sort(Document("email", 1)).toList().map { it.toDashboardUser() }
@@ -52,16 +89,22 @@ class DashboardUserRepository(mongoModule: MongoModule) {
         status = DashboardUserStatus.valueOf(getString("status") ?: DashboardUserStatus.ACTIVE.name),
         createdAt = getInstant("createdAt"),
         lastLoginAt = getDate("lastLoginAt")?.let { Instant.fromEpochMilliseconds(it.time) },
+        googleUid = getString("googleUid"),
+        googleEmail = getString("googleEmail"),
     )
 
     private fun DashboardUser.toDocument() = Document("_id", id)
         .append("tenantId", tenantId)
         .append("email", email.trim().lowercase())
-        .append("passwordHash", passwordHash)
         .append("role", role.name)
         .append("status", status.name)
         .append("createdAt", createdAt.toDate())
         .append("lastLoginAt", lastLoginAt?.toDate())
+        .apply {
+            passwordHash?.let { append("passwordHash", it) }
+            googleUid?.let { append("googleUid", it) }
+            googleEmail?.let { append("googleEmail", it) }
+        }
 }
 
 private fun Document.getInstant(field: String): Instant = Instant.fromEpochMilliseconds(getDate(field).time)

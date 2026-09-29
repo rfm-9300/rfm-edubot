@@ -151,6 +151,43 @@ support) but never `DELETED` ones. This covers every route under `authenticate("
 suspending a tenant or disabling a user takes effect on the next request rather than at token expiry.
 Login refuses inactive accounts with `403`.
 
+### Tenant sign-in
+
+Dashboard users (`dashboard_users`) sign in with a password, with Google, or with Google only
+(`dashboard/DashboardAccountRoutes.kt`). Google uses the backoffice's Firebase project and
+`FirebaseIdTokenVerifier`, without the operator allowlist: `identify` accepts any verified Google
+account, and the server decides which user it is. A linked account is found by its Firebase uid
+(`googleUid`, partial unique index, so a Google account belongs to one user at most). The first time,
+the user whose email equals the verified Google email is chosen and linked automatically. A user
+already linked to another Google account is refused (`other_google_account`), so an email match can't
+take it over. `POST /app/auth/login` answers a Google-only user exactly like a wrong password.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (/app)
+    participant G as Google (Firebase popup)
+    participant S as Ktor
+    participant M as MongoDB
+    B->>G: signInWithPopup
+    G-->>B: Firebase ID token
+    B->>S: POST /app/auth/google {idToken}
+    S->>S: RS256 via Google JWKS, project, google.com, email_verified
+    S->>M: user by googleUid
+    alt not linked yet
+        S->>M: user by verified email
+        S->>M: set googleUid + googleEmail
+    end
+    S->>S: tenant ACTIVE, user ACTIVE
+    S-->>B: dashboard JWT (typ tenant)
+```
+
+Each user manages their own sign-in from the account drawer (`/app/api/account`, tenant users only;
+an operator opening the dashboard gets `403 no_user_account`). Linking, unlinking and changing the
+password need the current password. Turning the password off (`password/disable`) or setting one
+again from Google-only needs a Google sign-in to the linked account from the last 5 minutes: that
+proves the Google account works before it becomes the only way in. New passwords need 8 characters
+and at most 72 bytes (BCrypt). The mobile app still signs in with a password only.
+
 ### Services
 
 Optional `services` module (also on whenever `clients` is on): client-attached work in
@@ -282,7 +319,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
 - **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath` (production: `/data/pdfs` on the `pdf_data` volume), then uploaded to WhatsApp as documents and linked from the tenant dashboard and operator APIs. `GET …/pdf` regenerates a missing file from the stored invoice/quote so downloads survive container recreation.
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
-- **Backoffice sign-in with Google** — operators sign in to `/backoffice` with Google through Firebase Auth (project `thebotslab`). `POST /admin/auth/google` verifies the Firebase ID token itself (Google's JWKS, issuer/audience = project, `sign_in_provider = google.com`, verified email in `ADMIN_EMAILS`) with the Auth0 JWT libraries Ktor already ships, then issues the same HS256 admin JWT as the password login, so every `admin-jwt` route is unchanged. Password login only exists while `ADMIN_PASSWORD_HASH` is set; `GET /admin/auth/config` tells the login screen which methods are on.
+- **Backoffice sign-in with Google** — operators sign in to `/backoffice` with Google through Firebase Auth (project `thebotslab`). `POST /admin/auth/google` verifies the Firebase ID token itself (Google's JWKS, issuer/audience = project, `sign_in_provider = google.com`, verified email in `ADMIN_EMAILS`) with the Auth0 JWT libraries Ktor already ships, then issues the same HS256 admin JWT as the password login, so every `admin-jwt` route is unchanged. Password login only exists while `ADMIN_PASSWORD_HASH` is set; `GET /admin/auth/config` tells the login screen which methods are on. Tenant users sign in with Google through the same Firebase project, matched to their own accounts ([Tenant sign-in](#tenant-sign-in)).
 - **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
 
 ## Infrastructure

@@ -52,11 +52,31 @@ class FirebaseIdTokenVerifierTest {
     }
 
     @Test
+    fun `tenant sign-in identifies any verified Google account, allowlisted or not`() {
+        assertEquals(FirebaseIdTokenVerifier.Result.Allowed("someone@gmail.com", "uid-1"), verifier.identify(token(email = "Someone@gmail.com"), config))
+        assertEquals(FirebaseIdTokenVerifier.EMAIL_NOT_VERIFIED, identifyReason(token(email = "someone@gmail.com", emailVerified = false)))
+        assertEquals(FirebaseIdTokenVerifier.NOT_GOOGLE, identifyReason(token(provider = "password")))
+        assertEquals(FirebaseIdTokenVerifier.INVALID_TOKEN, identifyReason(token(audience = "other-project")))
+    }
+
+    @Test
+    fun `confirming an account change needs a recent sign-in`() {
+        val recent = token(authTime = Instant.now().minusSeconds(60))
+        val old = token(authTime = Instant.now().minusSeconds(1800))
+        assertEquals(FirebaseIdTokenVerifier.Result.Allowed("owner@gmail.com", "uid-1"), verifier.identify(recent, config, maxAuthAgeSeconds = 300))
+        assertEquals(FirebaseIdTokenVerifier.STALE_SIGN_IN, identifyReason(old, maxAuthAgeSeconds = 300))
+        assertEquals(FirebaseIdTokenVerifier.Result.Allowed("owner@gmail.com", "uid-1"), verifier.identify(old, config))
+    }
+
+    @Test
     fun `ADMIN_EMAILS accepts commas, semicolons and spaces`() {
         assertEquals(setOf("a@x.com", "b@y.com"), AppConfig.parseEmails(" A@x.com, b@y.com;; not-an-email "))
     }
 
     private fun reason(idToken: String) = (verifier.verify(idToken, config) as FirebaseIdTokenVerifier.Result.Rejected).reason
+
+    private fun identifyReason(idToken: String, maxAuthAgeSeconds: Long? = null) =
+        (verifier.identify(idToken, config, maxAuthAgeSeconds) as FirebaseIdTokenVerifier.Result.Rejected).reason
 
     private fun token(
         email: String = "owner@gmail.com",

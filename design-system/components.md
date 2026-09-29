@@ -15,6 +15,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 <button class="btn btn--primary" type="button"><span class="btn__plus">+</span> New</button>
 <button class="iconbtn" type="button" aria-label="Close">×</button>
 <button class="iconbtn iconbtn--theme" id="btn-theme" type="button">🌙</button>
+<button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" aria-label="Your account">AR</button>
 ```
 
 - `.btn` and `.btn--primary` / `.btn--accent` are the same CTA (gradient + `--accent-ink` + `--glow-accent`). Prefer `--primary` for page CTAs, `--accent` for in-row / drawer save.
@@ -22,6 +23,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--danger` only for irreversible confirm. Pair with `.confirm`.
 - `.btn--sm` in table action cells and compact toolbars.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
+- `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
 ## Brand
@@ -81,6 +83,8 @@ Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `s
 Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
 
 On pages that support layouts (`/app`), `#btn-layout` (`.iconbtn.iconbtn--theme`) sits right before the theme button. `theme.js` fills its icon and localized label (`common.layoutToMinimal` / `common.layoutToClassic`); leave it empty in markup.
+
+On `/app`, `#btn-account` (`.iconbtn--avatar`) sits between the theme button and Log out. It stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account).
 
 ## View hero + stats
 
@@ -393,7 +397,7 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
 ```
 
 - `.record-kpis` holds up to four `.record-kpi`; `data-count` sets the columns (two below 560px). `data-tone="bad|warn|info"` colors the value. Values sit at the bottom of the cell so they line up when a label wraps.
-- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.record` as it does in `.dash`. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`.
+- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.record` as it does in `.dash`. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
 - `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip. A supplier or employee has one list (payments), so no tabs; its table panel carries a `.panel__head` title instead.
 - Tables reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
 - The create actions are a sticky `.drawer__foot` at the end of the record.
@@ -447,6 +451,8 @@ One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide 
 ```
 
 Render login **inside** `#view` so the sidebar/topbar chrome can remain or clear as each app already does. Submit button is full-width (`.auth .btn`).
+
+When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a `.btn--primary` "Continue with Google" button comes first, then an `.auth__desc` line ("or sign in with your email and password"), then the form with a `.btn--ghost` submit. A refusal that needs explaining (no linked user, a different Google account) shows under the Google button as `.hint.hint--warn` with `role="alert"`; cancelled or failed popups use the toast.
 
 ## Chat (persona / thread / assistant)
 

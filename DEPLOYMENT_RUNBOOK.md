@@ -334,12 +334,18 @@ the VPS by the deploy workflow (see "Sync compose files" in `deploy.yml`) but
 the cron entries above are one-time manual setup — CI does not install cron
 jobs.
 
-## Backoffice sign-in (Google via Firebase)
+## Google sign-in (Firebase)
 
 `/backoffice` (and `/admin`, which redirects there) signs in with Google through
 Firebase Auth, project `thebotslab`. The browser gets a Firebase ID token and posts
 it to `POST /admin/auth/google`; the server checks Google's signature, the project,
 and that the verified email is in `ADMIN_EMAILS`, then issues the usual admin JWT.
+
+The tenant dashboard `/app` uses the same Firebase config (no allowlist): `POST /app/auth/google`
+signs a user in with the Google account linked to them, and links it automatically the first time
+when the verified Google email equals their dashboard email. Users link/unlink Google, change their
+password, or switch to Google only from the account button in the `/app` top bar. `GET /app/auth/config`
+shows whether Google is offered. Refused tenant sign-ins are logged by `DashboardAuth`.
 
 - VPS `.env`: `FIREBASE_PROJECT_ID`, `FIREBASE_WEB_API_KEY`, `FIREBASE_AUTH_DOMAIN`,
   `FIREBASE_APP_ID` (public web config, from
@@ -354,6 +360,11 @@ and that the verified email is in `ADMIN_EMAILS`, then issues the usual admin JW
   bcrypt hash) and recreate the app with the command above. `GET /admin/auth/config` shows which
   methods are active.
 - Refused sign-ins are logged by `AdminAuth` with the reason and email.
+- A Google-only tenant user who lost their Google account has no self-service way back (there is no
+  backoffice action for it yet). Only when Rodrigo asks: generate a bcrypt hash for a temporary
+  password (command in `.env.example`), then on the VPS
+  `cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml exec mongo mongosh wabot --eval 'db.dashboard_users.updateOne({ email: "user@example.com" }, { $set: { passwordHash: "<hash>" }, $unset: { googleUid: 1, googleEmail: 1 } })'`
+  (drop the `$unset` to keep the Google link). The user then signs in with that password and changes it.
 
 ## Failure Rules
 

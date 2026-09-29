@@ -45,6 +45,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
 
             val dashboardUsers = db.getCollection<Document>("dashboard_users")
             dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))
+            dashboardUsers.createIndex(
+                Document("googleUid", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("googleUid", Document("\$type", "string"))),
+            )
             dashboardUsers.createIndex(Document("tenantId", 1))
 
             val tenantPersona = db.getCollection<Document>("tenant_persona")

@@ -410,7 +410,8 @@ body.nav-open .nav-scrim {
 .topbar__search input::placeholder { color: var(--ink-faint); font-weight: 600; }
 .topbar__search kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mute); background: var(--bg); }
 .topbar__actions { display: flex; align-items: center; gap: 8px; }
-.topbar #btn-new[hidden] { display: none; }
+.topbar #btn-new[hidden],
+.topbar #btn-account[hidden] { display: none; }
 
 /* ============================================================
    BUTTONS
@@ -471,6 +472,12 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
 .iconbtn:hover { background: var(--surface-2); color: var(--ink); transform: translateY(-1px); }
 .iconbtn--danger:hover { color: var(--bad-ink); border-color: color-mix(in srgb, var(--bad) 40%, var(--mix)); background: var(--bad-soft); }
 .iconbtn--theme { width: 36px; height: 36px; border-radius: 999px; font-size: 16px; }
+/* The signed-in user's initials; opens their account. */
+.iconbtn--avatar {
+  background: var(--accent-soft); color: var(--accent-deep); border-color: transparent;
+  font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
+}
+html[data-theme="dark"] .iconbtn--avatar { color: var(--accent); }
 
 /* ============================================================
    VIEW + TABLE
@@ -1964,6 +1971,7 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .worklist > li + li { border-top: 1px solid var(--line-soft); }
 .worklist__item { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; gap: 12px; width: 100%; padding: 10px 16px; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; transition: background 100ms; }
 .worklist__item:hover { background: var(--surface-2); }
+.worklist__item:disabled { cursor: default; background: transparent; }
 .worklist__item:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 0 6px var(--accent-soft); }
 .worklist__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--tone, var(--ink-faint)); }
 .worklist__main { display: flex; flex-direction: column; min-width: 0; }

@@ -74,8 +74,9 @@ data class AppConfig(
     }
 
     /**
-     * Backoffice sign-in with Google through Firebase Auth. The web values are public (they go to the
-     * browser); access is decided server-side by [allowedEmails].
+     * Sign-in with Google through Firebase Auth. The web values are public (they go to the browser);
+     * access is decided server-side: [allowedEmails] for the backoffice, the user's own linked
+     * account (or verified email) for the tenant dashboard.
      */
     data class GoogleSignInConfig(
         val firebaseProjectId: String = "",
@@ -84,7 +85,11 @@ data class AppConfig(
         val appId: String = "",
         val allowedEmails: Set<String> = emptySet(),
     ) {
-        val enabled: Boolean get() = firebaseProjectId.isNotBlank() && webApiKey.isNotBlank() && allowedEmails.isNotEmpty()
+        /** Backoffice sign-in: the Firebase web app plus an operator allowlist. */
+        val enabled: Boolean get() = webConfigured && allowedEmails.isNotEmpty()
+
+        /** Tenant dashboard sign-in only needs the Firebase web app; users are matched to their own accounts. */
+        val webConfigured: Boolean get() = firebaseProjectId.isNotBlank() && webApiKey.isNotBlank()
     }
 
     companion object {

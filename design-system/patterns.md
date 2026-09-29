@@ -60,6 +60,8 @@ Used by clients, quotes, invoices, catalog, tenants:
 
 Render `.auth` > `.auth__card` into `#view`. Keep brand mark letters consistent with the surface (CRM / AI / BO). POST existing auth endpoints; do not add a new login visual.
 
+Google sign-in (backoffice and `/app`) goes above the password form when the page's auth config returns `google` ([components.md](components.md#auth-card)). Load the Firebase SDK as soon as the login shows, and call `signInWithPopup` before any other `await` in the click handler: browsers only allow the popup straight from the click. The Firebase session stays in memory (`inMemoryPersistence`); the page keeps its own token.
+
 ## Confirm then destroy
 
 Never `window.confirm`. Fill `.confirm__title` / `.confirm__body`, show `#confirm`, ghost cancel + `.btn--danger` confirm.
@@ -162,6 +164,15 @@ Optional `instagram` module. Work queue first, not an Insights wall:
 ## Settings (tenant)
 
 Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Layout and Theme; both are browser preferences (localStorage) applied through `UIPrefs`, not tenant settings. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
+
+## Account (tenant user)
+
+The top-bar avatar (`#btn-account`) opens the signed-in user's account as a `.record` drawer, not a Settings tab: Settings is an optional module, and every user needs a way to their sign-in. It has a `.record-card` (initials, email, role · tenant) and a "How you sign in" `.panel` with two `.worklist__item` rows, Google and Password (dot tone + `.pill--ok` when on, plain pill when off), then a `.hint` with the next step. Each row opens a small form drawer through the drawer trail (back link "Account"); after a change the form closes and the account drawer comes back with fresh data.
+
+- Link Google: current password, then the Google popup. Unlink: current password, `.btn--danger`.
+- Password on: change form (current, new, repeat), and below it a `.panel` "Sign in with Google only" whose button confirms with a Google popup (not the password, so the Google account is proven to work before it becomes the only way in).
+- Google only: set a password (new, repeat), confirmed with a Google popup; the Google drawer explains it's the only way in and offers "Set a password" instead of unlink.
+- Errors go through `app.accountErr_<code>` in the catalogs, falling back to `app.accountFailed`.
 
 ## Document template studio
 
