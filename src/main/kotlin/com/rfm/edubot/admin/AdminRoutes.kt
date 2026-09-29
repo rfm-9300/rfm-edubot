@@ -133,6 +133,7 @@ internal data class ClientDto(
     val notes: String? = null,
     val createdAt: String,
     val updatedAt: String? = null,
+    val archivedAt: String? = null,
 )
 
 @Serializable
@@ -206,6 +207,7 @@ internal data class SupplierDto(
     val phone: String,
     val address: String? = null,
     val createdAt: String,
+    val archivedAt: String? = null,
 )
 
 @Serializable
@@ -216,6 +218,7 @@ internal data class EmployeeDto(
     val phone: String,
     val role: String? = null,
     val createdAt: String,
+    val archivedAt: String? = null,
 )
 
 @Serializable
@@ -246,6 +249,7 @@ internal fun Client.dto() = ClientDto(
     notes = notes,
     createdAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
+    archivedAt = archivedAt?.toString(),
 )
 
 internal fun Quote.dto(client: Client?) = QuoteDto(
@@ -355,6 +359,7 @@ internal fun Employee.dto() = EmployeeDto(
     phone = phone,
     role = role,
     createdAt = createdAt.toString(),
+    archivedAt = archivedAt?.toString(),
 )
 
 internal fun Supplier.dto() = SupplierDto(
@@ -364,6 +369,7 @@ internal fun Supplier.dto() = SupplierDto(
     phone = phone,
     address = address,
     createdAt = createdAt.toString(),
+    archivedAt = archivedAt?.toString(),
 )
 
 internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null) = PaymentDto(

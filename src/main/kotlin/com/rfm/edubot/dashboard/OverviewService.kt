@@ -451,7 +451,7 @@ class OverviewService(private val mongo: MongoModule) {
     private suspend fun employees(tenantId: ObjectId, window: OverviewMath.Window): OverviewSuppliersDto {
         val tenantFilter = Filters.eq("tenantId", tenantId)
         return OverviewSuppliersDto(
-            total = coll("crm.employees").countDocuments(tenantFilter),
+            total = coll("crm.employees").countDocuments(Filters.and(tenantFilter, Filters.eq("archivedAt", null))),
             newThisMonth = coll("crm.employees").countDocuments(
                 Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
             ),
@@ -464,7 +464,7 @@ class OverviewService(private val mongo: MongoModule) {
     private suspend fun suppliers(tenantId: ObjectId, window: OverviewMath.Window): OverviewSuppliersDto {
         val tenantFilter = Filters.eq("tenantId", tenantId)
         return OverviewSuppliersDto(
-            total = coll("crm.suppliers").countDocuments(tenantFilter),
+            total = coll("crm.suppliers").countDocuments(Filters.and(tenantFilter, Filters.eq("archivedAt", null))),
             newThisMonth = coll("crm.suppliers").countDocuments(
                 Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
             ),
@@ -514,7 +514,7 @@ class OverviewService(private val mongo: MongoModule) {
     private suspend fun customers(tenantId: ObjectId, window: OverviewMath.Window): OverviewCustomersDto {
         val tenantFilter = Filters.eq("tenantId", tenantId)
         return OverviewCustomersDto(
-            total = coll("crm.clients").countDocuments(tenantFilter),
+            total = coll("crm.clients").countDocuments(Filters.and(tenantFilter, Filters.eq("archivedAt", null))),
             newThisMonth = coll("crm.clients").countDocuments(
                 Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
             ),

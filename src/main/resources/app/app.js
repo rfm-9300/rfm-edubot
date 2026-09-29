@@ -12,6 +12,8 @@ let state = {
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
   search: '', active: 'overview', selectedAsset: '',
+  // Directory ('clients', 'suppliers' or 'employees') whose archived records are listed instead of the active ones.
+  archivedView: '', archivedRows: [],
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   settingsSection: 'channels', personaAdvanced: false, overviewLayout: null, overviewExtended: false,
@@ -721,6 +723,7 @@ async function setActive(tab) {
   state.filterFinanceiroType = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
+  state.archivedView = '';
   try {
     await loadModule(tab);
     render();
@@ -1731,14 +1734,37 @@ async function openInboxThread(id, root) {
     finally { button.disabled = false; input.focus(); }
   });
 }
+// The directory pages list active records; the Archived chip swaps in the archived ones, ready to restore.
+function directoryViewChips(kind) {
+  const archived = state.archivedView === kind;
+  return `<button class="chip ${archived ? '' : 'is-on'}" type="button" data-directory-view="">${escapeHTML(STR.directoryActive)}</button>`
+    + `<button class="chip ${archived ? 'is-on' : ''}" type="button" data-directory-view="${kind}">${escapeHTML(STR.directoryArchived)}</button>`;
+}
+
+async function showDirectoryView(kind) {
+  if (kind) {
+    const rows = await api(`/app/api/crm/${kind}?archived=1`).catch(() => null);
+    if (!rows) return toast(STR.loadFailed);
+    state.archivedRows = rows;
+  }
+  state.archivedView = kind;
+  render();
+}
+
+function wireDirectoryView(root) {
+  $$('[data-directory-view]', root).forEach(b => b.addEventListener('click', () => showDirectoryView(b.dataset.directoryView)));
+}
+
 function renderClients(root) {
   const t = CRM.clients;
+  const archived = state.archivedView === 'clients';
+  const source = archived ? state.archivedRows : state.clients;
   const q = state.search.trim().toLowerCase();
   const qDigits = phoneDigits(q);
   const matches = c => !q
     || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${c.address || ''} ${c.email || ''} ${c.taxId || ''}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
-  const rows = state.clients
+  const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
     .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML(c.address || '')}</td><td class="mono muted">${escapeHTML(c.phone)}</td><td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
@@ -1749,19 +1775,23 @@ function renderClients(root) {
     { label: t.new30, value: new30 },
   ])) + crmPanel({
     title: t.directory,
-    tag: state.clients.length,
+    tag: source.length,
+    tools: directoryViewChips('clients'),
     head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
     rows,
-    empty: t.emptyTitle,
-    emptyDesc: t.emptyDesc,
+    empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
+    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
-  $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(state.clients.find(c => c.id === r.dataset.client) || r.dataset.client)));
+  $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
+  wireDirectoryView(root);
 }
 
 function renderSuppliers(root) {
   const t = CRM.suppliers;
+  const archived = state.archivedView === 'suppliers';
+  const source = archived ? state.archivedRows : (state.suppliers || []);
   const q = state.search.toLowerCase();
-  const rows = (state.suppliers || [])
+  const rows = source
     .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.phone || ''} ${s.address || ''}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${escapeHTML(s.name)}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`)
     .join('');
@@ -1771,19 +1801,23 @@ function renderSuppliers(root) {
     { label: t.new30, value: new30 },
   ])) + crmPanel({
     title: t.directory,
-    tag: (state.suppliers || []).length,
+    tag: source.length,
+    tools: directoryViewChips('suppliers'),
     head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
     rows,
-    empty: t.emptyTitle,
-    emptyDesc: t.emptyDesc,
+    empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
+    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
-  $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', state.suppliers.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
+  $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
+  wireDirectoryView(root);
 }
 
 function renderEmployees(root) {
   const t = CRM.employees;
+  const archived = state.archivedView === 'employees';
+  const source = archived ? state.archivedRows : (state.employees || []);
   const q = state.search.toLowerCase();
-  const rows = (state.employees || [])
+  const rows = source
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''}`.toLowerCase().includes(q))
     .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
     .join('');
@@ -1793,13 +1827,15 @@ function renderEmployees(root) {
     { label: t.new30, value: new30 },
   ])) + crmPanel({
     title: t.directory,
-    tag: (state.employees || []).length,
+    tag: source.length,
+    tools: directoryViewChips('employees'),
     head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thRole)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
     rows,
-    empty: t.emptyTitle,
-    emptyDesc: t.emptyDesc,
+    empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
+    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
-  $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', state.employees.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
+  $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
+  wireDirectoryView(root);
 }
 
 function renderServices(root) {
@@ -2282,8 +2318,8 @@ function contactButtons(phone, extra = '') {
   ].join('');
 }
 
-// `lines` is trusted HTML built by the caller (escaped values); everything else is escaped here.
-function recordCardHtml({ name, lines, since, contact = '', notes = '' }) {
+// `lines` and `actions` are trusted HTML built by the caller (escaped values); everything else is escaped here.
+function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null }) {
   return `<section class="record-card">
     <div class="record-card__head">
       <span class="record-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
@@ -2291,8 +2327,9 @@ function recordCardHtml({ name, lines, since, contact = '', notes = '' }) {
         <div class="record-card__lines">${lines}</div>
         <p class="record-card__since">${escapeHTML(since)}</p>
       </div>
-      <button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>
+      <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${actions}</div>
     </div>
+    ${archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(archivedAt) }))}</p>` : ''}
     ${contact ? `<div class="record-card__contact">${contact}</div>` : ''}
     ${notes ? `<div class="record-card__notes"><span class="record-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(notes)}</div>` : ''}
   </section>`;
@@ -2328,6 +2365,54 @@ function recordFootHtml(acts) {
     : '';
 }
 
+// A client, supplier or employee that documents refer to can't be deleted (the server answers 409
+// `in_use`), only archived, so its quotes, invoices and payments keep their name and PDFs.
+function recordRemovalButton(record) {
+  return record.archivedAt
+    ? `<button class="btn btn--sm btn--ghost" type="button" data-record-restore>${escapeHTML(STR.recordRestore)}</button>`
+    : `<button class="btn btn--sm btn--ghost" type="button" data-record-remove>${escapeHTML(STR.recordDelete)}</button>`;
+}
+
+async function removeDirectoryRecord(kind, record, { inUse, archiveBody, onDeleted, onArchived }) {
+  const url = `/app/api/crm/${kind}/${encodeURIComponent(record.id)}`;
+  if (!inUse) {
+    if (!await confirmDialog({ title: STR.recordDeleteTitle({ name: record.name }), body: STR.recordDeleteBody, okLabel: STR.recordDelete })) return;
+    try {
+      await api(url, { method: 'DELETE' });
+      toast(STR.recordDeleted);
+      return onDeleted();
+    } catch (err) {
+      // Documents the record didn't show (a module that is off) still count: offer to archive instead.
+      if (err?.code !== 'in_use') { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); return; }
+    }
+  }
+  if (!await confirmDialog({ title: STR.recordArchiveTitle({ name: record.name }), body: archiveBody, okLabel: STR.recordArchive, danger: false })) return;
+  try {
+    const res = await api(`${url}/archive`, { method: 'POST' });
+    toast(STR.recordArchived);
+    onArchived(res.archivedAt);
+  } catch (err) { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); }
+}
+
+async function restoreDirectoryRecord(kind, record, onRestored) {
+  try {
+    await api(`/app/api/crm/${kind}/${encodeURIComponent(record.id)}/restore`, { method: 'POST' });
+    toast(STR.recordRestored);
+    onRestored();
+  } catch (err) { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); }
+}
+
+// Pickers read the active lists, so they are reloaded after a record is deleted, archived or restored.
+async function refreshDirectory(kind) {
+  const [active, archived] = await Promise.all([
+    api(`/app/api/crm/${kind}`).catch(() => null),
+    state.archivedView === kind ? api(`/app/api/crm/${kind}?archived=1`).catch(() => null) : null,
+  ]);
+  if (active) state[kind] = active;
+  if (archived) state.archivedRows = archived;
+  render();
+}
+
 // Relative due date of an unpaid document: "was due 12 days ago" or "due in 3 days".
 function dueWhenText(dueDate, overdue) {
   return overdue ? STR.clientAttnOverdueDetail({ when: relDay(dueDate) }) : STR.clientDueWhen({ when: relDay(dueDate) });
@@ -2351,7 +2436,10 @@ function clientCardHtml(r, bk) {
   const chat = r.conversation
     ? `<button class="btn btn--sm" type="button" data-record-open="chat">${escapeHTML(STR.clientOpenChat)}${r.conversation.waiting ? ` <span class="pill pill--warn">${escapeHTML(STR.waiting)}</span>` : ''}</button>`
     : '';
-  return recordCardHtml({ name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes });
+  return recordCardHtml({
+    name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes,
+    actions: recordRemovalButton(c), archivedAt: c.archivedAt,
+  });
 }
 
 function clientKpiCells(m, bk) {
@@ -2413,7 +2501,7 @@ function clientAttention(r, m, bk) {
   if (m.openWork.length) {
     items.push({
       tone: 'warn', title: STR.clientAttnUnbilled({ n: m.openWork.length }), detail: m.openWork.map(s => s.name).join(', '),
-      amount: m.openWorkTotal, open: hasModule('invoices') ? 'invoice-open-work' : 'tab:services',
+      amount: m.openWorkTotal, open: hasModule('invoices') && !r.client.archivedAt ? 'invoice-open-work' : 'tab:services',
     });
   }
   m.openQuotes.forEach(q => {
@@ -2477,8 +2565,10 @@ function clientActivity(r, bk) {
 }
 
 function clientPaneHtml(r, m, bk) {
+  // An archived client gets no new documents until it is restored.
+  const act = kind => (r.client.archivedAt ? null : kind);
   if (r.tab === 'bookings') {
-    if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, 'booking', STR.bookingsNewForClient);
+    if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, act('booking'), STR.bookingsNewForClient);
     const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="booking:${escapeHTML(b.id)}">
       <td>${escapeHTML(bookingWhen(b))}</td><td class="name">${escapeHTML(bookingServiceName(b))}</td><td>${bookingPill(b.status)}</td>
       <td class="num right">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : ''}</td></tr>`;
@@ -2489,7 +2579,7 @@ function clientPaneHtml(r, m, bk) {
     );
   }
   if (r.tab === 'services') {
-    if (!r.services.length) return recordEmpty(STR.clientNoServices, 'service', CRM.services.addForClient);
+    if (!r.services.length) return recordEmpty(STR.clientNoServices, act('service'), CRM.services.addForClient);
     const t = CRM.services;
     const rows = [...r.services]
       .sort((a, b) => String(b.performedAt || b.createdAt).localeCompare(String(a.performedAt || a.createdAt)))
@@ -2497,12 +2587,12 @@ function clientPaneHtml(r, m, bk) {
         <td class="mono">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
         <td class="name">${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
         <td>${servicePill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
-    const invoiceOpen = m.openWork.length && hasModule('invoices')
+    const invoiceOpen = m.openWork.length && hasModule('invoices') && act('invoice')
       ? `<div class="record__pane-foot"><button class="btn btn--sm btn--accent" type="button" data-record-act="invoice-open-work">${escapeHTML(STR.clientInvoiceOpenWork({ amount: fmtEUR(m.openWorkTotal) }))}</button></div>` : '';
     return recordTable([[t.thWhen], [t.thService], [t.thStatus], [t.thTotal, 'right']], rows) + invoiceOpen;
   }
   if (r.tab === 'quotes') {
-    if (!r.quotes.length) return recordEmpty(STR.clientNoQuotes, 'quote', CRM.tabs.orcamentos.newLabel);
+    if (!r.quotes.length) return recordEmpty(STR.clientNoQuotes, act('quote'), CRM.tabs.orcamentos.newLabel);
     const t = CRM.quotes;
     const rows = r.quotes.map(q => `<tr class="conversation-row${q.status === 'ACEITO' ? ' is-paid' : ''}" data-record-open="quote:${escapeHTML(q.id)}">
       <td class="id">${escapeHTML(q.number)}</td><td class="mono">${escapeHTML(fmtDay(q.createdAt))}</td>
@@ -2511,7 +2601,7 @@ function clientPaneHtml(r, m, bk) {
     return recordTable([[t.thNumber], [STR.clientThDate], [t.thValidUntil], [t.thStatus], [t.thTotal, 'right']], rows);
   }
   if (r.tab === 'invoices') {
-    if (!r.invoices.length) return recordEmpty(STR.clientNoInvoices, 'invoice', CRM.tabs.faturas.newLabel);
+    if (!r.invoices.length) return recordEmpty(STR.clientNoInvoices, act('invoice'), CRM.tabs.faturas.newLabel);
     const t = CRM.invoices;
     const rows = r.invoices.map(i => {
       const status = effectiveStatus(i);
@@ -2558,8 +2648,16 @@ function renderClientRecord(focusTab = false) {
     ${recordAttentionHtml(clientAttention(r, m, bk))}
     ${clientTabs(r)}
     <div class="record__pane" role="tabpanel">${clientPaneHtml(r, m, bk)}</div>
-    ${recordFootHtml(acts)}`;
+    ${r.client.archivedAt ? '' : recordFootHtml(acts)}`;
   $('[data-record-edit]', body)?.addEventListener('click', () => openFromClient(() => openClientForm(r.client)));
+  const setArchivedAt = archivedAt => { r.client = { ...r.client, archivedAt }; renderClientRecord(); refreshDirectory('clients'); };
+  $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord('clients', r.client, {
+    inUse: r.quotes.length + r.invoices.length + r.services.length + r.bookings.length > 0,
+    archiveBody: STR.clientArchiveBody,
+    onDeleted: () => { closeDrawer({ dismissed: true }); refreshDirectory('clients'); },
+    onArchived: setArchivedAt,
+  }));
+  $('[data-record-restore]', body)?.addEventListener('click', () => restoreDirectoryRecord('clients', r.client, () => setArchivedAt(null)));
   $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.recordTab; renderClientRecord(true); }));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.recordOpen)));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.recordAct)));
@@ -2682,7 +2780,8 @@ function wireDuplicatePhone(form, editingId) {
     const found = await api(`/app/api/crm/clients/by-phone?phone=${encodeURIComponent(input.value)}`).catch(() => null);
     if (mine !== seq) return;
     if (!found || found.id === editingId) { hint.hidden = true; return; }
-    hint.innerHTML = `${escapeHTML(STR.clientDuplicate({ name: found.name, number: found.number }))} <button class="btn btn--sm btn--ghost" type="button" data-open-dup>${escapeHTML(STR.clientOpenExisting)}</button>`;
+    const text = found.archivedAt ? STR.clientDuplicateArchived : STR.clientDuplicate;
+    hint.innerHTML = `${escapeHTML(text({ name: found.name, number: found.number }))} <button class="btn btn--sm btn--ghost" type="button" data-open-dup>${escapeHTML(STR.clientOpenExisting)}</button>`;
     hint.hidden = false;
     $('[data-open-dup]', hint).addEventListener('click', () => openClientDrawer(found));
   };
@@ -2845,15 +2944,23 @@ function renderPayeeRecord() {
   const payments = !hasModule('payments') ? ''
     : r.payments.length
       ? recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: r.payments.length })
-      : recordEmpty(STR.payeeNoPayments, 'payment', t.addPayment);
+      : recordEmpty(STR.payeeNoPayments, p.archivedAt ? null : 'payment', t.addPayment);
   body.innerHTML = `
-    ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone) })}
+    ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
     ${recordKpisHtml(cells)}
     ${recordAttentionHtml(attention)}
     ${payments}
-    ${hasModule('payments') ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
+    ${hasModule('payments') && !p.archivedAt ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
   const here = () => payeeTrailEntry(kind, p);
   $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
+  const setArchivedAt = archivedAt => { r.payee = { ...p, archivedAt }; renderPayeeRecord(); refreshDirectory(cfg.path); };
+  $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord(cfg.path, p, {
+    inUse: r.payments.length > 0,
+    archiveBody: STR.payeeArchiveBody,
+    onDeleted: () => { closeDrawer({ dismissed: true }); refreshDirectory(cfg.path); },
+    onArchived: setArchivedAt,
+  }));
+  $('[data-record-restore]', body)?.addEventListener('click', () => restoreDirectoryRecord(cfg.path, p, () => setArchivedAt(null)));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => {
     const id = el.dataset.recordOpen.split(':')[1];
     openFrom(here(), () => openPaymentDetail(id));

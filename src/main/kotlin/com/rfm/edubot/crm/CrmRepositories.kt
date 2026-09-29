@@ -22,16 +22,16 @@ import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
 
-class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
+class ClientRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.clients")
     private val sequences = SequenceRepository(mongoModule, tenantId)
 
     suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
-    suspend fun search(query: String, limit: Int = 20): List<Client> {
+    suspend fun search(query: String, limit: Int = 20, archived: Boolean = false): List<Client> {
         val trimmed = query.trim()
-        val filter = if (trimmed.isBlank()) {
-            Filters.eq("tenantId", tenantId)
+        val text = if (trimmed.isBlank()) {
+            null
         } else {
             val contains = ".*${Regex.escape(trimmed)}.*"
             val digits = trimmed.filter(Char::isDigit)
@@ -41,22 +41,27 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
             } else {
                 null
             }
-            scoped(
-                Filters.or(
-                    listOfNotNull(
-                        Filters.regex("number", contains, "i"),
-                        Filters.regex("name", contains, "i"),
-                        Filters.regex("phone", contains, "i"),
-                        Filters.regex("address", contains, "i"),
-                        Filters.regex("email", contains, "i"),
-                        Filters.regex("taxId", contains, "i"),
-                        phoneDigits,
-                    )
+            Filters.or(
+                listOfNotNull(
+                    Filters.regex("number", contains, "i"),
+                    Filters.regex("name", contains, "i"),
+                    Filters.regex("phone", contains, "i"),
+                    Filters.regex("address", contains, "i"),
+                    Filters.regex("email", contains, "i"),
+                    Filters.regex("taxId", contains, "i"),
+                    phoneDigits,
                 )
             )
         }
+        val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
         return collection.find(filter).limit(limit).toList().map { it.toClient() }
     }
+
+    /** Only a client no quote, invoice, Serviços row or booking refers to can be deleted; the others get archived. */
+    suspend fun delete(id: ObjectId): DirectoryDelete =
+        collection.deleteUnreferenced(mongoModule, tenantId, id, "clientId", listOf("crm.quotes", "crm.invoices", "crm.client_services", "bookings.appointments"))
+
+    suspend fun setArchived(id: ObjectId, archived: Boolean): Client? = collection.setArchived(tenantId, id, archived)?.toClient()
 
     /**
      * The client with this phone however it was typed ("+351 912 345 678" = "912345678"): numbers of
@@ -146,6 +151,7 @@ class ClientRepository(mongoModule: MongoModule, private val tenantId: ObjectId)
         notes = getString("notes"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
+        archivedAt = getDate("archivedAt")?.toInstantValue(),
     )
 
     private fun Client.toDocument() = Document("_id", id)

@@ -38,6 +38,7 @@ import com.rfm.edubot.crm.ClientServiceBilling
 import com.rfm.edubot.crm.ClientServiceDelete
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
+import com.rfm.edubot.crm.DirectoryDelete
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
@@ -598,8 +599,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val q = call.request.queryParameters["q"].orEmpty()
+            val archived = call.request.queryParameters["archived"] == "1"
             // The Clients page, and the client pickers in the quote/invoice forms, list the whole directory.
-            call.respond(deps.clients.search(q, limit = if (q.isBlank()) CLIENT_DIRECTORY_LIMIT else 50).map { it.dto() })
+            call.respond(deps.clients.search(q, limit = if (q.isBlank()) CLIENT_DIRECTORY_LIMIT else 50, archived = archived).map { it.dto() })
         }
         get("/clients/by-phone") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -636,6 +638,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
             call.respond(deps.clients.findById(id)?.dto() ?: return@get call.respond(HttpStatusCode.NotFound))
+        }
+        removableDirectory("clients", DashboardModules.CLIENTS, { tenantDeps(it) }, { clients.delete(it) }) { id, archived ->
+            clients.setArchived(id, archived)?.let { ArchiveStateDto(it.archivedAt?.toString()) }
         }
         get("/standard-items") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -837,7 +842,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
         get("/suppliers") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
-            call.respond(deps.suppliers.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
+            val archived = call.request.queryParameters["archived"] == "1"
+            call.respond(deps.suppliers.search(call.request.queryParameters["q"].orEmpty(), archived).map { it.dto() })
         }
         get("/suppliers/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -863,10 +869,14 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
                 .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(supplier.dto())
         }
+        removableDirectory("suppliers", DashboardModules.SUPPLIERS, { tenantDeps(it) }, { suppliers.delete(it) }) { id, archived ->
+            suppliers.setArchived(id, archived)?.let { ArchiveStateDto(it.archivedAt?.toString()) }
+        }
         get("/employees") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
-            call.respond(deps.employees.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
+            val archived = call.request.queryParameters["archived"] == "1"
+            call.respond(deps.employees.search(call.request.queryParameters["q"].orEmpty(), archived).map { it.dto() })
         }
         get("/employees/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -891,6 +901,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val employee = (call.uniquePhone { deps.employees.update(id, request.name, request.phone, request.role) } ?: return@patch)
                 .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(employee.dto())
+        }
+        removableDirectory("employees", DashboardModules.EMPLOYEES, { tenantDeps(it) }, { employees.delete(it) }) { id, archived ->
+            employees.setArchived(id, archived)?.let { ArchiveStateDto(it.archivedAt?.toString()) }
         }
         get("/payments") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -938,6 +951,36 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val payment = deps.payments.markPaid(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(deps.paymentDto(payment))
+        }
+    }
+}
+
+/**
+ * Removing a client, supplier or employee. DELETE only works when no document refers to the record
+ * (409 `in_use` otherwise, so the dashboard can offer to archive it); archive hides it from lists and
+ * pickers, restore brings it back.
+ */
+private fun Route.removableDirectory(
+    path: String,
+    module: String,
+    deps: (DashboardContext) -> CrmDeps,
+    remove: suspend CrmDeps.(ObjectId) -> DirectoryDelete,
+    archive: suspend CrmDeps.(ObjectId, Boolean) -> ArchiveStateDto?,
+) {
+    delete("/$path/{id}") {
+        val ctx = call.dashboardContext()?.takeIf { it.requireModule(module) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
+        val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+        when (deps(ctx).remove(id)) {
+            DirectoryDelete.NOT_FOUND -> call.respond(HttpStatusCode.NotFound)
+            DirectoryDelete.IN_USE -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "in_use"))
+            DirectoryDelete.DELETED -> call.respond(mapOf("deleted" to true))
+        }
+    }
+    for ((action, archived) in listOf("archive" to true, "restore" to false)) {
+        post("/$path/{id}/$action") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(module) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+            call.respond(deps(ctx).archive(id, archived) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
     }
 }
@@ -1240,6 +1283,7 @@ private suspend fun runPersonaTest(
 }
 
 @Serializable private data class DashboardLoginResponse(val token: String)
+@Serializable private data class ArchiveStateDto(val archivedAt: String?)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
 @Serializable private data class MeDto(
     val tenant: TenantMeDto,

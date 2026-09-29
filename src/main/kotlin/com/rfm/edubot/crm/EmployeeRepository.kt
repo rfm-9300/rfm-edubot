@@ -13,29 +13,34 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 
-class EmployeeRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
+class EmployeeRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.employees")
     private val sequences = SequenceRepository(mongoModule, tenantId)
 
     suspend fun findById(id: ObjectId): Employee? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toEmployee()
 
-    suspend fun search(query: String): List<Employee> {
+    suspend fun search(query: String, archived: Boolean = false): List<Employee> {
         val trimmed = query.trim()
-        val filter = if (trimmed.isBlank()) {
-            Filters.eq("tenantId", tenantId)
+        val text = if (trimmed.isBlank()) {
+            null
         } else {
-            scoped(
-                Filters.or(
-                    Filters.regex("number", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
-                    Filters.regex("role", ".*${Regex.escape(trimmed)}.*", "i"),
-                ),
+            Filters.or(
+                Filters.regex("number", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("role", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
+        val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
         return collection.find(filter).sort(Document("name", 1)).limit(100).toList().map { it.toEmployee() }
     }
+
+    /** Only an employee with no payments can be deleted; the others get archived. */
+    suspend fun delete(id: ObjectId): DirectoryDelete =
+        collection.deleteUnreferenced(mongoModule, tenantId, id, "employeeId", listOf("crm.payments"))
+
+    suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
 
     suspend fun update(id: ObjectId, name: String, phone: String, role: String?): Employee? {
         val now = SystemClock.now()
@@ -77,6 +82,7 @@ class EmployeeRepository(mongoModule: MongoModule, private val tenantId: ObjectI
         role = getString("role"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
+        archivedAt = getDate("archivedAt")?.toInstantValue(),
     )
 
     private fun Employee.toDocument() = Document("_id", id)

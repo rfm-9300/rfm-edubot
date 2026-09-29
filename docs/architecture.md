@@ -247,6 +247,20 @@ PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm
 
 Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role). It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
 
+### Removing clients, suppliers and employees
+
+`DELETE /app/api/crm/{clients|suppliers|employees}/{id}` deletes the record only when no document
+refers to it: quotes, invoices, Serviços rows or bookings for a client, payments for a supplier or
+employee. Otherwise it answers `409 in_use` and the record can only be archived
+(`POST …/{id}/archive`, undone by `POST …/{id}/restore`), so those documents keep their name and
+their PDFs keep generating (`crm/DirectoryRecords.kt`).
+
+An archived record (`archivedAt`) is left out of the list endpoints (`?archived=1` lists only the
+archived ones), and so out of every picker, the AI's `search_clients`, and the Home totals. It is
+still found by id (documents, record drawer) and by phone: it keeps its phone number (unique per
+tenant), the client form warns about it, and a booking or the AI's `create_client` with that phone
+restores the client instead of failing on the duplicate.
+
 ### Bookings
 
 Optional `bookings` module: weekly opening hours, conflict-checked appointments, and the CRM links

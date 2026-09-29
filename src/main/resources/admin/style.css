@@ -786,7 +786,7 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 @media (max-width: 560px) {
   .record-kpis, .record-kpis[data-count="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .record-card__head { grid-template-columns: auto minmax(0, 1fr); }
-  .record-card__head > .btn { grid-column: 1 / -1; justify-self: start; }
+  .record-card__head > .actions { grid-column: 1 / -1; justify-self: start; }
 }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 

@@ -19,6 +19,8 @@ data class Client(
     val notes: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Set on a client that has documents and was removed: hidden from lists and pickers, restorable. */
+    val archivedAt: Instant? = null,
 )
 
 data class LineItem(
@@ -47,6 +49,8 @@ data class Supplier(
     val address: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Set on a supplier that has payments and was removed: hidden from lists and pickers, restorable. */
+    val archivedAt: Instant? = null,
 )
 
 /** Person on the tenant's team. Payments still attach only to a supplier; this directory is the payee list a later payments change can use. */
@@ -59,6 +63,8 @@ data class Employee(
     val role: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** Set on an employee who has payments and was removed: hidden from lists and pickers, restorable. */
+    val archivedAt: Instant? = null,
 )
 
 /** Outgoing bill. Exactly one of [supplierId] or [employeeId] is set. */

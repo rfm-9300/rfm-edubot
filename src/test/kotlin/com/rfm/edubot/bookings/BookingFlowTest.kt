@@ -142,6 +142,20 @@ class BookingFlowTest {
     }
 
     @Test
+    fun `a booking from an archived client's phone restores the client`() = runBlocking<Unit> {
+        val tenant = tenant()
+        val deps = deps(tenant)
+        val clients = ClientRepository(mongoModule, tenant.id)
+        val rita = clients.create("Rita Sousa", "+351 915 555 000")
+        clients.setArchived(rita.id, archived = true)
+
+        val booking = deps.scheduler.create(newBooking(day(3), 10, contactName = "Rita", contactPhone = "915555000"))
+
+        assertEquals(rita.id, booking.clientId)
+        assertNull(clients.findById(rita.id)?.archivedAt)
+    }
+
+    @Test
     fun `completing a booking bills it once in Servicos and undoing it cancels the row`() = runBlocking<Unit> {
         val tenant = tenant()
         val deps = deps(tenant)

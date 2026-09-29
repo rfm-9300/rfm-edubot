@@ -118,7 +118,10 @@ class CrmTools(
     }
 
     private suspend fun createClient(args: JsonObject): JsonObject {
-        val client = clients.create(args.string("name"), args.string("phone"), args.optionalString("address"))
+        // search_clients doesn't see archived clients; one coming back is restored rather than duplicated.
+        val archived = clients.findByPhone(args.string("phone"))?.takeIf { it.archivedAt != null }
+        val client = archived?.let { clients.setArchived(it.id, archived = false) }
+            ?: clients.create(args.string("name"), args.string("phone"), args.optionalString("address"))
         return buildJsonObject { put("client", clientJson(client.id.toHexString(), client.number, client.name, client.phone, client.address)) }
     }
 

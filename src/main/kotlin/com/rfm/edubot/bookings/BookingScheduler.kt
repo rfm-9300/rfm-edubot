@@ -187,10 +187,16 @@ class BookingScheduler(
         if (!fitsAvailability(startAt, endAt, availability.list(), zone)) throw BookingRuleException(OUTSIDE_HOURS)
     }
 
-    /** The CRM client for this contact: matched by phone, or created so every booking has a customer record. */
+    /**
+     * The CRM client for this contact: matched by phone, or created so every booking has a customer record.
+     * An archived client who books again is restored.
+     */
     private suspend fun linkClient(name: String, phone: String): ObjectId? {
         val clients = crm.clients ?: return null
-        clients.findByPhone(phone)?.let { return it.id }
+        clients.findByPhone(phone)?.let { found ->
+            if (found.archivedAt != null) clients.setArchived(found.id, archived = false)
+            return found.id
+        }
         if (phone.count(Char::isDigit) < 6) return null
         return try {
             clients.create(name, phone).id

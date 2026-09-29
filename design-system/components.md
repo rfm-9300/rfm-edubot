@@ -376,7 +376,10 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
         </div>
         <p class="record-card__since">Client since 28/09/26 · 2 visits · last activity yesterday</p>
       </div>
-      <button class="btn btn--sm btn--ghost" type="button">Edit</button>
+      <div class="actions">
+        <button class="btn btn--sm btn--ghost" type="button">Edit</button>
+        <button class="btn btn--sm btn--ghost" type="button">Delete</button>
+      </div>
     </div>
     <div class="record-card__contact"><a class="btn btn--sm" href="tel:+351911222333">Call</a></div>
     <div class="record-card__notes"><span class="record-card__notes-label">Notes</span>Prefers afternoons.</div>
@@ -403,6 +406,9 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
 - `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip. A supplier or employee has one list (payments), so no tabs; its table panel carries a `.panel__head` title instead.
 - Tables reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
 - The create actions are a sticky `.drawer__foot` at the end of the record.
+- The card head's buttons sit in one `.actions` row (Edit, then Delete, or Restore on an archived record); below 560px the row drops under the name. Delete confirms through `.confirm`; when documents refer to the record, the confirm offers Archive instead (primary button, not danger).
+- An archived record shows a `.hint--warn` line in the card ("Archived on …") and no create actions (neither the foot nor the empty-pane buttons) until it is restored.
+- The Clients, Suppliers and Employees lists carry an Active / Archived pair of `.chip` buttons in their `.panel__head` tools.
 - `.hint--warn` is a warning-colored hint, e.g. "another client already uses this phone" under the client form's phone field.
 
 ## Confirm
