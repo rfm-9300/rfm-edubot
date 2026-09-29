@@ -5,6 +5,7 @@ import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.MockRequestHandleScope
 import io.ktor.client.engine.mock.respond
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.HttpRequestData
 import io.ktor.client.request.HttpResponseData
 import io.ktor.http.ContentType
@@ -12,6 +13,7 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -43,7 +45,73 @@ class WhatsAppSignupClientTest {
         assertEquals("business-token", result.accessToken)
         assertEquals("waba-1", result.wabaId)
         assertEquals("+351 900 000 000", result.displayPhoneNumber)
-        assertEquals(listOf("/v21.0/oauth/access_token", "/v21.0/pn-1/register", "/v21.0/waba-1/subscribed_apps", "/v21.0/pn-1"), paths)
+        assertEquals(listOf("/v21.0/oauth/access_token", "/v21.0/pn-1", "/v21.0/pn-1/register", "/v21.0/waba-1/subscribed_apps"), paths)
+    }
+
+    @Test
+    fun `number already on Cloud API is not registered again`() = runBlocking {
+        val paths = mutableListOf<String>()
+        val client = client { request ->
+            paths.add(request.url.encodedPath)
+            when (request.url.encodedPath) {
+                "/v21.0/oauth/access_token" -> json("""{"access_token":"business-token"}""")
+                "/v21.0/pn-1" -> json("""{"id":"pn-1","platform_type":"CLOUD_API","is_pin_enabled":true}""")
+                "/v21.0/waba-1/subscribed_apps" -> json("""{"success":true}""")
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        WhatsAppSignupClient(config(), client).connect("code-1", "waba-1", "pn-1")
+
+        assertEquals(listOf("/v21.0/oauth/access_token", "/v21.0/pn-1", "/v21.0/waba-1/subscribed_apps"), paths)
+    }
+
+    @Test
+    fun `existing two-step pin is replaced and reused for register`() = runBlocking {
+        val pinWrites = mutableListOf<Pair<String, String>>()
+        val client = client { request ->
+            when ("${request.method.value} ${request.url.encodedPath}") {
+                "POST /v21.0/oauth/access_token" -> json("""{"access_token":"business-token"}""")
+                "GET /v21.0/pn-1" -> json("""{"id":"pn-1","platform_type":"NOT_APPLICABLE","is_pin_enabled":true}""")
+                "POST /v21.0/pn-1", "POST /v21.0/pn-1/register" -> {
+                    val pin = Json.parseToJsonElement((request.body as TextContent).text).jsonObject.getValue("pin").jsonPrimitive.content
+                    pinWrites.add(request.url.encodedPath to pin)
+                    json("""{"success":true}""")
+                }
+                "POST /v21.0/waba-1/subscribed_apps" -> json("""{"success":true}""")
+                else -> error("Unexpected request ${request.method.value} ${request.url.encodedPath}")
+            }
+        }
+
+        WhatsAppSignupClient(config(), client).connect("code-1", "waba-1", "pn-1")
+
+        assertEquals(listOf("/v21.0/pn-1", "/v21.0/pn-1/register"), pinWrites.map { it.first })
+        assertEquals(pinWrites[0].second, pinWrites[1].second)
+    }
+
+    @Test
+    fun `register gets more time than the shared client timeout`() = runBlocking {
+        val client = HttpClient(MockEngine) {
+            install(HttpTimeout) { requestTimeoutMillis = 100 }
+            engine {
+                addHandler { request ->
+                    when (request.url.encodedPath) {
+                        "/v21.0/oauth/access_token" -> json("""{"access_token":"business-token"}""")
+                        "/v21.0/pn-1" -> json("""{"id":"pn-1"}""")
+                        "/v21.0/pn-1/register" -> {
+                            delay(300)
+                            json("""{"success":true}""")
+                        }
+                        "/v21.0/waba-1/subscribed_apps" -> json("""{"success":true}""")
+                        else -> error("Unexpected path ${request.url.encodedPath}")
+                    }
+                }
+            }
+        }
+
+        val result = WhatsAppSignupClient(config(), client).connect("code-1", "waba-1", "pn-1")
+
+        assertEquals("pn-1", result.phoneNumberId)
     }
 
     @Test
@@ -93,6 +161,7 @@ class WhatsAppSignupClientTest {
         val client = client { request ->
             when (request.url.encodedPath) {
                 "/v21.0/oauth/access_token" -> json("""{"access_token":"business-token"}""")
+                "/v21.0/pn-1" -> json("""{"id":"pn-1"}""")
                 "/v21.0/pn-1/register" -> json("""{"success":true}""")
                 "/v21.0/waba-1/subscribed_apps" -> json(
                     """{"error":{"message":"Missing permission","code":10,"fbtrace_id":"trace-1"}}""",

@@ -2,6 +2,7 @@ package com.rfm.edubot.whatsapp.signup
 
 import com.rfm.edubot.config.AppConfig
 import io.ktor.client.HttpClient
+import io.ktor.client.plugins.timeout
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.forms.submitForm
 import io.ktor.client.request.get
@@ -19,6 +20,9 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import org.slf4j.LoggerFactory
 import java.security.SecureRandom
+
+// Meta's register call often runs past the shared Graph client's 15 s request timeout.
+private const val REGISTER_TIMEOUT_MS = 60_000L
 
 class WhatsAppSignupClient(
     private val configProvider: () -> AppConfig.WhatsAppConfig,
@@ -46,6 +50,9 @@ class WhatsAppSignupClient(
     private data class RegisterRequest(val messaging_product: String = "whatsapp", val pin: String)
 
     @Serializable
+    private data class SetPinRequest(val pin: String)
+
+    @Serializable
     private data class GraphSuccessResponse(val success: Boolean? = null)
 
     @Serializable
@@ -54,6 +61,8 @@ class WhatsAppSignupClient(
         val display_phone_number: String? = null,
         val verified_name: String? = null,
         val quality_rating: String? = null,
+        val platform_type: String? = null,
+        val is_pin_enabled: Boolean? = null,
     )
 
     @Serializable
@@ -70,9 +79,16 @@ class WhatsAppSignupClient(
 
     suspend fun connect(code: String, wabaId: String, phoneNumberId: String): Result {
         val token = exchangeCode(code)
-        registerPhoneNumber(phoneNumberId, token)
-        subscribeWaba(wabaId, token)
         val phone = confirmPhoneNumber(phoneNumberId, token)
+        if (phone.platform_type == "CLOUD_API") {
+            log.info("WhatsApp phone number already on Cloud API, skipping register: phoneNumberId={}", phoneNumberId)
+        } else {
+            // A PIN left by an earlier attempt would make register fail, and wrong guesses lock the number.
+            val pin = randomPin()
+            if (phone.is_pin_enabled == true) setPin(phoneNumberId, token, pin)
+            registerPhoneNumber(phoneNumberId, token, pin)
+        }
+        subscribeWaba(wabaId, token)
         log.info(
             "WhatsApp Embedded Signup success: wabaId={} phoneNumberId={} displayPhoneNumber={} verifiedName={}",
             wabaId,
@@ -106,11 +122,23 @@ class WhatsAppSignupClient(
             ?: throw SignupException("token_exchange_missing_token", response.status.value, null)
     }
 
-    private suspend fun registerPhoneNumber(phoneNumberId: String, token: String) {
-        val response = httpClient.post(graphUrl("$phoneNumberId/register")) {
+    private suspend fun setPin(phoneNumberId: String, token: String, pin: String) {
+        val response = httpClient.post(graphUrl(phoneNumberId)) {
             bearerAuth(token)
             contentType(ContentType.Application.Json)
-            setBody(TextContent(json.encodeToString(RegisterRequest(pin = randomPin())), ContentType.Application.Json))
+            setBody(TextContent(json.encodeToString(SetPinRequest(pin)), ContentType.Application.Json))
+        }
+        val text = response.bodyAsText()
+        if (!response.status.isSuccess()) throw SignupException("phone_pin_reset_failed", response.status.value, graphError(text))
+        log.info("WhatsApp phone number had a two-step PIN, replaced it before register: phoneNumberId={}", phoneNumberId)
+    }
+
+    private suspend fun registerPhoneNumber(phoneNumberId: String, token: String, pin: String) {
+        val response = httpClient.post(graphUrl("$phoneNumberId/register")) {
+            bearerAuth(token)
+            timeout { requestTimeoutMillis = REGISTER_TIMEOUT_MS }
+            contentType(ContentType.Application.Json)
+            setBody(TextContent(json.encodeToString(RegisterRequest(pin = pin)), ContentType.Application.Json))
         }
         val text = response.bodyAsText()
         if (response.status.isSuccess()) return
@@ -135,7 +163,7 @@ class WhatsAppSignupClient(
     private suspend fun confirmPhoneNumber(phoneNumberId: String, token: String): PhoneNumberResponse {
         val response = httpClient.get(graphUrl(phoneNumberId)) {
             bearerAuth(token)
-            url.parameters.append("fields", "display_phone_number,verified_name,quality_rating")
+            url.parameters.append("fields", "display_phone_number,verified_name,quality_rating,platform_type,is_pin_enabled")
         }
         val text = response.bodyAsText()
         if (!response.status.isSuccess()) throw SignupException("phone_confirm_failed", response.status.value, graphError(text))

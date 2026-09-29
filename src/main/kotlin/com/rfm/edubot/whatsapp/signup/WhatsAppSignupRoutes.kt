@@ -7,6 +7,7 @@ import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
+import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
@@ -116,6 +117,10 @@ private suspend fun connectWhatsAppForTenant(
             e.graphError?.traceId,
         )
         call.respond(HttpStatusCode.BadGateway, mapOf("error" to e.reason))
+        return
+    } catch (e: HttpRequestTimeoutException) {
+        log.warn("WhatsApp Embedded Signup timed out: tenant={} {}", slug, e.message)
+        call.respond(HttpStatusCode.GatewayTimeout, mapOf("error" to "graph_timeout"))
         return
     }
 
