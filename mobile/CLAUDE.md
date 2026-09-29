@@ -33,6 +33,7 @@ knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do i
 When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 <!-- gitnexus:start -->
+<!-- gitnexus:keep -->
 # GitNexus — Code Intelligence
 
 This project is indexed by GitNexus as **rfm-edubot-mobile** (757 symbols, 1513 relationships, 60 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
@@ -41,8 +42,6 @@ This project is indexed by GitNexus as **rfm-edubot-mobile** (757 symbols, 1513 
 
 ## Always Do
 
-- **MUST run impact analysis before editing any symbol.** Before modifying a function, class, or method, run `impact({target: "symbolName", direction: "upstream"})` and report the blast radius (direct callers, affected processes, risk level) to the user.
-- **MUST run `detect_changes()` before committing** to verify your changes only affect expected symbols and execution flows. For regression review, compare against the default branch: `detect_changes({scope: "compare", base_ref: "main"})`.
 - **MUST warn the user** if impact analysis returns HIGH or CRITICAL risk before proceeding with edits.
 - When exploring unfamiliar code, use `query({search_query: "concept"})` to find execution flows instead of grepping. It returns process-grouped results ranked by relevance.
 - When you need full context on a specific symbol — callers, callees, which execution flows it participates in — use `context({name: "symbolName"})`.
@@ -50,10 +49,8 @@ This project is indexed by GitNexus as **rfm-edubot-mobile** (757 symbols, 1513 
 
 ## Never Do
 
-- NEVER edit a function, class, or method without first running `impact` on it.
 - NEVER ignore HIGH or CRITICAL risk warnings from impact analysis.
 - NEVER rename symbols with find-and-replace — use `rename` which understands the call graph.
-- NEVER commit changes without running `detect_changes()` to check affected scope.
 
 ## Resources
 
