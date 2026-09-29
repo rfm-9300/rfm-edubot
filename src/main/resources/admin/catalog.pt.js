@@ -59,7 +59,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     docTplColQty: 'Qtd', docTplColPrice: 'Preço',
     docTplColQty: 'Qtd', docTplColPrice: 'Preço',
     docTplClientLabel: 'Cliente', docTplPaymentLabel: 'Forma de pagamento', docTplTermsLabel: 'Termos e condições',
-    docTplDateLabel: 'Data', docTplTotalLabel: 'Total',
+    docTplDateLabel: 'Emitido em', docTplDueLabel: 'Vencimento', docTplTotalLabel: 'Total',
     docTplSampleClient: 'Cliente exemplo', docTplSamplePhone: '+351 210 000 000', docTplSampleClientRef: 'CLT-001  ·  NIF 123456789',
     docTplSampleItem1: 'Pintura interior', docTplSampleItem1Desc: 'Preparação e duas demãos',
     docTplSampleItem2: 'Reboco exterior', docTplSampleItem2Desc: 'Reparação e acabamento de fachada',

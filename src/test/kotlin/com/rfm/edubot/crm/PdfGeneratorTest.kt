@@ -215,7 +215,7 @@ class PdfGeneratorTest {
     }
 
     @Test
-    fun `column headers stay inside their pills when the table is narrow`() {
+    fun `column headers stay apart when the table is narrow`() {
         val narrow = DocumentTemplate(
             layout = com.rfm.edubot.tenant.model.DocumentLayouts.DEFAULT.map { block ->
                 if (block.id == "items") block.copy(w = 300f) else block
@@ -245,6 +245,99 @@ class PdfGeneratorTest {
         val bytes = generator.generateQuote(quote(listOf(item("Pintura", 1000.0))), client, template)
         assertTrue(bytes.isNotEmpty())
         assertEquals(1, pageCount(bytes))
+    }
+
+    @Test
+    fun `amounts print in Portuguese currency format`() {
+        val text = textOf(generator.generateQuote(quote(listOf(item("Pintura", 1500.0), item("Reboco", 2000.0))), client))
+        assertTrue(text.contains("3 500,00 €"), text)
+        assertTrue(!text.contains("EUR"), text)
+        assertEquals("1 234 567,89 €", PdfGenerator.money(123_456_789))
+        assertEquals("-0,05 €", PdfGenerator.money(-5))
+    }
+
+    @Test
+    fun `five ordinary items fit on one page in every design`() {
+        val items = listOf(
+            item("Limpeza geral - Apartamento T3 com cozinha, duas casas de banho e varandas", 120.0),
+            lineItem("Limpeza de vidros: interior e exterior de 14 janelas", quantity = 14.0, unitPriceEur = 6.5, unit = "un"),
+            item("Limpeza de estofos - Sofá de 3 lugares e 2 cadeirões", 85.0),
+            item("Desinfeção de cozinha", 45.0),
+            lineItem("Tratamento de pavimento em madeira - Aspiração, lavagem e enceramento", quantity = 62.0, unitPriceEur = 3.2, unit = "m²"),
+        )
+        val templates = listOf("historical" to DocumentTemplate(companyName = "Family Clean", termsText = "Preços com IVA incluído.")) +
+            BuiltInDesignTemplates.ALL.map { design ->
+                design.name to DocumentTemplate(
+                    companyName = "Family Clean",
+                    termsText = "Preços com IVA incluído.",
+                    accentColor = design.accentColor,
+                    showDecor = design.showDecor,
+                    layout = design.layout,
+                    style = design.style,
+                )
+            }
+        templates.forEach { (name, template) ->
+            val bytes = generator.generateQuote(quote(items), client, template)
+            assertEquals(1, pageCount(bytes), "$name spills five items onto a second page")
+            assertTrue(overlappingRuns(bytes).isEmpty(), "$name overlaps: ${overlappingRuns(bytes)}")
+        }
+    }
+
+    @Test
+    fun `invoice prints its due date and a badge only for statuses the client cares about`() {
+        val badge = Regex("\\bPAGA\\b")
+        val pending = textOf(generator.generateInvoice(invoice(), client))
+        assertTrue(pending.contains("Vencimento 15/10/2026"), pending)
+        assertTrue(!pending.contains("Pendente") && !badge.containsMatchIn(pending), pending)
+
+        val paid = textOf(generator.generateInvoice(invoice().copy(status = InvoiceStatus.PAID), client))
+        assertTrue(badge.containsMatchIn(paid), paid)
+    }
+
+    @Test
+    fun `quote prints its validity date`() {
+        val dated = quote(listOf(item("Pintura", 1000.0))).copy(validUntil = kotlinx.datetime.LocalDate(2026, 10, 30))
+        assertTrue(textOf(generator.generateQuote(dated, client)).contains("Válido até 30/10/2026"))
+    }
+
+    @Test
+    fun `every page of a long document carries the footer and its page number`() {
+        val many = (1..30).map { i -> item("Servico $i com descricao longa para forcar varias paginas", 100.0 + i) }
+        val bytes = generator.generateQuote(quote(many), client)
+        val pages = pageCount(bytes)
+        assertTrue(pages >= 2, "expected several pages, got $pages")
+        Loader.loadPDF(bytes).use { doc ->
+            (1..pages).forEach { page ->
+                val text = PDFTextStripper().apply { startPage = page; endPage = page }.getText(doc)
+                assertTrue(text.contains("Página $page de $pages"), "page $page: $text")
+                assertTrue(text.contains(PdfGenerator.DEFAULT_FOOTER), "page $page has no footer: $text")
+            }
+        }
+        assertTrue(overlappingRuns(bytes).isEmpty(), "long document overlaps: ${overlappingRuns(bytes)}")
+    }
+
+    @Test
+    fun `letter-spaced labels still extract as words`() {
+        val template = DocumentTemplate(quotePaymentTerms = "50% adiantamento.")
+        val text = textOf(generator.generateQuote(quote(listOf(item("Pintura", 1000.0))), client, template))
+        assertTrue(text.contains("FORMA DE PAGAMENTO"), text)
+        assertTrue(!text.contains("F O R M A"), text)
+    }
+
+    @Test
+    fun `characters the font lacks are dropped instead of breaking the document`() {
+        val emoji = quote(listOf(item("Limpeza geral ✨🧽 - Casa de férias 🏖️", 150.0)))
+        val text = textOf(generator.generateQuote(emoji, client.copy(name = "Ana 😊")))
+        assertTrue(text.contains("Limpeza geral") && text.contains("Casa de férias") && text.contains("Ana"), text)
+    }
+
+    @Test
+    fun `accent colours used as text or under text stay readable`() {
+        listOf("#F5D90A", "#96AAB6", "#FFFFFF", "#0F766E", "#111827", "#767676", "#D52A0B").forEach { hex ->
+            val accent = java.awt.Color.decode(hex)
+            assertTrue(PdfGenerator.contrast(PdfGenerator.readableOnWhite(accent), java.awt.Color.WHITE) >= 4.5, "$hex as text")
+            assertTrue(PdfGenerator.contrast(PdfGenerator.onFill(accent), accent) >= 4.5, "text on $hex")
+        }
     }
 
     private fun quote(items: List<com.rfm.edubot.crm.model.LineItem>) = Quote(

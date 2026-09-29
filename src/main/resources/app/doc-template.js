@@ -11,10 +11,10 @@
     { id: 'company', x: 42, y: 96, w: 280, h: 44, visible: false },
     { id: 'title', x: 42, y: 151, w: 400, h: 48, visible: true },
     { id: 'client', x: 42, y: 214, w: 280, h: 90, visible: true },
-    { id: 'items', x: 42, y: 290, w: 511, h: 280, visible: true },
+    { id: 'items', x: 42, y: 312, w: 511, h: 268, visible: true },
     { id: 'totals', x: 333, y: 590, w: 220, h: 32, visible: true },
-    { id: 'payment', x: 50, y: 708, w: 320, h: 56, visible: true },
-    { id: 'terms', x: 50, y: 766, w: 320, h: 40, visible: true },
+    { id: 'payment', x: 42, y: 708, w: 320, h: 56, visible: true },
+    { id: 'terms', x: 42, y: 766, w: 320, h: 40, visible: true },
     { id: 'footer', x: 200, y: 812, w: 353, h: 18, visible: true },
   ];
   const MIN = {
@@ -94,10 +94,38 @@
     return m ? `#${m[1].toUpperCase()}` : '#96AAB6';
   }
 
-  function onBrand(hex) {
+  function hexRgb(hex) {
     const h = normalizeHex(hex).slice(1);
-    const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
-    return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.62 ? '#121212' : '#ffffff';
+    return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+  }
+
+  function luminance(rgb) {
+    const [r, g, b] = rgb.map(v => {
+      const c = v / 255;
+      return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+    });
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+
+  function contrast(a, b) {
+    const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (hi + 0.05) / (lo + 0.05);
+  }
+
+  // Same rules as the PDF (PdfGenerator.onFill and readableOnWhite).
+  function onBrand(hex) {
+    const fill = hexRgb(hex);
+    const ink = [17, 19, 24];
+    const white = [255, 255, 255];
+    const best = contrast(ink, fill) >= contrast(white, fill) ? ink : white;
+    if (contrast(best, fill) < 4.5 && contrast([0, 0, 0], fill) > contrast(best, fill)) return '#000000';
+    return best === ink ? '#111318' : '#ffffff';
+  }
+
+  function brandText(hex) {
+    let rgb = hexRgb(hex);
+    for (let i = 0; i < 30 && contrast(rgb, [255, 255, 255]) < 4.5; i++) rgb = rgb.map(v => Math.floor(v * 0.9));
+    return `#${rgb.map(v => v.toString(16).padStart(2, '0')).join('')}`;
   }
 
   function blockLabel(id) {
@@ -146,9 +174,10 @@
     return { x: (ev.clientX - r.left) * (PAGE_W / r.width), y: (ev.clientY - r.top) * (PAGE_H / r.height) };
   }
 
-  function sampleDate() {
+  function sampleDate(daysAhead = 0) {
     const loc = (window.I18N && I18N.locale()) || 'pt-PT';
-    return new Date().toLocaleDateString(loc === 'en' ? 'en-GB' : loc, { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return new Date(Date.now() + daysAhead * 864e5)
+      .toLocaleDateString(loc === 'en' ? 'en-GB' : loc, { day: '2-digit', month: '2-digit', year: 'numeric' });
   }
 
   function d(key, fallback) {
@@ -168,7 +197,7 @@
       return `<div class="tpl-logo">${esc(name.slice(0, 18))}${tag}</div>`;
     }
     if (id === 'contact') {
-      return `<div class="tpl-sub">${esc([draft.taxId, draft.email || draft.phone, draft.phone && draft.email ? draft.phone : ''].filter(Boolean).join('   ') || '—')}</div>`;
+      return `<div class="tpl-sub">${esc([draft.taxId, draft.email, draft.phone].map(v => String(v || '').trim()).filter(Boolean).join('  ·  ') || '—')}</div>`;
     }
     if (id === 'company') {
       return `<div class="tpl-name">${esc(draft.companyName || deps.tenantName() || '—')}</div>
@@ -178,11 +207,14 @@
     if (id === 'title') {
       const title = mode === 'invoice' ? d('invoiceTitle') : d('quoteTitle');
       const num = mode === 'invoice' ? S.docTplSampleInvoiceNo : S.docTplSampleQuoteNo;
-      return `<div class="tpl-title">${esc(title)}  ${esc(num)}</div><div class="tpl-meta">${esc(S.docTplDateLabel)}: ${esc(sampleDate())}</div>`;
+      const sep = '<i aria-hidden="true"> · </i>';
+      const due = mode === 'invoice' ? `<span>${sep}${esc(S.docTplDueLabel)} ${esc(sampleDate(30))}</span>` : '';
+      return `<div class="tpl-title">${esc(title)}</div>
+        <div class="tpl-meta"><b>${esc(num)}</b><span>${sep}${esc(S.docTplDateLabel)} ${esc(sampleDate())}</span>${due}</div>`;
     }
     if (id === 'client') {
       return `<div class="tpl-kicker">${esc(S.docTplClientLabel)}</div>
-        <div class="tpl-name">${esc(S.docTplSampleClient).toUpperCase()}</div>
+        <div class="tpl-name">${esc(S.docTplSampleClient)}</div>
         <div class="tpl-sub">${esc(S.docTplSamplePhone)}</div>
         <div class="tpl-sub">${esc(S.docTplSampleClientRef)}</div>`;
     }
@@ -191,18 +223,18 @@
         return `<table class="tpl-table tpl-table--ruled"><thead><tr>
           <th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColQty)}</th><th>${esc(S.docTplColPrice)}</th><th>${esc(S.docTplColValue)}</th>
         </tr></thead><tbody>
-          <tr><td>${esc(S.docTplSampleItem1)} — ${esc(S.docTplSampleItem1Desc)}</td><td>1</td><td>1 500,00</td><td>1 500,00</td></tr>
-          <tr><td>${esc(S.docTplSampleItem2)} — ${esc(S.docTplSampleItem2Desc)}</td><td>1</td><td>2 000,00</td><td>2 000,00</td></tr>
+          <tr><td>${esc(S.docTplSampleItem1)} — ${esc(S.docTplSampleItem1Desc)}</td><td>1</td><td>1 500,00 €</td><td>1 500,00 €</td></tr>
+          <tr><td>${esc(S.docTplSampleItem2)} — ${esc(S.docTplSampleItem2Desc)}</td><td>1</td><td>2 000,00 €</td><td>2 000,00 €</td></tr>
         </tbody></table>`;
       }
       return `<table class="tpl-table"><thead><tr>
         <th>${esc(S.docTplColService)}</th><th>${esc(S.docTplColDesc)}</th><th>${esc(S.docTplColValue)}</th>
       </tr></thead><tbody>
-        <tr><td>${esc(S.docTplSampleItem1)}</td><td>${esc(S.docTplSampleItem1Desc)}</td><td>1 500,00 EUR</td></tr>
-        <tr><td>${esc(S.docTplSampleItem2)}</td><td>${esc(S.docTplSampleItem2Desc)}</td><td>2 000,00 EUR</td></tr>
+        <tr><td>${esc(S.docTplSampleItem1)}</td><td>${esc(S.docTplSampleItem1Desc)}</td><td>1 500,00 €</td></tr>
+        <tr><td>${esc(S.docTplSampleItem2)}</td><td>${esc(S.docTplSampleItem2Desc)}</td><td>2 000,00 €</td></tr>
       </tbody></table>`;
     }
-    if (id === 'totals') return `<div class="tpl-total">${esc(S.docTplTotalLabel)}: 3 500,00 EUR</div>`;
+    if (id === 'totals') return `<div class="tpl-total"><span>${esc(S.docTplTotalLabel)}</span><strong>3 500,00 €</strong></div>`;
     // Same rules as the PDF: a section without text is not printed, and the default terms
     // (a validity line) only apply to quotes.
     if (id === 'payment') {
@@ -327,7 +359,7 @@
         <p class="tpl__stage-label">${esc(S.docTplPageLabel)}</p>
         <div class="tpl__sizer" id="tpl-sizer">
           <div class="tpl__page ${draft.showDecor && !isRuled() ? 'is-decor' : ''}" id="tpl-page" tabindex="0" data-style="${esc(draft.style || 'classic')}">
-            ${draft.layout.map(b => `<div class="tpl__block ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${overlappingIds().has(b.id) ? 'is-clash' : ''}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
+            ${draft.layout.map(b => `<div class="tpl__block tpl__block--${esc(b.id)} ${selected === b.id ? 'is-on' : ''} ${b.visible ? '' : 'is-off'} ${overlappingIds().has(b.id) ? 'is-clash' : ''}" data-block="${esc(b.id)}" role="button" tabindex="0" aria-label="${esc(blockLabel(b.id))}" style="left:${b.x}px;top:${b.y}px;width:${b.w}px;height:${b.h}px">
               <div class="tpl__block-body">${blockInner(b.id)}</div>${handlesHtml()}
             </div>`).join('')}
           </div>
@@ -345,6 +377,7 @@
     if (!page) return;
     page.style.setProperty('--doc-brand', draft.accentColor);
     page.style.setProperty('--doc-brand-ink', onBrand(draft.accentColor));
+    page.style.setProperty('--doc-brand-text', brandText(draft.accentColor));
     page.dataset.style = draft.style || 'classic';
     page.classList.toggle('is-decor', draft.showDecor && !isRuled());
   }
@@ -637,8 +670,8 @@
     const style = normalizeStyle(p.style);
     const ruled = isRuled(style);
     return `<div class="tpl-thumb" aria-hidden="true">
-      <div class="tpl__page ${p.showDecor && !ruled ? 'is-decor' : ''}" data-style="${esc(style)}" style="--doc-brand:${esc(p.accentColor)};--doc-brand-ink:${ink}">
-        ${layout.map(b => `<div class="tpl__block" style="left:${+b.x}px;top:${+b.y}px;width:${+b.w}px;height:${+b.h}px">
+      <div class="tpl__page ${p.showDecor && !ruled ? 'is-decor' : ''}" data-style="${esc(style)}" style="--doc-brand:${esc(p.accentColor)};--doc-brand-ink:${ink};--doc-brand-text:${brandText(p.accentColor)}">
+        ${layout.map(b => `<div class="tpl__block tpl__block--${esc(b.id)}" style="left:${+b.x}px;top:${+b.y}px;width:${+b.w}px;height:${+b.h}px">
           <div class="tpl__block-body">${blockInner(b.id, style)}</div>
         </div>`).join('')}
       </div>

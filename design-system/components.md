@@ -667,9 +667,10 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 
 - `.tpl__page` is 595×842 CSS px (1pt = 1px), scaled with `--tpl-scale`. Paper tokens (`--doc-page*`) stay white in dark theme.
 - Blocks are absolutely positioned. Selection: `.is-on`. Hidden: `.is-off`. Resize: `.tpl__handle--nw|n|ne|e|se|s|sw|w`.
-- Preview chrome inside the page (`--doc-brand`, `.tpl-kicker`, `.tpl-table`, `.tpl-total`) is document ink, not dashboard `--ink`.
+- Preview chrome inside the page (`--doc-brand`, `.tpl-kicker`, `.tpl-table`, `.tpl-total`) is document ink, not dashboard `--ink`. `doc-template.js` sets `--doc-brand-ink` (ink or white on an accent fill) and `--doc-brand-text` (the accent darkened to 4.5:1 for labels) with the same formulas as `PdfGenerator`; never color preview text with raw `--doc-brand`.
+- Blocks carry `.tpl__block--<id>` (studio and thumbnails) for per-block styling. `data-block` is studio-only: `applyGeometry` finds blocks with `host.querySelector('[data-block=…]')`, so a thumbnail carrying it would be moved instead.
 - Templates opens a **wide** drawer. `.tpl-presets` is a card grid of A4 thumbnails (`.tpl-thumb` + `.tpl-preset`), not a swatch list. Built-in designs live in `BuiltInDesignTemplates`.
-- `.tpl__page[data-style="plain|split|band"]` paints the readable table (qty/price columns, no pills). Classic keeps the pill chrome. Do not restyle Classic to look like Clear.
+- `.tpl__page[data-style="plain|split|band"]` paints the readable table (qty/price columns, no pills). Classic keeps its own chrome: accent header bar, rounded rows, total pill, letter-spaced labels. Do not restyle Classic to look like Clear.
 - Do not replace this with a generic drawer form.
 
 ## Settings rows

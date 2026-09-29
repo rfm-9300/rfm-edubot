@@ -68,9 +68,6 @@ class DocumentLayoutsTest {
                 else -> DocumentDesignStyle.CLASSIC.id
             }
             assertEquals(expectedStyle, DocumentDesignStyle.sanitize(design.style), design.name)
-            // Classic is the historical default: the items frame overlaps the client frame by a
-            // few points, but the painted table header sits below the client text.
-            if (design.name == "classic") return@forEach
             val clashes = DocumentLayouts.overlappingIds(design.layout)
             assertTrue(clashes.isEmpty(), "${design.name} overlaps $clashes")
         }

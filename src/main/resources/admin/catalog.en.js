@@ -59,7 +59,7 @@ window.__I18N_CATALOGS['en'] = {
     docTplColService: 'Service', docTplColDesc: 'Description', docTplColValue: 'Amount',
     docTplColQty: 'Qty', docTplColPrice: 'Price',
     docTplClientLabel: 'Client', docTplPaymentLabel: 'Payment method', docTplTermsLabel: 'Terms and conditions',
-    docTplDateLabel: 'Date', docTplTotalLabel: 'Total',
+    docTplDateLabel: 'Issued', docTplDueLabel: 'Due', docTplTotalLabel: 'Total',
     docTplSampleClient: 'Sample client', docTplSamplePhone: '+351 210 000 000', docTplSampleClientRef: 'CLT-001  ·  NIF 123456789',
     docTplSampleItem1: 'Interior painting', docTplSampleItem1Desc: 'Preparation and two coats',
     docTplSampleItem2: 'Exterior render', docTplSampleItem2Desc: 'Facade repair and finish',

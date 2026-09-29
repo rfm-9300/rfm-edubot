@@ -59,7 +59,7 @@ object TenantCompanies {
 /**
  * Per-tenant quote/invoice PDF template.
  * Blank fields fall back to built-in defaults in [com.rfm.edubot.crm.PdfGenerator].
- * An empty [layout] keeps the historical hardcoded page; a saved layout is used as-is.
+ * An empty [layout] prints [DocumentLayouts.DEFAULT]; a saved layout overlays it block by block.
  */
 data class DocumentTemplate(
     val companyName: String = "",
@@ -79,7 +79,7 @@ data class DocumentTemplate(
     /** Hex accent used for pills, headings, and logo fallback. Blank = built-in slate. */
     val accentColor: String = "",
     val showDecor: Boolean = true,
-    /** A4 blocks in top-left points. Empty = PdfGenerator's original geometry. */
+    /** A4 blocks in top-left points. Empty = [DocumentLayouts.DEFAULT]. */
     val layout: List<DocumentLayoutBlock> = emptyList(),
     /** How PdfGenerator paints the page. Blank or unknown = [DocumentDesignStyle.CLASSIC]. */
     val style: String = "",
@@ -169,8 +169,8 @@ object BuiltInDesignTemplates {
                 DocumentLayoutBlock("client", 42f, 190f, 280f, 90f),
                 DocumentLayoutBlock("items", 42f, 290f, 511f, 280f),
                 DocumentLayoutBlock("totals", 333f, 590f, 220f, 32f),
-                DocumentLayoutBlock("payment", 50f, 708f, 320f, 56f),
-                DocumentLayoutBlock("terms", 50f, 766f, 320f, 40f),
+                DocumentLayoutBlock("payment", 42f, 708f, 320f, 56f),
+                DocumentLayoutBlock("terms", 42f, 766f, 320f, 40f),
                 DocumentLayoutBlock("footer", 200f, 812f, 353f, 18f),
             ),
             createdAt = EPOCH,
@@ -269,17 +269,17 @@ object DocumentLayouts {
         "items", "totals", "payment", "terms", "footer",
     )
 
-    /** Geometry that matches [com.rfm.edubot.crm.PdfGenerator] when [DocumentTemplate.layout] is empty. */
+    /** The page [com.rfm.edubot.crm.PdfGenerator] prints when [DocumentTemplate.layout] is empty. */
     val DEFAULT: List<DocumentLayoutBlock> = listOf(
         DocumentLayoutBlock("logo", 403f, 60f, 150f, 52f),
         DocumentLayoutBlock("contact", 42f, 48f, 340f, 44f),
         DocumentLayoutBlock("company", 42f, 96f, 280f, 44f, visible = false),
         DocumentLayoutBlock("title", 42f, 151f, 400f, 48f),
         DocumentLayoutBlock("client", 42f, 214f, 280f, 90f),
-        DocumentLayoutBlock("items", 42f, 290f, 511f, 280f),
+        DocumentLayoutBlock("items", 42f, 312f, 511f, 268f),
         DocumentLayoutBlock("totals", 333f, 590f, 220f, 32f),
-        DocumentLayoutBlock("payment", 50f, 708f, 320f, 56f),
-        DocumentLayoutBlock("terms", 50f, 766f, 320f, 40f),
+        DocumentLayoutBlock("payment", 42f, 708f, 320f, 56f),
+        DocumentLayoutBlock("terms", 42f, 766f, 320f, 40f),
         DocumentLayoutBlock("footer", 200f, 812f, 353f, 18f),
     )
 
