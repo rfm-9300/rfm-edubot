@@ -86,6 +86,9 @@ class PdfGenerator {
     ): ByteArray {
         val payment = quote.notes?.takeIf { it.isNotBlank() }
             ?: template.quotePaymentTerms.takeIf { it.isNotBlank() }
+        // A quote with its own "valid until" date already shows it; "valid for 30 days" would contradict it.
+        val terms = template.termsText.takeIf { it.isNotBlank() }
+            ?: DEFAULT_QUOTE_TERMS.takeIf { quote.validUntil == null }
         return buildDocument(
             docType = template.quoteTitle.ifBlank { "ORÇAMENTO" },
             number = quote.number,
@@ -93,6 +96,7 @@ class PdfGenerator {
             items = quote.items,
             totalCents = quote.totalCents,
             paymentTerms = payment,
+            terms = terms,
             template = template,
             meta = listOfNotNull(
                 "Estado: ${ptStatus(quote.status.name)}",
@@ -112,7 +116,8 @@ class PdfGenerator {
         client = client,
         items = invoice.items,
         totalCents = invoice.totalCents,
-        paymentTerms = template.invoicePaymentTerms.takeIf { it.isNotBlank() },
+        paymentTerms = template.invoicePaymentTerms.takeIf { it.isNotBlank() } ?: DEFAULT_INVOICE_PAYMENT_TERMS,
+        terms = template.termsText.takeIf { it.isNotBlank() },
         template = template,
         meta = listOf(
             "Estado: ${ptStatus(invoice.status.name)}",
@@ -130,6 +135,7 @@ class PdfGenerator {
         items: List<LineItem>,
         totalCents: Long,
         paymentTerms: String?,
+        terms: String?,
         template: DocumentTemplate,
         meta: List<String>,
     ): ByteArray {
@@ -145,7 +151,7 @@ class PdfGenerator {
             // Pre-calculate row heights and page breaks (two-pass layout).
             val tableScale = ((itemsBlock?.w ?: CONTENT_W).coerceAtLeast(MIN_TABLE_WIDTH)) / CONTENT_W
             val rowHeights = items.map { rowHeightFor(it, tableScale, itemsBlock) }
-            val bottomReserve = closingBlockHeight(paymentTerms, template, blocks)
+            val bottomReserve = closingBlockHeight(paymentTerms, terms, blocks)
             val pageBreakSet = layoutItems(rowHeights, firstPageStartY, bottomReserve).drop(1).toSet()
 
             // ── Page 1 ──
@@ -196,7 +202,7 @@ class PdfGenerator {
             if (blocks == null || blocks["totals"]?.visible != false) {
                 cursor = drawTotals(cs, totalCents, cursor, blocks?.get("totals")?.takeIf { it.visible }) - 16f
             }
-            cursor = drawPaymentAndTerms(cs, paymentTerms, template, blocks, cursor)
+            cursor = drawPaymentAndTerms(cs, paymentTerms, terms, blocks, cursor)
             drawFooter(cs, template, blocks?.get("footer"))
             cs.close()
 
@@ -223,11 +229,11 @@ class PdfGenerator {
      */
     private fun closingBlockHeight(
         paymentTerms: String?,
-        template: DocumentTemplate,
+        terms: String?,
         blocks: Map<String, DocumentLayoutBlock>?,
     ): Float {
-        val payment = paymentTerms?.takeIf { it.isNotBlank() } ?: DEFAULT_PAYMENT_TERMS
-        val terms = template.termsText.takeIf { it.isNotBlank() } ?: DEFAULT_TERMS
+        val payment = paymentTerms?.takeIf { it.isNotBlank() }
+        val conditions = terms?.takeIf { it.isNotBlank() }
         val width = blocks?.get("payment")?.takeIf { it.visible }?.w
             ?: blocks?.get("terms")?.takeIf { it.visible }?.w
             ?: 315f
@@ -235,10 +241,12 @@ class PdfGenerator {
         if (blocks == null || blocks["totals"]?.visible != false) {
             height += if (design.ruled) 28f else TOTALS_BLOCK_HEIGHT
         }
-        val showPayment = blocks == null || blocks["payment"]?.visible == true
-        val showTerms = blocks == null || blocks["terms"]?.visible == true
-        if (showPayment) height += 16f + wrap(payment, regular, 9f, width).take(4).size * 13f + 8f
-        if (showTerms) height += 16f + wrap(terms, regular, 9f, width).take(2).size * 12f
+        if (blocks == null || blocks["payment"]?.visible == true) {
+            payment?.let { height += 16f + wrap(it, regular, 9f, width).take(4).size * 13f + 8f }
+        }
+        if (blocks == null || blocks["terms"]?.visible == true) {
+            conditions?.let { height += 16f + wrap(it, regular, 9f, width).take(2).size * 12f }
+        }
         return height
     }
 
@@ -531,13 +539,12 @@ class PdfGenerator {
     private fun drawPaymentAndTerms(
         cs: PDPageContentStream,
         paymentTerms: String?,
-        template: DocumentTemplate,
+        terms: String?,
         blocks: Map<String, DocumentLayoutBlock>? = null,
         startY: Float = 122f,
     ): Float {
         val payment = paymentTerms?.takeIf { it.isNotBlank() }
-            ?: DEFAULT_PAYMENT_TERMS
-        val terms = template.termsText.takeIf { it.isNotBlank() } ?: DEFAULT_TERMS
+        val conditions = terms?.takeIf { it.isNotBlank() }
         val paymentBlock = blocks?.get("payment")?.takeIf { it.visible }
         val termsBlock = blocks?.get("terms")?.takeIf { it.visible }
         if (blocks != null && paymentBlock == null && termsBlock == null) return startY
@@ -546,7 +553,7 @@ class PdfGenerator {
         val width = paymentBlock?.w ?: termsBlock?.w ?: 315f
         var y = startY
 
-        if (blocks == null || paymentBlock != null) {
+        if (payment != null && (blocks == null || paymentBlock != null)) {
             text(cs, if (design.ruled) "Forma de pagamento" else spaced("FORMA DE PAGAMENTO"), x, y, 11f, bold, cBrand)
             y -= 16f
             wrap(payment, regular, 9f, width).take(4).forEach { line ->
@@ -555,10 +562,10 @@ class PdfGenerator {
             }
             y -= 8f
         }
-        if (blocks == null || termsBlock != null) {
+        if (conditions != null && (blocks == null || termsBlock != null)) {
             text(cs, if (design.ruled) "Termos e condições" else spaced("TERMOS E CONDIÇÕES"), x, y, 11f, bold, cBrand)
             y -= 16f
-            wrap(terms, regular, 9f, width).take(2).forEach { line ->
+            wrap(conditions, regular, 9f, width).take(2).forEach { line ->
                 text(cs, line, x, y, 9f, regular, ink)
                 y -= 12f
             }
@@ -863,9 +870,11 @@ class PdfGenerator {
     }
 
     companion object {
-        const val DEFAULT_PAYMENT_TERMS =
-            "15% na adjudicacao, 70% a meio da execucao da obra e os restantes 15% apos a sua conclusao."
-        const val DEFAULT_TERMS = "Este documento e valido por 30 dias."
+        /** Payment terms on an invoice whose tenant has not written its own. Quotes get none. */
+        const val DEFAULT_INVOICE_PAYMENT_TERMS = "Pagamento até à data de vencimento."
+
+        /** Terms on a quote without its own validity date, when the tenant has not written terms. Invoices get none. */
+        const val DEFAULT_QUOTE_TERMS = "Este orçamento é válido por 30 dias."
         const val DEFAULT_FOOTER = "gerado por thebotslab.pt"
     }
 

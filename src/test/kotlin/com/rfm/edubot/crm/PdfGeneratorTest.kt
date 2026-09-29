@@ -1,6 +1,8 @@
 package com.rfm.edubot.crm
 
 import com.rfm.edubot.crm.model.Client
+import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.tenant.model.BuiltInDesignTemplates
@@ -141,6 +143,49 @@ class PdfGeneratorTest {
     }
 
     @Test
+    fun `invoice without its own terms prints a neutral payment line and no validity`() {
+        val text = textOf(generator.generateInvoice(invoice(), client))
+        assertTrue(text.contains(PdfGenerator.DEFAULT_INVOICE_PAYMENT_TERMS), text)
+        assertTrue(!text.contains("adjudica"), "construction schedule on an invoice: $text")
+        assertTrue(!text.contains("30 dias"), "quote validity on an invoice: $text")
+        assertTrue(!text.squashed().contains("TERMOSECONDIÇÕES"), "empty terms section printed: $text")
+    }
+
+    @Test
+    fun `quote without its own terms prints no payment schedule and keeps the validity line`() {
+        val text = textOf(generator.generateQuote(quote(listOf(item("Pintura", 1000.0))), client))
+        assertTrue(!text.contains("adjudica"), text)
+        assertTrue(!text.squashed().contains("FORMADEPAGAMENTO"), "empty payment section printed: $text")
+        assertTrue(text.contains(PdfGenerator.DEFAULT_QUOTE_TERMS), text)
+
+        val dated = quote(listOf(item("Pintura", 1000.0))).copy(validUntil = kotlinx.datetime.LocalDate(2026, 10, 30))
+        assertTrue(!textOf(generator.generateQuote(dated, client)).contains("30 dias"), "30-day line contradicts the quote's own date")
+    }
+
+    @Test
+    fun `tenant payment terms and conditions still win`() {
+        val template = DocumentTemplate(invoicePaymentTerms = "50% adiantamento, 50% na entrega.", termsText = "Garantia de 2 anos.")
+        val text = textOf(generator.generateInvoice(invoice(), client, template))
+        assertTrue(text.contains("50% adiantamento") && text.contains("Garantia de 2 anos."), text)
+        assertTrue(!text.contains(PdfGenerator.DEFAULT_INVOICE_PAYMENT_TERMS), text)
+    }
+
+    @Test
+    fun `invoices with the default closing block stay clear of rows in every design`() {
+        BuiltInDesignTemplates.ALL.forEach { design ->
+            val template = DocumentTemplate(
+                companyName = "RoPaint Lda",
+                accentColor = design.accentColor,
+                showDecor = design.showDecor,
+                layout = design.layout,
+                style = design.style,
+            )
+            val overlaps = overlappingRuns(generator.generateInvoice(invoice(), client, template))
+            assertTrue(overlaps.isEmpty(), "${design.name} prints text on top of text: $overlaps")
+        }
+    }
+
+    @Test
     fun `clear style prints quantity and unit price as columns`() {
         val design = BuiltInDesignTemplates.find("builtin-clear")!!
         val template = DocumentTemplate(
@@ -213,6 +258,24 @@ class PdfGeneratorTest {
         createdAt = Clock.System.now(),
         updatedAt = Clock.System.now(),
     )
+
+    private fun invoice() = Invoice(
+        id = ObjectId(),
+        tenantId = tenantId,
+        number = "FAT-TEST",
+        clientId = client.id,
+        items = listOf(item("Pintura", 1000.0), item("Reboco", 500.0)),
+        status = InvoiceStatus.PENDING,
+        dueDate = kotlinx.datetime.LocalDate(2026, 10, 15),
+        totalCents = 150_000,
+        createdAt = Clock.System.now(),
+        updatedAt = Clock.System.now(),
+    )
+
+    private fun textOf(bytes: ByteArray): String = Loader.loadPDF(bytes).use { PDFTextStripper().getText(it) }
+
+    /** Letter-spaced headings ("F O R M A  D E …") come out with gaps; compare without whitespace. */
+    private fun String.squashed() = filterNot { it.isWhitespace() }.uppercase()
 
     private fun pageCount(bytes: ByteArray): Int =
         Loader.loadPDF(bytes).use { it.numberOfPages }

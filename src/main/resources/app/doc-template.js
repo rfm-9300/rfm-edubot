@@ -203,12 +203,15 @@
       </tbody></table>`;
     }
     if (id === 'totals') return `<div class="tpl-total">${esc(S.docTplTotalLabel)}: 3 500,00 EUR</div>`;
+    // Same rules as the PDF: a section without text is not printed, and the default terms
+    // (a validity line) only apply to quotes.
     if (id === 'payment') {
-      const text = mode === 'invoice' ? d('invoicePaymentTerms', 'paymentTerms') : d('quotePaymentTerms', 'paymentTerms');
-      return `<div class="tpl-kicker">${esc(S.docTplPaymentLabel)}</div><div class="tpl-note">${esc(text)}</div>`;
+      const text = mode === 'invoice' ? d('invoicePaymentTerms') : d('quotePaymentTerms');
+      return text ? `<div class="tpl-kicker">${esc(S.docTplPaymentLabel)}</div><div class="tpl-note">${esc(text)}</div>` : '';
     }
     if (id === 'terms') {
-      return `<div class="tpl-kicker">${esc(S.docTplTermsLabel)}</div><div class="tpl-note">${esc(d('termsText'))}</div>`;
+      const text = mode === 'invoice' ? String(draft.termsText || '').trim() : d('termsText');
+      return text ? `<div class="tpl-kicker">${esc(S.docTplTermsLabel)}</div><div class="tpl-note">${esc(text)}</div>` : '';
     }
     if (id === 'footer') return `<div class="tpl-foot">${esc(d('footerText'))}</div>`;
     return '';
@@ -258,8 +261,8 @@
       return `${field(S.docQuoteTitle, 'quoteTitle')}${field(S.docInvoiceTitle, 'invoiceTitle')}`;
     }
     if (id === 'payment') {
-      return `${area(S.docQuotePayment, 'quotePaymentTerms', d('quotePaymentTerms', 'paymentTerms'))}
-        ${area(S.docInvoicePayment, 'invoicePaymentTerms', d('invoicePaymentTerms', 'paymentTerms'))}`;
+      return `${area(S.docQuotePayment, 'quotePaymentTerms', d('quotePaymentTerms'))}
+        ${area(S.docInvoicePayment, 'invoicePaymentTerms', d('invoicePaymentTerms'))}`;
     }
     if (id === 'terms') return area(S.docTerms, 'termsText', d('termsText'));
     if (id === 'footer') return field(S.docFooter, 'footerText', '', true);

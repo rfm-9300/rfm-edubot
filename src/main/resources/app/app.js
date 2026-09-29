@@ -1413,7 +1413,7 @@ function renderSuppliers(root) {
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
-  $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openSupplierForm(state.suppliers.find(s => s.id === r.dataset.supplier))));
+  $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', state.suppliers.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
 }
 
 function renderEmployees(root) {
@@ -1435,7 +1435,7 @@ function renderEmployees(root) {
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
-  $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openEmployeeForm(state.employees.find(e => e.id === r.dataset.employee))));
+  $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', state.employees.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
 }
 
 function renderServices(root) {
@@ -1709,7 +1709,7 @@ async function invoiceSelectedServices() {
 }
 // ── Client record ──────────────────────────────────────────────────────────────
 // A client opens as a record: who they are and how to reach them, what they owe, what's next, then
-// the full history. Edit is one click away. Drawers opened from here come back to it (drawerReturn).
+// the full history. Edit is one click away. Drawers opened from here come back to it (drawerTrail).
 let clientRecord = null;
 const EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const phoneDigits = p => String(p || '').replace(/\D/g, '');
@@ -1730,11 +1730,11 @@ function waHref(phone) {
   const intl = raw.startsWith('00') ? digits.slice(2) : (!raw.startsWith('+') && digits.length === 9 ? `351${digits}` : digits);
   return `https://wa.me/${intl}`;
 }
-// Home counts a pending invoice past its due date as overdue; the record agrees with Home.
-function invoiceIsOverdue(inv, today = todayKey()) {
-  return inv.status === 'OVERDUE' || (inv.status === 'PENDING' && !!inv.dueDate && inv.dueDate.slice(0, 10) < today);
+// Nothing flips an invoice or payment to OVERDUE, so, like Home, a pending one past its due date counts.
+function isPastDue(doc, today = todayKey()) {
+  return doc.status === 'OVERDUE' || (doc.status === 'PENDING' && !!doc.dueDate && doc.dueDate.slice(0, 10) < today);
 }
-const effectiveInvoiceStatus = inv => (invoiceIsOverdue(inv) ? 'OVERDUE' : inv.status);
+const effectiveStatus = doc => (isPastDue(doc) ? 'OVERDUE' : doc.status);
 
 function matchConversation(client, list) {
   const key = phoneKey(client.phone);
@@ -1785,7 +1785,7 @@ function clientMoney(r) {
   const today = todayKey();
   const live = r.invoices.filter(i => i.status !== 'CANCELLED');
   const unpaid = live.filter(i => i.status === 'PENDING' || i.status === 'OVERDUE');
-  const overdue = unpaid.filter(i => invoiceIsOverdue(i, today)).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+  const overdue = unpaid.filter(i => isPastDue(i, today)).sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
   const openWork = r.services.filter(s => s.status === 'OPEN');
   const openQuotes = r.quotes.filter(q => q.status === 'PENDENTE' || q.status === 'SENT');
   return {
@@ -1828,17 +1828,78 @@ function clientLastActivity(r) {
   ].filter(s => s && new Date(s).getTime() <= now).sort().pop() || null;
 }
 
-function clientRowHtml(item) {
+// ── Record building blocks (client, supplier and employee records) ─────────────
+function recordRowHtml(item) {
   const side = [
     item.pill ? `<span class="worklist__meta">${item.pill}</span>` : '',
     item.amount != null ? `<span class="worklist__meta worklist__meta--amount">${fmtEUR(item.amount)}</span>` : '',
     item.when ? `<span class="worklist__when">${escapeHTML(item.when)}</span>` : '',
   ].join('');
-  return `<li><button class="worklist__item" type="button" data-client-open="${escapeHTML(item.open)}" data-tone="${item.tone || 'neutral'}">
+  return `<li><button class="worklist__item" type="button" data-record-open="${escapeHTML(item.open)}" data-tone="${item.tone || 'neutral'}">
     <span class="worklist__dot" aria-hidden="true"></span>
     <span class="worklist__main"><span class="worklist__title">${escapeHTML(item.title)}</span>${item.detail ? `<span class="worklist__detail">${escapeHTML(item.detail)}</span>` : ''}</span>
     <span class="worklist__side">${side}</span>
   </button></li>`;
+}
+
+// Call and WhatsApp buttons for a phone number; extra buttons (open chat…) go after them.
+function contactButtons(phone, extra = '') {
+  return [
+    phoneDigits(phone).length >= 6 ? `<a class="btn btn--sm" href="${escapeHTML(telHref(phone))}">${escapeHTML(STR.clientCall)}</a>` : '',
+    phoneDigits(phone).length >= 9 ? `<a class="btn btn--sm" href="${escapeHTML(waHref(phone))}" target="_blank" rel="noopener">${escapeHTML(STR.clientWhatsApp)}</a>` : '',
+    extra,
+  ].join('');
+}
+
+// `lines` is trusted HTML built by the caller (escaped values); everything else is escaped here.
+function recordCardHtml({ name, lines, since, contact = '', notes = '' }) {
+  return `<section class="record-card">
+    <div class="record-card__head">
+      <span class="record-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
+      <div class="record-card__who">
+        <div class="record-card__lines">${lines}</div>
+        <p class="record-card__since">${escapeHTML(since)}</p>
+      </div>
+      <button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>
+    </div>
+    ${contact ? `<div class="record-card__contact">${contact}</div>` : ''}
+    ${notes ? `<div class="record-card__notes"><span class="record-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(notes)}</div>` : ''}
+  </section>`;
+}
+
+function recordKpisHtml(cells) {
+  const shown = cells.slice(0, 4);
+  if (!shown.length) return '';
+  return `<div class="record-kpis" data-count="${shown.length}">${shown.map(k => `<div class="record-kpi"${k.tone ? ` data-tone="${k.tone}"` : ''} title="${escapeHTML(`${k.label}: ${k.value} · ${k.sub}`)}">
+    <span class="record-kpi__label">${escapeHTML(k.label)}</span>
+    <span class="record-kpi__value">${escapeHTML(k.value)}</span>
+    <span class="record-kpi__sub">${escapeHTML(k.sub)}</span>
+  </div>`).join('')}</div>`;
+}
+
+function recordAttentionHtml(items) {
+  if (!items.length) return '';
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.clientAttention)} <span class="tag">${items.length}</span></h2></header><ul class="worklist">${items.map(recordRowHtml).join('')}</ul></section>`;
+}
+
+function recordTable(head, rows, heading = null) {
+  const title = heading ? `<header class="panel__head"><h2 class="panel__title">${escapeHTML(heading.title)}${heading.count ? ` <span class="tag">${heading.count}</span>` : ''}</h2></header>` : '';
+  return `<div class="panel">${title}<div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
+}
+
+function recordEmpty(title, act, actLabel) {
+  return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(title)}</p>${act ? `<button class="btn btn--sm" type="button" data-record-act="${act}"><span class="btn__plus">+</span> ${escapeHTML(actLabel)}</button>` : ''}</div></div>`;
+}
+
+function recordFootHtml(acts) {
+  return acts.length
+    ? `<div class="drawer__foot record__foot">${acts.map(([kind, label]) => `<button class="btn btn--sm" type="button" data-record-act="${kind}"><span class="btn__plus">+</span> ${escapeHTML(label)}</button>`).join('')}</div>`
+    : '';
+}
+
+// Relative due date of an unpaid document: "was due 12 days ago" or "due in 3 days".
+function dueWhenText(dueDate, overdue) {
+  return overdue ? STR.clientAttnOverdueDetail({ when: relDay(dueDate) }) : STR.clientDueWhen({ when: relDay(dueDate) });
 }
 
 function clientCardHtml(r, bk) {
@@ -1851,31 +1912,18 @@ function clientCardHtml(r, bk) {
     last ? STR.clientLastActivity({ when: relTime(last) }) : '',
   ].filter(Boolean).join(' · ');
   const lines = [
-    `<span class="client-card__line mono">${escapeHTML(c.phone)}</span>`,
-    c.email ? `<a class="client-card__line" href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>` : '',
-    c.address ? `<a class="client-card__line" href="${escapeHTML(mapsHref(c.address))}" target="_blank" rel="noopener">${escapeHTML(c.address)}</a>` : '',
-    c.taxId ? `<span class="client-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: c.taxId }))}</span>` : '',
+    `<span class="record-card__line mono">${escapeHTML(c.phone)}</span>`,
+    c.email ? `<a class="record-card__line" href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>` : '',
+    c.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(c.address))}" target="_blank" rel="noopener">${escapeHTML(c.address)}</a>` : '',
+    c.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: c.taxId }))}</span>` : '',
   ].filter(Boolean).join('');
-  const contact = [
-    phoneDigits(c.phone).length >= 6 ? `<a class="btn btn--sm" href="${escapeHTML(telHref(c.phone))}">${escapeHTML(STR.clientCall)}</a>` : '',
-    phoneDigits(c.phone).length >= 9 ? `<a class="btn btn--sm" href="${escapeHTML(waHref(c.phone))}" target="_blank" rel="noopener">${escapeHTML(STR.clientWhatsApp)}</a>` : '',
-    r.conversation ? `<button class="btn btn--sm" type="button" data-client-open="chat">${escapeHTML(STR.clientOpenChat)}${r.conversation.waiting ? ` <span class="pill pill--warn">${escapeHTML(STR.waiting)}</span>` : ''}</button>` : '',
-  ].join('');
-  return `<section class="client-card">
-    <div class="client-card__head">
-      <span class="client-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(c.name))}</span>
-      <div class="client-card__who">
-        <div class="client-card__lines">${lines}</div>
-        <p class="client-card__since">${escapeHTML(since)}</p>
-      </div>
-      <button class="btn btn--sm btn--ghost" type="button" data-client-edit>${escapeHTML(STR.clientEditAction)}</button>
-    </div>
-    ${contact ? `<div class="client-card__contact">${contact}</div>` : ''}
-    ${c.notes ? `<div class="client-card__notes"><span class="client-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(c.notes)}</div>` : ''}
-  </section>`;
+  const chat = r.conversation
+    ? `<button class="btn btn--sm" type="button" data-record-open="chat">${escapeHTML(STR.clientOpenChat)}${r.conversation.waiting ? ` <span class="pill pill--warn">${escapeHTML(STR.waiting)}</span>` : ''}</button>`
+    : '';
+  return recordCardHtml({ name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes });
 }
 
-function clientKpisHtml(m, bk) {
+function clientKpiCells(m, bk) {
   const cells = [];
   if (hasModule('invoices')) {
     cells.push({
@@ -1915,13 +1963,7 @@ function clientKpisHtml(m, bk) {
       tone: m.openQuotes.length ? 'info' : '',
     });
   }
-  const shown = cells.slice(0, 4);
-  if (!shown.length) return '';
-  return `<div class="client-kpis" data-count="${shown.length}">${shown.map(k => `<div class="client-kpi"${k.tone ? ` data-tone="${k.tone}"` : ''} title="${escapeHTML(`${k.label}: ${k.value} · ${k.sub}`)}">
-    <span class="client-kpi__label">${escapeHTML(k.label)}</span>
-    <span class="client-kpi__value">${escapeHTML(k.value)}</span>
-    <span class="client-kpi__sub">${escapeHTML(k.sub)}</span>
-  </div>`).join('')}</div>`;
+  return cells;
 }
 
 function clientAttention(r, m, bk) {
@@ -1955,7 +1997,7 @@ function clientAttention(r, m, bk) {
     });
   });
   const soon = addDayKey(today, 7);
-  m.unpaid.filter(i => !invoiceIsOverdue(i, today) && i.dueDate && i.dueDate.slice(0, 10) <= soon).forEach(i => items.push({
+  m.unpaid.filter(i => !isPastDue(i, today) && i.dueDate && i.dueDate.slice(0, 10) <= soon).forEach(i => items.push({
     tone: 'warn', title: STR.clientAttnDueSoon({ number: i.number }), detail: STR.clientDueWhen({ when: relDay(i.dueDate) }),
     amount: i.totalEur, open: `invoice:${i.id}`,
   }));
@@ -1982,7 +2024,7 @@ function clientActivity(r, bk) {
     detail: STR.clientCreatedOn({ date: fmtDay(q.createdAt) }), pill: quotePill(q.status), amount: q.totalEur, open: `quote:${q.id}`,
   }));
   r.invoices.forEach(i => {
-    const status = effectiveInvoiceStatus(i);
+    const status = effectiveStatus(i);
     past.push({
       at: i.createdAt, tone: invoiceTone(status) || 'muted', title: STR.clientEvtInvoice({ number: i.number }),
       detail: STR.clientIssuedOn({ date: fmtDay(i.createdAt) }), pill: invoicePill(status), amount: i.totalEur, open: `invoice:${i.id}`,
@@ -2003,64 +2045,57 @@ function clientActivity(r, bk) {
   return { upcoming, past: past.slice(0, 40) };
 }
 
-function clientTable(head, rows) {
-  return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr>${head.map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr></thead><tbody>${rows}</tbody></table></div></div>`;
-}
-function clientEmpty(title, act, actLabel) {
-  return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(title)}</p>${act ? `<button class="btn btn--sm" type="button" data-client-act="${act}"><span class="btn__plus">+</span> ${escapeHTML(actLabel)}</button>` : ''}</div></div>`;
-}
-
 function clientPaneHtml(r, m, bk) {
   if (r.tab === 'bookings') {
-    if (!r.bookings.length) return clientEmpty(STR.clientNoBookings, 'booking', STR.bookingsNewForClient);
-    const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-client-open="booking:${escapeHTML(b.id)}">
+    if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, 'booking', STR.bookingsNewForClient);
+    const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="booking:${escapeHTML(b.id)}">
       <td>${escapeHTML(bookingWhen(b))}</td><td class="name">${escapeHTML(bookingServiceName(b))}</td><td>${bookingPill(b.status)}</td>
       <td class="num right">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : ''}</td></tr>`;
     const group = (label, list) => (list.length ? `<tr class="is-day"><td colspan="4">${escapeHTML(label)}</td></tr>${list.map(row).join('')}` : '');
-    return clientTable(
+    return recordTable(
       [[STR.bookingsThWhen], [STR.bookingsThService], [STR.bookingsThStatus], [CRM.quotes.thTotal, 'right']],
       group(STR.clientUpcoming, bk.upcoming) + group(STR.clientPast, bk.past),
     );
   }
   if (r.tab === 'services') {
-    if (!r.services.length) return clientEmpty(STR.clientNoServices, 'service', CRM.services.addForClient);
+    if (!r.services.length) return recordEmpty(STR.clientNoServices, 'service', CRM.services.addForClient);
     const t = CRM.services;
     const rows = [...r.services]
       .sort((a, b) => String(b.performedAt || b.createdAt).localeCompare(String(a.performedAt || a.createdAt)))
-      .map(s => `<tr class="conversation-row${s.status === 'CANCELLED' ? ' is-draft' : s.status === 'INVOICED' ? ' is-paid' : ''}" data-client-open="service:${escapeHTML(s.id)}">
+      .map(s => `<tr class="conversation-row${s.status === 'CANCELLED' ? ' is-draft' : s.status === 'INVOICED' ? ' is-paid' : ''}" data-record-open="service:${escapeHTML(s.id)}">
         <td class="mono">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
         <td class="name">${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
         <td>${servicePill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
     const invoiceOpen = m.openWork.length && hasModule('invoices')
-      ? `<div class="client-record__pane-foot"><button class="btn btn--sm btn--accent" type="button" data-client-act="invoice-open-work">${escapeHTML(STR.clientInvoiceOpenWork({ amount: fmtEUR(m.openWorkTotal) }))}</button></div>` : '';
-    return clientTable([[t.thWhen], [t.thService], [t.thStatus], [t.thTotal, 'right']], rows) + invoiceOpen;
+      ? `<div class="record__pane-foot"><button class="btn btn--sm btn--accent" type="button" data-record-act="invoice-open-work">${escapeHTML(STR.clientInvoiceOpenWork({ amount: fmtEUR(m.openWorkTotal) }))}</button></div>` : '';
+    return recordTable([[t.thWhen], [t.thService], [t.thStatus], [t.thTotal, 'right']], rows) + invoiceOpen;
   }
   if (r.tab === 'quotes') {
-    if (!r.quotes.length) return clientEmpty(STR.clientNoQuotes, 'quote', CRM.tabs.orcamentos.newLabel);
+    if (!r.quotes.length) return recordEmpty(STR.clientNoQuotes, 'quote', CRM.tabs.orcamentos.newLabel);
     const t = CRM.quotes;
-    const rows = r.quotes.map(q => `<tr class="conversation-row${q.status === 'ACEITO' ? ' is-paid' : ''}" data-client-open="quote:${escapeHTML(q.id)}">
+    const rows = r.quotes.map(q => `<tr class="conversation-row${q.status === 'ACEITO' ? ' is-paid' : ''}" data-record-open="quote:${escapeHTML(q.id)}">
       <td class="id">${escapeHTML(q.number)}</td><td class="mono">${escapeHTML(fmtDay(q.createdAt))}</td>
       <td class="mono muted">${escapeHTML(q.validUntil ? fmtDay(q.validUntil) : '—')}</td><td>${quotePill(q.status)}</td>
       <td class="num right">${fmtEUR(q.totalEur)}</td></tr>`).join('');
-    return clientTable([[t.thNumber], [STR.clientThDate], [t.thValidUntil], [t.thStatus], [t.thTotal, 'right']], rows);
+    return recordTable([[t.thNumber], [STR.clientThDate], [t.thValidUntil], [t.thStatus], [t.thTotal, 'right']], rows);
   }
   if (r.tab === 'invoices') {
-    if (!r.invoices.length) return clientEmpty(STR.clientNoInvoices, 'invoice', CRM.tabs.faturas.newLabel);
+    if (!r.invoices.length) return recordEmpty(STR.clientNoInvoices, 'invoice', CRM.tabs.faturas.newLabel);
     const t = CRM.invoices;
     const rows = r.invoices.map(i => {
-      const status = effectiveInvoiceStatus(i);
+      const status = effectiveStatus(i);
       const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
-      return `<tr class="conversation-row${marker}" data-client-open="invoice:${escapeHTML(i.id)}">
+      return `<tr class="conversation-row${marker}" data-record-open="invoice:${escapeHTML(i.id)}">
         <td class="id">${escapeHTML(i.number)}</td><td class="mono">${escapeHTML(fmtDay(i.createdAt))}</td>
         <td class="mono muted">${escapeHTML(fmtDay(i.dueDate))}</td><td>${invoicePill(status)}</td><td class="num right">${fmtEUR(i.totalEur)}</td></tr>`;
     }).join('');
-    return clientTable([[t.thNumber], [STR.clientThDate], [t.thDueDate], [t.thStatus], [t.thTotal, 'right']], rows);
+    return recordTable([[t.thNumber], [STR.clientThDate], [t.thDueDate], [t.thStatus], [t.thTotal, 'right']], rows);
   }
   const ev = clientActivity(r, bk);
   if (!ev.upcoming.length && !ev.past.length) {
     return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.clientActivityEmpty)}</p><p class="empty__desc">${escapeHTML(STR.clientActivityEmptyDesc)}</p></div></div>`;
   }
-  const group = (label, list) => (list.length ? `<li class="worklist__group">${escapeHTML(label)}</li>${list.map(clientRowHtml).join('')}` : '');
+  const group = (label, list) => (list.length ? `<li class="worklist__group">${escapeHTML(label)}</li>${list.map(recordRowHtml).join('')}` : '');
   return `<div class="panel"><ul class="worklist">${group(STR.clientUpcoming, ev.upcoming)}${group(STR.clientHistory, ev.past)}</ul></div>`;
 }
 
@@ -2071,7 +2106,7 @@ function clientTabs(r) {
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
-  return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-client-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
+  return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
 }
 
 function renderClientRecord(focusTab = false) {
@@ -2080,7 +2115,6 @@ function renderClientRecord(focusTab = false) {
   if (!body || !body.isConnected) return;
   const m = clientMoney(r);
   const bk = clientBookingsSplit(r);
-  const attention = clientAttention(r, m, bk);
   const acts = [
     hasModule('bookings') ? ['booking', STR.bookingsNewForClient] : null,
     hasModule('services') ? ['service', CRM.services.addForClient] : null,
@@ -2089,25 +2123,22 @@ function renderClientRecord(focusTab = false) {
   ].filter(Boolean);
   body.innerHTML = `
     ${clientCardHtml(r, bk)}
-    ${clientKpisHtml(m, bk)}
-    ${attention.length ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.clientAttention)} <span class="tag">${attention.length}</span></h2></header><ul class="worklist">${attention.map(clientRowHtml).join('')}</ul></section>` : ''}
+    ${recordKpisHtml(clientKpiCells(m, bk))}
+    ${recordAttentionHtml(clientAttention(r, m, bk))}
     ${clientTabs(r)}
-    <div class="client-record__pane" role="tabpanel">${clientPaneHtml(r, m, bk)}</div>
-    ${acts.length ? `<div class="drawer__foot client-record__foot">${acts.map(([k, l]) => `<button class="btn btn--sm" type="button" data-client-act="${k}"><span class="btn__plus">+</span> ${escapeHTML(l)}</button>`).join('')}</div>` : ''}`;
-  $('[data-client-edit]', body)?.addEventListener('click', () => openFromClient(() => openClientForm(r.client)));
-  $$('[data-client-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.clientTab; renderClientRecord(true); }));
-  $$('[data-client-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.clientOpen)));
-  $$('[data-client-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.clientAct)));
-  if (focusTab) $('[data-client-tab].is-on', body)?.focus();
+    <div class="record__pane" role="tabpanel">${clientPaneHtml(r, m, bk)}</div>
+    ${recordFootHtml(acts)}`;
+  $('[data-record-edit]', body)?.addEventListener('click', () => openFromClient(() => openClientForm(r.client)));
+  $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.recordTab; renderClientRecord(true); }));
+  $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.recordOpen)));
+  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.recordAct)));
+  if (focusTab) $('[data-record-tab].is-on', body)?.focus();
 }
 
+const clientTrailEntry = (id, name, tab) => ({ key: `client:${id}`, label: name, open: () => openClientDrawer(id, tab) });
 function openFromClient(open) {
   const c = clientRecord?.client;
-  if (c) {
-    const tab = clientRecord.tab;
-    drawerReturn = { label: c.name, open: () => openClientDrawer(c.id, tab) };
-  }
-  open();
+  openFrom(c ? clientTrailEntry(c.id, c.name, clientRecord.tab) : null, open);
 }
 
 function openClientItem(ref) {
@@ -2151,10 +2182,9 @@ async function openClientConversation(conversation) {
 async function openClientDrawer(ref, tab) {
   const id = typeof ref === 'string' ? ref : ref?.id;
   if (!id) return;
-  drawerReturn = null;
   const known = (typeof ref === 'object' && ref) || state.clients.find(c => c.id === id) || null;
   const body = document.createElement('div');
-  body.className = 'client-record';
+  body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = c => [STR.clientEyebrow, c?.number].filter(Boolean).join(' · ');
   const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
@@ -2275,23 +2305,133 @@ async function openClientForm(client) {
       else openClientDrawer(saved);
     } catch (err) {
       btn.disabled = false;
-      toast(err?.code === 'invalid_email' ? STR.clientInvalidEmail : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
+      toast(err?.code === 'invalid_email' ? STR.clientInvalidEmail
+        : err?.code === 'phone_taken' ? STR.clientPhoneTaken
+          : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
     }
   });
   openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { eyebrow: STR.clientEyebrow });
 }
 
+// ── Supplier and employee records ──────────────────────────────────────────────
+// Same record as a client, from the other side of the money: what the tenant owes them and when.
+let payeeRecord = null;
+const PAYEE_KINDS = {
+  supplier: {
+    module: 'suppliers', path: 'suppliers', filter: 'supplierId', t: () => CRM.suppliers,
+    eyebrow: () => STR.recordSupplier, since: date => STR.supplierSince({ date }), list: () => state.suppliers || [],
+    edit: p => openSupplierForm(p), pay: p => openPaymentForm(p.id),
+  },
+  employee: {
+    module: 'employees', path: 'employees', filter: 'employeeId', t: () => CRM.employees,
+    eyebrow: () => STR.recordEmployee, since: date => STR.employeeSince({ date }), list: () => state.employees || [],
+    edit: p => openEmployeeForm(p), pay: p => openPaymentForm(null, p.id),
+  },
+};
+const payeeTrailEntry = (kind, p) => ({ key: `${kind}:${p.id}`, label: p.name, open: () => openPayeeDrawer(kind, p.id) });
+
+async function openPayeeDrawer(kind, ref) {
+  const cfg = PAYEE_KINDS[kind];
+  const id = typeof ref === 'string' ? ref : ref?.id;
+  if (!cfg || !id) return;
+  const known = (typeof ref === 'object' && ref) || cfg.list().find(p => p.id === id) || null;
+  const body = document.createElement('div');
+  body.className = 'record';
+  body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
+  const eyebrow = p => [cfg.eyebrow(), p?.number].filter(Boolean).join(' · ');
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
+  const q = encodeURIComponent(id);
+  const [payee, payments] = await Promise.all([
+    api(`/app/api/crm/${cfg.path}/${q}`).catch(() => known),
+    hasModule('payments') ? api(`/app/api/crm/payments?${cfg.filter}=${q}`).catch(() => []) : Promise.resolve([]),
+  ]);
+  if (gen !== drawerGen) return;
+  if (!payee) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
+  payeeRecord = { kind, payee, payments: payments || [], el: body };
+  $('#drawer-title').textContent = payee.name;
+  renderDrawerEyebrow(eyebrow(payee));
+  renderPayeeRecord();
+}
+
+function renderPayeeRecord() {
+  const r = payeeRecord;
+  const body = r?.el;
+  if (!body || !body.isConnected) return;
+  const { kind, payee: p } = r;
+  const cfg = PAYEE_KINDS[kind];
+  const t = cfg.t();
+  const pt = CRM.payments;
+  const today = todayKey();
+  const live = r.payments.filter(x => x.status !== 'CANCELLED');
+  const unpaid = live.filter(x => x.status === 'PENDING' || x.status === 'OVERDUE')
+    .sort((a, b) => String(a.dueDate).localeCompare(String(b.dueDate)));
+  const overdue = unpaid.filter(x => isPastDue(x, today));
+  const paid = live.filter(x => x.status === 'PAID');
+  const next = unpaid.find(x => !isPastDue(x, today));
+  const lastPaid = paid.map(x => x.paidAt).filter(Boolean).sort().pop();
+  const lines = [
+    `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
+    p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
+    p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
+  ].filter(Boolean).join('');
+  const since = [
+    cfg.since(fmtDay(p.createdAt)),
+    live.length ? STR.payeePayments({ n: live.length }) : '',
+    lastPaid ? STR.payeeLastPaid({ when: relTime(lastPaid) }) : '',
+  ].filter(Boolean).join(' · ');
+  const cells = !hasModule('payments') ? [] : [
+    {
+      label: STR.payeeKpiToPay,
+      value: fmtEUR(sumBy(unpaid, 'totalEur')),
+      sub: overdue.length ? STR.clientKpiOverdue({ amount: fmtEUR(sumBy(overdue, 'totalEur')) })
+        : unpaid.length ? STR.payeeKpiUnpaid({ n: unpaid.length }) : STR.payeeKpiNothingDue,
+      tone: overdue.length ? 'bad' : unpaid.length ? 'warn' : '',
+    },
+    {
+      label: STR.payeeKpiNextDue,
+      value: next ? fmtDayKey(next.dueDate.slice(0, 10), { day: 'numeric', month: 'short' }) : '—',
+      sub: next ? `${fmtEUR(next.totalEur)} · ${next.number}` : STR.payeeKpiNoneDue,
+    },
+    { label: STR.payeeKpiPaid, value: fmtEUR(sumBy(paid, 'totalEur')), sub: STR.payeePayments({ n: paid.length }) },
+  ];
+  const soon = addDayKey(today, 7);
+  const attention = [
+    ...overdue.map(x => ({
+      tone: 'bad', title: STR.payeeAttnOverdue({ number: x.number }), detail: dueWhenText(x.dueDate, true), amount: x.totalEur, open: `payment:${x.id}`,
+    })),
+    ...unpaid.filter(x => !isPastDue(x, today) && x.dueDate.slice(0, 10) <= soon).map(x => ({
+      tone: 'warn', title: STR.clientAttnDueSoon({ number: x.number }), detail: dueWhenText(x.dueDate, false), amount: x.totalEur, open: `payment:${x.id}`,
+    })),
+  ];
+  const rows = [...r.payments].sort((a, b) => String(b.dueDate).localeCompare(String(a.dueDate))).map(x => {
+    const status = effectiveStatus(x);
+    const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
+    return `<tr class="conversation-row${marker}" data-record-open="payment:${escapeHTML(x.id)}">
+      <td class="id">${escapeHTML(x.number)}</td><td class="mono muted">${escapeHTML(fmtDay(x.dueDate))}</td>
+      <td>${paymentPill(status)}</td><td class="num right">${fmtEUR(x.totalEur)}</td></tr>`;
+  }).join('');
+  const payments = !hasModule('payments') ? ''
+    : r.payments.length
+      ? recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: r.payments.length })
+      : recordEmpty(STR.payeeNoPayments, 'payment', t.addPayment);
+  body.innerHTML = `
+    ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone) })}
+    ${recordKpisHtml(cells)}
+    ${recordAttentionHtml(attention)}
+    ${payments}
+    ${hasModule('payments') ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
+  const here = () => payeeTrailEntry(kind, p);
+  $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
+  $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => {
+    const id = el.dataset.recordOpen.split(':')[1];
+    openFrom(here(), () => openPaymentDetail(id));
+  }));
+  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => cfg.pay(p))));
+}
+
 async function openSupplierForm(supplier) {
   const t = CRM.suppliers;
   const editing = supplier && supplier.id ? supplier : null;
-  let relatedPayments = [];
-  if (editing && hasModule('payments')) {
-    relatedPayments = await api(`/app/api/crm/payments?supplierId=${encodeURIComponent(editing.id)}`).catch(() => (state.payments || []).filter(p => p.supplierId === editing.id));
-  }
-  const related = [
-    relatedPayments.length ? `<p class="hint">${escapeHTML(t.related)} · ${relatedPayments.map(p => escapeHTML(p.number)).join(', ')}</p>` : '',
-    editing && hasModule('payments') ? `<button class="btn btn--sm" type="button" id="sf-add-payment">${escapeHTML(t.addPayment)}</button>` : '',
-  ].join('');
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
@@ -2301,9 +2441,11 @@ async function openSupplierForm(supplier) {
       <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
       <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
-    ${related}
-    <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
-  $('#sf-add-payment', form)?.addEventListener('click', () => openPaymentForm(editing.id));
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
+      ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
+    </div>`;
+  $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const name = $('#sf-name', form).value.trim();
@@ -2326,8 +2468,9 @@ async function openSupplierForm(supplier) {
         toast(t.created);
         if (hasModule('payments') && state.active === 'payments') return openPaymentForm(created.id);
         render();
+        openPayeeDrawer('supplier', created);
       }
-    } catch { btn.disabled = false; toast(t.saveFailed); }
+    } catch (err) { btn.disabled = false; toast(err?.code === 'phone_taken' ? STR.supplierPhoneTaken : t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
 }
@@ -2335,14 +2478,6 @@ async function openSupplierForm(supplier) {
 async function openEmployeeForm(employee) {
   const t = CRM.employees;
   const editing = employee && employee.id ? employee : null;
-  let relatedPayments = [];
-  if (editing && hasModule('payments')) {
-    relatedPayments = await api(`/app/api/crm/payments?employeeId=${encodeURIComponent(editing.id)}`).catch(() => (state.payments || []).filter(p => p.employeeId === editing.id));
-  }
-  const related = [
-    relatedPayments.length ? `<p class="hint">${escapeHTML(t.related)} · ${relatedPayments.map(p => escapeHTML(p.number)).join(', ')}</p>` : '',
-    editing && hasModule('payments') ? `<button class="btn btn--sm" type="button" id="ef-add-payment">${escapeHTML(t.addPayment)}</button>` : '',
-  ].join('');
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
@@ -2352,9 +2487,11 @@ async function openEmployeeForm(employee) {
       <input class="inp inp--mono" id="ef-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
     <div class="form__row"><label class="lbl" for="ef-role">${escapeHTML(t.formRole)}</label>
       <input class="inp" id="ef-role" placeholder="${escapeHTML(t.phRole)}" value="${escapeHTML(editing?.role || '')}" /></div>
-    ${related}
-    <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
-  $('#ef-add-payment', form)?.addEventListener('click', () => openPaymentForm(null, editing.id));
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
+      ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
+    </div>`;
+  $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const name = $('#ef-name', form).value.trim();
@@ -2364,13 +2501,15 @@ async function openEmployeeForm(employee) {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      if (editing) await api(`/app/api/crm/employees/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, role }) });
-      else await api('/app/api/crm/employees', { method: 'POST', body: JSON.stringify({ name, phone, role }) });
+      const saved = editing
+        ? await api(`/app/api/crm/employees/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, role }) })
+        : await api('/app/api/crm/employees', { method: 'POST', body: JSON.stringify({ name, phone, role }) });
       closeDrawer();
       await loadModule('employees');
       render();
       toast(editing ? t.updated : t.created);
-    } catch { btn.disabled = false; toast(t.saveFailed); }
+      if (!editing) openPayeeDrawer('employee', saved);
+    } catch (err) { btn.disabled = false; toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
 }
@@ -2809,9 +2948,13 @@ function renderQuotes(root) {
   }));
 }
 
-function detailHead(clientName, pillHtml, totalEur, tone) {
+// With `link`, the name opens that client's or payee's record (wire [data-detail-link]).
+function detailHead(clientName, pillHtml, totalEur, tone, link = false) {
+  const name = escapeHTML(clientName || '');
   return `<div class="detail__head">
-    <div class="detail__client">${escapeHTML(clientName || '')}</div>
+    ${link
+      ? `<button class="detail__client detail__client--link" type="button" data-detail-link aria-label="${escapeHTML(STR.detailOpenRecordAria({ name: clientName || '' }))}">${name}</button>`
+      : `<div class="detail__client">${name}</div>`}
     <div class="detail__amount">${pillHtml}<span class="detail__figure${tone ? ` detail__figure--${tone}` : ''}">${fmtEUR(totalEur)}</span></div>
   </div>`;
 }
@@ -2831,14 +2974,29 @@ async function openQuoteDetail(id) {
   try { quote = await api(`/app/api/crm/quotes/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!quote) return;
+  // Converting marks the quote accepted; its invoice is the one that points back at it.
+  const invoice = hasModule('invoices') && quote.status === 'ACEITO'
+    ? (await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).catch(() => [])).find(i => i.quoteId === quote.id) || null
+    : null;
+  const here = { key: `quote:${quote.id}`, label: quote.number, open: () => openQuoteDetail(quote.id) };
+  const isOpen = quote.status === 'PENDENTE' || quote.status === 'SENT';
+  const expired = !!quote.validUntil && quote.validUntil.slice(0, 10) < todayKey();
+  const validity = quote.validUntil && isOpen
+    ? `${fmtDay(quote.validUntil)} · ${expired ? STR.clientAttnQuoteExpired({ when: relDay(quote.validUntil) }) : STR.quoteExpiresWhen({ when: relDay(quote.validUntil) })}`
+    : fmtDay(quote.validUntil);
   const form = document.createElement('div');
   form.className = 'form';
   const canSend = quote.status === 'PENDENTE';
-  const canAccept = quote.status === 'PENDENTE' || quote.status === 'SENT';
-  const canConvert = hasModule('invoices') && quote.status !== 'CANCELLED';
+  const canAccept = isOpen;
+  const canConvert = hasModule('invoices') && quote.status !== 'CANCELLED' && !invoice;
+  const clientLink = hasModule('clients') && !!quote.clientId && !linksBackTo(`client:${quote.clientId}`);
   form.innerHTML = `
-    ${detailHead(quote.clientName, quotePill(quote.status), quote.totalEur, quoteTone(quote.status))}
-    ${detailMeta([quote.validUntil ? { label: CRM.quotes.thValidUntil, value: fmtDay(quote.validUntil) } : null])}
+    ${detailHead(quote.clientName, quotePill(quote.status), quote.totalEur, quoteTone(quote.status), clientLink)}
+    ${detailMeta([
+      { label: STR.detailCreated, value: fmtDay(quote.createdAt) },
+      quote.validUntil ? { label: CRM.quotes.thValidUntil, value: validity } : null,
+      invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
+    ])}
     ${itemsTable(quote.items)}
     ${quote.notes ? `<p class="hint">${escapeHTML(quote.notes)}</p>` : ''}
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
@@ -2847,19 +3005,26 @@ async function openQuoteDetail(id) {
       ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
       ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
       ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
+      ${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}
+      ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
     </div>`;
+  $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
+  $('[data-open-invoice]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
   form.querySelectorAll('[data-q-status]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
     try {
       await api(`/app/api/crm/quotes/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ status: b.dataset.qStatus }) });
       closeDrawer();
       await loadModule('quotes');
       render();
       toast(STR.quoteStatusUpdated);
-    } catch { toast(STR.loadFailed); }
+    } catch { b.disabled = false; toast(STR.loadFailed); }
   }));
-  $('#q-convert', form)?.addEventListener('click', async () => {
+  $('#q-convert', form)?.addEventListener('click', async e => {
     const dueDate = $('#q-due', form).value;
     if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    const btn = e.currentTarget;
+    btn.disabled = true;
     try {
       await api(`/app/api/crm/quotes/${encodeURIComponent(id)}/invoice`, { method: 'POST', body: JSON.stringify({ dueDate }) });
       closeDrawer();
@@ -2867,8 +3032,12 @@ async function openQuoteDetail(id) {
       if (hasModule('invoices')) state.invoices = await api('/app/api/crm/invoices').catch(() => state.invoices);
       render();
       toast(STR.quoteConverted);
-    } catch { toast(STR.quoteConvertFailed); }
+    } catch (err) {
+      btn.disabled = false;
+      toast(err?.code === 'already_invoiced' ? STR.quoteAlreadyInvoiced : STR.quoteConvertFailed);
+    }
   });
+  wirePdfButtons(form);
   openDrawer(quote.number, form);
 }
 
@@ -3109,11 +3278,10 @@ function renderPayments(root) {
   }));
 }
 
-async function markInvoicePaid(id) {
-  const inv = state.invoices.find(i => i.id === id);
+async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id)?.number || '') {
   const ok = await confirmDialog({
     title: STR.markPaidConfirmTitle,
-    body: STR.markPaidConfirmBody({ number: inv?.number || '' }),
+    body: STR.markPaidConfirmBody({ number }),
     okLabel: STR.markPaid,
     danger: false,
   });
@@ -3123,7 +3291,7 @@ async function markInvoicePaid(id) {
     closeDrawer();
     await loadModule('invoices');
     render();
-    toast(STR.markedPaid({ number: inv?.number || '' }));
+    toast(STR.markedPaid({ number }));
   } catch { toast(STR.markPaidFailed); }
 }
 
@@ -3132,32 +3300,39 @@ async function openInvoiceDetail(id) {
   try { inv = await api(`/app/api/crm/invoices/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!inv) return;
-  const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const status = effectiveStatus(inv);
+  const unpaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
+  const clientLink = hasModule('clients') && !!inv.clientId && !linksBackTo(`client:${inv.clientId}`);
+  const quoteLink = hasModule('quotes') && !!inv.quoteId && !linksBackTo(`quote:${inv.quoteId}`);
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    ${detailHead(inv.clientName, invoicePill(inv.status), inv.totalEur, invoiceTone(inv.status))}
+    ${detailHead(inv.clientName, invoicePill(status), inv.totalEur, invoiceTone(status), clientLink)}
     ${detailMeta([
-      { label: STR.thDueDate, value: fmtDay(inv.dueDate) },
+      { label: STR.detailIssued, value: fmtDay(inv.createdAt) },
+      { label: STR.thDueDate, value: unpaid ? `${fmtDay(inv.dueDate)} · ${dueWhenText(inv.dueDate, status === 'OVERDUE')}` : fmtDay(inv.dueDate) },
       inv.status === 'PAID' && inv.paidAt ? { label: STR.paidOnLabel, value: fmtDay(inv.paidAt) } : null,
     ])}
-    ${inv.quoteNumber ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
+    ${inv.quoteNumber && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
     ${itemsTable(inv.items)}
     <div class="detail__foot">
-      ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
+      ${unpaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
+      ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
     </div>`;
-  $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id));
+  $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
+  $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
+  $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
 }
 
-async function markPaymentPaid(id) {
-  const pay = state.payments.find(p => p.id === id);
+async function markPaymentPaid(id, number = state.payments.find(p => p.id === id)?.number || '') {
   const t = CRM.payments;
   const ok = await confirmDialog({
     title: t.markPaidConfirmTitle,
-    body: t.markPaidConfirmBody({ number: pay?.number || '' }),
+    body: t.markPaidConfirmBody({ number }),
     okLabel: t.markPaid,
     danger: false,
   });
@@ -3167,7 +3342,7 @@ async function markPaymentPaid(id) {
     closeDrawer();
     await loadModule('payments');
     render();
-    toast(t.markedPaid({ number: pay?.number || '' }));
+    toast(t.markedPaid({ number }));
   } catch { toast(t.markPaidFailed); }
 }
 
@@ -3177,14 +3352,20 @@ async function openPaymentDetail(id) {
   try { pay = await api(`/app/api/crm/payments/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!pay) return;
+  const status = effectiveStatus(pay);
   const canMarkPaid = pay.status === 'PENDING' || pay.status === 'OVERDUE';
-  const tone = { PENDING: 'warn', PAID: 'ok', OVERDUE: 'bad' }[pay.status] || '';
+  const tone = { PENDING: 'warn', PAID: 'ok', OVERDUE: 'bad' }[status] || '';
+  const kind = pay.supplierId ? 'supplier' : pay.employeeId ? 'employee' : '';
+  const payeeKey = kind ? `${kind}:${payeeId(pay)}` : '';
+  const payeeLink = !!kind && hasModule(PAYEE_KINDS[kind].module) && !linksBackTo(payeeKey);
+  const here = { key: `payment:${pay.id}`, label: pay.number, open: () => openPaymentDetail(pay.id) };
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
-    ${detailHead(payeeName(pay), paymentPill(pay.status), pay.totalEur, tone)}
+    ${detailHead(payeeName(pay), paymentPill(status), pay.totalEur, tone, payeeLink)}
     ${detailMeta([
-      { label: t.thDueDate, value: fmtDay(pay.dueDate) },
+      { label: STR.detailCreated, value: fmtDay(pay.createdAt) },
+      { label: t.thDueDate, value: canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate) },
       pay.status === 'PAID' && pay.paidAt ? { label: STR.paidOnLabel, value: fmtDay(pay.paidAt) } : null,
     ])}
     ${itemsTable(pay.items)}
@@ -3192,7 +3373,8 @@ async function openPaymentDetail(id) {
     <div class="detail__foot">
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
     </div>`;
-  $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id));
+  $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer(kind, payeeId(pay))));
+  $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   openDrawer(pay.number, form);
 }
 
@@ -3972,10 +4154,18 @@ function handleOAuthPopup() {
 let drawerPrevFocus = null;
 let drawerKeyHandler = null;
 let drawerGen = 0;
-// Set while a drawer was opened from a client record: its head shows the way back, and when it closes
-// itself after an action (save, mark paid, convert…) the record reopens with fresh data. Closing it by
-// hand (×, scrim, Escape) goes back to the page instead.
-let drawerReturn = null;
+// Drawers opened from another drawer (a client record, an invoice…) stack their opener here as
+// { key, label, open }. The head shows the way back to the last one, and a drawer that closes itself
+// after an action (save, mark paid, convert…) reopens it with fresh data. Closing by hand (×, scrim,
+// Escape) clears the stack and goes back to the page.
+let drawerTrail = [];
+const trailTop = () => drawerTrail[drawerTrail.length - 1] || null;
+function openFrom(back, open) {
+  if (back) drawerTrail.push(back);
+  open();
+}
+// A link to the record the trail already goes back to would just loop.
+const linksBackTo = key => trailTop()?.key === key;
 
 function drawerFocusables(panel) {
   return [...panel.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])')]
@@ -3991,8 +4181,8 @@ function closeDrawer(opts = {}) {
       drawerKeyHandler = null;
     }
   }
-  const back = opts.dismissed ? null : drawerReturn;
-  drawerReturn = null;
+  if (opts.dismissed) drawerTrail = [];
+  const back = drawerTrail.pop();
   if (back) {
     // The caller may open another drawer right after closing this one; only come back if it didn't.
     const gen = drawerGen;
@@ -4007,10 +4197,10 @@ function closeDrawer(opts = {}) {
 function renderDrawerEyebrow(text) {
   const el = $('#drawer .drawer__eyebrow');
   if (!el) return;
-  if (!drawerReturn) { el.textContent = text || STR.dashboardWord; return; }
-  const back = drawerReturn;
+  const back = trailTop();
+  if (!back) { el.textContent = text || STR.dashboardWord; return; }
   el.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(STR.clientBackAria({ name: back.label }))}">${escapeHTML(back.label)}</button>`;
-  $('.drawer__back', el).addEventListener('click', () => { drawerReturn = null; back.open(); });
+  $('.drawer__back', el).addEventListener('click', () => { drawerTrail.pop(); back.open(); });
 }
 
 function openDrawer(title, body, wide = false, opts = {}) {
@@ -4461,10 +4651,11 @@ async function openBookingDetail(b) {
   const billingHint = billing === 'INVOICED'
     ? `<p class="hint"><span class="pill pill--ok">${escapeHTML(STR.bookingsInvoiced)}</span></p>`
     : billing === 'OPEN' ? `<p class="hint">${escapeHTML(STR.bookingsBilled)}</p>` : '';
+  const clientLink = !!b.clientId && hasModule('clients') && !linksBackTo(`client:${b.clientId}`);
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    ${detailHead(b.contactName, bookingPill(b.status), bookingPrice(b) || 0, bookingTone(b.status))}
+    ${detailHead(b.contactName, bookingPill(b.status), bookingPrice(b) || 0, bookingTone(b.status), clientLink)}
     ${detailMeta([
       { label: STR.bookingsThWhen, value: bookingWhen(b) },
       { label: STR.bookingsService, value: [bookingServiceName(b), minutes ? fmtMinutes(minutes) : ''].filter(Boolean).join(' · ') },
@@ -4477,7 +4668,6 @@ async function openBookingDetail(b) {
       ${actions.join('')}
       ${canInvoice ? `<button class="btn btn--sm btn--accent" type="button" data-booking-invoice>${escapeHTML(STR.bookingsInvoice)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-booking-edit>${escapeHTML(STR.bookingsEditAction)}</button>
-      ${b.clientId && hasModule('clients') && !drawerReturn ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-client>${escapeHTML(STR.bookingsOpenClient)}</button>` : ''}
     </div>`;
   $$('[data-set-status]', body).forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
@@ -4487,7 +4677,14 @@ async function openBookingDetail(b) {
   }));
   $('[data-booking-invoice]', body)?.addEventListener('click', () => invoiceBooking(b));
   $('[data-booking-edit]', body)?.addEventListener('click', () => openBookingForm(b));
-  $('[data-booking-client]', body)?.addEventListener('click', () => openClientById(b.clientId));
+  $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(
+    {
+      key: `booking:${b.id}`,
+      label: bookingServiceName(b) || STR.bookingsEdit,
+      open: async () => openBookingDetail(await api(`/app/api/bookings/${encodeURIComponent(b.id)}`).catch(() => b)),
+    },
+    () => openClientDrawer(b.clientId),
+  ));
   openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
 }
 

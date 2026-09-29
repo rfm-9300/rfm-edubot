@@ -115,7 +115,7 @@ Rows deep-link: `data-go` switches module and `data-open` opens that invoice / q
 
 ## Clients (directory + record)
 
-`/app` Clients is the directory recipe (hero + stats + table), sorted by name; the search also matches email, NIF and phone digits typed without spaces. The list holds the whole directory (the API used to stop at 20). A row opens the client **record** in the drawer, not an edit form ([components.md](components.md#client-record)):
+`/app` Clients is the directory recipe (hero + stats + table), sorted by name; the search also matches email, NIF and phone digits typed without spaces. The list holds the whole directory (the API used to stop at 20). A row opens the client **record** in the drawer, not an edit form ([components.md](components.md#record)):
 
 1. Profile card: initials, contact lines (email opens mail, address opens Maps), NIF, "client since · visits · no-shows · last activity", Edit. Then Call, WhatsApp (`wa.me`; a number typed without a country code is Portuguese) and Open chat when a WhatsApp conversation matches the phone (last 9 digits, like bookings), and the staff notes.
 2. Money strip, up to four cells, each only with its module on, in this order: outstanding (a pending invoice past its due date counts as overdue, as on Home), next booking, to invoice (open Serviços), billed. In proposal (open quotes) only fills a free cell.
@@ -123,7 +123,7 @@ Rows deep-link: `data-go` switches module and `data-open` opens that invoice / q
 4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices. Every row opens its own drawer.
 5. A sticky create bar: New booking, Add service, New quote, New invoice, each prefilled with the client.
 
-Drawers opened from the record show `← client` and return to it (same tab, fresh data) once they save; ×, scrim and Escape leave it. Edit holds name, NIF, phone, email, address and notes ("only your team sees these"). The phone field warns when another client has the number but does not block, since families share phones. A new client opens its record after saving. Staff notes never reach the bot's CRM tools. The NIF prints on quotes and invoices on the client-number line.
+Drawers opened from the record show `← client` and return to it (same tab, fresh data) once they save; ×, scrim and Escape leave it. Edit holds name, NIF, phone, email, address and notes ("only your team sees these"). The phone field warns as soon as another client has the number, whatever the formatting, and links to them. Phone is unique per tenant for clients, suppliers and employees, so saving the exact same number is refused with a clear message (`409 phone_taken`) instead of a generic failure; the warning is what catches the same number typed differently. A new client opens its record after saving. Staff notes never reach the bot's CRM tools. The NIF prints on quotes and invoices on the client-number line.
 
 ## Invoices
 
@@ -135,11 +135,13 @@ Drawers opened from the record show `← client` and return to it (same tab, fre
 
 ## Suppliers (vendor directory)
 
-`/app` Suppliers is the clients list, inverted: people and companies the tenant **pays**. Same directory recipe (hero + stats + table, row opens the drawer). From a supplier, Add payment opens the payments form with that vendor prefilled.
+`/app` Suppliers is the clients list, inverted: people and companies the tenant **pays**. Same directory recipe (hero + stats + table). A row opens the supplier **record** ([components.md](components.md#record)): profile card (phone, address, "supplier since · payments · last paid", Edit, Call, WhatsApp), money strip (to pay with the overdue part, next due, paid), needs attention (overdue payments, payments due within 7 days), the payments table (a row opens the payment), and a sticky Add payment prefilled with the vendor. Employees get the same record with their role instead of an address. A new supplier or employee opens its record after saving.
 
 ## Payments (outgoing bills)
 
-`/app` Payments is invoices, inverted: bills attached to a **supplier** or, when that module is on, an **employee**. The form uses `.chip` to pick the payee kind, then a `.sel`. A supplier payment uses the catalog line editor. An employee payment is one amount and an optional description (default “Payment”), not a catalog line. Opening a payment uses the same detail drawer as an invoice: `.detail__head`, `.detail__meta`, the lines table, `.detail__foot` with Mark paid. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` payee filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment with neither suppliers nor employees opens the supplier form first.
+`/app` Payments is invoices, inverted: bills attached to a **supplier** or, when that module is on, an **employee**. The form uses `.chip` to pick the payee kind, then a `.sel`. A supplier payment uses the catalog line editor. An employee payment is one amount and an optional description (default “Payment”), not a catalog line. Opening a payment uses the same detail drawer as an invoice: `.detail__head`, `.detail__meta`, the lines table, `.detail__foot` with Mark paid.
+
+Quote, invoice, payment and booking details share these rules: the name in the head links to the client's or payee's record; the meta shows when the document was created and, while unpaid or open, how far away its date is ("due in 3 days", "was due 12 days ago", "expires in 6 days"); a pending document past its due date shows as overdue, as on Home. Documents link to each other (a converted quote shows and opens its invoice and no longer offers Convert, and the server refuses a second conversion with `already_invoiced`; an invoice opens its quote). The quote detail has the PDF button like the invoice. Every link goes through the drawer trail, so Back and saving return to where the user came from. Recipe: `.view__hero` + paid / to-pay / overdue stats + `.crm` panel with a compact `.sel` payee filter in `.panel__tools` plus status chips. Mark paid in the row or drawer. No PDF in v1. Creating a payment with neither suppliers nor employees opens the supplier form first.
 
 ## Conversation / assistant
 
@@ -164,6 +166,8 @@ Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Langu
 ## Document template studio
 
 Settings → Quote & invoice template is a three-pane studio (layers · A4 stage · inspector), not a stacked form. Script: `app/doc-template.js`. Persist via `PUT /app/api/settings/document-template` (`layout`, `accentColor`, `showDecor`, `style` plus the existing copy fields). Empty `layout` keeps the historical PDF geometry. `style` chooses how PdfGenerator paints the page (`classic` pills vs `plain` / `split` / `band` ruled tables). Templates opens a wide drawer of A4 thumbnails (built-in + saved). Applying a design keeps company copy.
+
+Defaults when the tenant leaves a text empty: invoices print "Pagamento até à data de vencimento." as payment terms and no terms section; quotes print no payment section (their own notes, if any, fill it) and "Este orçamento é válido por 30 dias." only when the quote has no validity date of its own. A section with no text is not printed at all. The studio preview follows the same rules, from the `defaults` the API sends.
 
 ## New dashboard page
 

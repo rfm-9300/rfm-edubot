@@ -80,6 +80,7 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.application.call
 import io.ktor.server.auth.authenticate
 import io.ktor.server.request.receive
@@ -617,8 +618,10 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-            val client = deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
-            call.respond(HttpStatusCode.Created, client.dto())
+            val client = call.uniquePhone {
+                deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+            } ?: return@post
+            call.respond(HttpStatusCode.Created, client.value.dto())
         }
         patch("/clients/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
@@ -627,8 +630,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-            val client = deps.clients.update(id, request.name, request.phone, request.address, request.email, request.taxId, request.notes)
-                ?: return@patch call.respond(HttpStatusCode.NotFound)
+            val client = (call.uniquePhone {
+                deps.clients.update(id, request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+            } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(client.dto())
         }
         get("/clients/{id}") {
@@ -702,6 +706,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
             val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+            if (deps.invoices.list(quote.clientId).any { it.quoteId == quote.id }) {
+                return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
+            }
             val invoice = deps.invoices.create(quote.clientId, quote.id, quote.items, dueDate)
             deps.quotes.update(quote.id, null, null, null, QuoteStatus.ACEITO)
             call.respond(HttpStatusCode.Created, invoice.dto(client))
@@ -829,12 +836,19 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             call.respond(deps.suppliers.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
         }
+        get("/suppliers/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            call.respond(deps.suppliers.findById(id)?.dto() ?: return@get call.respond(HttpStatusCode.NotFound))
+        }
         post("/suppliers") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            call.respond(HttpStatusCode.Created, deps.suppliers.create(request.name, request.phone, request.address).dto())
+            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address) } ?: return@post
+            call.respond(HttpStatusCode.Created, supplier.value.dto())
         }
         patch("/suppliers/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SUPPLIERS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
@@ -842,7 +856,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val supplier = deps.suppliers.update(id, request.name, request.phone, request.address) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address) } ?: return@patch)
+                .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(supplier.dto())
         }
         get("/employees") {
@@ -850,12 +865,19 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             call.respond(deps.employees.search(call.request.queryParameters["q"].orEmpty()).map { it.dto() })
         }
+        get("/employees/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            call.respond(deps.employees.findById(id)?.dto() ?: return@get call.respond(HttpStatusCode.NotFound))
+        }
         post("/employees") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateEmployeeRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            call.respond(HttpStatusCode.Created, deps.employees.create(request.name, request.phone, request.role).dto())
+            val employee = call.uniquePhone { deps.employees.create(request.name, request.phone, request.role) } ?: return@post
+            call.respond(HttpStatusCode.Created, employee.value.dto())
         }
         patch("/employees/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
@@ -863,7 +885,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateEmployeeRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val employee = deps.employees.update(id, request.name, request.phone, request.role) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            val employee = (call.uniquePhone { deps.employees.update(id, request.name, request.phone, request.role) } ?: return@patch)
+                .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(employee.dto())
         }
         get("/payments") {
@@ -915,6 +938,22 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
         }
     }
 }
+
+private class Written<T>(val value: T)
+
+/**
+ * Runs a client, supplier or employee write. Phone is unique per tenant in each of those collections,
+ * so a duplicate-key clash answers 409 `phone_taken` and returns null instead of surfacing as a 500.
+ */
+private suspend fun <T> ApplicationCall.uniquePhone(write: suspend () -> T): Written<T>? =
+    try {
+        Written(write())
+    } catch (e: com.mongodb.MongoServerException) {
+        // Inserts fail with MongoWriteException, findOneAndUpdate with MongoCommandException; both carry the code.
+        if (com.mongodb.ErrorCategory.fromErrorCode(e.code) != com.mongodb.ErrorCategory.DUPLICATE_KEY) throw e
+        respond(HttpStatusCode.Conflict, mapOf("error" to "phone_taken"))
+        null
+    }
 
 private suspend fun CrmDeps.paymentDto(payment: com.rfm.edubot.crm.model.Payment) = payment.dto(
     supplier = payment.supplierId?.let { suppliers.findById(it) },
@@ -990,16 +1029,31 @@ private data class DocumentLayoutBlockDto(
     val visible: Boolean = true,
 )
 
+// No default values here: the JSON config drops properties equal to their default, which used to send
+// the studio an empty object, so its preview showed none of what the PDFs print.
 @Serializable
 private data class DocumentTemplateDefaultsDto(
-    val quoteTitle: String = "ORÇAMENTO",
-    val invoiceTitle: String = "FATURA",
-    val paymentTerms: String = PdfGenerator.DEFAULT_PAYMENT_TERMS,
-    val termsText: String = PdfGenerator.DEFAULT_TERMS,
-    val footerText: String = PdfGenerator.DEFAULT_FOOTER,
-    val accentColor: String = DocumentLayouts.DEFAULT_ACCENT,
-    val layout: List<DocumentLayoutBlockDto> = DocumentLayouts.DEFAULT.map { it.dto() },
-    val style: String = DocumentDesignStyle.CLASSIC.id,
+    val quoteTitle: String,
+    val invoiceTitle: String,
+    val quotePaymentTerms: String,
+    val invoicePaymentTerms: String,
+    val termsText: String,
+    val footerText: String,
+    val accentColor: String,
+    val layout: List<DocumentLayoutBlockDto>,
+    val style: String,
+)
+
+private fun documentTemplateDefaults() = DocumentTemplateDefaultsDto(
+    quoteTitle = "ORÇAMENTO",
+    invoiceTitle = "FATURA",
+    quotePaymentTerms = "",
+    invoicePaymentTerms = PdfGenerator.DEFAULT_INVOICE_PAYMENT_TERMS,
+    termsText = PdfGenerator.DEFAULT_QUOTE_TERMS,
+    footerText = PdfGenerator.DEFAULT_FOOTER,
+    accentColor = DocumentLayouts.DEFAULT_ACCENT,
+    layout = DocumentLayouts.DEFAULT.map { it.dto() },
+    style = DocumentDesignStyle.CLASSIC.id,
 )
 
 private fun DocumentTemplateRequest.toTemplate(existing: DocumentTemplate): DocumentTemplate = DocumentTemplate(
@@ -1040,7 +1094,7 @@ private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
     layout = layout.map { it.dto() },
     style = DocumentDesignStyle.sanitize(style),
     hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
-    defaults = DocumentTemplateDefaultsDto(),
+    defaults = documentTemplateDefaults(),
 )
 
 private fun DocumentLayoutBlock.dto() = DocumentLayoutBlockDto(id, x, y, w, h, visible)
