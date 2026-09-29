@@ -197,6 +197,7 @@ internal data class CreatePaymentRequest(
     val items: List<CreateLineItemRequest>,
     val dueDate: String,
     val notes: String? = null,
+    val clientId: String? = null,
 )
 
 @Serializable
@@ -229,6 +230,8 @@ internal data class PaymentDto(
     val supplierName: String = "",
     val employeeId: String? = null,
     val employeeName: String = "",
+    val clientId: String? = null,
+    val clientName: String = "",
     val status: String,
     val dueDate: String,
     val totalEur: Double,
@@ -372,13 +375,15 @@ internal fun Supplier.dto() = SupplierDto(
     archivedAt = archivedAt?.toString(),
 )
 
-internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null) = PaymentDto(
+internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client: Client? = null) = PaymentDto(
     id = id.toHexString(),
     number = number,
     supplierId = supplierId?.toHexString(),
     supplierName = supplier?.name ?: "",
     employeeId = employeeId?.toHexString(),
     employeeName = employee?.name ?: "",
+    clientId = clientId?.toHexString(),
+    clientName = client?.name ?: "",
     status = status.name,
     dueDate = dueDate.toString(),
     totalEur = totalCents / 100.0,

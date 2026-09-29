@@ -57,9 +57,12 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         return collection.find(filter).limit(limit).toList().map { it.toClient() }
     }
 
-    /** Only a client no quote, invoice, Serviços row or booking refers to can be deleted; the others get archived. */
+    /** Only a client no quote, invoice, Serviços row, booking or payment refers to can be deleted; the others get archived. */
     suspend fun delete(id: ObjectId): DirectoryDelete =
-        collection.deleteUnreferenced(mongoModule, tenantId, id, "clientId", listOf("crm.quotes", "crm.invoices", "crm.client_services", "bookings.appointments"))
+        collection.deleteUnreferenced(
+            mongoModule, tenantId, id, "clientId",
+            listOf("crm.quotes", "crm.invoices", "crm.client_services", "bookings.appointments", "crm.payments"),
+        )
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Client? = collection.setArchived(tenantId, id, archived)?.toClient()
 

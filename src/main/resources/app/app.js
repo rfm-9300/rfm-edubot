@@ -6,7 +6,7 @@ let state = {
   persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
-  filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '',
+  filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
   bookings: [], bookingUpcoming: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: '', bookingStatusFilter: '',
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
@@ -721,6 +721,7 @@ async function setActive(tab) {
   state.filterFinanceiroPeriod = '';
   state.filterFinanceiroPeriodKey = '';
   state.filterFinanceiroType = '';
+  state.filterFinanceiroClient = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
   state.archivedView = '';
@@ -2249,12 +2250,13 @@ async function loadClientRecord(id) {
   const conversations = !hasModule('conversations') ? Promise.resolve([])
     : state.fetched.conversations ? Promise.resolve(state.conversations)
     : api('/app/api/conversations').catch(() => []);
-  const [client, quotes, invoices, services, bookings, chats] = await Promise.all([
+  const [client, quotes, invoices, services, bookings, payments, chats] = await Promise.all([
     api(`/app/api/crm/clients/${q}`).catch(() => null),
     related('quotes', `/app/api/crm/quotes?clientId=${q}`),
     related('invoices', `/app/api/crm/invoices?clientId=${q}`),
     related('services', `/app/api/crm/services?clientId=${q}`),
     related('bookings', `/app/api/bookings?clientId=${q}`),
+    related('payments', `/app/api/crm/payments?clientId=${q}`),
     conversations,
     ensureBookingData(),
   ]);
@@ -2264,6 +2266,7 @@ async function loadClientRecord(id) {
     invoices: invoices || [],
     services: services || [],
     bookings: bookings || [],
+    payments: payments || [],
     conversation: client ? matchConversation(client, chats || []) : null,
   };
 }
@@ -2584,9 +2587,73 @@ function clientActivity(r, bk) {
   return { upcoming, past: past.slice(0, 40) };
 }
 
+// What the client paid against what was spent on them: payments count only once linked to the client.
+function clientFinance(r, m) {
+  const expenses = r.payments.filter(p => p.status !== 'CANCELLED');
+  const toPay = expenses.filter(p => p.status === 'PENDING' || p.status === 'OVERDUE');
+  const spent = sumBy(expenses.filter(p => p.status === 'PAID'), 'totalEur');
+  return { expenses, spent, toPay: sumBy(toPay, 'totalEur'), net: m.paid - spent };
+}
+
+function clientFinanceHtml(r, m, act) {
+  const t = CRM.financeiro;
+  const f = clientFinance(r, m);
+  const payments = hasModule('payments');
+  const invoices = r.invoices.filter(i => i.status !== 'CANCELLED');
+  const addExpense = payments && act('expense');
+  if (!invoices.length && !f.expenses.length) {
+    return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.clientFinEmpty)}</p>
+      <p class="empty__desc">${escapeHTML(payments ? STR.clientFinExpensesHint : STR.clientFinEmptyDesc)}</p>
+      ${addExpense ? `<button class="btn btn--sm" type="button" data-record-act="expense"><span class="btn__plus">+</span> ${escapeHTML(STR.clientAddExpense)}</button>` : ''}</div></div>`;
+  }
+  const cells = [];
+  if (hasModule('invoices')) {
+    cells.push({ label: t.received, value: fmtEUR(m.paid), sub: m.outstanding ? STR.clientFinToReceive({ amount: fmtEUR(m.outstanding) }) : STR.clientKpiNothingDue });
+  }
+  if (payments) {
+    cells.push({
+      label: t.spent,
+      value: fmtEUR(f.spent),
+      sub: f.toPay ? STR.clientFinToPay({ amount: fmtEUR(f.toPay) }) : f.expenses.length ? STR.clientFinNothingToPay : STR.clientFinNoExpenses,
+    });
+    cells.push({
+      label: t.net,
+      value: fmtEUR(f.net),
+      sub: m.paid > 0 ? STR.clientFinMargin({ pct: Math.round((f.net / m.paid) * 100) }) : STR.clientFinNoMargin,
+      tone: f.net < 0 ? 'bad' : '',
+    });
+  }
+  const moves = [
+    ...invoices.map(i => ({ i, status: effectiveStatus(i) })).map(({ i, status }) => ({
+      at: status === 'PAID' && i.paidAt ? i.paidAt : i.dueDate, out: false, open: `invoice:${i.id}`,
+      title: STR.clientEvtInvoice({ number: i.number }), detail: '', pill: invoicePill(status), amount: i.totalEur, status,
+    })),
+    ...f.expenses.map(p => ({ p, status: effectiveStatus(p) })).map(({ p, status }) => ({
+      at: status === 'PAID' && p.paidAt ? p.paidAt : p.dueDate, out: true, open: `payment:${p.id}`,
+      title: STR.clientEvtExpense({ number: p.number }), detail: payeeName(p), pill: paymentPill(status), amount: p.totalEur, status,
+    })),
+  ].sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  const rows = moves.map(mv => `<tr class="conversation-row${{ PAID: ' is-paid', OVERDUE: ' is-overdue' }[mv.status] || ''}" data-record-open="${escapeHTML(mv.open)}">
+    <td class="mono">${escapeHTML(fmtDay(mv.at))}</td>
+    <td class="name">${escapeHTML(mv.title)}${mv.detail ? ` <span class="muted">· ${escapeHTML(mv.detail)}</span>` : ''}</td>
+    <td>${mv.pill}</td>
+    <td class="num right">${mv.out ? '−' : ''}${fmtEUR(mv.amount)}</td></tr>`).join('');
+  const foot = [
+    m.paid || f.spent ? `<button class="btn btn--sm btn--ghost" type="button" data-record-act="finance-page">${escapeHTML(STR.clientFinOpenPage)}</button>` : '',
+    addExpense ? `<button class="btn btn--sm" type="button" data-record-act="expense"><span class="btn__plus">+</span> ${escapeHTML(STR.clientAddExpense)}</button>` : '',
+  ].join('');
+  return `<div class="record__stack">
+    ${recordKpisHtml(cells)}
+    ${payments && !f.expenses.length ? `<p class="hint">${escapeHTML(STR.clientFinExpensesHint)}</p>` : ''}
+    ${recordTable([[STR.clientThDate], [STR.clientFinThMove], [CRM.invoices.thStatus], [t.thTotal, 'right']], rows)}
+    ${foot ? `<div class="record__pane-foot">${foot}</div>` : ''}
+  </div>`;
+}
+
 function clientPaneHtml(r, m, bk) {
   // An archived client gets no new documents until it is restored.
   const act = kind => (r.client.archivedAt ? null : kind);
+  if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
   if (r.tab === 'bookings') {
     if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, act('booking'), STR.bookingsNewForClient);
     const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="booking:${escapeHTML(b.id)}">
@@ -2642,6 +2709,7 @@ function clientPaneHtml(r, m, bk) {
 
 function clientTabs(r) {
   const tabs = [['activity', STR.clientTabActivity, 0]];
+  if (hasModule('invoices') || hasModule('payments')) tabs.push(['finance', labels.financeiro, 0]);
   if (hasModule('bookings')) tabs.push(['bookings', labels.bookings, r.bookings.length]);
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
@@ -2672,7 +2740,7 @@ function renderClientRecord(focusTab = false) {
   $('[data-record-edit]', body)?.addEventListener('click', () => openFromClient(() => openClientForm(r.client)));
   const setArchivedAt = archivedAt => { r.client = { ...r.client, archivedAt }; renderClientRecord(); refreshDirectory('clients'); };
   $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord('clients', r.client, {
-    inUse: r.quotes.length + r.invoices.length + r.services.length + r.bookings.length > 0,
+    inUse: r.quotes.length + r.invoices.length + r.services.length + r.bookings.length + r.payments.length > 0,
     archiveBody: STR.clientArchiveBody,
     onDeleted: () => { closeDrawer({ dismissed: true }); refreshDirectory('clients'); },
     onArchived: setArchivedAt,
@@ -2698,6 +2766,7 @@ function openClientItem(ref) {
   if (kind === 'tab') { r.tab = id; return renderClientRecord(true); }
   if (kind === 'invoice-open-work') return openFromClient(() => openInvoiceOpenWork(r.client, r.services.filter(s => s.status === 'OPEN')));
   if (kind === 'invoice') return openFromClient(() => openInvoiceDetail(id));
+  if (kind === 'payment') return openFromClient(() => openPaymentDetail(id));
   if (kind === 'quote') return openFromClient(() => openQuoteDetail(id));
   if (kind === 'booking') {
     const booking = r.bookings.find(b => b.id === id);
@@ -2717,6 +2786,16 @@ function clientAct(kind) {
   if (kind === 'quote') return openFromClient(() => openQuoteForm({ client: c }));
   if (kind === 'invoice') return openFromClient(() => openInvoiceForm({ client: c }));
   if (kind === 'invoice-open-work') return openClientItem('invoice-open-work');
+  if (kind === 'expense') return openFromClient(() => openPaymentForm(null, null, c));
+  if (kind === 'finance-page') return openClientFinancePage(c);
+}
+
+// Finances filtered to this client; the filter is set after setActive, which clears filters.
+async function openClientFinancePage(client) {
+  closeDrawer({ dismissed: true });
+  await setActive('financeiro');
+  state.filterFinanceiroClient = client.id;
+  render();
 }
 
 async function openClientConversation(conversation) {
@@ -3173,6 +3252,15 @@ function employeeSelect(employees, selectedId = '') {
     ${employees.map(e => `<option value="${escapeHTML(e.id)}" ${e.id === selectedId ? 'selected' : ''}>${escapeHTML(e.name)}</option>`).join('')}</select></div>`;
 }
 
+// Optional: the client an expense was for. It then counts as spent in that client's finances.
+function paymentClientSelect(clients, selectedId = '') {
+  const t = CRM.payments;
+  const list = [...clients].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  return `<div class="form__row"><label class="lbl" for="p-client">${escapeHTML(t.client)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="p-client"><option value="">${escapeHTML(t.clientNone)}</option>
+    ${list.map(c => `<option value="${escapeHTML(c.id)}"${c.id === selectedId ? ' selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
+}
+
 function payeeName(payment) {
   return payment.employeeName || payment.supplierName || '';
 }
@@ -3370,14 +3458,16 @@ async function openInvoiceForm(opts = {}) {
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
-async function openPaymentForm(presetSupplierId, presetEmployeeId) {
+async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient = null) {
   const t = CRM.payments;
   const employeesOn = hasModule('employees');
-  let suppliers, employees, catalog;
+  const clientsOn = hasModule('clients');
+  let suppliers, employees, catalog, clients;
   try {
     suppliers = await api('/app/api/crm/suppliers');
     employees = employeesOn ? await api('/app/api/crm/employees').catch(() => state.employees || []) : [];
     catalog = hasModule('catalog') ? await api('/app/api/crm/standard-items').catch(() => state.catalog || []) : (state.catalog || []);
+    clients = clientsOn ? withClient(await api('/app/api/crm/clients').catch(() => state.clients || []), presetClient) : [];
   } catch { return toast(t.saveFailed); }
   state.suppliers = suppliers;
   if (employeesOn) state.employees = employees;
@@ -3405,6 +3495,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId) {
       ${employeesOn ? employeeSelect(employees, presetEmployeeId || '') : ''}
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
+      ${clientsOn ? paymentClientSelect(clients, presetClient?.id || '') : ''}
     </div>
     <div id="payment-lines">${li.html}</div>
     ${employeesOn ? generalPaymentFields() : ''}
@@ -3454,9 +3545,10 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId) {
     }
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
+    const clientId = $('#p-client', form)?.value || null;
     const body = payee === 'employee'
-      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null }
-      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null };
+      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId }
+      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId };
     try {
       await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
       closeDrawer();
@@ -3692,14 +3784,25 @@ function renderFinanceiro(root) {
   const t = CRM.financeiro;
   const period = state.filterFinanceiroPeriod || '';
   const typeFilter = state.filterFinanceiroType || '';
-  const paidInvoices = hasModule('invoices') ? state.invoices.filter(i => i.status === 'PAID' && i.paidAt) : [];
-  const paidPayments = hasModule('payments') ? state.payments.filter(p => p.status === 'PAID' && p.paidAt) : [];
+  const everyPaidInvoice = hasModule('invoices') ? state.invoices.filter(i => i.status === 'PAID' && i.paidAt) : [];
+  const everyPaidPayment = hasModule('payments') ? state.payments.filter(p => p.status === 'PAID' && p.paidAt) : [];
+  // A payment counts for a client only when it is linked to that client.
+  const clientNames = new Map();
+  for (const m of [...everyPaidInvoice, ...everyPaidPayment]) {
+    if (m.clientId && !clientNames.has(m.clientId)) clientNames.set(m.clientId, m.clientName || m.clientId);
+  }
+  if (state.filterFinanceiroClient && !clientNames.has(state.filterFinanceiroClient)) state.filterFinanceiroClient = '';
+  const clientId = state.filterFinanceiroClient || '';
+  const paidInvoices = clientId ? everyPaidInvoice.filter(i => i.clientId === clientId) : everyPaidInvoice;
+  const paidPayments = clientId ? everyPaidPayment.filter(p => p.clientId === clientId) : everyPaidPayment;
   const receivedAll = sumEur(paidInvoices);
   const spentAll = sumEur(paidPayments);
 
   const ledgerAll = [
-    ...paidInvoices.map(i => ({ kind: 'in', date: i.paidAt, amount: i.totalEur, who: i.clientName || '—', ref: i.number })),
-    ...paidPayments.map(p => ({ kind: 'out', date: p.paidAt, amount: p.totalEur, who: p.supplierName || p.employeeName || '—', ref: p.number })),
+    ...paidInvoices.map(i => ({ kind: 'in', date: i.paidAt, amount: i.totalEur, who: i.clientName || '—', ref: i.number, open: `invoice:${i.id}` })),
+    ...paidPayments.map(p => ({
+      kind: 'out', date: p.paidAt, amount: p.totalEur, who: payeeName(p) || '—', whoFor: clientId ? '' : p.clientName || '', ref: p.number, open: `payment:${p.id}`,
+    })),
   ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const ledger = ledgerAll.filter(m => !typeFilter || m.kind === typeFilter);
 
@@ -3717,9 +3820,13 @@ function renderFinanceiro(root) {
   const delta = period && periodKeys.includes(prevKey) ? periodDelta(nowRoll.net, rollupFor(prevKey).net) : { text: '', trend: '' };
 
   const views = periodChips(period, 'data-fin-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
-  const tools = period ? '' : `<button class="chip ${!typeFilter ? 'is-on' : ''}" data-filter-fin="">${escapeHTML(t.filterAll)}</button>`
+  const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
+  const clientFilter = hasModule('clients') && clientOptions.length
+    ? `<select class="sel" data-filter-fin-client aria-label="${escapeHTML(t.filterClientAria)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    : '';
+  const tools = clientFilter + (period ? '' : `<button class="chip ${!typeFilter ? 'is-on' : ''}" data-filter-fin="">${escapeHTML(t.filterAll)}</button>`
     + `<button class="chip ${typeFilter === 'in' ? 'is-on' : ''}" data-filter-fin="in">${escapeHTML(t.received)}</button>`
-    + `<button class="chip ${typeFilter === 'out' ? 'is-on' : ''}" data-filter-fin="out">${escapeHTML(t.spent)}</button>`;
+    + `<button class="chip ${typeFilter === 'out' ? 'is-on' : ''}" data-filter-fin="out">${escapeHTML(t.spent)}</button>`);
 
   const financeNav = periodNav(nowKey, period, 'data-fin-period-nav', t);
   const financeStats = period
@@ -3743,9 +3850,9 @@ function renderFinanceiro(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${fmtEUR(roll.received)}</td><td class="num">${fmtEUR(roll.spent)}</td><td class="num">${fmtEUR(roll.net)}</td></tr>`;
       }).join('')
     : '';
-  const ledgerRows = ledger.map(m => `<tr class="conversation-row" data-fin-go="${m.kind === 'in' ? 'invoices' : 'payments'}">
+  const ledgerRows = ledger.map(m => `<tr class="conversation-row" data-fin-open="${escapeHTML(m.open)}">
     <td class="mono muted">${escapeHTML(fmtDay(m.date))} <span class="pill ${m.kind === 'in' ? 'pill--ok' : 'pill--bad'}">${escapeHTML(m.kind === 'in' ? t.received : t.spent)}</span></td>
-    <td class="name">${escapeHTML(m.who)}</td>
+    <td class="name">${escapeHTML(m.who)}${m.whoFor ? ` <span class="muted">· ${escapeHTML(m.whoFor)}</span>` : ''}</td>
     <td class="mono muted">${escapeHTML(m.ref)}</td>
     <td class="num">${m.kind === 'out' ? '−' : ''}${fmtEUR(m.amount)}</td>
   </tr>`).join('');
@@ -3757,9 +3864,10 @@ function renderFinanceiro(root) {
     tools,
     head: period ? summaryHead : listHead,
     rows: period ? summaryRows : ledgerRows,
-    empty: period ? t.summaryEmpty : t.emptyTitle,
-    emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
+    empty: clientId ? t.emptyClient : period ? t.summaryEmpty : t.emptyTitle,
+    emptyDesc: clientId ? t.emptyClientDesc : period ? t.summaryEmptyDesc : t.emptyDesc,
   });
+  $('[data-filter-fin-client]', root)?.addEventListener('change', e => { state.filterFinanceiroClient = e.target.value; render(); });
   $$('[data-fin-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterFinanceiroPeriod = btn.dataset.finPeriod; state.filterFinanceiroPeriodKey = ''; render(); }));
   $$('[data-fin-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
     const dir = btn.dataset.finPeriodNav;
@@ -3767,7 +3875,11 @@ function renderFinanceiro(root) {
     render();
   }));
   $$('[data-filter-fin]', root).forEach(btn => btn.addEventListener('click', () => { state.filterFinanceiroType = btn.dataset.filterFin; render(); }));
-  $$('[data-fin-go]', root).forEach(tr => tr.addEventListener('click', () => setActive(tr.dataset.finGo)));
+  $$('[data-fin-open]', root).forEach(tr => tr.addEventListener('click', () => {
+    const [kind, id] = tr.dataset.finOpen.split(':');
+    if (kind === 'invoice') openInvoiceDetail(id);
+    else openPaymentDetail(id);
+  }));
 }
 
 function renderPayments(root) {
@@ -3786,13 +3898,13 @@ function renderPayments(root) {
   const scoped = supplierId ? all.filter(p => payeeId(p) === supplierId) : all;
   const rows = scoped
     .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
-    .filter(p => !q || `${p.number} ${payeeName(p)} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
+    .filter(p => !q || `${p.number} ${payeeName(p)} ${p.clientName || ''} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
     .map(p => {
       const canMarkPaid = p.status === 'PENDING' || p.status === 'OVERDUE';
       const rowClass = p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '';
       return `<tr class="conversation-row ${rowClass}" data-payment="${escapeHTML(p.id)}">
         <td class="id">${escapeHTML(p.number)}</td>
-        <td class="name">${escapeHTML(payeeName(p))}</td>
+        <td class="name">${escapeHTML(payeeName(p))}${p.clientName ? ` <span class="muted">· ${escapeHTML(p.clientName)}</span>` : ''}</td>
         <td>${paymentPill(p.status)}</td>
         <td class="mono muted">${fmtDay(p.dueDate)}</td>
         <td class="num">${fmtEUR(p.totalEur)}</td>
@@ -3917,6 +4029,8 @@ async function openPaymentDetail(id) {
   const kind = pay.supplierId ? 'supplier' : pay.employeeId ? 'employee' : '';
   const payeeKey = kind ? `${kind}:${payeeId(pay)}` : '';
   const payeeLink = !!kind && hasModule(PAYEE_KINDS[kind].module) && !linksBackTo(payeeKey);
+  const clientsOn = hasModule('clients');
+  const clientLink = clientsOn && !!pay.clientId && !linksBackTo(`client:${pay.clientId}`);
   const here = { key: `payment:${pay.id}`, label: pay.number, open: () => openPaymentDetail(pay.id) };
   const form = document.createElement('div');
   form.className = 'form';
@@ -3926,15 +4040,50 @@ async function openPaymentDetail(id) {
       { label: STR.detailCreated, value: fmtDay(pay.createdAt) },
       { label: t.thDueDate, value: canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate) },
       pay.status === 'PAID' && pay.paidAt ? { label: STR.paidOnLabel, value: fmtDay(pay.paidAt) } : null,
+      clientsOn ? { label: t.client, value: pay.clientName || t.noClient } : null,
     ])}
     ${itemsTable(pay.items)}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
     <div class="detail__foot">
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
+      ${clientLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-client>${escapeHTML(STR.detailOpenRecordAria({ name: pay.clientName || '' }))}</button>` : ''}
+      ${clientsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-client>${escapeHTML(pay.clientId ? t.changeClient : t.linkClient)}</button>` : ''}
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer(kind, payeeId(pay))));
+  $('[data-open-client]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(pay.clientId)));
+  $('[data-pay-client]', form)?.addEventListener('click', () => openFrom(here, () => openPaymentClientForm(pay)));
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   openDrawer(pay.number, form);
+}
+
+// Links a payment to the client it was for, or unlinks it.
+async function openPaymentClientForm(pay) {
+  const t = CRM.payments;
+  let clients;
+  try { clients = await api('/app/api/crm/clients'); } catch { return toast(t.clientSaveFailed); }
+  const current = pay.clientId ? { id: pay.clientId, name: pay.clientName || pay.clientId } : null;
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(t.clientHint)}</p>
+    ${paymentClientSelect(withClient(clients, current), pay.clientId || '')}
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.clientSave)}</button>`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api(`/app/api/crm/payments/${encodeURIComponent(pay.id)}/client`, {
+        method: 'PATCH',
+        body: JSON.stringify({ clientId: $('#p-client', form).value || null }),
+      });
+      closeDrawer();
+      if (state.fetched.payments) state.payments = await api('/app/api/crm/payments').catch(() => state.payments);
+      if (state.active === 'payments' || state.active === 'financeiro') render();
+      toast(t.clientSaved);
+    } catch { btn.disabled = false; toast(t.clientSaveFailed); }
+  });
+  openDrawer(t.clientFormTitle, form, true);
 }
 
 function catalogTypePill(type) {

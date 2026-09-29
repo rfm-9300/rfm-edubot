@@ -243,6 +243,13 @@ line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of clie
 PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
 `/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
 
+A payment can also name the client it was spent on (`clientId`, optional): set it on
+`POST /app/api/crm/payments`, change or clear it with `PATCH /app/api/crm/payments/{id}/client`,
+and list a client's with `GET /app/api/crm/payments?clientId=`. The client record's Financeiro tab
+weighs those payments against the client's invoices (received, spent, net), and the Financeiro page
+filters by client the same way. Payments recorded before this link count for no client until someone
+links them.
+
 ### Employees
 
 Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role). It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
@@ -250,8 +257,8 @@ Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the 
 ### Removing clients, suppliers and employees
 
 `DELETE /app/api/crm/{clients|suppliers|employees}/{id}` deletes the record only when no document
-refers to it: quotes, invoices, Serviços rows or bookings for a client, payments for a supplier or
-employee. Otherwise it answers `409 in_use` and the record can only be archived
+refers to it: quotes, invoices, Serviços rows, bookings or linked payments for a client, payments
+for a supplier or employee. Otherwise it answers `409 in_use` and the record can only be archived
 (`POST …/{id}/archive`, undone by `POST …/{id}/restore`), so those documents keep their name and
 their PDFs keep generating (`crm/DirectoryRecords.kt`).
 

@@ -439,11 +439,13 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
 - The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.record` as it does in `.dash`. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
 - `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip. A supplier or employee has one list (payments), so no tabs; its table panel carries a `.panel__head` title instead.
 - Tables reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
+- A pane with more than one block (the client's Financeiro tab: `.record-kpis`, a `.hint`, the movements table, a `.record__pane-foot`) wraps them in `.record__stack` for even spacing. `.record__pane-foot` holds one or more right-aligned buttons.
 - The create actions are a sticky `.drawer__foot` at the end of the record.
 - The card head's buttons sit in one `.actions` row (Edit, then Delete, or Restore on an archived record); below 560px the row drops under the name. Delete confirms through `.confirm`; when documents refer to the record, the confirm offers Archive instead (primary button, not danger).
 - An archived record shows a `.hint--warn` line in the card ("Archived on …") and no create actions (neither the foot nor the empty-pane buttons) until it is restored.
 - The Clients, Suppliers and Employees lists carry an Active / Archived pair of `.chip` buttons in their `.panel__head` tools.
 - `.hint--warn` is a warning-colored hint, e.g. "another client already uses this phone" under the client form's phone field.
+- Form sections toggled with the `hidden` attribute (the payment form's supplier / employee fields, the catalog's booking fields) rely on `.form__row[hidden]` and `.form__grid[hidden]`; a class that sets `display` otherwise wins over the attribute and the section stays visible.
 
 ## Confirm
 

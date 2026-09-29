@@ -911,7 +911,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val supplierId = call.request.queryParameters["supplierId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
             val employeeId = call.request.queryParameters["employeeId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
             val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { PaymentStatus.valueOf(it.uppercase()) }.getOrNull() }
-            call.respond(deps.payments.list(supplierId, employeeId, status).map { deps.paymentDto(it) })
+            val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
+            call.respond(deps.payments.list(supplierId, employeeId, status, clientId).map { deps.paymentDto(it) })
         }
         post("/payments") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
@@ -925,16 +926,17 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             }
             val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
+            val clientId = request.clientId?.takeIf { it.isNotBlank() }?.let { call.paymentClient(ctx, deps, it) ?: return@post }
             val items = request.items.map { it.toLineItem() }
             val payment = if (employeeRaw != null) {
                 if (!ctx.requireModule(DashboardModules.EMPLOYEES)) return@post call.respond(HttpStatusCode.Forbidden)
                 val employeeId = runCatching { ObjectId(employeeRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee required"))
                 if (deps.employees.findById(employeeId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee not found"))
-                deps.payments.create(supplierId = null, employeeId = employeeId, items = items, dueDate = dueDate, notes = request.notes)
+                deps.payments.create(supplierId = null, employeeId = employeeId, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId)
             } else {
                 val supplierId = runCatching { ObjectId(supplierRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier required"))
                 if (deps.suppliers.findById(supplierId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier not found"))
-                deps.payments.create(supplierId = supplierId, employeeId = null, items = items, dueDate = dueDate, notes = request.notes)
+                deps.payments.create(supplierId = supplierId, employeeId = null, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId)
             }
             call.respond(HttpStatusCode.Created, deps.paymentDto(payment))
         }
@@ -952,8 +954,35 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val payment = deps.payments.markPaid(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(deps.paymentDto(payment))
         }
+        patch("/payments/{id}/client") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<PaymentClientRequest>()
+            val clientId = request.clientId?.takeIf { it.isNotBlank() }?.let { call.paymentClient(ctx, deps, it) ?: return@patch }
+            val payment = deps.payments.setClient(id, clientId) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(deps.paymentDto(payment))
+        }
     }
 }
+
+/**
+ * The tenant's client [raw] names, for linking a payment to it. Answers 403 without the clients
+ * module and 400 for an unknown client, returning null after responding.
+ */
+private suspend fun ApplicationCall.paymentClient(ctx: DashboardContext, deps: CrmDeps, raw: String): ObjectId? {
+    if (!ctx.requireModule(DashboardModules.CLIENTS)) {
+        respond(HttpStatusCode.Forbidden)
+        return null
+    }
+    val id = runCatching { ObjectId(raw) }.getOrNull()?.takeIf { deps.clients.findById(it) != null }
+    if (id == null) respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+    return id
+}
+
+/** A blank or missing `clientId` unlinks the payment from its client. */
+@Serializable
+private data class PaymentClientRequest(val clientId: String? = null)
 
 /**
  * Removing a client, supplier or employee. DELETE only works when no document refers to the record
@@ -1004,6 +1033,7 @@ private suspend fun <T> ApplicationCall.uniquePhone(write: suspend () -> T): Wri
 private suspend fun CrmDeps.paymentDto(payment: com.rfm.edubot.crm.model.Payment) = payment.dto(
     supplier = payment.supplierId?.let { suppliers.findById(it) },
     employee = payment.employeeId?.let { employees.findById(it) },
+    client = payment.clientId?.let { clients.findById(it) },
 )
 
 private data class CrmDeps(

@@ -74,9 +74,9 @@ class DirectoryRecordsTest {
     }
 
     @Test
-    fun `quotes, Servicos rows and bookings also keep a client from being deleted`() = runBlocking<Unit> {
+    fun `quotes, Servicos rows, bookings and linked payments also keep a client from being deleted`() = runBlocking<Unit> {
         val clients = ClientRepository(mongoModule, tenantId)
-        listOf("crm.quotes", "crm.client_services", "bookings.appointments").forEachIndexed { i, collection ->
+        listOf("crm.quotes", "crm.client_services", "bookings.appointments", "crm.payments").forEachIndexed { i, collection ->
             val client = clients.create("Cliente $i", "+351 912 000 00$i")
             refer(collection, "clientId", client.id)
             assertEquals(DirectoryDelete.IN_USE, clients.delete(client.id), collection)
