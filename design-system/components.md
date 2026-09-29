@@ -24,6 +24,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--sm` in table action cells and compact toolbars.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
+- In the `/app` skin (`html[data-layout="minimal"]`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
 ## Brand
@@ -59,7 +60,9 @@ Mark is 40×40, gradient, display font. Surfaces: CRM SVG house, app `"AI"`, bac
 
 Wrap related items in `.nav__group`. The first group (Home) may omit `.nav__group-label`. `.nav__count.is-alert` is for waiting chats, overdue invoices, overdue payments, or pending bookings.
 
-Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `style.css` for `--tab` color and `.nav__dot::after` emoji. Copy an existing tab block. Dark theme remaps overview/tenants to yellow.
+Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `style.css` for `--tab` color and `.nav__dot::after` emoji (classic: backoffice), and a `--nav-icon` outline mask in the minimal block (`/app`). Copy an existing tab block. Dark theme remaps overview/tenants to yellow.
+
+In the `/app` skin the active item is a `--accent-soft` fill with a 3px `--accent` bar on the left (`box-shadow: inset 3px 0 0`), `--ink` text at weight 700 and a dark icon; icons follow the label color. Group labels are small sentence-case `--ink-mute` text. Items are 32px tall; the sidebar scrolls when the nav outgrows the window.
 
 ## Topbar
 
@@ -84,7 +87,7 @@ Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `s
 
 Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
 
-On pages that support layouts (`/app`), `#btn-layout` (`.iconbtn.iconbtn--theme`) sits right before the theme button. `theme.js` fills its icon and localized label (`common.layoutToMinimal` / `common.layoutToClassic`); leave it empty in markup.
+`/app` has no layout switch: its skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label="app.searchPlaceholder"`.
 
 On `/app`, `#btn-account` (`.iconbtn--avatar`) sits between the theme button and Log out. It stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account).
 
@@ -106,6 +109,20 @@ On `/app`, `#btn-account` (`.iconbtn--avatar`) sits between the theme button and
 ```
 
 Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta — add `.delta--up` / `.delta--down` to it when the delta has a direction. `.stat--lg` is a bigger spotlight variant (Home's highlights only); don't use it on list-page stat rows (clients, services, quotes, invoices, catalog).
+
+In the `/app` skin `.view__stats` is one white card (hairline border, `--r-lg`, `--shadow-sm`) whose cells are split by inset hairlines; it is a grid of equal columns and drops to two columns under 700px.
+
+A stat can lead with an icon well — pass `icon` in the `statCards` item:
+
+```html
+<div class="stat stat--icon">
+  <span class="stat__icon" data-icon="users" aria-hidden="true"></span>
+  <div class="stat__label">Total</div>
+  <div class="stat__value">12</div>
+</div>
+```
+
+`.stat__icon` is a 36px `--accent-soft` square with a dark outline icon, drawn as a mask from `data-icon` (`users`, `user-plus`). Add a `.stat__icon[data-icon="…"]` rule with a `--stat-icon` SVG before using a new name. Clientes uses it today.
 
 ### Hero with a period navigator
 
@@ -249,6 +266,8 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 
 Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
+In the `/app` skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
+
 Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda. Clickable rows may use `.conversation-row`.
 
 ## Empty
@@ -260,7 +279,22 @@ Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` 
 </div>
 ```
 
-Place inside a table cell with `colspan`, or in a panel body. The wand glyph is CSS (`::before`). Do not add a second illustration.
+Place inside a table cell with `colspan`, or in a panel body. The generic glyph is CSS (`::before`: a wand in classic, a line tray in the `/app` skin).
+
+A module may replace it with its own small line illustration: `crmPanel({ …, emptyArt })` renders `div.empty.empty--art` with the inline SVG first:
+
+```html
+<div class="empty empty--art">
+  <svg class="empty__art" viewBox="0 0 128 84" aria-hidden="true" focusable="false">
+    <path class="art-accent" d="…"/>          <!-- sparkles and small fills: --accent -->
+    <g class="art-line"><path d="…"/></g>     <!-- strokes: currentColor (--ink) -->
+  </svg>
+  <p class="empty__title">No clients found</p>
+  <p class="empty__desc">Adjust the search or create a new client.</p>
+</div>
+```
+
+Keep it minimal and professional: outline strokes, at most a few accent shapes, no emoji or photos. Colors come only from `.art-line` / `.art-accent`, so dark mode works without extra rules. Only Clientes has one today (`CLIENTS_EMPTY_ART` in `app.js`: a client, a spray bottle, three sparkles).
 
 ## Pills
 
@@ -503,7 +537,7 @@ Thin progress bar for a card whose headline number is a share of a whole (win ra
 
 `.meter__fill` width is a JS-computed percentage (clamp 0–100), not a token. Inside `.snapshot`, its fill color follows that card's `--snap` tint automatically. Only add a meter where the ratio is meaningful — most panels don't need one.
 
-Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive. Settings → Appearance uses the same list for Layout (classic / minimal) and Theme (light / dark), each section a `.panel` with `.panel__body`.
+Settings → Home reuses `.queue__item.choice` in a `.choice-list`. Visible cards get `.is-on` (accent border) plus a Shown/Hidden pill. Do not invent a second toggle primitive. Settings → Appearance uses the same list for Theme (light / dark), in a `.panel` with `.panel__body`.
 
 ## Card panel
 
@@ -666,5 +700,8 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
     <div class="kpi__value">€ 0,00</div>
   </div>
   <div class="meta"><span>v 1.0</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
+  <div class="sidebar__credit"><span data-i18n="app.poweredBy">Powered by</span> <strong>The Bots Lab</strong></div>
 </div>
 ```
+
+`.sidebar__credit` is `/app`'s technology-provider line: a small bolt (CSS mask) plus muted text, last in the foot. It must stay quieter than the tenant's brand at the top — no logo, no accent color, no link. "Powered by" goes through i18n; "The Bots Lab" is the product name and is not translated.

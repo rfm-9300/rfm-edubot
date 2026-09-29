@@ -65,26 +65,29 @@ Status `*-soft` values on dark are `rgba(color, 0.12)`.
 
 ## Layout skins (`html[data-layout]`)
 
-A second axis next to the theme. `classic` (default) is everything above. `minimal` is an optional clean CRM skin: neutral canvas, hairline cards, one accent, no gradients / glow / emoji.
+A second axis next to the theme. `classic` is everything above and is what the backoffice and `/admin` use. `minimal` is the `/app` skin (the "Clean Ops" look for tenants such as Family Clean): light-gray canvas, white cards, near-black text, yellow only for actions, selections and small highlights; no gradients, glow, textures or emoji.
 
-- `admin/theme.js` writes `html[data-layout]` from `localStorage.uiLayout` (`"classic"` | `"minimal"`) before first paint, **only on pages whose `<html>` already declares `data-layout`** (today: `/app/index.html`). The backoffice never switches.
-- Toggle: `#btn-layout` in the topbar, or Settings → Appearance. Both call `UIPrefs.setLayout()`, which fires a `ui:layout` event (`ui:theme` for the theme).
+- The skin is fixed in markup: `/app/index.html` declares `<html data-layout="minimal">`; other pages declare nothing and stay classic. There is no layout switch (`theme.js` only handles the theme and fires `ui:theme`); an old `localStorage.uiLayout` value is ignored.
 - Minimal overrides tokens on `html[data-layout="minimal"]` (light) and `html[data-layout="minimal"][data-theme="dark"]`. The dark block must redeclare **every** color the light block sets — both selectors otherwise tie with `html[data-theme="dark"]` and the later one wins.
 
 | Token | Minimal light | Minimal dark |
 |---|---|---|
-| `--bg` / `--surface` / `--surface-2` | `#f5f6f8` / `#ffffff` / `#f8f9fb` | `#0c0e12` / `#111318` / `#161a20` |
+| `--bg` / `--surface` / `--surface-2` | `#f7f8fa` / `#ffffff` / `#f9fafb` | `#0c0e12` / `#111318` / `#161a20` |
 | `--line` / `--line-soft` / `--hairline-strong` | `#e4e7ec` / `#eef0f3` / `#d0d5dd` | white 8% / 5% / 14% |
-| `--ink` / `--ink-2` / `--ink-mute` / `--ink-faint` | `#101828` / `#344054` / `#667085` / `#98a2b3` | `#f0f1f3` / `#c1c5cd` / `#858b96` / `#5d636e` |
-| `--accent` / `--accent-deep` / `--accent-ink` | `#5b4bdb` / `#4b3cc4` / `#ffffff` | `#ffd60a` / `#e6c009` / `#0b0d0f` |
+| `--ink` / `--ink-2` / `--ink-mute` / `--ink-faint` | `#111318` / `#344054` / `#667085` / `#98a2b3` | `#f0f1f3` / `#c1c5cd` / `#858b96` / `#5d636e` |
+| `--accent` / `--accent-hover` | `#f5d90a` / `#e6cb00` (yellow, yellow-hover) | same |
+| `--accent-soft` | `#fff9d6` (yellow-soft: active nav, icon wells, selected chips) | yellow 12% |
+| `--accent-deep` | `#735f00` — accent *as text* on light surfaces | `#e6cb00` |
+| `--accent-ink` | `#111318` (text on yellow) | `#0b0d0f` |
+| `--focus-border` / `--focus-ring` | `--ink` / 1px ink ring + 4px yellow halo | `--accent` / 1px yellow ring + faint halo |
 | `--ok` `--warn` `--bad` `--info` | `#12b76a` `#f79009` `#f04438` `#2e90fa` (inks darker) | `#32d583` `#fdb022` `#f97066` `#53b1fd` (inks lighter) |
-| `--grad` / `--grad-hover` | solid `--accent` / `--accent-deep` | same |
+| `--grad` / `--grad-hover` | solid `--accent` / `--accent-hover` | same |
 | `--glow-accent` | transparent (no glow) | same |
 | `--r-xs` … `--r-lg` | `6` / `8` / `10` / `12px` | inherited from light |
 | `--sidebar` | `240px` | inherited |
-| `--shadow-*` | hairline-soft ink | black 40–60% |
+| `--shadow-*` | soft ink (`--shadow-sm`: 1px + 3px at 4–6%) | black 40–60% |
 
-`--ink-faint` is decorative in minimal (bars, placeholders); text uses `--ink-mute` or darker. Components that read tokens restyle for free; add a `html[data-layout="minimal"]` rule only for what tokens can't express (uppercase labels, emoji, literal `999px` radii, heavy font weights).
+Yellow is a fill. On white it is far below text contrast, so never color text or thin lines with `--accent` in the light skin: text on tints uses `--accent-deep` (or `--ink`, as the active nav item and selected chips do), and trend lines use `--accent-deep`. `--ink-faint` is decorative in minimal (bars); text uses `--ink-mute` or darker (≥ 4.5:1 on `--bg` and `--surface`). Components that read tokens restyle for free; add a `html[data-layout="minimal"]` rule only for what tokens can't express (uppercase labels, emoji, literal `999px` radii, heavy font weights).
 
 On dark, text that sits on an accent tint should use `var(--accent)` (not `--accent-deep`). Existing overrides: `.panel__title .tag`, `.pill--accent`, `.drawer__eyebrow`, `.auth__eyebrow`, `.pdf:hover`, `.lines__total .v`.
 
@@ -118,6 +121,8 @@ Body: `14px / 1.5`, antialiased. Do not add a fourth family.
 | Table body | 13px | 600 | sans |
 | Uppercase label (`.lbl`, `.panel__title`, th) | 10.5–12px | 800 | sans, `letter-spacing: 0.05–0.08em`, uppercase |
 | KPI / ID / money | 12–13px | 500–600 | mono, `font-variant-numeric: tabular-nums` |
+
+The `/app` skin retunes a few roles: page title 30px / 700 (26px under 920px), stat value 20px / 700, panel title 15px / 600 display, nav item 13.5px / 600 (active 700), buttons 600, and sentence-case labels instead of uppercase. Sidebar money values use sans 700.
 
 ## Radius
 
@@ -165,11 +170,13 @@ Hover lift is `translateY(-1px)` (buttons, chips, icon buttons) or `translateX(2
 ## Focus
 
 ```css
-border-color: var(--accent);
-box-shadow: 0 0 0 4px var(--accent-soft);
+border-color: var(--focus-border);
+box-shadow: var(--focus-ring);
 ```
 
-Used by `.inp:focus`, `.sel:focus`, `.txt:focus`, `.topbar__search:focus-within`. Reuse this ring. Do not use browser outline as the only focus style on interactive controls.
+Used by `.inp:focus`, `.sel:focus`, `.txt:focus`, `.topbar__search:focus-within`, and `:focus-visible` on `.btn`, `.chip`, `.iconbtn`, `.nav__item`. Reuse this ring. Do not use browser outline as the only focus style on interactive controls.
+
+Classic resolves the tokens to `--accent` / `0 0 0 4px var(--accent-soft)`. The `/app` light skin uses an ink edge plus a yellow halo, because a yellow ring alone is invisible on white. Inset rings on borderless rows (`.dash-kpi`, `.worklist__item`, `.rank__item`) use `inset 0 0 0 2px var(--focus-border)`.
 
 ## Layout constants
 
@@ -185,4 +192,4 @@ Used by `.inp:focus`, `.sel:focus`, `.txt:focus`, `.topbar__search:focus-within`
 - Light: three pastel radial blobs on `body::before` (violet, mint, coral).
 - Dark: 32px terminal grid from `--line-soft`, masked so it fades at top/bottom.
 
-Do not replace these with a solid fill unless removing texture on a specific inner surface (chat log already uses `--surface-2` / `--bg-deep`).
+Do not replace these with a solid fill unless removing texture on a specific inner surface (chat log already uses `--surface-2` / `--bg-deep`). The `/app` skin is the exception: it hides `body::before` and keeps a solid `--bg`.

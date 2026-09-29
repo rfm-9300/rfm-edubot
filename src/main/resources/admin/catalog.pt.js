@@ -16,8 +16,6 @@ window.__I18N_CATALOGS['pt-PT'] = {
     menuCloseAria: 'Fechar menu',
     themeToLight: 'Mudar para tema claro',
     themeToDark: 'Mudar para tema escuro',
-    layoutToMinimal: 'Mudar para o esquema minimalista',
-    layoutToClassic: 'Mudar para o esquema clássico',
   },
 
   app: {
@@ -229,6 +227,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     clientDuplicateArchived: p => `Um cliente arquivado já tem este número: ${p.name} (${p.number}).`,
     newPrefix: 'Novo',
     dashboardWord: 'Painel', searchPlaceholder: 'Procurar…', logout: 'Sair', themeAria: 'Mudar tema',
+    poweredBy: 'Powered by',
     closeAria: 'Fechar', cancel: 'Cancelar', confirm: 'Confirmar',
     noData: 'Sem dados',
     contactStatusACTIVE: 'Activo', contactStatusBLOCKED: 'Bloqueado', contactStatusRATE_LIMITED: 'Com limite',
@@ -323,10 +322,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     recent_invoice_paid: 'Fatura {number} paga', recent_invoice_issued: 'Fatura {number} emitida',
     recent_payment_paid: 'Pagamento {number} efetuado', recent_quote_accepted: 'Orçamento {number} aceite',
     recent_quote_created: 'Orçamento {number} criado', recent_client_created: 'Novo cliente', recent_booking_created: 'Nova marcação',
-    settingsAppearance: 'Aspeto', appearanceLayoutTitle: 'Esquema',
-    appearanceLayoutHint: 'Guardado neste navegador. Pode mudar a qualquer momento na barra de topo.',
-    layoutClassic: 'Clássico', layoutClassicDesc: 'Cartões coloridos e um Início espaçoso com números grandes.',
-    layoutMinimal: 'Minimalista', layoutMinimalDesc: 'Vista de CRM limpa e densa: tendências, agenda de hoje e valores a receber de relance.',
+    settingsAppearance: 'Aspeto',
     appearanceThemeTitle: 'Tema', themeLight: 'Claro', themeLightDesc: 'Superfícies claras para trabalhar de dia.',
     themeDark: 'Escuro', themeDarkDesc: 'Menos brilho para ambientes com pouca luz.',
     appearanceActive: 'Ativo', appearanceSaved: 'Aspeto atualizado',

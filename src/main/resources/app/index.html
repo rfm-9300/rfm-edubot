@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-PT" data-layout="classic">
+<html lang="pt-PT" data-layout="minimal">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -26,6 +26,7 @@
       <div class="kpi"><div class="kpi__label" id="kpi-1-label" data-i18n="app.statMessages">Messages</div><div class="kpi__value" id="kpi-messages">—</div></div>
       <div class="kpi"><div class="kpi__label" id="kpi-2-label" data-i18n="app.statContacts">Contacts</div><div class="kpi__value" id="kpi-users">—</div></div>
       <div class="meta"><span id="principal-type">—</span><span class="meta__sep">·</span><span id="meta-clock">—</span></div>
+      <div class="sidebar__credit"><span data-i18n="app.poweredBy">Powered by</span> <strong>The Bots Lab</strong></div>
     </div>
   </aside>
   <main class="main">
@@ -36,8 +37,8 @@
         </button>
         <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
       </div>
-      <div class="topbar__search"><input type="text" id="search" data-i18n-placeholder="app.searchPlaceholder" placeholder="Search…" autocomplete="off" /><kbd>/</kbd></div>
-      <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-layout" type="button" aria-label="Switch layout"></button><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" data-i18n-aria-label="app.accountAria" data-i18n-title="app.accountAria" aria-label="Your account" title="Your account" hidden></button><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" data-i18n="app.newPrefix" hidden>New</button></div>
+      <div class="topbar__search"><input type="text" id="search" data-i18n-placeholder="app.searchPlaceholder" data-i18n-aria-label="app.searchPlaceholder" placeholder="Search…" aria-label="Search…" autocomplete="off" /><kbd aria-hidden="true">/</kbd></div>
+      <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" data-i18n-aria-label="app.accountAria" data-i18n-title="app.accountAria" aria-label="Your account" title="Your account" hidden></button><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" data-i18n="app.newPrefix" hidden>New</button></div>
     </header>
     <section class="view" id="view"></section>
   </main>

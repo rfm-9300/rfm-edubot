@@ -1,15 +1,11 @@
 /* Theme switcher + mobile nav shell — shared by backoffice and tenant dashboard.
    Loaded synchronously in <head> so the theme applies before first paint.
    Preference persists per browser in localStorage ("light" | "dark").
-   If the user has never chosen, follow prefers-color-scheme.
-   Layout ("classic" | "minimal", localStorage.uiLayout) only applies to pages whose <html>
-   declares data-layout; others (backoffice) keep the classic skin. Changes fire ui:theme / ui:layout. */
+   If the user has never chosen, follow prefers-color-scheme. Changes fire ui:theme.
+   The page's skin is fixed in markup (/app declares <html data-layout="minimal">). */
 (function () {
   const KEY = 'uiTheme';
-  const LAYOUT_KEY = 'uiLayout';
-  const LAYOUTS = ['classic', 'minimal'];
   const root = document.documentElement;
-  const layoutAware = root.hasAttribute('data-layout');
 
   function current() {
     return root.dataset.theme === 'dark' ? 'dark' : 'light';
@@ -48,56 +44,11 @@
 
   apply(initialTheme());
 
-  function currentLayout() {
-    return root.dataset.layout === 'minimal' ? 'minimal' : 'classic';
-  }
-
-  function layoutLabel(layout) {
-    const key = layout === 'minimal' ? 'common.layoutToClassic' : 'common.layoutToMinimal';
-    if (window.I18N && typeof window.I18N.t === 'function') return window.I18N.t(key);
-    return layout === 'minimal' ? 'Switch to classic layout' : 'Switch to minimal layout';
-  }
-
-  function layoutIcon(layout) {
-    return layout === 'minimal'
-      ? '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M7 1.8l1.3 3.4 3.4 1.3-3.4 1.3L7 11.2 5.7 7.8 2.3 6.5l3.4-1.3z"/><path d="M12.3 10.2l.6 1.6 1.6.6-1.6.6-.6 1.6-.6-1.6-1.6-.6 1.6-.6z"/></svg>'
-      : '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="2" y="2" width="5" height="6.5" rx="1"/><rect x="9" y="2" width="5" height="3.5" rx="1"/><rect x="9" y="7.5" width="5" height="6.5" rx="1"/><rect x="2" y="10.5" width="5" height="3.5" rx="1"/></svg>';
-  }
-
-  function applyLayout(layout) {
-    if (!layoutAware) return;
-    root.dataset.layout = layout;
-    const btn = document.getElementById('btn-layout');
-    if (btn) {
-      btn.innerHTML = layoutIcon(layout);
-      const label = layoutLabel(layout);
-      btn.title = label;
-      btn.setAttribute('aria-label', label);
-    }
-  }
-
-  function initialLayout() {
-    try {
-      const stored = localStorage.getItem(LAYOUT_KEY);
-      if (LAYOUTS.includes(stored)) return stored;
-    } catch (_) {}
-    return currentLayout();
-  }
-
-  applyLayout(initialLayout());
-
   function setTheme(theme) {
     if (theme !== 'light' && theme !== 'dark') return;
     try { localStorage.setItem(KEY, theme); } catch (_) {}
     apply(theme);
     document.dispatchEvent(new CustomEvent('ui:theme', { detail: { theme } }));
-  }
-
-  function setLayout(layout) {
-    if (!layoutAware || !LAYOUTS.includes(layout)) return;
-    try { localStorage.setItem(LAYOUT_KEY, layout); } catch (_) {}
-    applyLayout(layout);
-    document.dispatchEvent(new CustomEvent('ui:layout', { detail: { layout } }));
   }
 
   function menuLabel(open) {
@@ -170,16 +121,12 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     apply(current());
-    applyLayout(currentLayout());
     document.getElementById('btn-theme')?.addEventListener('click', () => {
       setTheme(current() === 'dark' ? 'light' : 'dark');
-    });
-    document.getElementById('btn-layout')?.addEventListener('click', () => {
-      setLayout(currentLayout() === 'minimal' ? 'classic' : 'minimal');
     });
     initMobileNav();
   });
 
-  window.refreshThemeLabels = function () { apply(current()); applyLayout(currentLayout()); };
-  window.UIPrefs = { theme: current, layout: currentLayout, setTheme, setLayout, layoutAware };
+  window.refreshThemeLabels = function () { apply(current()); };
+  window.UIPrefs = { theme: current, setTheme };
 })();

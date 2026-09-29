@@ -874,7 +874,8 @@ function statCards(items, size = '') {
   const sizeCls = size === 'lg' ? ' stat--lg' : '';
   return `<div class="view__stats">${items.map((it, i) => {
     const trendCls = it.trend === 'up' ? ' delta--up' : it.trend === 'down' ? ' delta--down' : '';
-    return `<div class="stat${sizeCls}"><div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint${trendCls}">${escapeHTML(it.hint)}</div>` : ''}</div>`;
+    const icon = it.icon ? `<span class="stat__icon" data-icon="${escapeHTML(it.icon)}" aria-hidden="true"></span>` : '';
+    return `<div class="stat${sizeCls}${icon ? ' stat--icon' : ''}">${icon}<div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint${trendCls}">${escapeHTML(it.hint)}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
 function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
@@ -882,9 +883,27 @@ function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
   const emptyCell = `<tr><td colspan="${cols}"><div class="empty"><p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
   return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || emptyCell}</tbody></table></div></div>`;
 }
-function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, emptyDesc }) {
+// Empty-state illustration for the clients directory: a client, a spray bottle and sparkles.
+// Strokes follow the text color; `.art-accent` shapes take the accent (see `.empty__art`).
+const CLIENTS_EMPTY_ART = `<svg class="empty__art" viewBox="0 0 128 84" aria-hidden="true" focusable="false">
+  <path class="art-accent" d="M71 8.5c.5 3.1 1.9 4.5 5 5-3.1.5-4.5 1.9-5 5-.5-3.1-1.9-4.5-5-5 3.1-.5 4.5-1.9 5-5z"/>
+  <path class="art-accent" d="M29 43.5c.4 2.3 1.4 3.3 3.7 3.7-2.3.4-3.3 1.4-3.7 3.7-.4-2.3-1.4-3.3-3.7-3.7 2.3-.4 3.3-1.4 3.7-3.7z"/>
+  <path class="art-accent" d="M105 25c.3 1.7 1.1 2.5 2.8 2.8-1.7.3-2.5 1.1-2.8 2.8-.3-1.7-1.1-2.5-2.8-2.8 1.7-.3 2.5-1.1 2.8-2.8z"/>
+  <path class="art-accent" d="M84.5 62h13v10.5h-13z"/>
+  <g class="art-line">
+    <path d="M22 74h84"/>
+    <circle cx="54" cy="36" r="9.5"/>
+    <path d="M36 74c0-11 8-19 18-19s18 8 18 19"/>
+    <path d="M82 74V59.5c0-2.2 1.3-4.1 3.2-5l1.3-.6V50h9v3.9l1.3.6c1.9.9 3.2 2.8 3.2 5V74"/>
+    <path d="M86.5 50v-5.5c0-1.4 1.1-2.5 2.5-2.5h8.5l1.5 4v4"/>
+    <path d="M86.5 44.5h-6.5"/>
+    <path d="M80 43v3"/>
+    <path d="M89 47.5c-2.6.3-4.1 1.8-4.4 4.4"/>
+  </g>
+</svg>`;
+function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, emptyDesc, emptyArt = '' }) {
   const cols = (String(head).match(/<th/g) || []).length || 8;
-  const emptyCell = `<tr><td colspan="${cols}"><div class="empty"><p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
+  const emptyCell = `<tr><td colspan="${cols}"><div class="empty${emptyArt ? ' empty--art' : ''}">${emptyArt}<p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
   // `views` switches the panel's whole layout (e.g. List / By week / By month). Keep it out of
   // `.panel__tools` so it reads as a mode switch, not a same-weight filter: it stays in the head,
   // and any `tools` (status/client filters) drop to their own `.panel__filters` row underneath.
@@ -1771,8 +1790,8 @@ function renderClients(root) {
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
-    { label: t.total, value: state.clients.length },
-    { label: t.new30, value: new30 },
+    { label: t.total, value: state.clients.length, icon: 'users' },
+    { label: t.new30, value: new30, icon: 'user-plus' },
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
@@ -1781,6 +1800,7 @@ function renderClients(root) {
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
+    emptyArt: CLIENTS_EMPTY_ART,
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
   wireDirectoryView(root);
@@ -4289,13 +4309,10 @@ function homeLayoutPanel() {
 
 function appearancePanel() {
   const prefs = window.UIPrefs;
-  const layout = prefs ? prefs.layout() : 'classic';
   const theme = prefs ? prefs.theme() : 'light';
   const choice = (group, id, title, detail, on) => `<button type="button" class="queue__item choice ${on ? 'is-on' : ''}" data-appearance-${group}="${id}" aria-pressed="${on}"><div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(detail)}</span></div><span class="queue__meta">${on ? `<span class="pill pill--ok">${escapeHTML(STR.appearanceActive)}</span>` : ''}</span></button>`;
   const section = (title, hint, choices) => `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(title)}</h2></header><div class="panel__body"><div class="form">${hint ? `<div class="hint">${escapeHTML(hint)}</div>` : ''}<div class="choice-list">${choices}</div></div></div></section>`;
-  return `<div class="settings-stack">${section(STR.appearanceLayoutTitle, STR.appearanceLayoutHint,
-    choice('layout', 'classic', STR.layoutClassic, STR.layoutClassicDesc, layout === 'classic')
-    + choice('layout', 'minimal', STR.layoutMinimal, STR.layoutMinimalDesc, layout === 'minimal'))}${section(STR.appearanceThemeTitle, '',
+  return `<div class="settings-stack">${section(STR.appearanceThemeTitle, '',
     choice('theme', 'light', STR.themeLight, STR.themeLightDesc, theme === 'light')
     + choice('theme', 'dark', STR.themeDark, STR.themeDarkDesc, theme === 'dark'))}</div>`;
 }
@@ -4456,7 +4473,6 @@ function renderSettings(root) {
   root.innerHTML = `${hero(labels.settings, STR.settingsDesc)}${chips}${body}`;
   $$('[data-settings]', root).forEach(b => b.addEventListener('click', () => { state.settingsSection = b.dataset.settings; render(); }));
   $$('[data-home-card]', root).forEach(b => b.addEventListener('click', () => toggleHomeCard(b.dataset.homeCard)));
-  $$('[data-appearance-layout]', root).forEach(b => b.addEventListener('click', () => { window.UIPrefs?.setLayout(b.dataset.appearanceLayout); toast(STR.appearanceSaved); }));
   $$('[data-appearance-theme]', root).forEach(b => b.addEventListener('click', () => { window.UIPrefs?.setTheme(b.dataset.appearanceTheme); toast(STR.appearanceSaved); }));
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
@@ -5567,13 +5583,6 @@ async function init() {
     const tab = (location.hash || '').replace('#', '') || 'overview';
     if (tab === state.active) return;
     setActive(tab);
-  });
-  document.addEventListener('ui:layout', async () => {
-    if (!token || !state.me) return;
-    if (state.active === 'overview' && isMinimalLayout() && !state.overviewExtended) {
-      try { await loadModule('overview'); } catch { toast(STR.loadFailed); }
-    }
-    render();
   });
   document.addEventListener('ui:theme', () => {
     if (token && state.me && state.active === 'settings' && state.settingsSection === 'appearance') render();

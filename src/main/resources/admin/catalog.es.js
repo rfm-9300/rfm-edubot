@@ -16,8 +16,6 @@ window.__I18N_CATALOGS['es'] = {
     menuCloseAria: 'Cerrar menú',
     themeToLight: 'Cambiar a tema claro',
     themeToDark: 'Cambiar a tema oscuro',
-    layoutToMinimal: 'Cambiar al diseño minimalista',
-    layoutToClassic: 'Cambiar al diseño clásico',
   },
 
   app: {
@@ -228,6 +226,7 @@ window.__I18N_CATALOGS['es'] = {
     clientDuplicateArchived: p => `Un cliente archivado ya tiene este número: ${p.name} (${p.number}).`,
     newPrefix: 'Nuevo',
     dashboardWord: 'Panel', searchPlaceholder: 'Buscar…', logout: 'Salir', themeAria: 'Cambiar tema',
+    poweredBy: 'Powered by',
     closeAria: 'Cerrar', cancel: 'Cancelar', confirm: 'Confirmar',
     noData: 'Sin datos',
     contactStatusACTIVE: 'Activo', contactStatusBLOCKED: 'Bloqueado', contactStatusRATE_LIMITED: 'Con límite',
@@ -322,10 +321,7 @@ window.__I18N_CATALOGS['es'] = {
     recent_invoice_paid: 'Factura {number} pagada', recent_invoice_issued: 'Factura {number} emitida',
     recent_payment_paid: 'Pago {number} realizado', recent_quote_accepted: 'Presupuesto {number} aceptado',
     recent_quote_created: 'Presupuesto {number} creado', recent_client_created: 'Nuevo cliente', recent_booking_created: 'Nueva reserva',
-    settingsAppearance: 'Apariencia', appearanceLayoutTitle: 'Diseño',
-    appearanceLayoutHint: 'Se guarda en este navegador. Puedes cambiarlo cuando quieras desde la barra superior.',
-    layoutClassic: 'Clásico', layoutClassicDesc: 'Tarjetas de colores y un Inicio amplio con cifras grandes.',
-    layoutMinimal: 'Minimalista', layoutMinimalDesc: 'Vista de CRM limpia y densa: tendencias, agenda de hoy y cobros de un vistazo.',
+    settingsAppearance: 'Apariencia',
     appearanceThemeTitle: 'Tema', themeLight: 'Claro', themeLightDesc: 'Superficies claras para trabajar de día.',
     themeDark: 'Oscuro', themeDarkDesc: 'Menos brillo para espacios con poca luz.',
     appearanceActive: 'Activo', appearanceSaved: 'Apariencia actualizada',

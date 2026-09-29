@@ -17,8 +17,6 @@ window.__I18N_CATALOGS['en'] = {
     menuCloseAria: 'Close menu',
     themeToLight: 'Switch to light theme',
     themeToDark: 'Switch to dark theme',
-    layoutToMinimal: 'Switch to minimal layout',
-    layoutToClassic: 'Switch to classic layout',
   },
 
   app: {
@@ -229,6 +227,7 @@ window.__I18N_CATALOGS['en'] = {
     clientDuplicateArchived: p => `An archived client already has this number: ${p.name} (${p.number}).`,
     newPrefix: 'New',
     dashboardWord: 'Dashboard', searchPlaceholder: 'Search…', logout: 'Log out', themeAria: 'Toggle theme',
+    poweredBy: 'Powered by',
     closeAria: 'Close', cancel: 'Cancel', confirm: 'Confirm',
     noData: 'No data',
     contactStatusACTIVE: 'Active', contactStatusBLOCKED: 'Blocked', contactStatusRATE_LIMITED: 'Rate limited',
@@ -323,10 +322,7 @@ window.__I18N_CATALOGS['en'] = {
     recent_invoice_paid: 'Invoice {number} paid', recent_invoice_issued: 'Invoice {number} issued',
     recent_payment_paid: 'Payment {number} made', recent_quote_accepted: 'Quote {number} accepted',
     recent_quote_created: 'Quote {number} created', recent_client_created: 'New client', recent_booking_created: 'New booking',
-    settingsAppearance: 'Appearance', appearanceLayoutTitle: 'Layout',
-    appearanceLayoutHint: 'Saved on this browser. Switch any time from the top bar.',
-    layoutClassic: 'Classic', layoutClassicDesc: 'Colorful cards and a roomy Home with big numbers.',
-    layoutMinimal: 'Minimal', layoutMinimalDesc: 'Clean, dense CRM view: trends, today’s agenda and receivables at a glance.',
+    settingsAppearance: 'Appearance',
     appearanceThemeTitle: 'Theme', themeLight: 'Light', themeLightDesc: 'Bright surfaces for daytime work.',
     themeDark: 'Dark', themeDarkDesc: 'Low-glare surfaces for dim rooms.',
     appearanceActive: 'Active', appearanceSaved: 'Appearance updated',

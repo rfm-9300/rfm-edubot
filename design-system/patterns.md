@@ -31,7 +31,7 @@ Head assets (order matters):
 5. `/admin/i18n.js`
 6. Page script `defer` at end of `<body>`
 
-`/app` declares `<html data-layout="classic">`, which opts it into the layout switch ([tokens.md](tokens.md#layout-skins-htmldata-layout)); `/backoffice` does not and always stays classic. Every `/app` screen must read well in both layouts × both themes.
+`/app` declares `<html data-layout="minimal">`, its fixed skin ([tokens.md](tokens.md#layout-skins-htmldata-layout)); there is no layout switch. `/backoffice` declares nothing and stays classic. Every `/app` screen must read well in the minimal skin in both themes. The sidebar foot ends with the "Powered by The Bots Lab" credit ([components.md](components.md#sidebar-kpis)).
 
 ## List module (default screen)
 
@@ -88,7 +88,7 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 
 ## Home (minimal layout)
 
-With `html[data-layout="minimal"]`, `renderOverview` hands off to `renderOverviewMinimal`: a CRM cockpit, clean but dense. Same hidden-card ids as the classic Home (Settings → Home drives both). Data comes from one call, `GET /app/api/overview?extended=1`, which adds `cashFlow`, `activity`, `agenda`, `recent` and `topClients`; the classic layout never requests them. Empty lists are omitted from the JSON, so treat a missing array as empty.
+`/app` always renders this Home: `renderOverview` hands off to `renderOverviewMinimal` because the page pins `html[data-layout="minimal"]` (the classic Home above is no longer reachable and is kept only until that code is removed). A CRM cockpit, clean but dense. Settings → Home picks its cards (same hidden-card ids). Data comes from one call, `GET /app/api/overview?extended=1`, which adds `cashFlow`, `activity`, `agenda`, `recent` and `topClients`. Empty lists are omitted from the JSON, so treat a missing array as empty.
 
 1. `.dash__head`: tenant-local date, time-of-day greeting, health line (`pulse`), then **Choose cards** and up to three quick-create buttons (first one primary). Quick create switches to the module, then opens its existing drawer form.
 2. `.dash-kpis` (`highlights`): up to five processed numbers — received (with vs-last-month delta and a 6-month spark), to collect (overdue in red), net (received − spent, when payments exist), open pipeline, waiting chats (14-day spark), then bookings today / clients. Each respects its module card being hidden.
@@ -163,7 +163,7 @@ Optional `instagram` module. Work queue first, not an Insights wall:
 
 ## Settings (tenant)
 
-Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Layout and Theme; both are browser preferences (localStorage) applied through `UIPrefs`, not tenant settings. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
+Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Theme (light / dark), a browser preference (localStorage) applied through `UIPrefs.setTheme`, not a tenant setting. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
 
 ## Account (tenant user)
 
