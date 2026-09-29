@@ -106,12 +106,13 @@ private suspend fun connectWhatsAppForTenant(
         )
     } catch (e: SignupException) {
         log.warn(
-            "WhatsApp Embedded Signup failed: tenant={} reason={} status={} graphCode={} graphSubcode={} traceId={}",
+            "WhatsApp Embedded Signup failed: tenant={} reason={} status={} graphCode={} graphSubcode={} graphMessage={} traceId={}",
             slug,
             e.reason,
             e.statusCode,
             e.graphError?.code,
             e.graphError?.subcode,
+            e.graphError?.message,
             e.graphError?.traceId,
         )
         call.respond(HttpStatusCode.BadGateway, mapOf("error" to e.reason))

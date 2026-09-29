@@ -27,7 +27,7 @@ class WhatsAppSignupClient(
     constructor(config: AppConfig.WhatsAppConfig, httpClient: HttpClient) : this({ config }, httpClient)
 
     private val config: AppConfig.WhatsAppConfig get() = configProvider()
-    private val json = Json { ignoreUnknownKeys = true }
+    private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true }
     private val log = LoggerFactory.getLogger("WhatsAppSignupClient")
     private val random = SecureRandom()
 

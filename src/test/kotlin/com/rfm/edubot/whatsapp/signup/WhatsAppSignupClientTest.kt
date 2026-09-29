@@ -10,11 +10,17 @@ import io.ktor.client.request.HttpResponseData
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertTrue
 
 class WhatsAppSignupClientTest {
     @Test
@@ -38,6 +44,28 @@ class WhatsAppSignupClientTest {
         assertEquals("waba-1", result.wabaId)
         assertEquals("+351 900 000 000", result.displayPhoneNumber)
         assertEquals(listOf("/v21.0/oauth/access_token", "/v21.0/pn-1/register", "/v21.0/waba-1/subscribed_apps", "/v21.0/pn-1"), paths)
+    }
+
+    @Test
+    fun `register sends messaging product and a six digit pin`() = runBlocking {
+        var registerBody: JsonObject? = null
+        val client = client { request ->
+            when (request.url.encodedPath) {
+                "/v21.0/oauth/access_token" -> json("""{"access_token":"business-token"}""")
+                "/v21.0/pn-1/register" -> {
+                    registerBody = Json.parseToJsonElement((request.body as TextContent).text).jsonObject
+                    json("""{"success":true}""")
+                }
+                "/v21.0/waba-1/subscribed_apps" -> json("""{"success":true}""")
+                "/v21.0/pn-1" -> json("""{"id":"pn-1"}""")
+                else -> error("Unexpected path ${request.url.encodedPath}")
+            }
+        }
+
+        WhatsAppSignupClient(config(), client).connect("code-1", "waba-1", "pn-1")
+
+        assertEquals("whatsapp", registerBody?.get("messaging_product")?.jsonPrimitive?.content)
+        assertTrue(registerBody?.get("pin")?.jsonPrimitive?.content.orEmpty().matches(Regex("\\d{6}")))
     }
 
     @Test
