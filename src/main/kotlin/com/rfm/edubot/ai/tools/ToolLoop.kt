@@ -21,12 +21,16 @@ data class TokenCount(val prompt: Int = 0, val completion: Int = 0) {
     val total: Int get() = prompt + completion
     operator fun plus(usage: UsageInfo?): TokenCount =
         if (usage == null) this else TokenCount(prompt + usage.prompt_tokens, completion + usage.completion_tokens)
+    operator fun plus(other: TokenCount): TokenCount = TokenCount(prompt + other.prompt, completion + other.completion)
 }
 
 data class ToolLoopResult(
     /** The model's final answer; null when it proposed writes or submitted a result instead. */
     val text: String?,
-    /** Write calls held for approval. The loop stops at the first response that proposes any. */
+    /**
+     * Write calls held for approval. Without a `proposedResult` the loop stops at the first response
+     * that proposes any; with one it keeps going and collects them all.
+     */
     val proposals: List<ToolCall> = emptyList(),
     /** Arguments of the finishing tool, when the caller asked for structured output. */
     val submitted: JsonObject? = null,
@@ -54,32 +58,39 @@ class ToolLoop(private val aiClient: AiClient) {
         finishTool: ToolDefinition? = null,
         fallbackInstruction: String? = "Answer the user now without calling tools.",
         deniedResult: (ToolCall) -> JsonObject = { buildJsonObject { put("error", "tool_not_allowed") } },
-        decide: (ToolCall) -> WriteDecision = { WriteDecision.DENY },
+        decide: suspend (ToolCall) -> WriteDecision = { WriteDecision.DENY },
+        /** When set, a proposed write gets this tool result and the loop carries on instead of stopping. */
+        proposedResult: ((ToolCall) -> JsonObject)? = null,
     ): ToolLoopResult {
         val conversation = messages.toMutableList()
         val allowed = definitions.map { it.name }.toSet()
         val offered = definitions + listOfNotNull(finishTool)
         val trace = mutableListOf<ToolTraceEntry>()
+        val proposals = mutableListOf<ToolCall>()
         var usage = TokenCount()
 
         repeat(maxIterations) { iteration ->
+            val last = iteration == maxIterations - 1
+            if (finishTool != null && last && iteration > 0) {
+                conversation.add(ChatMessage(role = "system", content = "This is your last turn: call ${finishTool.name} now with the result."))
+            }
             val response = aiClient.complete(
                 conversation,
                 offered,
-                forceToolUse = finishTool != null && iteration == maxIterations - 1,
+                forceToolUse = finishTool != null && last,
                 modelOverride = modelOverride,
             )
             when (response) {
                 is AiResponse.Text -> {
                     usage += response.usage
-                    if (finishTool == null) return ToolLoopResult(response.content, trace = trace, usage = usage)
+                    if (finishTool == null) return ToolLoopResult(response.content, proposals.toList(), trace = trace, usage = usage)
                     conversation.add(ChatMessage(role = "assistant", content = response.content))
                     conversation.add(ChatMessage(role = "system", content = "Call ${finishTool.name} now with the result."))
                 }
                 is AiResponse.ToolUse -> {
                     usage += response.usage
                     conversation.add(response.message)
-                    val proposals = mutableListOf<ToolCall>()
+                    var proposed = false
                     var submitted: JsonObject? = null
                     for (call in response.calls) {
                         when {
@@ -105,7 +116,10 @@ class ToolLoop(private val aiClient: AiClient) {
                                 }
                                 WriteDecision.PROPOSE -> {
                                     proposals += call
-                                    trace += ToolTraceEntry(call, null, WriteDecision.PROPOSE)
+                                    proposed = true
+                                    val result = proposedResult?.invoke(call)
+                                    trace += ToolTraceEntry(call, result, WriteDecision.PROPOSE)
+                                    if (result != null) conversation.add(toolResult(call, result))
                                 }
                                 WriteDecision.DENY -> {
                                     val result = deniedResult(call)
@@ -115,21 +129,21 @@ class ToolLoop(private val aiClient: AiClient) {
                             }
                         }
                     }
-                    if (submitted != null || proposals.isNotEmpty()) {
-                        return ToolLoopResult(null, proposals, submitted, trace, usage)
+                    if (submitted != null || (proposed && proposedResult == null)) {
+                        return ToolLoopResult(null, proposals.toList(), submitted, trace, usage)
                     }
                 }
             }
         }
 
-        if (fallbackInstruction == null) return ToolLoopResult(null, trace = trace, usage = usage)
+        if (fallbackInstruction == null) return ToolLoopResult(null, proposals.toList(), trace = trace, usage = usage)
         val fallback = aiClient.complete(
             conversation + ChatMessage(role = "system", content = fallbackInstruction),
             emptyList(),
             modelOverride = modelOverride,
         )
         val text = (fallback as? AiResponse.Text)?.let { usage += it.usage; it.content }
-        return ToolLoopResult(text, trace = trace, usage = usage)
+        return ToolLoopResult(text, proposals.toList(), trace = trace, usage = usage)
     }
 
     private suspend fun execute(tools: ToolPack, call: ToolCall, context: ToolCallContext): JsonObject =

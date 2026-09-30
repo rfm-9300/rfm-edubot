@@ -101,6 +101,69 @@ class ToolLoopTest {
         assertEquals("quote_request", result.submitted?.get("intent")?.jsonPrimitive?.content)
     }
 
+    /** Snapshots each request: the loop hands the client its live conversation list. */
+    private class Recorder(vararg responses: AiResponse) {
+        val queue = ArrayDeque(responses.toList())
+        val seen = mutableListOf<List<ChatMessage>>()
+        val forced = mutableListOf<Boolean>()
+
+        fun client(): AiClient = mockk<AiClient>().also { ai ->
+            coEvery { ai.complete(any(), any(), any(), any()) } answers {
+                seen += firstArg<List<ChatMessage>>().toList()
+                forced += thirdArg<Boolean>()
+                queue.removeFirst()
+            }
+        }
+    }
+
+    @Test
+    fun `with a proposed result the loop carries on and collects every proposal`() = runBlocking {
+        val submit = AiResponse.ToolUse(
+            calls = listOf(ToolCall("c9", "submit_result", buildJsonObject { put("summary", "done") })),
+            usage = UsageInfo(prompt_tokens = 3, completion_tokens = 1),
+            responseId = "r",
+            message = ChatMessage(role = "assistant"),
+        )
+        val recorder = Recorder(toolUse("write_it"), toolUse("read_it", "write_it"), submit)
+        val ai = recorder.client()
+        val seen = recorder.seen
+        val pack = FakePack()
+
+        val result = ToolLoop(ai).run(
+            listOf(ChatMessage("user", "do it")),
+            pack,
+            finishTool = ToolDefinition("submit_result", "Submit", buildJsonObject {}),
+            decide = { WriteDecision.PROPOSE },
+            proposedResult = { buildJsonObject { put("status", "proposed") } },
+        )
+
+        assertEquals(listOf("write_it", "write_it"), result.proposals.map { it.name })
+        assertEquals("done", result.submitted?.get("summary")?.jsonPrimitive?.content)
+        assertEquals(listOf("read_it"), pack.executed)
+        assertTrue(seen[1].any { it.role == "tool" && it.content!!.contains("proposed") })
+        assertEquals(TokenCount(23, 3), result.usage)
+    }
+
+    @Test
+    fun `the last turn forces a tool call and asks for the finishing tool`() = runBlocking {
+        val recorder = Recorder(toolUse("read_it"), toolUse("read_it"))
+        val seen = recorder.seen
+        val forced = recorder.forced
+
+        val result = ToolLoop(recorder.client()).run(
+            listOf(ChatMessage("user", "classify")),
+            FakePack(),
+            maxIterations = 2,
+            finishTool = ToolDefinition("submit_result", "Submit", buildJsonObject {}),
+            fallbackInstruction = null,
+        )
+
+        assertEquals(listOf(false, true), forced)
+        assertTrue(seen[1].last().content!!.contains("submit_result"))
+        assertNull(result.submitted)
+        assertNull(result.text)
+    }
+
     @Test
     fun `when the iterations run out the model is asked to answer without tools`() = runBlocking {
         val ai = mockk<AiClient>()
