@@ -6,6 +6,8 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
+import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.ai.tools.CrmToolPack
 import com.rfm.edubot.ai.tools.ToolLoop
 import com.rfm.edubot.admin.CreateClientRequest
@@ -1347,6 +1349,7 @@ private suspend fun runPersonaTest(
             }
         },
     )
+    TenantUsageRepository(mongo, tenant.id).recordUsage(result.usage.total.toLong(), UsageSources.ASSISTANT)
     return result.text ?: "Desculpe, não consegui processar isso."
 }
 

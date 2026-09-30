@@ -154,7 +154,9 @@ import kotlinx.serialization.json.jsonObject
     val activeAgents: Long,
     val maxActiveAgents: Int,
     val runsPerDay: Int,
+    /** Every AI token the company spent this month; [tokenBudget] caps this total. */
     val tokensThisMonth: Long,
+    val agentTokensThisMonth: Long,
     val tokenBudget: Long,
 )
 

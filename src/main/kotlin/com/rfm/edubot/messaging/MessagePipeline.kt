@@ -5,6 +5,7 @@ import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.ProfileLookupClient
 import com.rfm.edubot.bookings.BookingCallContext
@@ -416,7 +417,7 @@ class MessagePipeline(
             sendCreatedDocuments(user.waId, createdDocuments, responder)
 
             conversations.bumpActivity(conversation.id, tokenUsage)
-            tokenUsage?.let { tenantUsage?.recordUsage((it.prompt + it.completion).toLong()) }
+            tokenUsage?.let { tenantUsage?.recordUsage((it.prompt + it.completion).toLong(), UsageSources.PIPELINE) }
 
             deduplicationService.markProcessed(inbound.eventId)
 

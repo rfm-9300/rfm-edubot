@@ -722,7 +722,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         defaultAutonomy: 'Agentes novos, antes de agir', expiry: 'As aprovações expiram após (dias)',
         quiet: 'Não enviar mensagens a clientes entre', businessDays: 'Só enviar mensagens a clientes em dias úteis',
         dailyCap: 'Mensagens por cliente por dia', weeklyCap: 'Mensagens por cliente por semana',
-        saved: 'Definições guardadas', usage: 'Utilização e limites', activeAgents: 'Agentes ativos', runsToday: 'Execuções hoje', emails: 'Emails por dia', tokens: 'Tokens de IA este mês',
+        saved: 'Definições guardadas', usage: 'Utilização e limites', activeAgents: 'Agentes ativos', runsToday: 'Execuções hoje', emails: 'Emails por dia', tokens: 'Tokens de IA este mês', agentTokens: 'Usados por agentes',
         limitsHint: 'Os limites são definidos pela plataforma. Contacte o suporte para os alterar.',
       },
       runStatus: { QUEUED: 'Em fila', RUNNING: 'Em execução', WAITING: 'Em espera', AWAITING_APPROVAL: 'A aguardar aprovação', SUCCEEDED: 'Concluída', FAILED: 'Falhou', CANCELLED: 'Cancelada', SKIPPED: 'Ignorada', NEEDS_REVIEW: 'Precisa de revisão' },

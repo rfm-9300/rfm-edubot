@@ -19,6 +19,7 @@ import com.rfm.edubot.agents.runtime.StartResult
 import com.rfm.edubot.agents.store.AgentJson
 import com.rfm.edubot.agents.templates.AgentTemplates
 import com.rfm.edubot.agents.templates.TemplateBuild
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.DashboardAccessPolicy
 import com.rfm.edubot.dashboard.DashboardContext
@@ -491,6 +492,7 @@ private suspend fun settingsDto(agents: AgentsModule, ctx: DashboardContext): Ag
     val tenantId = ctx.tenant.id
     val settings = agents.settings.get(tenantId)
     val now = agents.services.clock()
+    val usage = agents.services.usage(ctx.tenant)
     return AgentSettingsDto(
         company = AgentJson.json.encodeToJsonElement(CompanyAgentSettings.serializer(), settings.company).jsonObject,
         platform = AgentJson.json.encodeToJsonElement(PlatformAgentLimits.serializer(), settings.platform).jsonObject,
@@ -499,7 +501,8 @@ private suspend fun settingsDto(agents: AgentsModule, ctx: DashboardContext): Ag
             activeAgents = agents.agents.countActive(tenantId),
             maxActiveAgents = settings.platform.maxActiveAgents,
             runsPerDay = settings.platform.runsPerDay,
-            tokensThisMonth = agents.services.usage(ctx.tenant).tokensUsedThisMonth(),
+            tokensThisMonth = usage.tokensUsedThisMonth(),
+            agentTokensThisMonth = usage.tokensBySourceThisMonth()[UsageSources.AGENTS] ?: 0L,
             tokenBudget = ctx.tenant.monthlyTokenBudget,
         ),
         canManage = ctx.canManageAgents(),

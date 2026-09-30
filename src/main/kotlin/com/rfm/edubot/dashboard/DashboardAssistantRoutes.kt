@@ -1,6 +1,8 @@
 package com.rfm.edubot.dashboard
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.persistence.MongoModule
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -18,7 +20,11 @@ internal fun Route.dashboardAssistantRoutes(
     mongo: MongoModule,
     aiClient: AiClient,
 ) {
-    val service = DashboardAssistantService(mongo, aiClient)
+    val service = DashboardAssistantService(
+        mongo,
+        aiClient,
+        onUsage = { tenant, usage -> TenantUsageRepository(mongo, tenant.id).recordUsage(usage.total.toLong(), UsageSources.ASSISTANT) },
+    )
 
     route("/assistant") {
         get("/threads") {

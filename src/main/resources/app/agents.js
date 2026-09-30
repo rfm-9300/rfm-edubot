@@ -1849,6 +1849,7 @@
           <div><dt>${esc(tr('settings.runsToday'))}</dt><dd>${num.format(u.runsToday || 0)} / ${num.format(u.runsPerDay || p.runsPerDay || 0)}</dd></div>
           <div><dt>${esc(tr('settings.emails'))}</dt><dd>${num.format(p.emailSendsPerDay || 0)}</dd></div>
           <div><dt>${esc(tr('settings.tokens'))}</dt><dd>${num.format(u.tokensThisMonth || 0)}${u.tokenBudget ? ` / ${num.format(u.tokenBudget)}` : ''}</dd></div>
+          <div><dt>${esc(tr('settings.agentTokens'))}</dt><dd>${num.format(u.agentTokensThisMonth || 0)}</dd></div>
         </dl><p class="hint">${esc(tr('settings.limitsHint'))}</p></div></section>
     </div>`;
     const form = $('#agents-settings-form', pane);
