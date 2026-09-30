@@ -8,6 +8,10 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.testing.TestMongo
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -16,6 +20,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.hours
@@ -97,6 +102,26 @@ class IntegrationConnectionRepositoryTest {
         connect(ObjectId(), email)
         connect(ObjectId(), email.uppercase())
         assertEquals(2, connections.countForAccount(IntegrationProviders.GOOGLE, email))
+    }
+
+    @Test
+    fun `an account's daily allowance is claimed atomically and starts over each day`(): Unit = runBlocking {
+        val connection = connect(ObjectId(), "envios@example.pt")
+        val claims = coroutineScope { (1..12).map { async(Dispatchers.IO) { connections.claimSend(connection.id, "2026-09-30", 5) } }.awaitAll() }
+        assertEquals(5, claims.count { it }, "never more than the allowance, however many race for it")
+        assertEquals(5, connections.findById(connection.id)!!.sentOn("2026-09-30"))
+
+        connections.releaseSend(connection.id, "2026-09-30")
+        assertTrue(connections.claimSend(connection.id, "2026-09-30", 5), "a send given back can be used again")
+        assertFalse(connections.claimSend(connection.id, "2026-09-30", 5))
+
+        assertTrue(connections.claimSend(connection.id, "2026-10-01", 5))
+        val nextDay = connections.findById(connection.id)!!
+        assertEquals(1, nextDay.sentOn("2026-10-01"))
+        assertEquals(0, nextDay.sentOn("2026-09-30"))
+        connections.releaseSend(connection.id, "2026-09-30")
+        assertEquals(1, connections.findById(connection.id)!!.sentOn("2026-10-01"), "yesterday's release leaves today alone")
+        assertFalse(connections.claimSend(connection.id, "2026-10-01", 0), "an allowance of zero sends nothing")
     }
 
     @Test

@@ -38,6 +38,13 @@ data class IntegrationConnection(
     val isDefault: Boolean = false,
     /** Why the connection stopped working, e.g. `invalid_grant`. */
     val lastError: String? = null,
+    val dailySends: DailySends? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
-)
+) {
+    /** Emails sent from the account on [day] (the company's date, `yyyy-mm-dd`). */
+    fun sentOn(day: String): Int = dailySends?.takeIf { it.day == day }?.count ?: 0
+}
+
+/** How many emails went out from the account on [day], for the company's daily cap. */
+data class DailySends(val day: String, val count: Int)

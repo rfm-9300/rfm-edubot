@@ -14,6 +14,7 @@ class GoogleIntegration(
     val oauth: GoogleOAuthClient,
     val connections: IntegrationConnectionRepository,
     val tokens: GoogleTokenProvider,
+    val gmail: GmailClient,
 ) {
     val config: AppConfig.GoogleConfig get() = configProvider()
 
@@ -30,7 +31,8 @@ class GoogleIntegration(
         ): GoogleIntegration {
             val connections = IntegrationConnectionRepository(mongo)
             val oauth = GoogleOAuthClient(configProvider, httpClient)
-            return GoogleIntegration(configProvider, cipher, oauth, connections, GoogleTokenProvider(connections, oauth, cipher, notifications))
+            val tokens = GoogleTokenProvider(connections, oauth, cipher, notifications)
+            return GoogleIntegration(configProvider, cipher, oauth, connections, tokens, GmailClient(httpClient))
         }
     }
 }

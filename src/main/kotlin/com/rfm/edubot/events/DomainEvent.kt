@@ -21,7 +21,7 @@ data class Actor(
     }
 }
 
-/** The record an event is about. [id] is an ObjectId hex for CRM rows, or a provider id (Instagram comment, Gmail message). */
+/** The record an event is about. [id] is an ObjectId hex for CRM rows and stored emails, or a provider id (Instagram comment). */
 data class SubjectRef(val type: String, val id: String) {
     companion object {
         fun of(type: String, id: ObjectId) = SubjectRef(type, id.toHexString())

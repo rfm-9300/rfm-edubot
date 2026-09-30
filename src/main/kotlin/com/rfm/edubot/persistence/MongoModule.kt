@@ -170,6 +170,11 @@ class MongoModule(config: AppConfig.MongoConfig) {
             integrationConnections.createIndex(Document("tenantId", 1).append("provider", 1).append("accountEmail", 1), IndexOptions().unique(true))
             integrationConnections.createIndex(Document("provider", 1).append("status", 1))
 
+            val emailMessages = db.getCollection<Document>("email_messages")
+            emailMessages.createIndex(Document("tenantId", 1).append("connectionId", 1).append("providerMessageId", 1), IndexOptions().unique(true))
+            emailMessages.createIndex(Document("tenantId", 1).append("clientId", 1).append("date", -1))
+            emailMessages.createIndex(Document("tenantId", 1).append("threadId", 1))
+
             val crmInvoices = db.getCollection<Document>("crm.invoices")
             crmInvoices.dropIndexIfExists("number_1")
             crmInvoices.createIndex(Document("tenantId", 1).append("clientId", 1))

@@ -125,6 +125,37 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
         collection.updateOne(Filters.eq("_id", id), Updates.combine(updates))
     }
 
+    /** Gmail refused the stored access token before it was due to expire: the next use refreshes it. */
+    suspend fun expireAccessToken(id: ObjectId) {
+        collection.updateOne(Filters.eq("_id", id), Updates.set("accessTokenExpiresAt", Instant.fromEpochMilliseconds(0).toDate()))
+    }
+
+    /**
+     * Takes one send from the account's allowance for [day]; false once [cap] were used. The counter
+     * starts over on a new day; two first sends of a day race safely, the loser counts on the winner's.
+     */
+    suspend fun claimSend(id: ObjectId, day: String, cap: Int): Boolean {
+        if (cap <= 0) return false
+        suspend fun sameDay() = collection.updateOne(
+            Filters.and(Filters.eq("_id", id), Filters.eq("dailySends.day", day), Filters.lt("dailySends.count", cap)),
+            Updates.inc("dailySends.count", 1),
+        ).modifiedCount > 0
+        if (sameDay()) return true
+        val started = collection.updateOne(
+            Filters.and(Filters.eq("_id", id), Filters.ne("dailySends.day", day)),
+            Updates.set("dailySends", Document("day", day).append("count", 1)),
+        ).modifiedCount > 0
+        return started || sameDay()
+    }
+
+    /** Gives back a send claimed with [claimSend] that didn't go out. */
+    suspend fun releaseSend(id: ObjectId, day: String) {
+        collection.updateOne(
+            Filters.and(Filters.eq("_id", id), Filters.eq("dailySends.day", day), Filters.gt("dailySends.count", 0)),
+            Updates.inc("dailySends.count", -1),
+        )
+    }
+
     /** False when the connection wasn't active any more, so whoever flips it first is the one who tells people. */
     suspend fun markNeedsReconnect(id: ObjectId, reason: String): Boolean =
         collection.updateOne(
@@ -148,6 +179,7 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
 
     private fun Document.toConnection(): IntegrationConnection {
         val settings = get("settings", Document::class.java)
+        val sends = get("dailySends", Document::class.java)
         return IntegrationConnection(
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
@@ -167,6 +199,7 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
             ),
             isDefault = getBoolean("isDefault", false),
             lastError = getString("lastError"),
+            dailySends = sends?.getString("day")?.let { DailySends(it, sends.getInteger("count") ?: 0) },
             createdAt = instant("createdAt") ?: Instant.fromEpochMilliseconds(0),
             updatedAt = instant("updatedAt") ?: Instant.fromEpochMilliseconds(0),
         )

@@ -73,7 +73,8 @@ class GoogleTokenProvider(
         return connection.accessToken?.let(cipher::open)
     }
 
-    private suspend fun needsReconnect(connection: IntegrationConnection, reason: String): Token {
+    /** The connection needs a person to reconnect it; its admins hear about it once. */
+    suspend fun needsReconnect(connection: IntegrationConnection, reason: String): Token {
         if (connections.markNeedsReconnect(connection.id, reason)) {
             log.warn("Google connection needs a reconnect: tenant={} connection={} reason={}", connection.tenantId, connection.id, reason)
             runCatching {

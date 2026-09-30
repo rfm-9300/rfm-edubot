@@ -24,8 +24,12 @@ data class OutgoingEmail(
 )
 
 sealed class EmailSendResult {
-    data class Sent(val messageId: String, val threadId: String?, val from: String) : EmailSendResult()
-    /** [key] is a dashboard error key: no_email_account, daily_send_limit, needs_reconnect, send_failed… */
+    /** [messageId] is Gmail's id; [alreadySent] when the idempotency key had gone out before and nothing was sent now. */
+    data class Sent(val messageId: String, val threadId: String?, val from: String, val alreadySent: Boolean = false) : EmailSendResult()
+    /**
+     * [key] is a dashboard error key: no_email_account, needs_reconnect, invalid_recipient, too_many_recipients,
+     * invalid_message, message_too_large, daily_send_limit, rate_limited, send_in_doubt or send_failed.
+     */
     data class Failed(val key: String, val detail: String? = null, val retryable: Boolean = false) : EmailSendResult()
 }
 
