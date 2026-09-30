@@ -66,11 +66,14 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
     suspend fun deleteForConnection(tenantId: ObjectId, connectionId: ObjectId): Long =
         collection.deleteMany(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("connectionId", connectionId))).deletedCount
 
-    /** Drops the bodies of emails dated before [before]; subject, addresses and snippet stay. */
+    /**
+     * Drops the text of emails dated before [before], the snippet included (it is the text's start);
+     * subject, addresses and attachment names stay as the record of what was sent.
+     */
     suspend fun purgeBodies(before: Instant): Long =
         collection.updateMany(
-            Filters.and(Filters.lt("date", before.toDate()), Filters.exists("bodyText", true)),
-            Updates.combine(Updates.unset("bodyText"), Updates.set("bodyPurgedAt", clock().toDate())),
+            Filters.and(Filters.eq("bodyPurgedAt", null), Filters.lt("date", before.toDate())),
+            Updates.combine(Updates.unset("bodyText"), Updates.set("snippet", ""), Updates.set("bodyPurgedAt", clock().toDate())),
         ).modifiedCount
 
     private fun EmailMessage.toDocument() = Document("_id", id)

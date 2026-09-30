@@ -174,6 +174,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             emailMessages.createIndex(Document("tenantId", 1).append("connectionId", 1).append("providerMessageId", 1), IndexOptions().unique(true))
             emailMessages.createIndex(Document("tenantId", 1).append("clientId", 1).append("date", -1))
             emailMessages.createIndex(Document("tenantId", 1).append("threadId", 1))
+            emailMessages.createIndex(Document("bodyPurgedAt", 1).append("date", 1))
 
             val crmInvoices = db.getCollection<Document>("crm.invoices")
             crmInvoices.dropIndexIfExists("number_1")

@@ -42,6 +42,7 @@ import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.TokenCipher
 import com.rfm.edubot.integrations.email.EmailMessageRepository
+import com.rfm.edubot.integrations.email.EmailRetention
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.email.emailRoutes
 import com.rfm.edubot.integrations.google.GoogleIntegration
@@ -200,6 +201,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         events = DomainEventLog(mongoModule),
         agentSettings = AgentSettingsRepository(mongoModule),
     )
+    EmailRetention(EmailMessageRepository(mongoModule)).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
 
     val agentServices = AgentServices(
         mongo = mongoModule,
