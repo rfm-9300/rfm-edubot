@@ -787,12 +787,14 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 | `.builder` > `section.panel.builder__section` · `.sel--inline` | Builder drawer sections (When, Only if, Steps, Stop rules, Rules, Voice); "Add …" selects are inline, not full width |
 | `.var-tools` (`__select`) · `.var-chip` (`--static`) | Suggested `{{variables}}` as mono chips under a template field, plus a grouped select; `--static` shows a variable inside read-only text |
 | `.conds` > `.cond-row` (`--exit`) | Condition rows: field · operator · value · remove `.iconbtn`; with two or more, a `.sel--inline` match select sits on top |
-| `.chip-picks` | Multi-select chips (weekdays, statuses); picked = `.chip.is-on` + `aria-pressed` |
+| `.chip-picks` | Multi-select chips (weekdays, statuses, an AI task's actions); picked = `.chip.is-on` + `aria-pressed` |
+| `.ai-outputs` > `.ai-output` (`__desc` `__options`) | An AI task's fields to return, one row each: mono name, type select, what it should contain, remove `.iconbtn` (not on the last row), and a full-width options input under a choice. On narrow screens the description drops to its own line. A ghost "Add a field" button ends the list |
+| `.persona-agents` | Persona page panel: a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
 | `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
 | `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing |
 | `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
 
-Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list.
+Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list. An AI task's fields are named by the user: their labels come from `app.agents.outputs.<name>` when there is one (summary, intent…), else the name as typed. Field names are normalized on change (accents dropped, anything else becomes `_`) so they stay usable as `{{steps.<id>.output.<name>}}`.
 
 ## Utilities
 
