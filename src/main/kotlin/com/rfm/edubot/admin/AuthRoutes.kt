@@ -39,7 +39,13 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantReposi
         jwt("admin-jwt") {
             verifier(dynamicVerifier)
             validate { credential ->
-                if (credential.payload.subject == "admin") JWTPrincipal(credential.payload) else null
+                // A Google session ends as soon as its email leaves the allowlist, not when the token expires.
+                val email = credential.payload.getClaim("email").asString()
+                when {
+                    credential.payload.subject != "admin" -> null
+                    email != null && email.lowercase() !in runtime.get().admin.googleSignIn.allowedEmails -> null
+                    else -> JWTPrincipal(credential.payload)
+                }
             }
         }
         jwt("dashboard") {

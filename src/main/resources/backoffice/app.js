@@ -198,6 +198,16 @@ async function loadAll() {
   state.tenants = tenants;
   state.whatsAppSignup = whatsAppSignup;
   state.stats = await statsFor(state.tenants.filter(t => t.status !== 'DELETED' || state.filter === 'DELETED'));
+  renderSidebarStats();
+}
+
+// The sidebar's tenant count and KPIs show on every view, not only Tenants.
+function renderSidebarStats() {
+  const live = state.tenants.filter(t => t.status !== 'DELETED');
+  $('#tenant-count').textContent = live.length;
+  $('#kpi-active').textContent = state.tenants.filter(t => t.status === 'ACTIVE').length;
+  $('#kpi-messages').textContent = live.reduce((sum, t) => sum + Number(state.stats[t.slug]?.messages || 0), 0);
+  $('#meta-clock').textContent = new Date().toLocaleString(I18N.locale(), { hour: '2-digit', minute: '2-digit' });
 }
 
 async function statsFor(tenants) {
@@ -226,18 +236,232 @@ async function loadPlatformSettings() {
   applyPlatformSettingsPayload(payload);
 }
 
+const VIEWS = ['tenants', 'admins', 'backups', 'settings'];
+
 function setView(view) {
-  currentView = view === 'settings' ? 'settings' : 'tenants';
+  currentView = VIEWS.includes(view) ? view : 'tenants';
+  stopBackupPolling();
   if (location.hash !== `#${currentView}`) location.hash = currentView;
   $$('.nav__item').forEach(a => a.classList.toggle('is-active', a.dataset.view === currentView));
   const leaf = $('.crumb__leaf');
-  if (leaf) leaf.textContent = currentView === 'settings' ? T.platformSettings.nav : T.heroTitle;
+  if (leaf) leaf.textContent = { settings: T.platformSettings.nav, admins: T.admins.nav, backups: T.backups.nav }[currentView] || T.heroTitle;
   const search = $('.topbar__search');
   if (search) search.hidden = currentView !== 'tenants';
   const btnNew = $('#btn-new');
   if (btnNew) btnNew.hidden = currentView !== 'tenants';
   if (currentView === 'settings') renderPlatformSettings();
+  else if (currentView === 'admins') renderAdmins();
+  else if (currentView === 'backups') renderBackups();
   else renderTenants();
+}
+
+const loadErrorHtml = e => `<div class="empty"><p class="empty__title">${escapeHTML(T.loadError)}</p><p class="empty__desc">${escapeHTML(e.message)}</p></div>`;
+
+// ── Admins: who may sign in with Google (the server's ADMIN_EMAILS plus the ones added here) ──
+
+async function renderAdmins() {
+  const A = T.admins;
+  let data;
+  try {
+    data = await api('/admin/api/admins');
+  } catch (e) {
+    if (currentView === 'admins') $('#view').innerHTML = loadErrorHtml(e);
+    return;
+  }
+  if (currentView !== 'admins') return;
+  $('#view').innerHTML = `
+    <div class="view__hero"><div><h1 class="view__title">${escapeHTML(A.title)}</h1><p class="view__desc">${escapeHTML(A.desc)}</p></div></div>
+    <div class="settings-stack">
+      ${data.googleReady ? '' : `<p class="hint hint--warn">${escapeHTML(A.googleNotReady)}</p>`}
+      <div class="panel">
+        <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.listTitle)} <span class="tag">${data.admins.length}</span></h2></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+          <th>${escapeHTML(A.thEmail)}</th><th>${escapeHTML(A.thSource)}</th><th>${escapeHTML(A.thAdded)}</th><th class="right">${escapeHTML(T.thActions)}</th>
+        </tr></thead><tbody>${data.admins.map(a => adminRowHtml(a, data.me)).join('')}</tbody></table></div>
+      </div>
+      <div class="panel">
+        <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.addTitle)}</h2></div>
+        <div class="panel__body">
+          <form class="form" id="admin-form" novalidate>
+            <div class="form__row"><label class="lbl" for="admin-email">${escapeHTML(A.emailLabel)}</label><input class="inp" id="admin-email" type="email" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(A.emailPlaceholder)}" /></div>
+            <p class="hint">${escapeHTML(A.addHint)}</p>
+            <div class="actions"><button class="btn btn--primary" type="submit">${escapeHTML(A.add)}</button></div>
+          </form>
+        </div>
+      </div>
+    </div>`;
+  bindAdmins();
+}
+
+function adminRowHtml(a, me) {
+  const A = T.admins;
+  const self = !!me && a.email === me.toLowerCase();
+  const fromEnv = a.source === 'env';
+  const action = fromEnv ? `<span class="muted">${escapeHTML(A.envLocked)}</span>`
+    : self ? '' : `<button class="btn btn--sm btn--ghost" type="button" data-remove-admin="${escapeHTML(a.email)}">${escapeHTML(A.remove)}</button>`;
+  return `<tr>
+    <td class="name">${escapeHTML(a.email)}${self ? `<span class="muted"> · ${escapeHTML(A.you)}</span>` : ''}</td>
+    <td><span class="pill ${fromEnv ? 'pill--info' : 'pill--accent'}">${escapeHTML(fromEnv ? A.sourceEnv : A.sourceBackoffice)}</span></td>
+    <td class="muted">${a.addedAt ? escapeHTML(A.addedBy({ date: fmtDate(a.addedAt), by: a.addedBy })) : '—'}</td>
+    <td class="right">${action}</td>
+  </tr>`;
+}
+
+function adminErrorText(err) {
+  const A = T.admins;
+  const messages = { invalid_email: A.invalidEmail, already_allowed: A.alreadyAllowed, from_env: A.fromEnv, cannot_remove_self: A.cannotRemoveSelf, not_found: A.notFound };
+  return messages[err.code] || T.error({ msg: err.message });
+}
+
+function bindAdmins() {
+  const A = T.admins;
+  const form = $('#admin-form');
+  form?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const input = $('#admin-email', form);
+    const email = input.value.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast(A.invalidEmail); input.focus(); return; }
+    if (!await confirmDialog({ title: A.addConfirmTitle, body: A.addConfirmBody({ email }), okLabel: A.add, danger: false })) return;
+    const button = $('button[type=submit]', form);
+    button.disabled = true;
+    try {
+      await api('/admin/api/admins', { method: 'POST', body: JSON.stringify({ email }) });
+      toast(A.added({ email }));
+      await renderAdmins();
+      $('#admin-email')?.focus();
+    } catch (err) {
+      toast(adminErrorText(err));
+      button.disabled = false;
+    }
+  });
+  $$('[data-remove-admin]').forEach(b => b.addEventListener('click', async () => {
+    const email = b.dataset.removeAdmin;
+    if (!await confirmDialog({ title: A.removeConfirmTitle, body: A.removeConfirmBody({ email }), okLabel: A.remove })) return;
+    try {
+      await api(`/admin/api/admins/${encodeURIComponent(email)}`, { method: 'DELETE' });
+      toast(A.removed({ email }));
+    } catch (err) {
+      toast(adminErrorText(err));
+    }
+    renderAdmins();
+  }));
+}
+
+// ── Backups: the server's archives, and a manual backup the host's runner picks up within a minute ──
+
+const BACKUP_POLL_MS = 4000;
+const BACKUP_STATE_PILLS = { requested: 'pill--warn', running: 'pill--info', succeeded: 'pill--ok', failed: 'pill--bad', stalled: 'pill--bad' };
+let backupPoll = null;
+// requestedAt of a run seen waiting or running on this page, so its outcome is announced once.
+let watchedBackup = null;
+
+function stopBackupPolling() {
+  clearTimeout(backupPoll);
+  backupPoll = null;
+}
+
+async function renderBackups() {
+  stopBackupPolling();
+  const B = T.backups;
+  let data;
+  try {
+    data = await api('/admin/api/backups');
+  } catch (e) {
+    if (currentView === 'backups') $('#view').innerHTML = loadErrorHtml(e);
+    return;
+  }
+  if (currentView !== 'backups') return;
+  const run = data.current;
+  const busy = !!run && (run.state === 'requested' || run.state === 'running');
+  announceBackupOutcome(run);
+  const hero = `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(B.title)}</h1><p class="view__desc">${escapeHTML(B.desc)}</p></div>
+    ${data.available ? `<div class="row"><button class="btn btn--primary" type="button" id="backup-now" ${busy ? 'disabled' : ''}>${escapeHTML(busy ? B.inProgress : B.backupNow)}</button></div>` : ''}</div>`;
+  if (!data.available) {
+    $('#view').innerHTML = `${hero}<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(B.unavailableTitle)}</p><p class="empty__desc">${escapeHTML(B.unavailableDesc)}</p></div></div>`;
+    return;
+  }
+  $('#view').innerHTML = `${hero}
+    <div class="settings-stack">
+      ${runnerNoticeHtml(data.runner)}
+      ${run ? backupRunHtml(run) : ''}
+      <div class="panel">
+        <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.listTitle)} <span class="tag">${data.archives.length}</span></h2></div>
+        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+          <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
+        </tr></thead><tbody>
+        ${data.archives.length ? data.archives.map(backupArchiveRowHtml).join('')
+          : `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(B.emptyTitle)}</p><p class="empty__desc">${escapeHTML(B.emptyDesc)}</p></div></td></tr>`}
+        </tbody></table></div>
+      </div>
+    </div>`;
+  $('#backup-now')?.addEventListener('click', requestBackup);
+  if (busy) backupPoll = setTimeout(() => { if (currentView === 'backups') renderBackups(); }, BACKUP_POLL_MS);
+}
+
+function announceBackupOutcome(run) {
+  if (run && (run.state === 'requested' || run.state === 'running')) {
+    watchedBackup = run.requestedAt;
+    return;
+  }
+  if (watchedBackup && run?.requestedAt === watchedBackup && (run.state === 'succeeded' || run.state === 'failed')) {
+    toast(run.state === 'succeeded' ? T.backups.doneToast : T.backups.failedToast);
+  }
+  watchedBackup = null;
+}
+
+function runnerNoticeHtml(runner) {
+  if (runner?.online) return '';
+  const text = runner?.lastSeenAt ? T.backups.runnerOffline({ at: fmtDate(runner.lastSeenAt) }) : T.backups.runnerMissing;
+  return `<p class="hint hint--warn">${escapeHTML(text)}</p>`;
+}
+
+function backupRunHtml(run) {
+  const B = T.backups;
+  const by = run.requestedBy || '';
+  const lines = {
+    requested: () => B.requestedLine({ at: fmtDate(run.requestedAt), by }),
+    running: () => B.runningLine({ at: fmtDate(run.startedAt), by }),
+    succeeded: () => B.succeededLine({ at: fmtDate(run.finishedAt), archive: run.archive || '—' }),
+    failed: () => B.failedLine({ at: fmtDate(run.finishedAt) }),
+    stalled: () => B.stalledLine({ at: fmtDate(run.startedAt) }),
+  };
+  return `<div class="panel">
+    <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.lastTitle)}</h2><span class="pill ${BACKUP_STATE_PILLS[run.state] || 'pill--info'}">${escapeHTML(B.state[run.state] || run.state)}</span></div>
+    <div class="panel__body">
+      <p class="hint">${escapeHTML(lines[run.state]?.() || '')}</p>
+      ${run.state === 'failed' && run.log ? `<pre class="log-tail">${escapeHTML(run.log)}</pre>` : ''}
+    </div>
+  </div>`;
+}
+
+function backupArchiveRowHtml(a) {
+  return `<tr>
+    <td>${escapeHTML(fmtDate(a.createdAt))}</td>
+    <td class="id">${escapeHTML(a.name)}</td>
+    <td class="num">${escapeHTML(formatBytes(a.sizeBytes))}</td>
+    <td>${a.uploaded ? `<span class="pill pill--ok">${escapeHTML(T.backups.copied)}</span>` : `<span class="muted">${escapeHTML(T.backups.notCopied)}</span>`}</td>
+  </tr>`;
+}
+
+function formatBytes(bytes) {
+  const units = ['byte', 'kilobyte', 'megabyte', 'gigabyte'];
+  let value = Number(bytes) || 0;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return new Intl.NumberFormat(I18N.locale(), { style: 'unit', unit: units[unit], unitDisplay: 'short', maximumFractionDigits: unit === 0 ? 0 : 1 }).format(value);
+}
+
+async function requestBackup() {
+  const B = T.backups;
+  const button = $('#backup-now');
+  if (button) button.disabled = true;
+  try {
+    await api('/admin/api/backups', { method: 'POST' });
+    toast(B.requestedToast);
+  } catch (e) {
+    toast(e.code === 'backup_in_progress' ? B.busy : e.code === 'backups_unavailable' ? B.unavailableTitle : T.error({ msg: e.message }));
+  }
+  renderBackups();
 }
 
 function categoryLabel(category) {
@@ -411,11 +635,7 @@ function renderTenants() {
   const rows = matching
     .filter(t => inStatusFilter(t, state.filter))
     .sort((a, b) => (group(a) - group(b)) || (Boolean(a.parentTenantId) - Boolean(b.parentTenantId)) || (order.get(a.id) - order.get(b.id)));
-  const live = state.tenants.filter(t => t.status !== 'DELETED');
-  $('#tenant-count').textContent = live.length;
-  $('#kpi-active').textContent = state.tenants.filter(t => t.status === 'ACTIVE').length;
-  $('#kpi-messages').textContent = live.reduce((sum, t) => sum + Number(state.stats[t.slug]?.messages || 0), 0);
-  $('#meta-clock').textContent = new Date().toLocaleString(I18N.locale(), { hour: '2-digit', minute: '2-digit' });
+  renderSidebarStats();
   $('#view').innerHTML = `
     <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
     <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2>

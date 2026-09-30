@@ -13,7 +13,17 @@ data class AppConfig(
     val rateLimit: RateLimitConfig,
     val admin: AdminConfig,
     val pdfStoragePath: String,
+    val backups: BackupConfig = BackupConfig(),
 ) {
+    /**
+     * Where the host's backup archives and the backup runner's control files are mounted in the app
+     * container (docker-compose.prod.yml). Blank = the backoffice says backups aren't set up here.
+     */
+    data class BackupConfig(
+        val archiveDir: String = "",
+        val controlDir: String = "",
+    )
+
     data class WhatsAppConfig(
         val verifyToken: String,
         val appSecret: String,
@@ -164,6 +174,10 @@ data class AppConfig(
                 rateLimit = rateLimitConfig,
                 admin = adminConfig,
                 pdfStoragePath = config.getString("app.pdf.storagePath"),
+                backups = BackupConfig(
+                    archiveDir = getOptional(config, "app.backups.archiveDir").trim(),
+                    controlDir = getOptional(config, "app.backups.controlDir").trim(),
+                ),
             )
         }
 

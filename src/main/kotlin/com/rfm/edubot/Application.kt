@@ -1,8 +1,13 @@
 package com.rfm.edubot
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.admin.AdminAccess
+import com.rfm.edubot.admin.AdminEmailRepository
+import com.rfm.edubot.admin.BackupControl
+import com.rfm.edubot.admin.adminAccessRoutes
 import com.rfm.edubot.admin.adminRoutes
 import com.rfm.edubot.admin.authRoutes
+import com.rfm.edubot.admin.backupRoutes
 import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.admin.platformSettingsRoutes
@@ -199,6 +204,9 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     configureSerialization()
     configureStatusPages()
     configureWebSockets()
+    val adminAccess = AdminAccess(AdminEmailRepository(mongoModule), runtimeConfig)
+    kotlinx.coroutines.runBlocking { adminAccess.initialize() }
+    val backupControl = BackupControl(appConfig.backups.archiveDir, appConfig.backups.controlDir)
     configureAdminAuth(runtimeConfig, tenantRepository, dashboardUserRepository)
 
     routing {
@@ -231,6 +239,8 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         )
         authRoutes(runtimeConfig)
         platformSettingsRoutes(platformSettingsService)
+        adminAccessRoutes(adminAccess, runtimeConfig)
+        backupRoutes(backupControl)
         backofficeRoutes()
         dashboardStaticRoutes()
         dashboardRoutes(

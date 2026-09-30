@@ -24,6 +24,15 @@ RCLONE_REMOTE="${RCLONE_REMOTE:-}"
 cd "$APP_DIR"
 mkdir -p "$BACKUP_DIR"
 
+# One backup at a time: the nightly cron and a backoffice request (backup-runner.sh) can start together.
+if command -v flock >/dev/null 2>&1; then
+  exec 9>"$APP_DIR/.backup.lock"
+  if ! flock -w 1800 9; then
+    echo "[backup-mongo] ERROR: another backup held the lock for 30 minutes, giving up" >&2
+    exit 1
+  fi
+fi
+
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
 archive="$BACKUP_DIR/mongo-${timestamp}.archive.gz"
 tmp_archive="${archive}.tmp"
@@ -40,11 +49,15 @@ fi
 
 mv "$tmp_archive" "$archive"
 echo "[backup-mongo] OK: $(du -h "$archive" | cut -f1) written"
+# backup-runner.sh reads this line to report the archive in the backoffice.
+echo "[backup-mongo] ARCHIVE $(basename "$archive")"
 
 if [[ -n "$RCLONE_REMOTE" ]]; then
   if command -v rclone >/dev/null 2>&1; then
     echo "[backup-mongo] Copying to $RCLONE_REMOTE..."
     rclone copy "$archive" "$RCLONE_REMOTE"
+    # The backoffice shows an archive as copied off the VPS when this marker exists.
+    touch "${archive}.uploaded"
   else
     echo "[backup-mongo] WARNING: RCLONE_REMOTE is set but rclone is not installed; skipping off-box copy" >&2
   fi
@@ -52,5 +65,6 @@ fi
 
 echo "[backup-mongo] Pruning local backups older than ${RETENTION_DAYS} days..."
 find "$BACKUP_DIR" -name 'mongo-*.archive.gz' -mtime "+${RETENTION_DAYS}" -print -delete
+find "$BACKUP_DIR" -name 'mongo-*.archive.gz.uploaded' -mtime "+${RETENTION_DAYS}" -delete
 
 echo "[backup-mongo] Done."

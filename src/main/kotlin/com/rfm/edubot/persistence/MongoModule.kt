@@ -36,6 +36,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "crm.sequences",
                 "crm.standard_items",
                 "tenant_usage",
+                "admin_emails",
             ).forEach { name -> try { db.createCollection(name) } catch (_: Exception) {} }
 
             val tenants = db.getCollection<Document>("tenants")
@@ -54,6 +55,8 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 IndexOptions().unique(true).partialFilterExpression(Document("googleUid", Document("\$type", "string"))),
             )
             dashboardUsers.createIndex(Document("tenantId", 1))
+
+            db.getCollection<Document>("admin_emails").createIndex(Document("email", 1), IndexOptions().unique(true))
 
             val tenantPersona = db.getCollection<Document>("tenant_persona")
             tenantPersona.createIndex(Document("tenantId", 1), IndexOptions().unique(true))

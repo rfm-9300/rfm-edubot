@@ -8,8 +8,13 @@ services:
       MONGO_URI: mongodb://mongo:27017
       PORT: "8080"
       PDF_STORAGE_PATH: /data/pdfs
+      BACKUP_ARCHIVE_DIR: /backups
+      BACKUP_CONTROL_DIR: /backup-control
     volumes:
       - pdf_data:/data/pdfs
+      # backup-mongo.sh's archives, read-only, and backup-runner.sh's request/status files (Backups page).
+      - ./backups:/backups:ro
+      - ./backup-control:/backup-control
     restart: always
     depends_on:
       - mongo

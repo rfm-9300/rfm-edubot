@@ -132,10 +132,10 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p ~/whatsapp-bot"
           scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            docker-compose.prod.yml scripts/remote-deploy.sh scripts/backup-mongo.sh scripts/restore-mongo.sh scripts/healthcheck-alert.sh \
+            docker-compose.prod.yml scripts/remote-deploy.sh scripts/backup-mongo.sh scripts/backup-runner.sh scripts/restore-mongo.sh scripts/healthcheck-alert.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:~/whatsapp-bot/"
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh ~/whatsapp-bot/backup-mongo.sh ~/whatsapp-bot/restore-mongo.sh ~/whatsapp-bot/healthcheck-alert.sh"
+            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh ~/whatsapp-bot/backup-mongo.sh ~/whatsapp-bot/backup-runner.sh ~/whatsapp-bot/restore-mongo.sh ~/whatsapp-bot/healthcheck-alert.sh"
       - name: Pull and restart app
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}

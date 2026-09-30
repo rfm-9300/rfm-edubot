@@ -741,6 +741,15 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 </div>
 ```
 
+## Log tail
+
+```html
+<pre class="log-tail">[backup-mongo] Dumping…
+open no-such-compose.yml: no such file or directory</pre>
+```
+
+The end of a script's output (the backoffice's failed backup), monospace on `--surface-2`, wraps long lines and scrolls past 280px. Escape the text. Not for anything a user types.
+
 ## Utilities
 
 `.row` `.col` `.muted` `.mono` `.sub` `.right` — use these instead of one-off flex/color classes.

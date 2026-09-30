@@ -293,6 +293,28 @@ scp mongo-<timestamp>.archive.gz hillsong-vps:~/whatsapp-bot/backups/
 ssh hillsong-vps "cd ~/whatsapp-bot && ./restore-mongo.sh backups/mongo-<timestamp>.archive.gz"
 ```
 
+### Manual backups from the backoffice
+
+The backoffice's **Backups** page lists the archives in `~/whatsapp-bot/backups` (mounted read-only
+into the app at `/backups`) and has a **Back up now** button. The app never runs anything on the
+host: the button only writes `request.json` into `~/whatsapp-bot/backup-control` (mounted at
+`/backup-control`), and `backup-runner.sh`, which CI copies next to the other scripts, picks it up
+from cron every minute and runs the same `backup-mongo.sh`, lock included, so it never overlaps the
+nightly run. The page reads the outcome back from that folder (`last.json`, `last.log`) and treats
+the runner as stopped when its `heartbeat` file is more than three minutes old. An archive shows as
+copied off the server when `backup-mongo.sh` left `<archive>.uploaded` after a successful
+`rclone copy`; archives made before that marker existed show "Not recorded".
+
+One-time: add the runner to root's crontab with the nightly job's settings:
+
+```bash
+ssh hillsong-vps "crontab -l > ~/whatsapp-bot/crontab.bak-\$(date -u +%Y%m%dT%H%M%SZ) && (crontab -l; echo '* * * * * cd /root/whatsapp-bot && APP_DIR=/root/whatsapp-bot RCLONE_REMOTE=gcs:thebotslab-backups/mongo ./backup-runner.sh >> /root/whatsapp-bot/backup.log 2>&1') | crontab -"
+```
+
+The runner prints nothing while there is no request, so `backup.log` only grows when a backup runs.
+If the page says the runner isn't installed or stopped checking in, check `crontab -l` and the end
+of `backup.log`; a failed run's output is also in `backup-control/last.log`.
+
 ### Restoring
 
 ```bash
@@ -339,7 +361,10 @@ jobs.
 `/backoffice` (and `/admin`, which redirects there) signs in with Google through
 Firebase Auth, project `thebotslab`. The browser gets a Firebase ID token and posts
 it to `POST /admin/auth/google`; the server checks Google's signature, the project,
-and that the verified email is in `ADMIN_EMAILS`, then issues the usual admin JWT.
+and that the verified email is allowed, then issues the usual admin JWT. Allowed emails are
+`ADMIN_EMAILS` plus the ones added on the backoffice's **Admins** page (Mongo `admin_emails`).
+`ADMIN_EMAILS` stays the break-glass list: the page shows those emails but can't remove them.
+Removing an added email ends that person's session at their next request, not when the token expires.
 
 The tenant dashboard `/app` uses the same Firebase config (no allowlist): `POST /app/auth/google`
 signs a user in with the Google account linked to them, and links it automatically the first time
