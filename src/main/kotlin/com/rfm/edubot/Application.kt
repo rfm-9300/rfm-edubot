@@ -23,6 +23,8 @@ import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.AgentRuntimeConfig
 import com.rfm.edubot.agents.runtime.AgentServices
+import com.rfm.edubot.agents.store.AgentSettingsRepository
+import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
@@ -37,7 +39,10 @@ import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
+import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.email.EmailMessageRepository
+import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
@@ -187,6 +192,13 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         httpClient = whatsappHttpClient,
         notifications = NotificationRepository(mongoModule),
     )
+    val emailService = EmailService(
+        google = google,
+        messages = EmailMessageRepository(mongoModule),
+        outboundLog = OutboundLogRepository(mongoModule),
+        events = DomainEventLog(mongoModule),
+        agentSettings = AgentSettingsRepository(mongoModule),
+    )
 
     val agentServices = AgentServices(
         mongo = mongoModule,
@@ -194,9 +206,15 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         outbound = { tenant, platform -> runCatching { pipelineFactory.responderFor(tenant, platform) }.getOrNull() },
         whatsApp = { pipelineFactory.whatsAppFor(it) },
         instagramSocial = instagramSocial,
+        email = emailService,
         pdfStoragePath = { runtimeConfig.get().pdfStoragePath },
     )
-    val agentsModule = AgentsModule(mongoModule, AgentRegistry(AgentActions.builtIn, TriggerTypes.all), agentServices)
+    val agentsModule = AgentsModule(
+        mongoModule,
+        AgentRegistry(AgentActions.builtIn, TriggerTypes.all),
+        agentServices,
+        emailAvailability = { emailService.availability(it) },
+    )
     val agentRuntime = AgentRuntime(
         module = agentsModule,
         tenants = { id -> tenantRepository.findById(id) },

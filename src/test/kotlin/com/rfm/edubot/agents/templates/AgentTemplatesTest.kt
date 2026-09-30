@@ -118,7 +118,7 @@ class AgentTemplatesTest {
         for (key in AgentTemplates.keys) {
             val agent = built(key, company = trusting)
             assertEquals(Autonomy.AUTO, agent.definition.policy.autonomy, key)
-            agent.definition.steps.filter { it.action == "whatsapp.send" || it.action.startsWith("crm.") }.forEach { step ->
+            agent.definition.steps.filter { it.action == "whatsapp.send" || it.action == "email.send" || it.action.startsWith("crm.") }.forEach { step ->
                 assertEquals(Autonomy.APPROVE, step.autonomy, "$key ${step.id}")
             }
         }
@@ -148,6 +148,8 @@ class AgentTemplatesTest {
         assertEquals("needs_integration:WHATSAPP", reason("invoice_due_reminder"))
         assertFalse(available("daily_agenda"))
         assertEquals("needs_module:bookings", reason("daily_agenda"))
+        assertFalse(available("email_invoice_when_created"))
+        assertEquals("needs_integration:GMAIL", reason("email_invoice_when_created"))
         assertTrue(available("payables_digest"))
         assertTrue(available("weekly_cash_briefing"))
         assertEquals("Payments due this week", entries.getValue("payables_digest")["name"]!!.jsonPrimitive.content)

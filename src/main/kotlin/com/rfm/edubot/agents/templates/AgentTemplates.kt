@@ -58,6 +58,7 @@ object AgentTemplates {
     const val SALES = "sales"
     const val BOOKINGS = "bookings"
     const val INBOX = "inbox"
+    const val EMAIL = "email"
     const val HOUSEKEEPING = "housekeeping"
 
     private val templates: List<AgentTemplate> = listOf(
@@ -338,6 +339,28 @@ object AgentTemplates {
             )
         },
 
+        // Email
+        AgentTemplate(
+            key = "email_quote_when_sent", category = EMAIL, kind = AgentKind.WORKFLOW, icon = "mail", messagesCustomers = true,
+            params = Schema.obj("attachPdf" to Schema.boolean(default = true), autonomyParam),
+        ) {
+            AgentDefinition(
+                triggers = listOf(onEvent(DomainEventTypes.QUOTE_STATUS_CHANGED, toStatus = "SENT")),
+                steps = listOf(email("s1", copy("subject"), copy("message"), attachPdf = if (flag("attachPdf")) "quote" else "none")),
+                policy = policy(),
+            )
+        },
+        AgentTemplate(
+            key = "email_invoice_when_created", category = EMAIL, kind = AgentKind.WORKFLOW, icon = "mail", messagesCustomers = true,
+            params = Schema.obj("attachPdf" to Schema.boolean(default = true), autonomyParam),
+        ) {
+            AgentDefinition(
+                triggers = listOf(onEvent(DomainEventTypes.INVOICE_CREATED)),
+                steps = listOf(email("s1", copy("subject"), copy("message"), attachPdf = if (flag("attachPdf")) "invoice" else "none")),
+                policy = policy(),
+            )
+        },
+
         // Housekeeping
         AgentTemplate(
             key = "weekly_data_check", category = HOUSEKEEPING, kind = AgentKind.DIGEST, icon = "tasks",
@@ -445,6 +468,14 @@ private class TemplateScope(private val key: String, val params: JsonObject, pri
         id,
         "whatsapp.send",
         json("to" to "client", "text" to message, "attachPdf" to attachPdf, "fallback" to (text("fallback") ?: "email")),
+        guard = guard,
+        autonomy = autonomy,
+    )
+
+    fun email(id: String, subject: String, text: String, attachPdf: String = "none", guard: ConditionGroup? = null) = StepSpec(
+        id,
+        "email.send",
+        json("to" to "client", "subject" to subject, "text" to text, "attachPdf" to attachPdf),
         guard = guard,
         autonomy = autonomy,
     )

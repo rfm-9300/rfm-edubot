@@ -8,6 +8,7 @@ object AgentActions {
     val builtIn: List<AgentAction> = listOf(
         WhatsAppSendAction,
         InstagramReplyAction,
+        EmailSendAction,
         NotifyTeamAction,
         CreateTaskAction,
         CreateClientAction,

@@ -240,6 +240,7 @@
   function stepDetail(step, steps) {
     const i = step.input || {};
     if (step.action === 'whatsapp.send' || step.action === 'instagram.reply') return i.text || '';
+    if (step.action === 'email.send') return i.subject || '';
     if (step.action === 'team.notify') return i.message || '';
     if (step.action === 'team.task.create') return i.title || '';
     if (step.action === 'flow.branch') return groupText(i.conditions, steps);
@@ -918,6 +919,7 @@
   // Every control carries data-bind="path.in.draft" and data-type; bindInputs() writes values back.
   const VISIBLE = {
     'whatsapp.send': { phone: v => v.to === 'phone', templateLanguage: () => false, templateParams: () => false },
+    'email.send': { userId: v => v.to === 'user', email: v => v.to === 'email' },
     'team.notify': { userId: v => v.audience === 'user' },
     schedule: {
       weekdays: v => ['daily', 'weekly', 'hourly', undefined].includes(v.frequency),
