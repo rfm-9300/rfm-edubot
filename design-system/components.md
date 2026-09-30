@@ -750,6 +750,28 @@ open no-such-compose.yml: no such file or directory</pre>
 
 The end of a script's output (the backoffice's failed backup), monospace on `--surface-2`, wraps long lines and scrolls past 280px. Escape the text. Not for anything a user types.
 
+## Agents
+
+Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automations)). Script: `app/agents.js`. Tokens only, emoji-free.
+
+| Block | Role |
+|---|---|
+| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view or record: agents paused, problems to fix before activating, the "let it act on its own" suggestion. Not a toast, not a modal |
+| `.agent-icon` (`--lg`) | 32px (44px) line icon on the accent tint; the SVG comes from the agent's `icon` key |
+| `.agent-cell` (`__text` `__name` `__sub`) | Agents table first column: icon, name, and a `.recipe` under it |
+| `.recipe` > `.recipe__part` (`--when`) + `.recipe__arrow` | "When → step → step" chips; the trigger part is tinted; long parts truncate |
+| `ol.flow` > `li.flow__step` (`--trigger`) + `li.flow__connector` | Read-only steps (agent overview, run, test run): `.flow__index` (number, or the bolt for the trigger) · `.flow__main` (`__eyebrow` `__title` `__detail` `__detail--bad`) · `.flow__side` (pills). `data-state="done\|failed\|waiting\|skipped"` tints a run step's index |
+| `.flow--edit` > `.flow__card` (`__card-head` `__card-summary` `__card-tools`) | Builder cards, one per trigger or step: the type/action select in the head, the schema-driven `.form__grid` below, a `div.flow__connector` between steps |
+| `.builder` > `section.panel.builder__section` · `.sel--inline` | Builder drawer sections (When, Only if, Steps, Stop rules, Rules, Voice); "Add …" selects are inline, not full width |
+| `.var-tools` (`__select`) · `.var-chip` (`--static`) | Suggested `{{variables}}` as mono chips under a template field, plus a grouped select; `--static` shows a variable inside read-only text |
+| `.conds` > `.cond-row` (`--exit`) | Condition rows: field · operator · value · remove `.iconbtn`; with two or more, a `.sel--inline` match select sits on top |
+| `.chip-picks` | Multi-select chips (weekdays, statuses); picked = `.chip.is-on` + `aria-pressed` |
+| `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
+| `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing |
+| `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
+
+Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list.
+
 ## Utilities
 
 `.row` `.col` `.muted` `.mono` `.sub` `.right` — use these instead of one-off flex/color classes.

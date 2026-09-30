@@ -700,12 +700,14 @@ function renderNav() {
     bookings: pendingBookings || (state.fetched.bookings ? weekBookings().filter(b => b.status !== 'CANCELLED').length : o.calendar?.thisWeek) || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
   };
-  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0 };
+  const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
+  if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
+  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
-    { id: 'groupBot', items: ['persona', 'ai-assistant'] },
+    { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
   const enabled = new Set(state.me.modules);
@@ -838,6 +840,7 @@ async function loadModule(tab) {
     state.bookingAvailability = availability;
     state.fetched.bookings = true;
   }
+  if (tab === 'agents') await window.AgentsUI.load();
   if (tab === 'instagram') {
     try { state.instagram = await api('/app/api/instagram?refresh=1'); }
     catch { toast(STR.instagramSyncFailed); state.instagram = await api('/app/api/instagram').catch(() => state.instagram); }
@@ -851,10 +854,11 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings', 'agents'].includes(state.active);
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
+    agents: I18N.t('app.agents.newAgent'),
   };
   $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -874,7 +878,51 @@ function render() {
   if (state.active === 'ai-assistant') return renderAssistant(root);
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
+  if (state.active === 'agents') return window.AgentsUI.render(root);
   renderSettings(root);
+}
+
+// ── Agents module glue: agents.js draws the module; these open the records its runs are about. ──
+function recordStatusLabel(entity, status) {
+  if (!status) return '';
+  if (entity === 'quote') return quoteStatusLabel(status);
+  if (entity === 'invoice') return invoiceStatusLabel(status);
+  if (entity === 'payment') return paymentStatusLabel(status);
+  if (entity === 'booking') return bookingStatusLabel(status);
+  return status;
+}
+const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations' };
+const AGENT_SUBJECT_OPENERS = {
+  client: id => openClientDrawer(id),
+  quote: id => openQuoteDetail(id),
+  invoice: id => openInvoiceDetail(id),
+  payment: id => openPaymentDetail(id),
+  booking: id => openBookingById(id),
+  service: id => openServiceDetail(id),
+};
+const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]);
+async function openAgentSubject(subject, back) {
+  if (!canOpenAgentSubject(subject)) return;
+  if (subject.type === 'conversation') {
+    closeDrawer({ dismissed: true });
+    state.selectedConversation = subject.id;
+    await setActive('conversations');
+    return;
+  }
+  openFrom(back, () => AGENT_SUBJECT_OPENERS[subject.type](subject.id));
+}
+function agentsDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, openFrom, bindDrawerClose,
+    drawerGen: () => drawerGen,
+    hero, statCards, crmPanel, recordKpisHtml, detailMeta,
+    fmtDate, fmtDay, fmtWhen, fmtEUR, relTime, localDay, uiLocale,
+    render, hasModule, labels, STR, CRM,
+    get state() { return state; },
+    statusLabel: recordStatusLabel,
+    openSubject: openAgentSubject,
+    canOpenSubject: canOpenAgentSubject,
+  };
 }
 
 function hero(title, desc, stats = '', nav = '') {
@@ -6846,6 +6894,7 @@ function openBookingAvailabilityForm() {
 
 async function init() {
   if (handleOAuthPopup()) return;
+  window.AgentsUI?.init(agentsDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
@@ -6861,6 +6910,7 @@ async function init() {
     if (state.active === 'employees') return openEmployeeForm();
     if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
+    if (state.active === 'agents') return window.AgentsUI.newAgent();
     toast(STR.quickCreateSoon);
   });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });

@@ -163,6 +163,20 @@ Optional `instagram` module. Work queue first, not an Insights wall:
 4. Drawer lists `.ig-comment` items and a reply form; do not auto-send
 5. Empty / not-connected / reconnect copy goes through i18n. Reconnect is Settings → Channels.
 
+## Agents (automations)
+
+Optional `agents` module, grouped with Persona and the AI assistant. `app/agents.js` is mounted by `app.js` (`AgentsUI.init(deps)`), which passes its drawer, table and formatting helpers; the page reuses them instead of copying them. Chip tabs (`.settings-tabs`): Agents · Templates · Inbox · Activity · Settings.
+
+1. `.view__hero` with active agents, runs today, waiting for you, failed this week; a `.notice--warn` below it while agents are paused (by the company, with Resume, or by the platform, without).
+2. **Agents**: `crmPanel` table (`.agent-cell` + `.recipe`, status pill, last run, runs) with Active / Drafts / Paused chips. A row opens the agent record drawer: `.record-card`, `.notice` for problems, KPIs, Overview (`ol.flow` + stop rules + rules) and Runs chips, and Test · Run now · Activate/Pause in the foot. Empty state: templates first, "Start from scratch" second.
+3. **Templates**: `.gallery` with category chips. A card opens a guided setup drawer (schema-driven questions) that creates a **draft**; activating is always a separate step.
+4. **Builder** (Edit): a wide drawer of `.builder__section`s drawn from the catalog's JSON schemas (`x-widget` picks the control). "Test changes" dry-runs the unsaved draft. Saving keeps a draft with problems; an active agent must stay valid.
+5. **Inbox**: a `.worklist` of approvals (agent · action, record, excerpt, expiry pill) or tasks, with Approvals / Tasks / My tasks chips. The approval drawer shows the draft (editable fields as `.txt`), Approve and Reject (confirmed), and links to the record and the run.
+6. **Activity**: a runs table with In progress / Needs attention / Finished chips and a "Show tests" check. The run drawer shows the trigger, an outcome `.notice` and each step's result on `ol.flow`, with Retry or Cancel.
+7. **Settings**: the company defaults form (read-only for non-admins) beside a usage `dl.dash-facts` of platform limits.
+
+The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval.
+
 ## Settings (tenant)
 
 Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Theme (light / dark), a browser preference (localStorage) applied through `UIPrefs.setTheme`, not a tenant setting. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
