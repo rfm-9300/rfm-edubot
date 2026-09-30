@@ -19,6 +19,8 @@ import com.rfm.edubot.agents.runtime.AgentServices
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardToken
@@ -325,6 +327,20 @@ class AgentRoutesTest {
         val onInvoice = http.send("GET", "/app/api/agents/subjects/invoice/${invoice.id}", company.memberToken).obj()
         assertEquals(invoicing.id.toHexString(), onInvoice["recent"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content, "the quote's run that issued this invoice")
         assertEquals(reminder.id.toHexString(), onInvoice["upcoming"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a task someone adds on a client's quote shows on the client's record`() = routes { http ->
+        val company = company()
+        val client = runBlocking { ClientRepository(mongo, company.tenant.id).create("Ana Silva", "+351910000001") }
+        val quote = runBlocking { QuoteRepository(mongo, company.tenant.id).create(client.id, listOf(lineItem("Telhado", unitPriceEur = 1_000.0)), null, null) }
+        http.send("POST", "/app/api/agents/tasks", company.memberToken, buildJsonObject {
+            put("title", "Ligar sobre o orçamento")
+            put("subjectType", SubjectTypes.QUOTE)
+            put("subjectId", quote.id.toHexString())
+        })
+        val tasks = http.send("GET", "/app/api/agents/subjects/client/${client.id}", company.memberToken).obj()["tasks"]!!.jsonArray
+        assertEquals("Ligar sobre o orçamento", tasks.single().jsonObject["title"]!!.jsonPrimitive.content)
     }
 
     @Test

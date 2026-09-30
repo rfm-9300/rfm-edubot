@@ -381,13 +381,15 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val assignee = request.assigneeUserId?.toObjectIdOrNull()?.let { agents.services.dashboardUsers.findById(it) }?.takeIf { it.tenantId == ctx.tenant.primaryTenantId }
                 val now = clock()
                 val subject = SubjectRef(request.subjectType ?: "", request.subjectId ?: "").takeIf { it.type.isNotBlank() && it.id.isNotBlank() }
+                val context = subject?.let { runtime.contextBuilder.build(ctx.tenant, it) }
                 val task = agents.tasks.insert(
                     AgentTask(
                         tenantId = ctx.tenant.id,
                         title = title,
                         detail = request.detail?.take(4000),
                         subject = subject,
-                        subjectLabel = subject?.let { runtime.contextBuilder.build(ctx.tenant, it).label },
+                        subjectLabel = context?.label,
+                        clientId = context?.clientId,
                         assigneeUserId = assignee?.id?.toHexString(),
                         assigneeName = assignee?.email,
                         dueAt = request.dueAt?.let { runCatching { Instant.parse(it) }.getOrNull() },
