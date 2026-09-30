@@ -2254,7 +2254,8 @@ function inboxRow(c) {
   const unread = c.unreadCount || 0;
   const active = state.selectedConversation === c.id;
   const tick = author && author !== 'customer' && c.lastTracked ? inboxTick({ status: c.lastStatus, tracked: true }) : '';
-  const who = author === 'ai' ? `<span class="inbox-row__who">${escapeHTML(STR.inboxAiPrefix)}</span>` : '';
+  const prefix = { ai: STR.inboxAiPrefix, automation: STR.inboxAutomationPrefix }[author];
+  const who = prefix ? `<span class="inbox-row__who">${escapeHTML(prefix)}</span>` : '';
   const flags = `${c.autoReplyEnabled === false ? `<span class="inbox-row__flag" title="${escapeHTML(STR.inboxAiPaused)}">${escapeHTML(STR.inboxAiOffShort)}</span>` : ''}${unread ? `<span class="inbox-row__badge">${unread > 99 ? '99+' : unread}</span>` : ''}`;
   const label = [inboxName(c), unread ? tApp('inboxUnreadAria', { n: unread }) : '', c.waiting ? STR.inboxFilter_needs : '', c.autoReplyEnabled === false ? STR.inboxAiPaused : '', preview].filter(Boolean).join(' · ');
   return `<li><button type="button" class="inbox-row${active ? ' is-active' : ''}${unread ? ' is-unread' : ''}${c.waiting ? ' is-waiting' : ''}" data-conversation="${escapeHTML(c.id)}" aria-current="${active ? 'true' : 'false'}" aria-label="${escapeHTML(label)}">
@@ -2502,15 +2503,19 @@ function inboxDayLabel(day) {
 function inboxBubble(m) {
   const author = inboxAuthor(m);
   const out = author !== 'customer';
-  const who = author === 'ai' ? STR.inboxAuthorAi : author === 'agent' ? inboxAgentLabel(m.agentUserId, m.agentName) : '';
-  const label = m.kind === 'template' ? `${who} · ${tApp('inboxTemplateLabel', { name: m.templateName || '' })}` : who;
+  const who = author === 'ai' ? STR.inboxAuthorAi
+    : author === 'agent' ? inboxAgentLabel(m.agentUserId, m.agentName)
+    : author === 'automation' ? m.agentName || '' : '';
+  const label = [who, m.kind === 'template' ? tApp('inboxTemplateLabel', { name: m.templateName || '' }) : ''].filter(Boolean).join(' · ');
+  // An agent from the Agents module sent it, not a person or the receptionist AI.
+  const tag = author === 'automation' ? `<span class="bubble__tag">${escapeHTML(STR.inboxAutomation)}</span>` : '';
   const media = INBOX_MEDIA_KINDS.includes(m.kind) && !m.pending
     ? `<div class="bubble__media-box" data-media="${escapeHTML(m.id)}" data-kind="${escapeHTML(m.kind)}">${mediaBoxHtml(m)}</div>` : '';
   const text = m.text ? `<div class="bubble__text">${renderWhatsAppText(m.text)}</div>` : '';
   const failed = m.status === 'FAILED';
   const retry = failed && author === 'agent' && m.kind === 'text' ? `<button type="button" class="btn btn--sm btn--ghost" data-retry="${escapeHTML(m.id)}">${escapeHTML(STR.inboxRetry)}</button>` : '';
   return `<article class="bubble ${out ? 'bubble--out' : 'bubble--in'} bubble--${author}${failed ? ' is-failed' : ''}${m.pending ? ' is-pending' : ''}" data-message="${escapeHTML(m.id)}">
-    ${out ? `<div class="bubble__author">${escapeHTML(label)}</div>` : ''}${media}${text}
+    ${out ? `<div class="bubble__author">${tag}${escapeHTML(label)}</div>` : ''}${media}${text}
     <div class="bubble__meta"><time datetime="${escapeHTML(m.createdAt)}" title="${escapeHTML(fmtDate(m.createdAt))}">${escapeHTML(fmtTime(m.createdAt))}</time>${out ? inboxTick(m) : ''}</div>
     ${failed ? `<div class="bubble__error"><span>${escapeHTML(inboxErrorText(m.errorKey, m.errorText))}</span>${retry}</div>` : ''}
   </article>`;

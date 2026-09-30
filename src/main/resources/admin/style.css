@@ -1305,6 +1305,9 @@ html[data-theme="dark"] .thread-log { background: var(--bg-deep); }
 .bubble__author { margin-bottom: 2px; color: var(--ink-mute); font-size: 11px; font-weight: 700; }
 .bubble--agent .bubble__author { color: var(--accent-deep); }
 html[data-theme="dark"] .bubble--agent .bubble__author { color: var(--accent); }
+.bubble--automation { background: var(--info-soft); border: 1px solid transparent; }
+.bubble--automation .bubble__author { color: var(--info-ink); }
+.bubble__tag { display: inline-block; margin-right: 6px; padding: 0 6px; border: 1px solid currentColor; border-radius: 999px; font-size: 10px; line-height: 15px; letter-spacing: 0.02em; vertical-align: 1px; }
 .bubble__text { white-space: pre-wrap; overflow-wrap: anywhere; }
 .bubble__media { display: inline-block; margin-bottom: 2px; color: var(--ink-2); font-style: italic; }
 .bubble__meta { display: flex; align-items: center; justify-content: flex-end; gap: 4px; margin-top: 3px; color: var(--ink-mute); font-family: var(--mono); font-size: 10.5px; }

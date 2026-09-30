@@ -418,6 +418,7 @@ window.__I18N_CATALOGS['en'] = {
     inboxOpenSettings: 'Open settings',
     inboxUnreadAria: p => `${p.n} unread`, inboxAiPrefix: 'AI: ', inboxAiOffShort: 'AI paused',
     inboxYou: 'You', inboxTeam: 'Team', inboxAuthorAi: 'AI assistant',
+    inboxAutomation: 'Automation', inboxAutomationPrefix: 'Automation: ',
     inboxTemplateLabel: p => `Template · ${p.name}`,
     inboxBack: 'Back to conversations', inboxLogAria: p => `Messages with ${p.name}`,
     inboxJumpNew: 'New messages', inboxNewFrom: p => `New message from ${p.name}`,

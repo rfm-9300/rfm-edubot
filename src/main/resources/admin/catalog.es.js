@@ -417,6 +417,7 @@ window.__I18N_CATALOGS['es'] = {
     inboxOpenSettings: 'Abrir ajustes',
     inboxUnreadAria: p => `${p.n} sin leer`, inboxAiPrefix: 'IA: ', inboxAiOffShort: 'IA en pausa',
     inboxYou: 'Tú', inboxTeam: 'Equipo', inboxAuthorAi: 'Asistente IA',
+    inboxAutomation: 'Automatización', inboxAutomationPrefix: 'Automatización: ',
     inboxTemplateLabel: p => `Plantilla · ${p.name}`,
     inboxBack: 'Volver a las conversaciones', inboxLogAria: p => `Mensajes con ${p.name}`,
     inboxJumpNew: 'Mensajes nuevos', inboxNewFrom: p => `Nuevo mensaje de ${p.name}`,
