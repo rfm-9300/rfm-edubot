@@ -1233,6 +1233,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         whatsapp: 'WhatsApp',
         instagram: 'Instagram',
         openrouter: 'OpenRouter',
+        google: 'Google (Gmail)',
         ratelimit: 'Rate limits',
         pdf: 'Armazenamento PDF',
         admin: 'Auth admin',

@@ -2,6 +2,7 @@ package com.rfm.edubot.config
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
 class PlatformSettingsMergerTest {
@@ -50,6 +51,26 @@ class PlatformSettingsMergerTest {
         assertEquals("env-wa-token", merged.whatsapp.accessToken)
         assertEquals(8080, merged.port)
         assertEquals("mongodb://localhost:27017", merged.mongo.uri)
+    }
+
+    @Test
+    fun `google oauth overrides turn the gmail integration on without touching the pubsub topic`() {
+        val withTopic = base.copy(google = AppConfig.GoogleConfig(pubsubTopic = "projects/p/topics/gmail"))
+        assertFalse(withTopic.google.oauthEnabled)
+        val merged = PlatformSettingsMerger.merge(
+            withTopic,
+            mapOf(
+                "GOOGLE_OAUTH_CLIENT_ID" to "client.apps.googleusercontent.com",
+                "GOOGLE_OAUTH_CLIENT_SECRET" to "google-secret",
+                "GOOGLE_OAUTH_REDIRECT" to "https://example.com/integrations/google/callback",
+            ),
+        )
+        assertTrue(merged.google.oauthEnabled)
+        assertEquals("client.apps.googleusercontent.com", merged.google.clientId)
+        assertEquals("projects/p/topics/gmail", merged.google.pubsubTopic)
+        assertTrue(PlatformSettingKey.GOOGLE_OAUTH_CLIENT_SECRET.secret)
+        assertEquals("google", PlatformSettingKey.GOOGLE_OAUTH_REDIRECT.category)
+        assertEquals("", PlatformSettingsMerger.readBase(base, PlatformSettingKey.GOOGLE_OAUTH_CLIENT_ID))
     }
 
     @Test

@@ -488,7 +488,7 @@ async function renderPlatformSettings() {
     (acc[s.category] ||= []).push(s);
     return acc;
   }, {});
-  const order = ['whatsapp', 'instagram', 'openrouter', 'ratelimit', 'pdf', 'admin'];
+  const order = ['whatsapp', 'instagram', 'google', 'openrouter', 'ratelimit', 'pdf', 'admin'];
   const categories = [...new Set([...order, ...Object.keys(groups)])].filter(c => groups[c]?.length);
   $('#view').innerHTML = `
     <div class="view__hero">
