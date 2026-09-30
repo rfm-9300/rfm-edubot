@@ -1,44 +1,33 @@
 package com.rfm.edubot.shared.jobs
 
-import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.testing.TestMongo
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
-import org.testcontainers.containers.MongoDBContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.Test
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.minutes
 import kotlin.time.Duration.Companion.seconds
 
-@Testcontainers
 class SchedulerLeaseTest {
 
     companion object {
-        @Container
-        @JvmStatic
-        val mongo = MongoDBContainer("mongo:7")
-
         private lateinit var mongoModule: MongoModule
 
         @BeforeAll
         @JvmStatic
         fun setUp() {
-            mongo.start()
-            mongoModule = MongoModule(AppConfig.MongoConfig(uri = mongo.replicaSetUrl, database = "leases"))
-            mongoModule.initialize()
+            mongoModule = TestMongo.module("leases")
         }
 
         @AfterAll
         @JvmStatic
         fun tearDown() {
             mongoModule.shutdown()
-            mongo.stop()
         }
     }
 

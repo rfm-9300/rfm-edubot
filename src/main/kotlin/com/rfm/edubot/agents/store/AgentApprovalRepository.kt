@@ -102,6 +102,7 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
         .append("agentName", agentName)
         .append("runId", runId)
         .append("stepId", stepId)
+        .append("seq", seq)
         .append("action", action)
         .append("input", BsonJson.toDocument(input))
         .append("preview", AgentJson.toDocument(ActionPreview.serializer(), preview))
@@ -125,6 +126,7 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
         agentName = getString("agentName").orEmpty(),
         runId = getObjectId("runId"),
         stepId = getString("stepId").orEmpty(),
+        seq = getInteger("seq") ?: 0,
         action = getString("action").orEmpty(),
         input = BsonJson.toJsonObject(get("input", Document::class.java)),
         preview = AgentJson.fromDocument(ActionPreview.serializer(), get("preview", Document::class.java), ActionPreview(kind = "generic")),

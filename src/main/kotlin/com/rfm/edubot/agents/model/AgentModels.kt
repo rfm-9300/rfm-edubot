@@ -216,6 +216,8 @@ data class AgentApproval(
     val agentName: String,
     val runId: ObjectId,
     val stepId: String,
+    /** Position among the approvals of one step: an AI step can propose several actions at once. */
+    val seq: Int = 0,
     val action: String,
     val input: JsonObject,
     val preview: ActionPreview,

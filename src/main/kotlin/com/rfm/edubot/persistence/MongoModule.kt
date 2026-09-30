@@ -146,7 +146,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
 
             val agentApprovals = db.getCollection<Document>("agent_approvals")
             agentApprovals.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
-            agentApprovals.createIndex(Document("runId", 1).append("stepId", 1), IndexOptions().unique(true))
+            agentApprovals.createIndex(Document("runId", 1).append("stepId", 1).append("seq", 1), IndexOptions().unique(true))
             agentApprovals.createIndex(Document("status", 1).append("expiresAt", 1))
 
             val agentTasks = db.getCollection<Document>("agent_tasks")

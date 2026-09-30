@@ -1,6 +1,5 @@
 package com.rfm.edubot.events
 
-import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.model.Message
 import com.rfm.edubot.conversation.model.MessageContent
@@ -12,6 +11,7 @@ import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.testing.TestMongo
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.LocalDate
@@ -19,38 +19,27 @@ import kotlinx.serialization.json.jsonPrimitive
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
-import org.testcontainers.containers.MongoDBContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.time.Duration.Companion.minutes
 
-@Testcontainers
 class DomainEventLogTest {
 
     companion object {
-        @Container
-        @JvmStatic
-        val mongo = MongoDBContainer("mongo:7")
-
         private lateinit var mongoModule: MongoModule
 
         @BeforeAll
         @JvmStatic
         fun setUp() {
-            mongo.start()
-            mongoModule = MongoModule(AppConfig.MongoConfig(uri = mongo.replicaSetUrl, database = "domain_events"))
-            mongoModule.initialize()
+            mongoModule = TestMongo.module("domain_events")
         }
 
         @AfterAll
         @JvmStatic
         fun tearDown() {
             mongoModule.shutdown()
-            mongo.stop()
         }
     }
 

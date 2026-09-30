@@ -9,6 +9,7 @@ import com.rfm.edubot.agents.model.AgentDefinition
 import com.rfm.edubot.agents.model.AgentKind
 import com.rfm.edubot.agents.model.AgentStats
 import com.rfm.edubot.agents.model.AgentStatus
+import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.BsonJson
 import com.rfm.edubot.shared.SystemClock
@@ -129,16 +130,23 @@ class AgentRepository(mongo: MongoModule, private val clock: () -> Instant = Sys
     suspend fun tenantsWithActiveAgents(): List<ObjectId> =
         collection.distinct<ObjectId>("tenantId", Filters.eq("status", AgentStatus.ACTIVE.name)).toList()
 
-    suspend fun recordRun(tenantId: ObjectId, id: ObjectId, succeeded: Boolean): Agent? {
-        val now = clock()
+    /** Counts a finished run; failures in a row feed the circuit breaker, a success resets them. */
+    suspend fun recordRun(tenantId: ObjectId, id: ObjectId, status: RunStatus): Agent? {
+        val updates = mutableListOf<Bson>(Updates.inc("stats.runs", 1L), Updates.set("stats.lastRunAt", clock().toDate()))
+        when (status) {
+            RunStatus.SUCCEEDED -> {
+                updates += Updates.inc("stats.succeeded", 1L)
+                updates += Updates.set("stats.consecutiveFailures", 0)
+            }
+            RunStatus.FAILED -> {
+                updates += Updates.inc("stats.failed", 1L)
+                updates += Updates.inc("stats.consecutiveFailures", 1)
+            }
+            else -> Unit
+        }
         return collection.findOneAndUpdate(
             scoped(tenantId, Filters.eq("_id", id)),
-            Updates.combine(
-                Updates.inc("stats.runs", 1L),
-                Updates.inc(if (succeeded) "stats.succeeded" else "stats.failed", 1L),
-                if (succeeded) Updates.set("stats.consecutiveFailures", 0) else Updates.inc("stats.consecutiveFailures", 1),
-                Updates.set("stats.lastRunAt", now.toDate()),
-            ),
+            Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )?.toAgent()
     }

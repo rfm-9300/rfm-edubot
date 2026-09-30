@@ -11,12 +11,12 @@ import com.rfm.edubot.agents.model.OutboundStatus
 import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.RunTrigger
 import com.rfm.edubot.agents.model.TriggerSpec
-import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.notifications.NotificationAudience
 import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.testing.TestMongo
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
@@ -25,9 +25,6 @@ import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
-import org.testcontainers.containers.MongoDBContainer
-import org.testcontainers.junit.jupiter.Container
-import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -38,29 +35,21 @@ import kotlin.time.Duration.Companion.days
 import kotlin.time.Duration.Companion.hours
 import kotlin.time.Duration.Companion.minutes
 
-@Testcontainers
 class AgentStoresTest {
 
     companion object {
-        @Container
-        @JvmStatic
-        val mongo = MongoDBContainer("mongo:7")
-
         private lateinit var mongoModule: MongoModule
 
         @BeforeAll
         @JvmStatic
         fun setUp() {
-            mongo.start()
-            mongoModule = MongoModule(AppConfig.MongoConfig(uri = mongo.replicaSetUrl, database = "agent_stores"))
-            mongoModule.initialize()
+            mongoModule = TestMongo.module("agent_stores")
         }
 
         @AfterAll
         @JvmStatic
         fun tearDown() {
             mongoModule.shutdown()
-            mongo.stop()
         }
     }
 
