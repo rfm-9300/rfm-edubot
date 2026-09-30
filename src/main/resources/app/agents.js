@@ -198,8 +198,9 @@
     const triggers = definition?.triggers || [];
     const steps = definition?.steps || [];
     if (!triggers.length && !steps.length) return `<span class="muted">${esc(A.noSteps)}</span>`;
-    const when = triggers.length ? `<span class="recipe__part recipe__part--when">${esc(triggerSummary(triggers[0]))}${triggers.length > 1 ? ` <span class="muted">+${triggers.length - 1}</span>` : ''}</span>` : '';
-    const shown = steps.slice(0, max).map(s => `<span class="recipe__arrow" aria-hidden="true"></span><span class="recipe__part">${esc(stepShort(s))}</span>`).join('');
+    const summary = triggers.length ? triggerSummary(triggers[0]) : '';
+    const when = triggers.length ? `<span class="recipe__part recipe__part--when" title="${esc(summary)}">${esc(summary)}${triggers.length > 1 ? ` <span class="muted">+${triggers.length - 1}</span>` : ''}</span>` : '';
+    const shown = steps.slice(0, max).map(s => `<span class="recipe__arrow" aria-hidden="true"></span><span class="recipe__part" title="${esc(stepShort(s))}">${esc(stepShort(s))}</span>`).join('');
     const more = steps.length > max ? `<span class="recipe__arrow" aria-hidden="true"></span><span class="recipe__part muted">+${steps.length - max}</span>` : '';
     return `<span class="recipe">${when}${shown}${more}</span>`;
   }
@@ -351,7 +352,7 @@
     const tools = LIST_FILTERS.map(f => `<button class="chip ${ui.listFilter === f ? 'is-on' : ''}" type="button" data-agents-filter="${f}">${esc(tr(`filters.${f || 'all'}`))}<span class="chip__count">${count(f)}</span></button>`).join('');
     const body = rows.map(a => {
       const flags = [
-        a.pendingApprovals ? `<span class="tag" title="${esc(A.pendingApprovals)}">${a.pendingApprovals}</span>` : '',
+        a.pendingApprovals ? pill('warn', tr('pendingCount', { n: a.pendingApprovals })) : '',
         a.problems?.length && a.status !== 'ARCHIVED' ? pill('warn', A.needsSetup) : '',
       ].join(' ');
       const toggle = !canManage() || a.status === 'ARCHIVED' ? '' : a.status === 'ACTIVE'
@@ -756,7 +757,7 @@
     if (run.stepCount && !['SUCCEEDED', 'SKIPPED', 'CANCELLED'].includes(run.status)) {
       return tr('run.stepOf', { n: Math.min(run.currentStep + 1, run.stepCount), total: run.stepCount, action: run.nextStep ? actionLabel(run.nextStep) : '' });
     }
-    return run.finishedAt ? d.relTime(run.finishedAt) : '';
+    return run.finishedAt ? tr('run.finishedWhen', { when: d.relTime(run.finishedAt) }) : '';
   }
   function runsTableHtml(runs, withAgent, bare = false) {
     const rows = runs.map(r => `<tr class="conversation-row" data-run="${esc(r.id)}">
@@ -947,7 +948,7 @@
     const req = required ? ' <span class="req">*</span>' : '';
     const current = value ?? prop.default;
     const row = (control, full = false, hint = '') => `<div class="form__row${full ? ' form__row--full' : ''}"><label class="lbl" for="${id}">${esc(label)}${req}</label>${control}${hint ? `<p class="hint">${esc(hint)}</p>` : ''}</div>`;
-    const select = (options, type = 'str', allowEmpty = !required && prop.default == null) => `<select class="sel" id="${id}" data-bind="${path}" data-type="${type}"${rerender}>${allowEmpty ? `<option value="">${esc(A.none)}</option>` : ''}${options.map(([v, text]) => `<option value="${esc(v)}" ${String(current ?? '') === String(v) ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select>`;
+    const select = (options, type = 'str', allowEmpty = !required && prop.default == null) => `<select class="sel" id="${id}" data-bind="${path}" data-type="${type}"${rerender}>${allowEmpty ? `<option value="">${esc(tr(`emptyOptions.${name}`, null, A.none))}</option>` : ''}${options.map(([v, text]) => `<option value="${esc(v)}" ${String(current ?? '') === String(v) ? 'selected' : ''}>${esc(text)}</option>`).join('')}</select>`;
 
     if (prop.type === 'object') return name === 'where' || name === 'conditions' ? `<div class="form__row form__row--full"><span class="lbl">${esc(label)}</span>${conditionsHtml(value, path, ctx)}</div>` : '';
     if (prop.type === 'boolean') return `<div class="form__row form__row--full"><label class="form__check"><input type="checkbox" data-bind="${path}" data-type="bool" ${current === true ? 'checked' : ''} /> ${esc(label)}</label></div>`;
@@ -1491,7 +1492,7 @@
   }
   function approvalRow(a) {
     const kind = a.preview?.kind || 'generic';
-    const excerpt = (a.preview?.body || a.preview?.subject || '').replace(/\s+/g, ' ').slice(0, 140);
+    const excerpt = [a.preview?.body, a.preview?.subject].find(t => t && t !== a.subjectLabel)?.replace(/\s+/g, ' ').slice(0, 140) || '';
     const expiresSoon = new Date(a.expiresAt).getTime() - Date.now() < 86400000;
     return `<li><button class="worklist__item" type="button" data-approval="${esc(a.id)}" data-tone="${kind === 'message' || kind === 'email' ? 'warn' : 'accent'}">
       <span class="worklist__dot" aria-hidden="true"></span>
@@ -1744,5 +1745,5 @@
     d = deps;
   }
 
-  window.AgentsUI = { init, load, render, badge, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon };
+  window.AgentsUI = { init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon };
 })();

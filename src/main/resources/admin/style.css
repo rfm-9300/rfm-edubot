@@ -2009,7 +2009,7 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .inp-range .inp { max-width: 130px; }
 
 .gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
-.gallery__card { display: grid; align-content: start; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color 120ms, box-shadow 120ms; }
+.gallery__card { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: 10px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); color: var(--ink); font: inherit; text-align: left; cursor: pointer; transition: border-color 120ms, box-shadow 120ms; }
 .gallery__card:hover { border-color: var(--hairline-strong); box-shadow: var(--shadow-sm); }
 .gallery__card:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: var(--focus-ring); }
 .gallery__card.is-unavailable { background: var(--surface-2); }
@@ -2025,6 +2025,8 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .plain-list { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
 .agents-settings { display: grid; gap: 16px; }
 .agents-settings .form { display: grid; gap: 12px; }
+.agents-settings .panel__body > .dash-facts { margin-top: 0; }
+.agents-settings .panel__body > .dash-facts > div:first-child { padding-top: 0; border-top: 0; }
 
 @media (max-width: 620px) {
   .cond-row { grid-template-columns: 1fr 1fr; }
