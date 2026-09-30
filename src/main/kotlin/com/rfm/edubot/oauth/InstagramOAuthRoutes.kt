@@ -72,7 +72,7 @@ fun Route.instagramOAuthRoutes(
     get("/admin/api/instagram/callback") {
         val params = call.request.queryParameters
         val state = params["state"]
-        val verified = state?.takeIf { it.isNotBlank() }?.let { oauthState.verify(it) }
+        val verified = state?.takeIf { it.isNotBlank() }?.let { oauthState.verify(it) }?.takeIf { it.purpose == null }
         val origin = verified?.origin ?: OAuthState.ORIGIN_BACKOFFICE
 
         params["error"]?.let { error ->

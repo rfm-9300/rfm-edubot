@@ -26,19 +26,45 @@ class OAuthState(
         now: () -> Long = System::currentTimeMillis,
     ) : this(secretProvider = { secret }, ttlMillis = ttlMillis, now = now)
     @Serializable
-    private data class Payload(val slug: String, val nonce: String, val exp: Long, val origin: String = ORIGIN_BACKOFFICE)
+    private data class Payload(
+        val slug: String,
+        val nonce: String,
+        val exp: Long,
+        val origin: String = ORIGIN_BACKOFFICE,
+        val purpose: String? = null,
+        val tenantId: String? = null,
+        val userId: String? = null,
+    )
 
-    /** Slug + which UI surface initiated the flow, so the callback can redirect back to it. */
-    data class Verified(val slug: String, val origin: String)
+    /**
+     * Slug + which UI surface initiated the flow, so the callback can redirect back to it. [purpose] names
+     * the flow the state was minted for (null for Instagram), so one flow's callback can't consume another's.
+     */
+    data class Verified(
+        val slug: String,
+        val origin: String,
+        val purpose: String? = null,
+        val tenantId: String? = null,
+        val userId: String? = null,
+    )
 
-    private val json = Json { encodeDefaults = true }
+    private val json = Json {
+        encodeDefaults = true
+        explicitNulls = false
+    }
     private val encoder: Base64.Encoder = Base64.getUrlEncoder().withoutPadding()
     private val decoder: Base64.Decoder = Base64.getUrlDecoder()
     private val random = SecureRandom()
     private val consumedNonces = ConcurrentHashMap<String, Long>()
 
-    fun mint(slug: String, origin: String = ORIGIN_BACKOFFICE): String {
-        val payload = Payload(slug, randomNonce(), now() + ttlMillis, origin)
+    fun mint(
+        slug: String,
+        origin: String = ORIGIN_BACKOFFICE,
+        purpose: String? = null,
+        tenantId: String? = null,
+        userId: String? = null,
+    ): String {
+        val payload = Payload(slug, randomNonce(), now() + ttlMillis, origin, purpose, tenantId, userId)
         val body = encoder.encodeToString(json.encodeToString(Payload.serializer(), payload).toByteArray())
         return "$body.${sign(body)}"
     }
@@ -57,12 +83,13 @@ class OAuthState(
         purgeExpired()
         // single-use: putIfAbsent returns non-null if the nonce was already consumed (replay)
         if (consumedNonces.putIfAbsent(payload.nonce, payload.exp) != null) return null
-        return Verified(payload.slug, payload.origin)
+        return Verified(payload.slug, payload.origin, payload.purpose, payload.tenantId, payload.userId)
     }
 
     companion object {
         const val ORIGIN_BACKOFFICE = "backoffice"
         const val ORIGIN_DASHBOARD = "app"
+        const val PURPOSE_GOOGLE = "google"
     }
 
     private fun sign(body: String): String {
