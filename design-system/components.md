@@ -15,6 +15,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 <button class="btn btn--primary" type="button"><span class="btn__plus">+</span> New</button>
 <button class="iconbtn" type="button" aria-label="Close">×</button>
 <button class="iconbtn iconbtn--theme" id="btn-theme" type="button">🌙</button>
+<button class="iconbtn iconbtn--theme iconbtn--bell" id="btn-notifications" type="button" aria-label="Notifications, 3 unread"><svg>…</svg><span class="iconbtn__count" aria-hidden="true">3</span></button>
 <button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" aria-label="Your account">AR</button>
 ```
 
@@ -24,6 +25,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--sm` in table action cells and compact toolbars.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
+- `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
 - In the `/app` skin (`html[data-layout="minimal"]`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
@@ -89,7 +91,7 @@ Order: crumb · search · actions. Theme button is always in actions. Search hid
 
 `/app` has no layout switch: its skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label="app.searchPlaceholder"`.
 
-On `/app`, `#btn-account` (`.iconbtn--avatar`) sits between the theme button and Log out. It stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account).
+On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
 ## View hero + stats
 
@@ -437,7 +439,7 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
 ```
 
 - `.record-kpis` holds up to four `.record-kpi`; `data-count` sets the columns (two below 560px). `data-tone="bad|warn|info"` colors the value. Values sit at the bottom of the cell so they line up when a label wraps.
-- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.dash`, `.record` and any `.worklist` (a drawer `.form`, the Agents panes), on the row or on its dot. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
+- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.dash`, `.record` and any `.worklist` (a drawer `.form`, the Agents panes), on the row or on its dot. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. `.worklist--wrap` lets titles and details wrap (keeping line breaks) instead of truncating, for rows that carry a sentence someone wrote (notifications); the dot stays on the first line. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
 - `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip. A supplier or employee has one list (payments), so no tabs; its table panel carries a `.panel__head` title instead.
 - Tables reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
 - A pane with more than one block (the client's Financeiro tab: `.record-kpis`, a `.hint`, the movements table, a `.record__pane-foot`) wraps them in `.record__stack` for even spacing. `.record__pane-foot` holds one or more right-aligned buttons.

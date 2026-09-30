@@ -888,6 +888,24 @@ window.__I18N_CATALOGS['en'] = {
         lead_qualifier: { name: 'Qualify new chats', desc: 'Reads new chats, sorts them and sums them up for your team.' },
       },
     },
+    notifications: {
+      title: 'Notifications', aria: 'Notifications', ariaUnread: 'Notifications, {n} unread',
+      unreadGroup: 'New', earlierGroup: 'Earlier', markAllRead: 'Mark all as read',
+      empty: 'No notifications', emptyDesc: 'When an agent needs your approval, runs into a problem or leaves you a message, you’ll see it here.',
+      loadFailed: 'Could not load your notifications', markAllFailed: 'Could not mark your notifications as read',
+      fromAgent: 'from {agent}',
+      pausedDetail: 'It failed several times in a row. Check its recent runs before you turn it back on.',
+      reconnectDetail: 'The connection stopped working. Reconnect it in Settings so agents can use it again.',
+      kinds: {
+        agent_approval: '{agent} is waiting for your approval',
+        agent_approvalMany: '{agent} has {count} actions waiting for your approval',
+        agent_failed: '{agent} couldn’t finish',
+        agent_paused: '{agent} was paused',
+        agent_task: 'New task: {title}',
+        agent_notice: 'Message from {agent}',
+        integration_reconnect: 'Reconnect {name}',
+      },
+    },
   },
 
   admin: {

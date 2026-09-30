@@ -887,6 +887,24 @@ window.__I18N_CATALOGS['es'] = {
         lead_qualifier: { name: 'Calificar nuevas conversaciones', desc: 'Lee las conversaciones nuevas, las clasifica y las resume para tu equipo.' },
       },
     },
+    notifications: {
+      title: 'Notificaciones', aria: 'Notificaciones', ariaUnread: 'Notificaciones, {n} sin leer',
+      unreadGroup: 'Nuevas', earlierGroup: 'Anteriores', markAllRead: 'Marcar todas como leídas',
+      empty: 'No hay notificaciones', emptyDesc: 'Cuando un agente necesite tu aprobación, tenga un problema o te deje un mensaje, lo verás aquí.',
+      loadFailed: 'No se pudieron cargar tus notificaciones', markAllFailed: 'No se pudieron marcar tus notificaciones como leídas',
+      fromAgent: 'de {agent}',
+      pausedDetail: 'Falló varias veces seguidas. Revisa sus ejecuciones recientes antes de volver a activarlo.',
+      reconnectDetail: 'La conexión dejó de funcionar. Vuelve a conectarla en Ajustes para que los agentes puedan usarla.',
+      kinds: {
+        agent_approval: '{agent} espera tu aprobación',
+        agent_approvalMany: '{agent} tiene {count} acciones esperando tu aprobación',
+        agent_failed: '{agent} no pudo terminar',
+        agent_paused: 'El agente {agent} quedó en pausa',
+        agent_task: 'Nueva tarea: {title}',
+        agent_notice: 'Mensaje de {agent}',
+        integration_reconnect: 'Vuelve a conectar {name}',
+      },
+    },
   },
 
   admin: {

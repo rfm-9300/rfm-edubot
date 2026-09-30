@@ -438,6 +438,7 @@ body.nav-open .nav-scrim {
 .topbar__search kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mute); background: var(--bg); }
 .topbar__actions { display: flex; align-items: center; gap: 8px; }
 .topbar #btn-new[hidden],
+.topbar #btn-notifications[hidden],
 .topbar #btn-account[hidden] { display: none; }
 
 /* ============================================================
@@ -505,6 +506,19 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
   font-family: var(--display); font-size: 12px; font-weight: 700; letter-spacing: 0.02em;
 }
 html[data-theme="dark"] .iconbtn--avatar { color: var(--accent); }
+/* The notifications bell; the unread count sits on its corner, ringed in the top bar's surface. */
+.iconbtn--bell { position: relative; }
+.iconbtn__count {
+  position: absolute; top: -6px; right: -7px;
+  display: grid; place-items: center;
+  min-width: 18px; height: 18px; padding: 0 5px;
+  border-radius: 999px;
+  background: var(--bad-soft); color: var(--bad-ink);
+  box-shadow: 0 0 0 2px var(--surface);
+  font-family: var(--sans); font-size: 11px; font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+.iconbtn__count[hidden] { display: none; }
 
 /* ============================================================
    VIEW + TABLE
@@ -1058,6 +1072,10 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
   .topbar__actions a.btn--ghost,
   .topbar__actions #btn-export { display: none; }
   .topbar__actions #btn-logout { padding: 0 12px; }
+  /* The "New …" button keeps just its plus; the label stays as its accessible name. */
+  .topbar__actions #btn-new:has(.btn__label) { width: 36px; padding: 0; justify-content: center; }
+  .topbar__actions #btn-new:has(.btn__label) .btn__plus { margin: 0; }
+  .topbar__actions #btn-new .btn__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
 /* ── Persona test chat ─────────────────────────────────────── */
@@ -2448,6 +2466,11 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .worklist__when { color: var(--ink-mute); font-size: 12px; white-space: nowrap; }
 .worklist__meta--amount { color: var(--ink); font-family: var(--mono); font-weight: 500; }
 .worklist__group { padding: 8px 16px; background: var(--surface-2); color: var(--ink-mute); font-size: 11px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+/* Rows that carry a sentence someone wrote (a notification) wrap instead of truncating. */
+.worklist--wrap .worklist__item { align-items: start; }
+.worklist--wrap .worklist__dot { margin-top: 6px; }
+.worklist--wrap .worklist__title,
+.worklist--wrap .worklist__detail { white-space: pre-line; overflow-wrap: anywhere; }
 html[data-layout="minimal"] .worklist__group { font-size: 11.5px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 
 /* today's agenda */

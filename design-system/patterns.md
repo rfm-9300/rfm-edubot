@@ -179,7 +179,7 @@ Optional `agents` module, grouped with Persona and the AI assistant. `app/agents
 
 The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval; there's no "Open record" when the trail already goes back to that record.
 
-Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand).
+Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand); and the top-bar notifications (see Notifications).
 
 ## Settings (tenant)
 
@@ -193,6 +193,12 @@ The top-bar avatar (`#btn-account`) opens the signed-in user's account as a `.re
 - Password on: change form (current, new, repeat), and below it a `.panel` "Sign in with Google only" whose button confirms with a Google popup (not the password, so the Google account is proven to work before it becomes the only way in).
 - Google only: set a password (new, repeat), confirmed with a Google popup; the Google drawer explains it's the only way in and offers "Set a password" instead of unlink.
 - Errors go through `app.accountErr_<code>` in the catalogs, falling back to `app.accountFailed`.
+
+## Notifications
+
+The top-bar bell (`#btn-notifications`) is there for every signed-in user, whatever modules the company has. It polls `GET /app/api/notifications` every minute while the tab is visible (and at once when the tab comes back after that). The server stores the kind and its params; `app.js` writes the sentence from `app.notifications.kinds.*`, so the list reads in the reader's language. Only a message someone or an agent wrote (`team.notify`) arrives as text, and it becomes the row's title.
+
+The bell opens a `.record` drawer (eyebrow: the company). A "New" `.panel` (`.tag` count, ghost "Mark all as read" in `.panel__tools`) lists unread rows, and an "Earlier" `.panel` lists read ones. Both are `.worklist.worklist--wrap`. Unread dots follow the kind (approval and paused agent `warn`, failed run and reconnect `bad`, task `info`, message `accent`); read ones are `muted`. With nothing at all, it shows an `.empty` state. A row marks itself read and opens what it's about, with the back link "Notifications": the approval, task, run or agent its `ref` names (`AgentsUI.openRef`; `inbox` goes to the Agents inbox), else its record (`openAgentSubject`), else its page (`link`). An open list redraws in place when a poll changes it.
 
 ## Document template studio
 
