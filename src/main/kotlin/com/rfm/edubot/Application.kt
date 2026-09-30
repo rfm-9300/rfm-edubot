@@ -46,6 +46,7 @@ import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailRetention
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.email.emailRoutes
+import com.rfm.edubot.integrations.google.GmailSyncWorker
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
@@ -203,6 +204,11 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         agentSettings = AgentSettingsRepository(mongoModule),
     )
     EmailRetention(EmailMessageRepository(mongoModule)).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
+    if (appConfig.google.inboxEnabled) {
+        GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
+            .job(SchedulerLease(mongoModule), appConfig.google.syncSeconds.seconds)
+            .start(pipelineScope, initialDelay = 30.seconds)
+    }
 
     val agentServices = AgentServices(
         mongo = mongoModule,

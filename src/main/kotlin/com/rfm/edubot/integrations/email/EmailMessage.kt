@@ -25,6 +25,8 @@ data class EmailMessage(
     val direction: EmailDirection,
     val from: String,
     val fromName: String? = null,
+    /** Where the sender asked replies to go, when that isn't [from]. */
+    val replyTo: String? = null,
     val to: List<String>,
     val cc: List<String> = emptyList(),
     val bcc: List<String> = emptyList(),
@@ -32,6 +34,8 @@ data class EmailMessage(
     val snippet: String,
     val bodyText: String? = null,
     val attachments: List<EmailAttachmentInfo> = emptyList(),
+    /** Received mail a machine sent (a newsletter, a notification, an automatic reply), which automations never answer. */
+    val automated: Boolean = false,
     val clientId: ObjectId? = null,
     /** The CRM record it is about, e.g. the quote it carried. */
     val record: SubjectRef? = null,
@@ -47,6 +51,7 @@ data class EmailMessage(
     companion object {
         const val MAX_BODY = 20_000
         const val MAX_SNIPPET = 200
+        const val MAX_SUBJECT = 300
 
         fun snippetOf(text: String): String = text.replace(Regex("\\s+"), " ").trim().take(MAX_SNIPPET)
     }

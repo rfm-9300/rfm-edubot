@@ -85,6 +85,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         .append("direction", direction.name)
         .append("from", from)
         .append("fromName", fromName)
+        .apply { if (replyTo != null) append("replyTo", replyTo) }
         .append("to", to)
         .append("cc", cc)
         .append("bcc", bcc)
@@ -92,6 +93,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         .append("snippet", snippet)
         .apply { if (bodyText != null) append("bodyText", bodyText.take(EmailMessage.MAX_BODY)) }
         .append("attachments", attachments.map { Document("filename", it.filename).append("mimeType", it.mimeType).append("size", it.size) })
+        .apply { if (automated) append("automated", true) }
         .append("clientId", clientId)
         .append("record", record?.toDocument())
         .append("sentByType", sentByType)
@@ -111,6 +113,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         direction = runCatching { EmailDirection.valueOf(getString("direction")) }.getOrDefault(EmailDirection.OUTBOUND),
         from = getString("from").orEmpty(),
         fromName = getString("fromName"),
+        replyTo = getString("replyTo"),
         to = getList("to", String::class.java).orEmpty(),
         cc = getList("cc", String::class.java).orEmpty(),
         bcc = getList("bcc", String::class.java).orEmpty(),
@@ -120,6 +123,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         attachments = getList("attachments", Document::class.java).orEmpty().map {
             EmailAttachmentInfo(it.getString("filename").orEmpty(), it.getString("mimeType").orEmpty(), it.getInteger("size") ?: 0)
         },
+        automated = getBoolean("automated", false),
         clientId = get("clientId", ObjectId::class.java),
         record = get("record", Document::class.java)?.toSubjectRef()?.takeIf { it.type.isNotEmpty() && it.id.isNotEmpty() },
         sentByType = getString("sentByType"),

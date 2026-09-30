@@ -75,9 +75,9 @@ class EmailServiceTest {
     private val events = DomainEventLog(mongo, clock)
     private val settings = AgentSettingsRepository(mongo, clock)
 
-    private fun service(google: FakeGoogle, configured: Boolean = true): EmailService {
+    private fun service(google: FakeGoogle, configured: Boolean = true, inbox: Boolean = false): EmailService {
         val oauth = google.client()
-        val config = if (configured) google.config else AppConfig.GoogleConfig()
+        val config = if (configured) google.config.copy(inboxEnabled = inbox) else AppConfig.GoogleConfig()
         val tokens = GoogleTokenProvider(connections, oauth, cipher, notifications, clock)
         return EmailService(GoogleIntegration({ config }, cipher, oauth, connections, tokens, GmailClient(google.http)), messages, outboundLog, events, settings, clock)
     }
@@ -264,6 +264,23 @@ class EmailServiceTest {
         assertEquals(EmailSendResult.Failed("needs_reconnect"), service.send(readOnly, email()))
         assertFalse(service.availability(readOnly).send)
         assertTrue(google.sends.isEmpty())
+    }
+
+    @Test
+    fun `the inbox is there for automations once an account reads it and the platform reads inboxes`(): Unit = runBlocking {
+        val google = FakeGoogle()
+        val tenant = company()
+        val connection = account(tenant, scopes = GoogleScopes.inbox)
+        assertFalse(service(google, inbox = true).availability(tenant).inbox, "until inbox sync is turned on")
+        connections.setInboxSync(tenant.id, connection.id, true)
+        assertTrue(service(google, inbox = true).availability(tenant).inbox)
+        assertFalse(service(google).availability(tenant).inbox, "the platform keeps inboxes off")
+
+        val sendOnly = company()
+        connections.setInboxSync(sendOnly.id, account(sendOnly).id, true)
+        val availability = service(google, inbox = true).availability(sendOnly)
+        assertTrue(availability.send)
+        assertFalse(availability.inbox, "sending alone can't read the inbox")
     }
 
     @Test

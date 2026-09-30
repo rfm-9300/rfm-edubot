@@ -59,12 +59,16 @@ class EmailService(
 
     /**
      * What automations may use. Sending still counts while the account only needs a reconnect: runs
-     * then stop with `needs_reconnect`, which its admins were already asked to fix.
+     * then stop with `needs_reconnect`, which its admins were already asked to fix. The inbox counts
+     * once an account has inbox sync on with the read scopes.
      */
     suspend fun availability(tenant: Tenant): EmailAvailability {
         if (!google.configured) return EmailAvailability()
         val accounts = google.connections.list(tenant.id, IntegrationProviders.GOOGLE).filter { it.status != ConnectionStatus.REVOKED }
-        return EmailAvailability(send = accounts.any { GoogleScopes.canSend(it.scopes) })
+        return EmailAvailability(
+            send = accounts.any { GoogleScopes.canSend(it.scopes) },
+            inbox = google.inboxAvailable && accounts.any { it.settings.inboxSync && GoogleScopes.canRead(it.scopes) },
+        )
     }
 
     /** How many emails each of the company's accounts may send a day. */

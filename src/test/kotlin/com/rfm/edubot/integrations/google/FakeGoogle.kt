@@ -59,7 +59,8 @@ internal class FakeGoogle(val clientId: String = "client-1.apps.googleuserconten
 
     /**
      * A Gmail inbox: [messages] (full-format JSON) by id, the [history] records after the sync's cursor,
-     * the ids a catch-up lists newest first ([listed]); [onRead] can refuse any read. Every read is in [reads].
+     * the ids a catch-up lists newest first ([listed]); [onRead] can refuse any read. Every read is in
+     * [reads], and the query of each listing in [searches].
      */
     class Mailbox {
         var emailAddress = "obras@example.pt"
@@ -70,6 +71,7 @@ internal class FakeGoogle(val clientId: String = "client-1.apps.googleuserconten
         var pageSize = 100
         var onRead: (path: String, accessToken: String) -> Pair<HttpStatusCode, String>? = { _, _ -> null }
         val reads = mutableListOf<String>()
+        val searches = mutableListOf<String>()
 
         /** Adds [id] to the inbox as history record [recordId], which also becomes the mailbox's history id. */
         fun receive(recordId: Long, id: String, json: String = GmailFixtures.message(id)) {
@@ -102,6 +104,7 @@ internal class FakeGoogle(val clientId: String = "client-1.apps.googleuserconten
                 HttpStatusCode.OK to """{"history":[$records],"historyId":"${mailbox.historyId}"$next}"""
             }
             path == "messages" -> {
+                synchronized(mailbox.searches) { mailbox.searches += query["q"].orEmpty() }
                 val chunk = mailbox.listed.drop(page * mailbox.pageSize).take(mailbox.pageSize)
                 val next = if (mailbox.listed.size > (page + 1) * mailbox.pageSize) ""","nextPageToken":"p${page + 1}"""" else ""
                 HttpStatusCode.OK to """{"messages":[${chunk.joinToString(",") { """{"id":"$it","threadId":"th-$it"}""" }}],"resultSizeEstimate":${chunk.size}$next}"""
