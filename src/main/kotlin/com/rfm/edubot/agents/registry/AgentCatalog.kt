@@ -25,13 +25,13 @@ data class CatalogActionDto(
     val sideEffect: String,
     val inputSchema: JsonObject,
     val outputSchema: JsonObject? = null,
-    val subjectTypes: List<String> = emptyList(),
+    val subjectTypes: List<String>,
     val available: Boolean,
     val reason: String? = null,
 )
 
 @Serializable
-data class CatalogEntityDto(val type: String, val module: String?, val available: Boolean, val statuses: List<String> = emptyList())
+data class CatalogEntityDto(val type: String, val module: String?, val available: Boolean, val statuses: List<String>)
 
 /**
  * Everything the builder needs to draw its forms, from the registry. Labels are not here: the
@@ -47,7 +47,7 @@ data class AgentCatalogDto(
     /** Variables by record type; `none` holds the ones every run has. */
     val variables: Map<String, List<VariableSpec>>,
     val integrations: List<String>,
-    val templates: List<JsonObject> = emptyList(),
+    val templates: List<JsonObject>,
 )
 
 object AgentAvailability {

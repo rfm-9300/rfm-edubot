@@ -14,7 +14,9 @@ import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
 import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.actions.AgentActions
+import com.rfm.edubot.agents.agentAdminRoutes
 import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
@@ -308,7 +310,9 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,
         )
-        agentRoutes(agentsModule, agentRuntime)
+        agentRoutes(agentsModule, agentRuntime, tenantRepository)
+        agentAdminRoutes(agentsModule, agentRuntime, tenantRepository)
+        notificationRoutes(agentServices.notifications)
         adminRoutes()
         tenantAdminRoutes(
             mongo = mongoModule,
