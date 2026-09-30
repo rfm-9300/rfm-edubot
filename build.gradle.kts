@@ -64,6 +64,8 @@ dependencies {
     testImplementation("io.kotest:kotest-runner-junit5:5.9.1")
     testImplementation("org.testcontainers:mongodb:1.20.3")
     testImplementation("org.testcontainers:junit-jupiter:1.20.3")
+    // Parses the messages MimeMessageBuilder writes, so the tests don't grade the builder with its own reading.
+    testImplementation("org.eclipse.angus:angus-mail:2.0.3")
 }
 
 tasks.named<JavaExec>("run") {
