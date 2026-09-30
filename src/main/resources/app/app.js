@@ -6269,7 +6269,10 @@ function renderSettings(root) {
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
   $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));
-  $$('[data-google-connect]', root).forEach(b => b.addEventListener('click', () => connectGoogle(b.dataset.googleConnect)));
+  $$('[data-google-connect]', root).forEach(b => b.addEventListener('click', () => {
+    const account = googleAccounts().find(c => c.accountEmail === b.dataset.googleConnect);
+    connectGoogle(b.dataset.googleConnect, { inbox: readsInbox(account) });
+  }));
   $$('[data-google-account]', root).forEach(b => b.addEventListener('click', () => openEmailAccount(b.dataset.googleAccount)));
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
@@ -6400,6 +6403,8 @@ async function disconnectInstagram(ig) {
 
 // ── Email (Google) ──────────────────────────────────────────────────────────────
 const googleAccounts = () => (state.integrations?.connections || []).filter(c => c.provider === 'google');
+// Reconnecting an account that reads its inbox asks for reading again, so it doesn't stay paused.
+const readsInbox = account => !!(account?.inboxSync && state.integrations?.google?.inbox);
 
 async function refreshGoogle() {
   const [integrations, email] = await Promise.all([
@@ -6434,12 +6439,15 @@ function googleRowsHtml() {
       ? escapeHTML(GOOGLE.status.ACTIVE)
       : `<span class="pill pill--${c.status === 'REVOKED' ? 'bad' : 'warn'}">${escapeHTML(googleTextOr(`status.${c.status}`, c.status))}</span>`;
     const isDefault = accounts.length > 1 && c.isDefault ? ` <span class="pill pill--info">${escapeHTML(GOOGLE.isDefault)}</span>` : '';
+    const inbox = info.google.inbox && c.inboxSync && c.status === 'ACTIVE'
+      ? ` <span class="pill ${c.inboxError ? 'pill--warn' : 'pill--accent'}">${escapeHTML(c.inboxError ? GOOGLE.inbox.rowPaused : GOOGLE.inbox.rowOn)}</span>`
+      : '';
     const actions = [
       canConnect && c.status !== 'ACTIVE' ? `<button class="btn btn--sm btn--primary" type="button" data-google-connect="${escapeHTML(c.accountEmail)}">${escapeHTML(GOOGLE.reconnect)}</button>` : '',
       info.canManage ? `<button class="btn btn--sm" type="button" data-google-account="${escapeHTML(c.id)}">${escapeHTML(GOOGLE.manage)}</button>` : '',
       canConnect && i === accounts.length - 1 ? `<button class="btn btn--sm btn--ghost" type="button" data-google-connect>${escapeHTML(GOOGLE.addAccount)}</button>` : '',
     ].filter(Boolean).join(' ');
-    return `<tr>${name}<td class="mono">${escapeHTML(c.accountEmail)}</td><td>${status}${isDefault}</td><td class="right">${actions}</td></tr>`;
+    return `<tr>${name}<td class="mono">${escapeHTML(c.accountEmail)}</td><td>${status}${isDefault}${inbox}</td><td class="right">${actions}</td></tr>`;
   }).join('');
 }
 
@@ -6449,12 +6457,15 @@ const GOOGLE_OAUTH_CHANNEL = 'google-oauth';
 const GOOGLE_POPUP_KEY = 'googleOAuthPopup';
 let googleChannel = null;
 
-// `account` reconnects that account: Google's screen opens on it.
-async function connectGoogle(account) {
+// `account` reconnects that account: Google's screen opens on it. `inbox` also asks to read its mail.
+async function connectGoogle(account, { inbox = false } = {}) {
   // Opened before any await: browsers only allow a popup straight from the click.
   const popup = window.open('', 'google-oauth', 'width=520,height=680');
+  const query = new URLSearchParams();
+  if (account) query.set('account', account);
+  if (inbox) query.set('inbox', '1');
   let res;
-  try { res = await api(`/app/api/integrations/google/connect${account ? `?account=${encodeURIComponent(account)}` : ''}`); }
+  try { res = await api(`/app/api/integrations/google/connect${query.toString() ? `?${query}` : ''}`); }
   catch (e) {
     popup?.close();
     if (e.message !== 'unauthorized') toast(googleTextOr(`connectErrors.${e.code || ''}`, GOOGLE.connectFailed));
@@ -6506,8 +6517,13 @@ function takeGooglePopupMark() {
 }
 
 async function googleOutcome(status, reason) {
-  if (status !== 'connected') { toast(googleTextOr(`reasons.${reason || ''}`, GOOGLE.connectFailed)); return; }
-  toast(GOOGLE.connected);
+  if (status === 'connected' || status === 'inbox') {
+    toast(status === 'inbox' ? GOOGLE.inbox.turnedOn : GOOGLE.connected);
+  } else {
+    toast(googleTextOr(`reasons.${reason || ''}`, GOOGLE.connectFailed));
+    // Reading was refused but sending was allowed, so the account did connect.
+    if (reason !== 'missing_inbox_scope') return;
+  }
   await refreshGoogle();
   if (state.active === 'settings') render();
 }
@@ -6523,6 +6539,31 @@ function takeGoogleRedirect() {
   const query = params.toString();
   history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}#settings`);
   return { status, reason };
+}
+
+// Only while the platform lets companies read inboxes. Its buttons act at once, apart from Save: turning
+// reading on may need Google's consent, and that popup has to open straight from the click.
+function emailInboxPanelHtml(account) {
+  const google = state.integrations?.google;
+  if (!google?.inbox) return '';
+  const I = GOOGLE.inbox;
+  const on = !!account.inboxSync;
+  const active = account.status === 'ACTIVE';
+  const failing = on && active && !!account.inboxError;
+  const pill = !on ? `<span class="pill">${escapeHTML(I.off)}</span>`
+    : `<span class="pill ${active && !failing ? 'pill--ok' : 'pill--warn'}">${escapeHTML(active && !failing ? I.on : I.paused)}</span>`;
+  const detail = !on ? `<p class="view__desc">${escapeHTML(I.offDetail)}</p>`
+    : !active ? `<p class="view__desc">${escapeHTML(I.pausedReconnect)}</p>`
+      : failing ? `<p class="hint hint--warn">${escapeHTML(googleTextOr(`inbox.errors.${account.inboxError}`, I.errors.generic))}</p>`
+        : `<p class="view__desc">${escapeHTML(account.inboxSyncedAt ? googleText('inbox.syncedAt', { when: relTime(account.inboxSyncedAt) }) : I.firstSync)}</p>`;
+  const actions = !on
+    ? (google.canConnect && active ? `<button class="btn btn--sm btn--primary" type="button" data-ga-inbox="on">${escapeHTML(I.turnOn)}</button>` : google.canConnect ? '' : `<span class="muted">${escapeHTML(I.adminsOnly)}</span>`)
+    : [
+      failing && account.inboxError === 'missing_scope' && google.canConnect ? `<button class="btn btn--sm btn--primary" type="button" data-ga-inbox="consent">${escapeHTML(I.allowReading)}</button>` : '',
+      `<button class="btn btn--sm btn--ghost" type="button" data-ga-inbox="off">${escapeHTML(I.turnOff)}</button>`,
+    ].filter(Boolean).join('');
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(I.title)}</h2>${pill}</header>
+    <div class="panel__body form">${detail}<p class="hint">${escapeHTML(I.hint)}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</div></section>`;
 }
 
 function openEmailAccount(id) {
@@ -6545,6 +6586,7 @@ function openEmailAccount(id) {
       ${account.connectedBy ? `<div><dt>${escapeHTML(GOOGLE.factConnectedBy)}</dt><dd>${escapeHTML(account.connectedBy)}</dd></div>` : ''}
       ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-ga-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
     </dl>
+    ${emailInboxPanelHtml(account)}
     <div class="form__row"><label class="lbl" for="ga-name">${escapeHTML(GOOGLE.senderName)} ${optional}</label>
       <input class="inp" id="ga-name" maxlength="80" autocomplete="off" placeholder="${escapeHTML(company)}" value="${escapeHTML(account.senderName || '')}" />
       <p class="hint">${escapeHTML(googleText('senderNameHint', { company }))}</p></div>
@@ -6565,7 +6607,7 @@ function openEmailAccount(id) {
   const path = `/app/api/integrations/${encodeURIComponent(account.id)}`;
   $('[data-ga-reconnect]', form)?.addEventListener('click', () => {
     closeDrawer({ dismissed: true });
-    connectGoogle(account.accountEmail);
+    connectGoogle(account.accountEmail, { inbox: readsInbox(account) });
   });
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -6604,6 +6646,26 @@ function openEmailAccount(id) {
       if (fresh && fresh.status !== account.status && form.isConnected) openEmailAccount(fresh.id);
     } finally { btn.disabled = false; }
   });
+  $$('[data-ga-inbox]', form).forEach(b => b.addEventListener('click', async () => {
+    const mode = b.dataset.gaInbox;
+    if (mode === 'consent' || (mode === 'on' && !account.canRead)) {
+      closeDrawer({ dismissed: true });
+      connectGoogle(account.accountEmail, { inbox: true });
+      return;
+    }
+    b.disabled = true;
+    try {
+      await api(path, { method: 'PATCH', body: JSON.stringify({ inboxSync: mode === 'on' }) });
+      toast(mode === 'on' ? GOOGLE.inbox.turnedOn : GOOGLE.inbox.turnedOff);
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      toast(googleTextOr(`inbox.patchErrors.${err.code || ''}`, GOOGLE.inbox.failed));
+    }
+    // A refused change (Google took reading back meanwhile) redraws the panel with what the server knows.
+    await refreshGoogle();
+    if (state.active === 'settings') render();
+    if (form.isConnected && googleAccounts().some(c => c.id === account.id)) openEmailAccount(account.id);
+  }));
   $('[data-ga-disconnect]', form).addEventListener('click', () => disconnectGoogle(account));
   openDrawer(account.accountEmail, form, false, { eyebrow: GOOGLE.eyebrow });
 }
