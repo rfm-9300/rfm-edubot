@@ -207,6 +207,7 @@ class AgentRuntimeTest {
         assertEquals(listOf("Olá Ana"), sent)
         assertTrue(noted.single().startsWith("Fatura FAT-"))
         assertEquals(SubjectRef.of(SubjectTypes.INVOICE, invoiceId), run.subject)
+        assertEquals(InvoiceRepository(mongo, tenant.id).findById(invoiceId)!!.clientId, run.clientId, "the run knows whose invoice it is")
         val event = com.rfm.edubot.events.DomainEventLog(mongo).findById(tenant.id, ObjectId(run.trigger.eventId))!!
         runtime.dispatcher.handle(event)
         assertEquals(1, runsFor(agent).size, "the same event never starts a second run")

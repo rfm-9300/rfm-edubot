@@ -142,6 +142,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             agentRuns.createIndex(Document("tenantId", 1).append("agentId", 1).append("createdAt", -1))
             agentRuns.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
             agentRuns.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1).append("status", 1))
+            agentRuns.createIndex(Document("tenantId", 1).append("clientId", 1).append("createdAt", -1))
             agentRuns.createIndex(Document("finishedAt", 1), IndexOptions().expireAfter(180, TimeUnit.DAYS))
 
             val agentApprovals = db.getCollection<Document>("agent_approvals")
@@ -153,6 +154,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             agentTasks.createIndex(Document("tenantId", 1).append("status", 1).append("dueAt", 1))
             agentTasks.createIndex(Document("tenantId", 1).append("assigneeUserId", 1).append("status", 1))
             agentTasks.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1))
+            agentTasks.createIndex(Document("tenantId", 1).append("clientId", 1).append("status", 1))
 
             val notifications = db.getCollection<Document>("notifications")
             notifications.createIndex(Document("tenantId", 1).append("audience", 1).append("userId", 1).append("createdAt", -1))

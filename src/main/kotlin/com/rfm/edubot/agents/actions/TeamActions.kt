@@ -113,6 +113,7 @@ object CreateTaskAction : AgentAction {
                 detail = input.string("detail"),
                 subject = ctx.run.subject,
                 subjectLabel = ctx.run.subjectLabel,
+                clientId = ctx.run.clientId,
                 assigneeUserId = assignee?.id?.toHexString(),
                 assigneeName = assignee?.email,
                 dueAt = ctx.now + (input.int("dueInDays") ?: 1).days,

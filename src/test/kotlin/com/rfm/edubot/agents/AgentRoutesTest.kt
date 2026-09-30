@@ -6,6 +6,7 @@ import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.model.AgentApproval
 import com.rfm.edubot.agents.model.AgentDefinition
 import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.AgentTask
 import com.rfm.edubot.agents.model.Approvers
 import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.RunTrigger
@@ -292,6 +293,38 @@ class AgentRoutesTest {
         assertEquals(0, view["upcoming"]!!.jsonArray.single().jsonObject["done"]!!.jsonArray.size, "an empty list still reaches the page")
         val done = view["recent"]!!.jsonArray.single().jsonObject["done"]!!.jsonArray.map { it.jsonPrimitive.content }
         assertEquals(listOf("whatsapp.send"), done, "each action once, without flow steps or skipped ones")
+    }
+
+    @Test
+    fun `a client's record covers work on its documents, and a document shows the runs that changed it`() = routes { http ->
+        val company = company()
+        val clientId = ObjectId()
+        val invoice = SubjectRef(SubjectTypes.INVOICE, ObjectId().toHexString())
+        val quote = SubjectRef(SubjectTypes.QUOTE, ObjectId().toHexString())
+        fun run(subject: SubjectRef, status: RunStatus, client: ObjectId?) = AgentRun(
+            tenantId = company.tenant.id, agentId = ObjectId(), agentName = "Lembrete", agentVersion = 1, definition = AgentDefinition(),
+            trigger = RunTrigger(type = "event", firedAt = now), subject = subject, clientId = client, dedupeKey = ObjectId().toHexString(),
+            status = status, createdAt = now, updatedAt = now,
+        )
+        val reminder = run(invoice, RunStatus.WAITING, clientId)
+        val invoicing = run(quote, RunStatus.SUCCEEDED, null)
+        runBlocking {
+            module.runs.insertIfAbsent(reminder)
+            module.runs.insertIfAbsent(invoicing)
+            module.runs.insertIfAbsent(run(invoice, RunStatus.SUCCEEDED, clientId).copy(dryRun = true))
+            module.tasks.insert(AgentTask(tenantId = company.tenant.id, title = "Ligar à Ana", subject = invoice, clientId = clientId, createdAt = now, updatedAt = now))
+            withContext(ActorContext(Actor.agent(invoicing.agentId, invoicing.id, "Faturar"))) {
+                DomainEventLog(mongo).append(company.tenant.id, DomainEventTypes.INVOICE_CREATED, invoice)
+            }
+        }
+        val client = http.send("GET", "/app/api/agents/subjects/client/$clientId", company.memberToken).obj()
+        assertEquals(reminder.id.toHexString(), client["upcoming"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content, "the reminder on the client's invoice, not the test run")
+        assertEquals(0, client["recent"]!!.jsonArray.size)
+        assertEquals("Ligar à Ana", client["tasks"]!!.jsonArray.single().jsonObject["title"]!!.jsonPrimitive.content)
+
+        val onInvoice = http.send("GET", "/app/api/agents/subjects/invoice/${invoice.id}", company.memberToken).obj()
+        assertEquals(invoicing.id.toHexString(), onInvoice["recent"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content, "the quote's run that issued this invoice")
+        assertEquals(reminder.id.toHexString(), onInvoice["upcoming"]!!.jsonArray.single().jsonObject["id"]!!.jsonPrimitive.content)
     }
 
     @Test

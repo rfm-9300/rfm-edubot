@@ -424,24 +424,27 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val ctx = call.agentsContext() ?: return@get
                 val subject = SubjectRef(call.parameters["type"].orEmpty(), call.parameters["id"].orEmpty())
                 val tenantId = ctx.tenant.id
-                val runs = agents.runs.list(tenantId, subject = subject, limit = 30).filter { !it.dryRun }
+                // A client's record also covers what agents do on its quotes, invoices, bookings and chats.
+                val clientId = subject.id.toObjectIdOrNull()?.takeIf { subject.type == SubjectTypes.CLIENT }
+                val own = if (clientId != null) agents.runs.forClient(tenantId, clientId) else agents.runs.list(tenantId, subject = subject, limit = 30).filter { !it.dryRun }
                 val activity = events.timeline(tenantId, subject, limit = 50).filter { it.actor.type == ActorType.AGENT }.map {
                     ActivityDto(it.type, it.actor.name, it.occurredAt.toString(), it.payload, it.actor.runId)
                 }
+                // Runs on another record that changed this one, like the quote's run that issued this invoice.
+                val listed = own.map { it.id }.toSet()
+                val relatedIds = activity.mapNotNull { it.runId?.toObjectIdOrNull() }.filter { it !in listed }.distinct().take(10)
+                val runs = (own + agents.runs.byIds(tenantId, relatedIds).filter { !it.dryRun }).sortedByDescending { it.createdAt }
                 val manual = agents.agents.activeFor(tenantId).filter { agent ->
                     agent.definition.triggers.any { it.type == TriggerTypes.MANUAL && (it.config.string("subjectType") ?: SubjectTypes.NONE) == subject.type }
                 }.map { AgentOptionDto(it.id.toHexString(), it.name) }
-                val paused = if (subject.type == SubjectTypes.CLIENT) {
-                    subject.id.toObjectIdOrNull()?.let { ClientRepository(agents.mongo, tenantId).findById(it)?.automationPaused }
-                } else {
-                    null
-                }
+                val paused = clientId?.let { ClientRepository(agents.mongo, tenantId).findById(it)?.automationPaused }
+                val tasks = if (clientId != null) agents.tasks.openForClient(tenantId, clientId) else agents.tasks.list(tenantId, TaskStatus.OPEN, subject = subject)
                 call.respond(
                     SubjectAutomationsDto(
-                        upcoming = runs.filter { it.status.open }.map { it.dto() },
+                        upcoming = runs.filter { it.status.open }.sortedBy { it.resumeAt ?: it.createdAt }.map { it.dto() },
                         recent = runs.filter { !it.status.open }.take(10).map { it.dto() },
                         activity = activity,
-                        tasks = agents.tasks.list(tenantId, TaskStatus.OPEN, subject = subject).map { it.dto() },
+                        tasks = tasks.map { it.dto() },
                         manualAgents = manual,
                         automationPaused = paused,
                     ),

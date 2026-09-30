@@ -7,6 +7,7 @@ import com.mongodb.client.model.Updates
 import com.rfm.edubot.agents.model.AgentTask
 import com.rfm.edubot.agents.model.TaskStatus
 import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -44,6 +45,21 @@ class AgentTaskRepository(mongo: MongoModule, private val clock: () -> Instant =
         }
         return collection.find(Filters.and(filters)).sort(Document("dueAt", 1).append("createdAt", -1)).limit(limit.coerceIn(1, 500)).toList().map { it.toTask() }
     }
+
+    /** Open tasks about [clientId] or one of its documents, earliest due first. */
+    suspend fun openForClient(tenantId: ObjectId, clientId: ObjectId, limit: Int = 50): List<AgentTask> =
+        collection.find(
+            scoped(
+                tenantId,
+                Filters.and(
+                    Filters.eq("status", TaskStatus.OPEN.name),
+                    Filters.or(
+                        Filters.eq("clientId", clientId),
+                        Filters.and(Filters.eq("subject.type", SubjectTypes.CLIENT), Filters.eq("subject.id", clientId.toHexString())),
+                    ),
+                ),
+            ),
+        ).sort(Document("dueAt", 1).append("createdAt", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toTask() }
 
     /** Open tasks due before [before], earliest first. Tasks without a due date are never due. */
     suspend fun dueBefore(tenantId: ObjectId, before: Instant, limit: Int = 3): List<AgentTask> =
@@ -107,6 +123,7 @@ class AgentTaskRepository(mongo: MongoModule, private val clock: () -> Instant =
         .append("detail", detail)
         .append("subject", subject?.let { Document("type", it.type).append("id", it.id) })
         .append("subjectLabel", subjectLabel)
+        .append("clientId", clientId)
         .append("assigneeUserId", assigneeUserId)
         .append("assigneeName", assigneeName)
         .append("dueAt", dueAt?.toDate())
@@ -127,6 +144,7 @@ class AgentTaskRepository(mongo: MongoModule, private val clock: () -> Instant =
         detail = getString("detail"),
         subject = get("subject", Document::class.java)?.let { SubjectRef(it.getString("type").orEmpty(), it.getString("id").orEmpty()) },
         subjectLabel = getString("subjectLabel"),
+        clientId = get("clientId", ObjectId::class.java),
         assigneeUserId = getString("assigneeUserId"),
         assigneeName = getString("assigneeName"),
         dueAt = instant("dueAt"),

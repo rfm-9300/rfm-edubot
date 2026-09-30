@@ -171,6 +171,8 @@ data class AgentRun(
     val trigger: RunTrigger,
     val subject: SubjectRef? = null,
     val subjectLabel: String? = null,
+    /** The client the subject belongs to when the run started, so the client's record lists runs on its documents. */
+    val clientId: ObjectId? = null,
     val dedupeKey: String,
     val status: RunStatus = RunStatus.QUEUED,
     val currentStep: Int = 0,
@@ -244,6 +246,8 @@ data class AgentTask(
     val detail: String? = null,
     val subject: SubjectRef? = null,
     val subjectLabel: String? = null,
+    /** Copied from the agent run, so a task about one of a client's documents shows on the client's record. */
+    val clientId: ObjectId? = null,
     val assigneeUserId: String? = null,
     val assigneeName: String? = null,
     val dueAt: Instant? = null,

@@ -88,6 +88,7 @@ class AgentRunStarter(
             trigger = trigger,
             subject = subject,
             subjectLabel = context.label,
+            clientId = context.clientId,
             dedupeKey = dedupeKey,
             status = if (matches) RunStatus.QUEUED else RunStatus.SKIPPED,
             context = context.variables,

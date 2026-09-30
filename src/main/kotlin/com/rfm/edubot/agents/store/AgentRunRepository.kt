@@ -12,6 +12,7 @@ import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.RunTrigger
 import com.rfm.edubot.agents.model.StepResult
 import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.BsonJson
 import com.rfm.edubot.shared.SystemClock
@@ -140,6 +141,25 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toRun() }
     }
 
+    /** Real runs on [clientId] itself or on its quotes, invoices, bookings and chats, newest first. */
+    suspend fun forClient(tenantId: ObjectId, clientId: ObjectId, limit: Int = 30): List<AgentRun> =
+        collection.find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.or(
+                    Filters.eq("clientId", clientId),
+                    // Runs stored before runs carried a client id.
+                    Filters.and(Filters.eq("subject.type", SubjectTypes.CLIENT), Filters.eq("subject.id", clientId.toHexString())),
+                ),
+                Filters.ne("dryRun", true),
+            ),
+        ).sort(Document("createdAt", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toRun() }
+
+    suspend fun byIds(tenantId: ObjectId, ids: Collection<ObjectId>): List<AgentRun> {
+        if (ids.isEmpty()) return emptyList()
+        return collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("_id", ids))).toList().map { it.toRun() }
+    }
+
     suspend fun countSince(tenantId: ObjectId, since: Instant, agentId: ObjectId? = null, includeDryRuns: Boolean = false): Long {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId), Filters.gte("createdAt", since.toDate()))
         agentId?.let { filters += Filters.eq("agentId", it) }
@@ -185,6 +205,7 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         .append("trigger", AgentJson.toDocument(RunTrigger.serializer(), trigger))
         .append("subject", subject?.let { Document("type", it.type).append("id", it.id) })
         .append("subjectLabel", subjectLabel)
+        .append("clientId", clientId)
         .append("dedupeKey", dedupeKey)
         .append("status", status.name)
         .append("currentStep", currentStep)
@@ -217,6 +238,7 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         ),
         subject = get("subject", Document::class.java)?.let { SubjectRef(it.getString("type").orEmpty(), it.getString("id").orEmpty()) },
         subjectLabel = getString("subjectLabel"),
+        clientId = get("clientId", ObjectId::class.java),
         dedupeKey = getString("dedupeKey").orEmpty(),
         status = runCatching { RunStatus.valueOf(getString("status")) }.getOrDefault(RunStatus.FAILED),
         currentStep = getInteger("currentStep") ?: 0,
