@@ -367,8 +367,9 @@
       .filter(a => !q || `${a.name} ${a.description || ''}`.toLowerCase().includes(q));
     if (!all.length) {
       pane.innerHTML = `<div class="panel"><div class="empty empty--art">${EMPTY_ART}<p class="empty__title">${esc(A.emptyTitle)}</p><p class="empty__desc">${esc(A.emptyDesc)}</p>
-        <div class="empty__actions"><button class="btn btn--primary" type="button" data-agents-go="templates">${esc(A.browseTemplates)}</button>${canManage() ? `<button class="btn btn--ghost" type="button" data-agents-blank>${esc(A.startBlank)}</button>` : ''}</div></div></div>`;
+        <div class="empty__actions"><button class="btn btn--primary" type="button" data-agents-go="templates">${esc(A.browseTemplates)}</button>${canManage() ? `<button class="btn btn--ghost" type="button" data-agents-describe>${esc(tr('describe.card'))}</button><button class="btn btn--ghost" type="button" data-agents-blank>${esc(A.startBlank)}</button>` : ''}</div></div></div>`;
       $('[data-agents-go]', pane).addEventListener('click', () => switchTab('templates'));
+      $('[data-agents-describe]', pane)?.addEventListener('click', openDescribe);
       $('[data-agents-blank]', pane)?.addEventListener('click', createBlank);
       return;
     }
@@ -449,6 +450,51 @@
     } catch {
       d.toast(A.actionFailed);
     }
+  }
+
+  const DESCRIBE_EXAMPLES = ['overdue', 'digest', 'newClient'];
+  const DESCRIBE_ERRORS = { 503: 'unavailable', 429: 'budget', 422: 'noResult' };
+  /** The person says what the agent should do; the server drafts it and the builder opens on the draft. */
+  function openDescribe() {
+    const form = document.createElement('form');
+    form.className = 'form';
+    form.innerHTML = `<p class="hint">${esc(tr('describe.hint'))}</p>
+      <div class="form__row"><label class="lbl" for="ag-describe">${esc(tr('describe.label'))}</label>
+        <textarea class="txt" id="ag-describe" rows="6" maxlength="2000" required placeholder="${esc(tr('describe.placeholder'))}"></textarea></div>
+      <div class="form__row"><span class="lbl">${esc(tr('describe.examples'))}</span>
+        <div class="chip-picks">${DESCRIBE_EXAMPLES.map(key => `<button class="chip" type="button" data-describe-example="${key}">${esc(tr(`describe.example.${key}.label`))}</button>`).join('')}</div></div>
+      <p class="hint">${esc(tr('describe.reviewHint'))}</p>
+      <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${esc(d.STR.cancel)}</button><button class="btn btn--accent" type="submit">${esc(tr('describe.submit'))}</button></div>`;
+    const gen = d.openDrawer(tr('describe.title'), form, false, { eyebrow: d.labels.agents });
+    d.bindDrawerClose(form);
+    const text = $('#ag-describe', form);
+    $$('[data-describe-example]', form).forEach(b => b.addEventListener('click', () => {
+      text.value = tr(`describe.example.${b.dataset.describeExample}.text`);
+      text.focus();
+    }));
+    form.addEventListener('submit', async e => {
+      e.preventDefault();
+      const request = text.value.trim();
+      if (!request) return text.focus();
+      const btn = $('button[type="submit"]', form);
+      btn.disabled = true;
+      text.readOnly = true;
+      btn.textContent = tr('describe.drafting');
+      try {
+        const drafted = await d.api('/app/api/agents/draft', { method: 'POST', body: JSON.stringify({ request }) });
+        ui.tab = 'agents';
+        await refresh();
+        // Drafting takes a while: someone who closed the drawer or moved on isn't pulled into the builder.
+        if (gen !== d.drawerGen() || $('#drawer')?.hidden) return d.toast(tr('describe.ready', { name: drafted.agent.name }));
+        d.toast(A.draftCreated);
+        openBuilder(drafted.agent, { intro: { note: drafted.note || '' } });
+      } catch (err) {
+        btn.disabled = false;
+        text.readOnly = false;
+        btn.textContent = tr('describe.submit');
+        d.toast(DESCRIBE_ERRORS[err?.status] ? tr(`describe.errors.${DESCRIBE_ERRORS[err.status]}`) : A.actionFailed);
+      }
+    });
   }
 
   // ── agent record ──────────────────────────────────────────────────
@@ -925,7 +971,8 @@
       .filter(t => !q || `${templateName(t)} ${templateDesc(t)}`.toLowerCase().includes(q));
     const chips = ['', ...categories].map(c => `<button class="chip ${ui.category === c ? 'is-on' : ''}" type="button" data-agents-category="${c}">${esc(c ? tr(`categories.${c}`) : tr('filters.all'))}</button>`).join('');
     const blank = canManage() && !ui.category && !q
-      ? `<button class="gallery__card gallery__card--blank" type="button" data-agents-blank><span class="gallery__head">${agentIcon('plus')}<span class="gallery__title">${esc(A.startBlank)}</span></span><span class="gallery__desc">${esc(A.startBlankDesc)}</span></button>`
+      ? `<button class="gallery__card gallery__card--blank" type="button" data-agents-describe><span class="gallery__head">${agentIcon('sparkle')}<span class="gallery__title">${esc(tr('describe.card'))}</span></span><span class="gallery__desc">${esc(tr('describe.cardDesc'))}</span></button>
+        <button class="gallery__card gallery__card--blank" type="button" data-agents-blank><span class="gallery__head">${agentIcon('plus')}<span class="gallery__title">${esc(A.startBlank)}</span></span><span class="gallery__desc">${esc(A.startBlankDesc)}</span></button>`
       : '';
     const cards = shown.map(t => {
       const reason = t.available ? '' : pill('', reasonText(t.reason));
@@ -939,6 +986,7 @@
     pane.innerHTML = `<div class="panel panel--card"><header class="panel__head"><div><h2 class="panel__title">${esc(A.galleryTitle)}</h2><p class="panel__meta">${esc(A.galleryDesc)}</p></div><div class="panel__tools">${chips}</div></header>
       <div class="panel__body">${cards || blank ? `<div class="gallery">${blank}${cards}</div>` : `<div class="empty"><p class="empty__title">${esc(A.galleryEmpty)}</p></div>`}</div></div>`;
     $$('[data-agents-category]', pane).forEach(b => b.addEventListener('click', () => { ui.category = b.dataset.agentsCategory; d.render(); }));
+    $('[data-agents-describe]', pane)?.addEventListener('click', openDescribe);
     $('[data-agents-blank]', pane)?.addEventListener('click', createBlank);
     $$('[data-template]', pane).forEach(b => b.addEventListener('click', () => openTemplateSetup(templates.find(t => t.key === b.dataset.template))));
   }
@@ -1318,14 +1366,15 @@
       definition: normalizeDefinition(clone(agent.definition || {})),
     };
     let problems = kept?.problems || agent.problems || [];
-    const here = { key: `builder:${agent.id}`, label: A.editTitle, open: () => openBuilder(agent, { draft, problems }) };
+    const intro = kept?.intro || null;
+    const here = { key: `builder:${agent.id}`, label: A.editTitle, open: () => openBuilder(agent, { draft, problems, intro }) };
     const body = document.createElement('div');
     body.className = 'builder';
     const draw = () => {
       const scroller = $('#drawer-body');
       const top = scroller ? scroller.scrollTop : 0;
       body.dataset.firstField = defaultField(subjectOf(draft.definition));
-      body.innerHTML = builderHtml(draft, problems);
+      body.innerHTML = builderHtml(draft, problems, intro);
       d.bindDrawerClose(body);
       if (scroller) scroller.scrollTop = top;
     };
@@ -1466,13 +1515,17 @@
     if (kind === 'exit-add') def.exitRules.push({ event: value });
   }
 
-  function builderHtml(draft, problems) {
+  /** [intro] is set on a draft made from a description: `note` is what the model says it left out. */
+  function builderHtml(draft, problems, intro = null) {
     const def = draft.definition;
     const subjectType = subjectOf(def);
+    const introHtml = intro
+      ? `<div class="notice notice--info"><div class="notice__text"><strong>${esc(tr('describe.introTitle'))}</strong><span>${esc(tr('describe.introDesc'))}</span>${intro.note ? `<span>${esc(intro.note)}</span>` : ''}</div></div>`
+      : '';
     const problemsHtml = problems.length
       ? `<div class="notice notice--warn"><div class="notice__text"><strong>${esc(A.problemsTitle)}</strong><ul class="notice__list">${problems.map(p => `<li>${esc(problemText(p, def))}</li>`).join('')}</ul></div></div>`
       : '';
-    return `${problemsHtml}
+    return `${introHtml}${problemsHtml}
       <div class="form__grid">
         <div class="form__row"><label class="lbl" for="ag-name">${esc(A.nameLabel)} <span class="req">*</span></label><input class="inp" id="ag-name" maxlength="80" data-bind="name" data-type="raw" value="${esc(draft.name)}" /></div>
         <div class="form__row"><label class="lbl" for="ag-desc">${esc(A.descriptionLabel)} <span class="opt">${esc(A.optional)}</span></label><input class="inp" id="ag-desc" maxlength="500" data-bind="description" data-type="raw" value="${esc(draft.description)}" /></div>
@@ -2084,6 +2137,6 @@
 
   window.AgentsUI = {
     init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon,
-    focusRef, openRef, renderAutomations, mountAutomations, mountPersonaAgents, reasonText,
+    focusRef, openRef, renderAutomations, mountAutomations, mountPersonaAgents, reasonText, actionLabel, openDescribe,
   };
 })();

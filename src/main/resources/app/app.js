@@ -5720,6 +5720,14 @@ function renderCatalog(root) {
 
 function assistantActionLabel(action) {
   const args = action.arguments || {};
+  const preview = action.preview || {};
+  const agent = preview.agent || args.agent_id || '';
+  const step = preview.action ? (window.AgentsUI?.actionLabel(preview.action) || preview.action) : '';
+  if (action.toolName === 'run_agent') return STR.assistantRunAgent({ agent, record: preview.record || '' });
+  if (action.toolName === 'pause_agent') return STR.assistantPauseAgent({ agent });
+  if (action.toolName === 'activate_agent') return STR.assistantActivateAgent({ agent });
+  if (action.toolName === 'approve_agent_item') return args.decision === 'reject' ? STR.assistantRejectAgentItem({ action: step }) : STR.assistantApproveAgentItem({ action: step });
+  if (action.toolName === 'draft_agent') return STR.assistantDraftAgent;
   if (action.toolName === 'create_client') return STR.assistantCreateClient({ name: args.name || '' });
   if (action.toolName === 'create_quote') return STR.assistantCreateQuote;
   if (action.toolName === 'update_quote') return STR.assistantUpdateQuote({ id: args.quote_id || '' });
@@ -5732,7 +5740,27 @@ function assistantActionLabel(action) {
   return STR.assistantChangeData;
 }
 
+const ASSISTANT_AGENT_TOOLS = new Set(['run_agent', 'pause_agent', 'activate_agent', 'approve_agent_item', 'draft_agent']);
+
+/** An agent action's details come from the server's preview (names behind the ids), not from the arguments. */
+function assistantAgentDetails(action) {
+  const args = action.arguments || {};
+  const p = action.preview || {};
+  const details = [];
+  if (action.toolName === 'approve_agent_item') {
+    if (p.agent) details.push(STR.assistantAgentName({ name: p.agent }));
+    if (p.record) details.push(STR.assistantAgentRecord({ record: p.record }));
+    if (p.recipients?.length) details.push(STR.assistantAgentTo({ to: p.recipients.join(', ') }));
+    if (p.subject) details.push(STR.assistantAgentSubject({ subject: p.subject }));
+    if (p.body) details.push(STR.assistantAgentMessage({ text: p.body }));
+    if (args.decision === 'reject' && args.reason) details.push(STR.assistantAgentReason({ reason: args.reason }));
+  }
+  if (action.toolName === 'draft_agent' && args.request) details.push(STR.assistantAgentRequest({ text: args.request }));
+  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
+}
+
 function assistantActionDetails(action) {
+  if (ASSISTANT_AGENT_TOOLS.has(action.toolName)) return assistantAgentDetails(action);
   const args = action.arguments || {};
   const details = [];
   if (args.name) details.push(`${STR.thName}: ${args.name}`);
@@ -5768,6 +5796,17 @@ function assistantDocumentDownload(action) {
   return `<div class="assistant__action-buttons">${pdfButton(id, type, true, STR.assistantDownloadPdf({ number }), filename)}</div>`;
 }
 
+/** After a confirmed draft or run, the way to what it made. */
+function assistantAgentLink(action) {
+  if (action.status !== 'CONFIRMED' || !hasModule('agents') || !window.AgentsUI) return '';
+  const result = action.result || {};
+  const ref = action.toolName === 'draft_agent' && result.agent_id ? `agent:${result.agent_id}`
+    : action.toolName === 'run_agent' && result.run_id ? `run:${result.run_id}` : '';
+  if (!ref) return '';
+  const label = ref.startsWith('agent:') ? STR.assistantOpenDraft : STR.assistantOpenRun;
+  return `<div class="assistant__action-buttons"><button class="btn btn--sm" type="button" data-assistant-agent-ref="${escapeHTML(ref)}">${escapeHTML(label)}</button></div>`;
+}
+
 async function openAssistantThread(id) {
   state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
   render();
@@ -5788,7 +5827,7 @@ function renderAssistant(root) {
     if (!m.action) return bubble;
     const pending = m.action.status === 'PENDING';
     const details = assistantActionDetails(m.action);
-    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}</div>`;
+    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}${assistantAgentLink(m.action)}</div>`;
   }).join('');
   root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
   $('#assistant-new').addEventListener('click', createAssistantThread);
@@ -5824,6 +5863,7 @@ function renderAssistant(root) {
   });
   $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
   $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
+  $$('[data-assistant-agent-ref]', root).forEach(b => b.addEventListener('click', () => window.AgentsUI.openRef(b.dataset.assistantAgentRef)));
   wirePdfButtons(root);
 }
 
