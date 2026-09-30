@@ -9,6 +9,7 @@ import com.rfm.edubot.agents.model.AgentTask
 import com.rfm.edubot.agents.model.Autonomy
 import com.rfm.edubot.agents.model.CompanyAgentSettings
 import com.rfm.edubot.agents.model.StepResult
+import com.rfm.edubot.agents.model.StepStatus
 import com.rfm.edubot.agents.registry.DefinitionProblem
 import com.rfm.edubot.agents.store.AgentJson
 import com.rfm.edubot.events.SubjectRef
@@ -87,6 +88,8 @@ import kotlinx.serialization.json.jsonObject
     val error: String? = null,
     val dryRun: Boolean,
     val tokens: Int,
+    /** Actions the run carried out (flow steps aside), for "what the agent did" lines on records. */
+    val done: List<String>,
     val steps: List<StepDto>? = null,
     val plan: List<PlannedStepDto>? = null,
 )
@@ -271,6 +274,7 @@ internal fun AgentRun.dto(withSteps: Boolean = false) = RunDto(
     error = error,
     dryRun = dryRun,
     tokens = promptTokens + completionTokens,
+    done = steps.filter { it.status == StepStatus.DONE && !it.action.startsWith("flow.") }.map { it.action }.distinct(),
     steps = if (withSteps) steps.map { it.dto() } else null,
     plan = if (withSteps) definition.steps.map { PlannedStepDto(it.id, it.action, it.label, it.input) } else null,
 )

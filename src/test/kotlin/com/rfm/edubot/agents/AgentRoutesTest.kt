@@ -4,7 +4,13 @@ import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.agents.actions.AgentActions
 import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentDefinition
+import com.rfm.edubot.agents.model.AgentRun
 import com.rfm.edubot.agents.model.Approvers
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.model.StepResult
+import com.rfm.edubot.agents.model.StepStatus
 import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
@@ -258,6 +264,34 @@ class AgentRoutesTest {
         val activity = http.send("GET", "/app/api/agents/subjects/client/$clientId", company.adminToken).obj()["activity"]!!.jsonArray.single().jsonObject
         assertEquals(runId.toHexString(), activity["runId"]!!.jsonPrimitive.content, "the record's timeline links each agent change to its run")
         assertEquals("Lembretes", activity["agentName"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `a record lists its upcoming runs and what finished runs did`() = routes { http ->
+        val company = company()
+        val subject = SubjectRef(SubjectTypes.QUOTE, ObjectId().toHexString())
+        fun run(status: RunStatus, vararg steps: StepResult) = AgentRun(
+            tenantId = company.tenant.id, agentId = ObjectId(), agentName = "Seguimento", agentVersion = 1, definition = AgentDefinition(),
+            trigger = RunTrigger(type = "event", firedAt = now), subject = subject, dedupeKey = ObjectId().toHexString(), status = status,
+            steps = steps.toList(), createdAt = now, updatedAt = now,
+        )
+        runBlocking {
+            module.runs.insertIfAbsent(
+                run(
+                    RunStatus.SUCCEEDED,
+                    StepResult("s1", "flow.wait", StepStatus.DONE),
+                    StepResult("s2", "whatsapp.send", StepStatus.DONE),
+                    StepResult("s3", "team.notify", StepStatus.SKIPPED),
+                    StepResult("s4", "whatsapp.send", StepStatus.DONE),
+                ),
+            )
+            module.runs.insertIfAbsent(run(RunStatus.WAITING, StepResult("s1", "flow.wait", StepStatus.WAITING)))
+        }
+        val view = http.send("GET", "/app/api/agents/subjects/quote/${subject.id}", company.memberToken).obj()
+        assertEquals("WAITING", view["upcoming"]!!.jsonArray.single().jsonObject["status"]!!.jsonPrimitive.content)
+        assertEquals(0, view["upcoming"]!!.jsonArray.single().jsonObject["done"]!!.jsonArray.size, "an empty list still reaches the page")
+        val done = view["recent"]!!.jsonArray.single().jsonObject["done"]!!.jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("whatsapp.send"), done, "each action once, without flow steps or skipped ones")
     }
 
     @Test
