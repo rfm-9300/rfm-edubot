@@ -9,6 +9,7 @@ object AgentActions {
         WhatsAppSendAction,
         InstagramReplyAction,
         EmailSendAction,
+        EmailReplyAction,
         NotifyTeamAction,
         CreateTaskAction,
         CreateClientAction,

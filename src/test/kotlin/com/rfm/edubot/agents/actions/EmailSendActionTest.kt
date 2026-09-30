@@ -31,9 +31,12 @@ import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationConnectionRepository
 import com.rfm.edubot.integrations.IntegrationProviders
 import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.email.EmailDirection
+import com.rfm.edubot.integrations.email.EmailMessage
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.google.FakeGoogle
@@ -279,5 +282,108 @@ class EmailSendActionTest {
         val (_, noEmail) = quoteFor(tenant, email = null, phone = "+351 922 000 222")
         assertEquals(listOf("no_email"), preview(input(), context(tenant, noEmail)).warnings)
         assertTrue(google.sends.isEmpty(), "previews never send")
+    }
+
+    private suspend fun inbox(tenant: Tenant, account: String) = connections.connect(
+        tenantId = tenant.id,
+        provider = IntegrationProviders.GOOGLE,
+        accountEmail = account,
+        scopes = GoogleScopes.inbox,
+        accessToken = cipher.seal("access-inbox"),
+        refreshToken = cipher.seal("refresh-inbox"),
+        accessTokenExpiresAt = now + 12.hours,
+        connectedByUserId = "u1",
+        connectedByEmail = "admin@example.pt",
+    )
+
+    private suspend fun received(
+        tenant: Tenant,
+        connection: IntegrationConnection,
+        replyTo: String? = null,
+        automated: Boolean = false,
+        direction: EmailDirection = EmailDirection.INBOUND,
+    ): SubjectRef {
+        val email = messages.insert(
+            EmailMessage(
+                tenantId = tenant.id, connectionId = connection.id, providerMessageId = ObjectId().toHexString(), threadId = "th-maria",
+                messageIdHeader = "<pedido-1@cliente.pt>", direction = direction, from = "maria@cliente.pt", fromName = "Maria Silva", replyTo = replyTo,
+                to = listOf(connection.accountEmail), subject = "Pintura da sala", snippet = "Queria um orçamento", bodyText = "Queria um orçamento para pintar a sala.",
+                automated = automated, date = now, createdAt = now,
+            ),
+        )
+        return SubjectRef.of(SubjectTypes.EMAIL, email.id)
+    }
+
+    private fun reply(text: String? = "Olá Maria,\n\nPassamos aí na terça para ver a sala.") = buildJsonObject { text?.let { put("text", it) } }
+
+    private suspend fun executeReply(input: JsonObject, ctx: RunContext): ActionResult = withContext(ActorContext(ctx.actor)) {
+        EmailReplyAction.execute(SchemaValidator.coerce(EmailReplyAction.inputSchema, Schema.withDefaults(EmailReplyAction.inputSchema, input)), ctx)
+    }
+
+    @Test
+    fun `a reply goes back in the thread from the account the email came in to, once`(): Unit = runBlocking {
+        val tenant = tenant()
+        gmail(tenant)
+        val geral = inbox(tenant, "geral@example.pt")
+        val email = received(tenant, geral, replyTo = "Maria.Pessoal@Cliente.pt")
+        val ctx = context(tenant, email)
+
+        val first = assertIs<ActionResult.Done>(executeReply(reply(), ctx))
+        val again = assertIs<ActionResult.Done>(executeReply(reply(), ctx))
+
+        assertEquals("maria.pessoal@cliente.pt", first.output["to"]!!.jsonPrimitive.content, "answered where the sender asked")
+        assertEquals("already_sent", again.note)
+        val sent = google.sends.single()
+        assertEquals("access-inbox", sent.accessToken, "from the account it came in to, not the default one")
+        assertEquals("th-maria", sent.threadId)
+        val message = sent.parsed()
+        assertEquals("geral@example.pt", (message.from.single() as InternetAddress).address)
+        assertEquals("Re: Pintura da sala", message.subject)
+        assertEquals("<pedido-1@cliente.pt>", message.getHeader("In-Reply-To").single())
+        assertEquals("<pedido-1@cliente.pt>", message.getHeader("References").single())
+        assertEquals("auto-replied", message.getHeader("Auto-Submitted").single())
+        val stored = messages.inThread(tenant.id, "th-maria").single { it.direction == EmailDirection.OUTBOUND }
+        assertEquals(geral.id, stored.connectionId)
+        assertEquals(email, stored.record)
+        assertEquals("AGENT", stored.sentByType)
+    }
+
+    @Test
+    fun `machines, emails that are gone and emails the company sent get no reply`(): Unit = runBlocking {
+        val tenant = tenant()
+        val geral = inbox(tenant, "geral@example.pt")
+
+        val newsletter = received(tenant, geral, automated = true)
+        assertEquals(ActionResult.Skipped("automated_sender"), executeReply(reply(), context(tenant, newsletter)))
+        assertEquals(listOf("automated_sender"), EmailReplyAction.preview(reply(), context(tenant, newsletter)).warnings)
+        assertEquals(ActionResult.Skipped("no_record"), executeReply(reply(), context(tenant, received(tenant, geral, direction = EmailDirection.OUTBOUND))))
+        assertEquals(ActionResult.Skipped("no_record"), executeReply(reply(), context(tenant, SubjectRef.of(SubjectTypes.EMAIL, ObjectId()))))
+        assertEquals(ActionResult.Skipped("empty_message"), executeReply(reply(text = null), context(tenant, received(tenant, geral))))
+        assertEquals(ActionResult.Failed("no_email_account"), executeReply(reply(), context(tenant, received(tenant, geral), services = services(withEmail = false))))
+
+        val orphan = received(tenant, geral)
+        connections.delete(tenant.id, geral.id)
+        assertEquals(ActionResult.Failed("no_email_account"), executeReply(reply(), context(tenant, orphan)), "its account was disconnected")
+        assertTrue(google.sends.isEmpty())
+    }
+
+    @Test
+    fun `the reply's preview shows who gets it under which subject`(): Unit = runBlocking {
+        val tenant = tenant()
+        val geral = inbox(tenant, "geral@example.pt")
+        val shown = EmailReplyAction.preview(reply(), context(tenant, received(tenant, geral)))
+
+        assertEquals("email", shown.channel)
+        assertEquals(listOf("maria@cliente.pt"), shown.recipients)
+        assertEquals("Re: Pintura da sala", shown.subject)
+        assertEquals("Olá Maria,\n\nPassamos aí na terça para ver a sala.", shown.body)
+        assertEquals(listOf("text"), shown.editable)
+        assertTrue(shown.warnings.isEmpty(), shown.warnings.toString())
+        assertEquals(listOf("no_record"), EmailReplyAction.preview(reply(), context(tenant, SubjectRef.of(SubjectTypes.EMAIL, ObjectId()))).warnings)
+
+        assertEquals("RE: Orçamento", EmailReplyAction.subject(" RE: Orçamento "))
+        assertEquals("Res: Orçamento", EmailReplyAction.subject("Res: Orçamento"))
+        assertEquals("Re: Reunião amanhã", EmailReplyAction.subject("Reunião amanhã"))
+        assertEquals("Re:", EmailReplyAction.subject(""))
     }
 }

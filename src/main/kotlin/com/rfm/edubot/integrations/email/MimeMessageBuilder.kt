@@ -32,6 +32,8 @@ object MimeMessageBuilder {
         val inReplyTo: String? = null,
         val references: List<String> = emptyList(),
         val date: Instant,
+        /** An automatic answer (RFC 3834), which well-behaved auto-responders on the other side don't answer back. */
+        val autoReplied: Boolean = false,
     )
 
     private const val CRLF = "\r\n"
@@ -57,6 +59,7 @@ object MimeMessageBuilder {
         message.inReplyTo?.let { header(out, "In-Reply-To", messageIdHeader(it)) }
         val references = (message.references + listOfNotNull(message.inReplyTo)).map { messageIdHeader(it) }.distinct()
         if (references.isNotEmpty()) header(out, "References", references.joinToString("$CRLF "))
+        if (message.autoReplied) header(out, "Auto-Submitted", "auto-replied")
         header(out, "MIME-Version", "1.0")
 
         val body = bodyPart(message)

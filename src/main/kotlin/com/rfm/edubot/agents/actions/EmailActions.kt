@@ -11,7 +11,11 @@ import com.rfm.edubot.agents.registry.SideEffect
 import com.rfm.edubot.agents.registry.string
 import com.rfm.edubot.agents.runtime.RunContext
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.email.EmailAddresses
 import com.rfm.edubot.integrations.email.EmailAttachment
+import com.rfm.edubot.integrations.email.EmailDirection
+import com.rfm.edubot.integrations.email.EmailMessage
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailSendResult
 import com.rfm.edubot.integrations.email.EmailService
@@ -121,7 +125,7 @@ object EmailSendAction : AgentAction {
     }
 
     /** The account's allowance comes back at the company's midnight: the step waits for it once, then gives up. */
-    private fun nextDay(ctx: RunContext): ActionResult {
+    internal fun nextDay(ctx: RunContext): ActionResult {
         val attempts = ctx.run.steps.firstOrNull { it.stepId == ctx.step.id }?.attempts ?: 0
         if (attempts >= 1) return ActionResult.Failed(EmailService.DAILY_LIMIT)
         val tomorrow = ctx.now.toLocalDateTime(ctx.zone).date.plus(1, DateTimeUnit.DAY).atStartOfDayIn(ctx.zone)
@@ -164,4 +168,88 @@ object EmailSendAction : AgentAction {
         raw.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
 
     const val ALREADY_EMAILED = "already_emailed"
+}
+
+/**
+ * A reply to the email the agent works on, in its thread, from the account it came in to, to its
+ * Reply-To or sender. Mail sent by machines (notifications, newsletters, no-reply senders) gets none:
+ * nobody reads the answer, and two auto-responders could answer each other forever.
+ */
+object EmailReplyAction : AgentAction {
+    override val key = "email.reply"
+    override val category = ActionCategory.MESSAGE
+    override val sideEffect = SideEffect.EXTERNAL_MESSAGE
+    override val requiredIntegration = IntegrationKind.GMAIL_INBOX
+    override val subjectTypes = setOf(SubjectTypes.EMAIL)
+    override val toolDescription = "Reply, in its thread, to the email the agent works on."
+    override val inputSchema = Schema.obj(
+        "text" to Schema.string(widget = "template", maxLength = 20_000, description = "the reply, as plain text"),
+        required = listOf("text"),
+    )
+
+    override suspend fun preview(input: JsonObject, ctx: RunContext): ActionPreview {
+        val email = inbound(ctx)
+        return ActionPreview(
+            kind = "email",
+            channel = "email",
+            recipients = listOfNotNull(email?.let(::recipient)),
+            subject = email?.let { subject(it.subject) },
+            body = input.string("text"),
+            editable = listOf("text"),
+            warnings = buildList {
+                if (email == null) add("no_record") else if (email.automated) add(AUTOMATED)
+                if (ctx.services.email?.isAvailable(ctx.tenant) != true) add("no_email_account")
+            },
+        )
+    }
+
+    override suspend fun execute(input: JsonObject, ctx: RunContext): ActionResult {
+        val text = input.string("text") ?: return ActionResult.Skipped("empty_message")
+        val sender = ctx.services.email ?: return ActionResult.Failed(EmailService.NO_ACCOUNT)
+        val email = inbound(ctx) ?: return ActionResult.Skipped("no_record")
+        if (email.automated) return ActionResult.Skipped(AUTOMATED)
+        val to = recipient(email)
+        AgentMessaging.capped(ctx, EmailService.CHANNEL, to)?.let { return it }
+        val reply = OutgoingEmail(
+            to = listOf(to),
+            subject = subject(email.subject),
+            text = text,
+            threadId = email.threadId,
+            inReplyTo = email.messageIdHeader,
+            clientId = email.clientId ?: ctx.run.clientId,
+            record = ctx.run.subject,
+            autoReplied = true,
+        )
+        return when (val sent = sender.sendFrom(ctx.tenant, email.connectionId, reply, ctx.idempotencyKey)) {
+            is EmailSendResult.Sent -> ActionResult.Done(
+                buildJsonObject {
+                    put("channel", EmailService.CHANNEL)
+                    put("to", to)
+                    if (sent.messageId.isNotEmpty()) put("messageId", sent.messageId)
+                    sent.threadId?.let { put("threadId", it) }
+                },
+                note = if (sent.alreadySent) "already_sent" else null,
+            )
+            is EmailSendResult.Failed ->
+                if (sent.key == EmailService.DAILY_LIMIT) EmailSendAction.nextDay(ctx) else ActionResult.Failed(sent.key, retryable = sent.retryable)
+        }
+    }
+
+    /** The email the run is about, when someone wrote it to the company. */
+    private suspend fun inbound(ctx: RunContext): EmailMessage? {
+        val subject = ctx.run.subject?.takeIf { it.type == SubjectTypes.EMAIL } ?: return null
+        val id = runCatching { ObjectId(subject.id) }.getOrNull() ?: return null
+        return EmailMessageRepository(ctx.services.mongo).find(ctx.tenant.id, id)?.takeIf { it.direction == EmailDirection.INBOUND }
+    }
+
+    private fun recipient(email: EmailMessage): String = EmailAddresses.normalize(email.replyTo) ?: email.from
+
+    /** `Re: ` once, whatever the sender's mail program called it. */
+    internal fun subject(original: String): String {
+        val trimmed = original.trim()
+        return if (REPLY_PREFIX.containsMatchIn(trimmed)) trimmed else "Re: $trimmed".trim().take(EmailMessage.MAX_SUBJECT)
+    }
+
+    const val AUTOMATED = "automated_sender"
+    private val REPLY_PREFIX = Regex("^(re|res|aw|sv)\\s*:", RegexOption.IGNORE_CASE)
 }

@@ -239,7 +239,7 @@
   }
   function stepDetail(step, steps) {
     const i = step.input || {};
-    if (step.action === 'whatsapp.send' || step.action === 'instagram.reply') return i.text || '';
+    if (step.action === 'whatsapp.send' || step.action === 'instagram.reply' || step.action === 'email.reply') return i.text || '';
     if (step.action === 'email.send') return i.subject || '';
     if (step.action === 'team.notify') return i.message || '';
     if (step.action === 'team.task.create') return i.title || '';

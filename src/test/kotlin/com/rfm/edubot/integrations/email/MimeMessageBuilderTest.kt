@@ -120,6 +120,10 @@ class MimeMessageBuilderTest {
         )
         assertEquals("<CAF=abc@mail.gmail.com>", parsed.getHeader("In-Reply-To").single())
         assertEquals(listOf("<first@mail.gmail.com>", "<CAF=abc@mail.gmail.com>"), parsed.getHeader("References").single().split(Regex("\\s+")))
+        assertEquals(null, parsed.getHeader("Auto-Submitted"), "a person's reply")
+
+        val automatic = parse(MimeMessageBuilder.build(message(subject = "Re: Pedido de orçamento").copy(inReplyTo = "CAF=abc@mail.gmail.com", autoReplied = true)))
+        assertEquals("auto-replied", automatic.getHeader("Auto-Submitted").single())
     }
 
     @Test

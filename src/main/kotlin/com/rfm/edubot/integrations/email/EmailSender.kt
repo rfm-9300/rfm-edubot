@@ -21,6 +21,8 @@ data class OutgoingEmail(
     val clientId: ObjectId? = null,
     /** The CRM record the email is about, for the client's Emails tab and the record's timeline. */
     val record: SubjectRef? = null,
+    /** An automation's answer to [inReplyTo], marked so the other side's auto-responders don't answer it back. */
+    val autoReplied: Boolean = false,
 )
 
 sealed class EmailSendResult {
@@ -37,4 +39,8 @@ sealed class EmailSendResult {
 interface EmailSender {
     suspend fun isAvailable(tenant: Tenant): Boolean
     suspend fun send(tenant: Tenant, email: OutgoingEmail, idempotencyKey: String? = null): EmailSendResult
+
+    /** Sends from one of the company's accounts, e.g. the one an email came in to, so the reply stays in its thread. */
+    suspend fun sendFrom(tenant: Tenant, connectionId: ObjectId, email: OutgoingEmail, idempotencyKey: String? = null): EmailSendResult =
+        send(tenant, email, idempotencyKey)
 }

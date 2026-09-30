@@ -87,6 +87,12 @@ class EmailService(
         return sendFrom(tenant, connection, email, idempotencyKey)
     }
 
+    override suspend fun sendFrom(tenant: Tenant, connectionId: ObjectId, email: OutgoingEmail, idempotencyKey: String?): EmailSendResult {
+        val connection = google.connections.find(tenant.id, connectionId)?.takeIf { it.provider == IntegrationProviders.GOOGLE }
+            ?: return EmailSendResult.Failed(NO_ACCOUNT)
+        return sendFrom(tenant, connection, email, idempotencyKey)
+    }
+
     /** A short email from [connection] to [to] in the company's language, to check how its clients see it. */
     suspend fun sendTest(tenant: Tenant, connection: IntegrationConnection, to: String): EmailSendResult {
         val company = tenant.documentTemplate.withCompanyFallback(tenant.name).companyName
@@ -214,6 +220,7 @@ class EmailService(
                     messageId = messageId,
                     inReplyTo = email.inReplyTo?.takeIf { it.isNotBlank() },
                     date = date,
+                    autoReplied = email.autoReplied,
                 ),
             )
         } catch (e: IllegalArgumentException) {
