@@ -2359,14 +2359,14 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 
 /* ── Minimal Home: dashboard building blocks ─────────────────── */
 .dash { display: flex; flex-direction: column; gap: 16px; }
-:is(.dash, .record) [data-tone="accent"]  { --tone: var(--accent); }
-:is(.dash, .record) [data-tone="ok"]      { --tone: var(--ok); }
-:is(.dash, .record) [data-tone="info"]    { --tone: var(--info); }
-:is(.dash, .record) [data-tone="warn"]    { --tone: var(--warn); }
-:is(.dash, .record) [data-tone="late"]    { --tone: color-mix(in srgb, var(--warn) 45%, var(--bad)); }
-:is(.dash, .record) [data-tone="bad"]     { --tone: var(--bad); }
-:is(.dash, .record) [data-tone="neutral"] { --tone: var(--ink-faint); }
-:is(.dash, .record) [data-tone="muted"]   { --tone: color-mix(in srgb, var(--ink-faint) 55%, transparent); }
+:is(.dash, .record, .worklist) [data-tone="accent"]  { --tone: var(--accent); }
+:is(.dash, .record, .worklist) [data-tone="ok"]      { --tone: var(--ok); }
+:is(.dash, .record, .worklist) [data-tone="info"]    { --tone: var(--info); }
+:is(.dash, .record, .worklist) [data-tone="warn"]    { --tone: var(--warn); }
+:is(.dash, .record, .worklist) [data-tone="late"]    { --tone: color-mix(in srgb, var(--warn) 45%, var(--bad)); }
+:is(.dash, .record, .worklist) [data-tone="bad"]     { --tone: var(--bad); }
+:is(.dash, .record, .worklist) [data-tone="neutral"] { --tone: var(--ink-faint); }
+:is(.dash, .record, .worklist) [data-tone="muted"]   { --tone: color-mix(in srgb, var(--ink-faint) 55%, transparent); }
 
 .dash__head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 14px 24px; }
 .dash__date { margin: 0 0 2px; color: var(--ink-mute); font-size: 13px; font-weight: 600; }

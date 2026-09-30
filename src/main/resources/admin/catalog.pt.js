@@ -753,6 +753,19 @@ window.__I18N_CATALOGS['pt-PT'] = {
         crm_payment_create: 'Pagamento a fazer', crm_service_create: 'Serviço', booking_confirm: 'Confirmar', booking_cancel: 'Cancelar marcação', booking_create: 'Marcação',
         doc_pdf: 'PDF', data_summary: 'Resumo', ai_task: 'Tarefa de IA', ai_compose: 'Texto com IA', flow_wait: 'Esperar', flow_branch: 'Escolha', flow_stop: 'Parar',
       },
+      did: {
+        whatsapp_send: 'Enviou uma mensagem de WhatsApp', instagram_reply: 'Respondeu no Instagram', email_send: 'Enviou um email', email_reply: 'Respondeu ao email', team_notify: 'Notificou a equipa', team_task_create: 'Criou uma tarefa',
+        crm_client_create: 'Adicionou um cliente', crm_client_update: 'Atualizou o cliente', crm_quote_set_status: 'Alterou o estado do orçamento', crm_invoice_from_quote: 'Faturou o orçamento', crm_invoice_from_open_services: 'Faturou os serviços em aberto',
+        crm_payment_create: 'Adicionou um pagamento a fazer', crm_service_create: 'Adicionou um serviço', booking_confirm: 'Confirmou a marcação', booking_cancel: 'Cancelou a marcação', booking_create: 'Criou uma marcação',
+        doc_pdf: 'Preparou o PDF', data_summary: 'Preparou um resumo', ai_task: 'Fez uma tarefa com IA', ai_compose: 'Escreveu um texto com IA',
+      },
+      automations: {
+        title: 'Automatizações', upcoming: 'Em curso', tasks: 'Tarefas em aberto', recent: 'Recentes',
+        empty: 'Ainda sem automatizações para este cliente', emptyDesc: 'Quando um agente trabalhar com este cliente ou com os seus orçamentos, faturas e marcações, verá aqui o que fez e o que vem a seguir.',
+        runLabel: 'Agente a executar', pause: 'Pausar automatizações', resume: 'Retomar',
+        pausedTitle: 'As automatizações estão em pausa para este cliente', pausedDesc: 'Os agentes não iniciam nem continuam nada para este cliente ou os seus documentos até as retomar.',
+        pausedToast: 'Automatizações em pausa para este cliente', resumedToast: 'Automatizações retomadas para este cliente',
+      },
       entities: { client: 'Cliente', quote: 'Orçamento', invoice: 'Fatura', payment: 'Pagamento a fazer', booking: 'Marcação', service: 'Serviço', conversation: 'Conversa', contact: 'Contacto', instagram_comment: 'Comentário no Instagram', email: 'Email', none: 'Sem registo', company: 'Empresa', event: 'Evento', now: 'Agora', today: 'Hoje' },
       fields: {
         event: 'Evento', toStatus: 'Para o estado', channel: 'Canal', keywords: 'Palavras na mensagem', frequency: 'Frequência', time: 'Hora', weekdays: 'Dias', dayOfMonth: 'Dia do mês', everyHours: 'A cada (horas)', forEach: 'Para cada', where: 'Só registos em que',

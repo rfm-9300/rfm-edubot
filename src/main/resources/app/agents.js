@@ -1679,6 +1679,111 @@
     d.openFrom(back, () => (kind === 'approval' ? openApproval(item) : openTask(item)));
   }
 
+  // ── automations on a record: the client record's tab, and a block under quotes, invoices and bookings ──
+  /** What a run did and where it stands: "Sent a WhatsApp message · Continues tomorrow at 09:00". */
+  function runSummary(run) {
+    const did = [...new Set(run.done || [])].map(key => tr(`did.${dotKey(key)}`, null, actionLabel(key)));
+    if (run.status !== 'SUCCEEDED') return [...did, runProgress(run)].filter(Boolean).join(' · ');
+    const outcome = run.outcome && run.outcome !== 'completed' ? reasonText(run.outcome) : '';
+    return [...did, outcome].filter(Boolean).join(' · ') || reasonText('completed');
+  }
+  function autoRunRow(run, subject) {
+    const elsewhere = run.subject && (run.subject.type !== subject.type || run.subject.id !== subject.id);
+    const tone = RUN_TONES[run.status] || 'muted';
+    const when = run.status === 'WAITING' && run.resumeAt ? '' : d.relTime(run.finishedAt || run.createdAt);
+    return `<li><button class="worklist__item" type="button" data-auto-run="${esc(run.id)}" data-tone="${tone}">
+      <span class="worklist__dot" aria-hidden="true"></span>
+      <span class="worklist__main"><span class="worklist__title">${esc(run.agentName)}</span><span class="worklist__detail">${esc([elsewhere ? run.subjectLabel : '', runSummary(run)].filter(Boolean).join(' · '))}</span></span>
+      <span class="worklist__side">${run.status === 'SUCCEEDED' ? '' : `<span class="worklist__meta">${runPill(run.status)}</span>`}${when ? `<span class="worklist__when">${esc(when)}</span>` : ''}</span>
+    </button></li>`;
+  }
+  const subjectPath = subject => `/app/api/agents/subjects/${encodeURIComponent(subject.type)}/${encodeURIComponent(subject.id)}`;
+
+  /**
+   * Draws [view] (GET /app/api/agents/subjects/{type}/{id}) into [el]: runs in progress, open tasks,
+   * recent runs and "run an agent", plus the pause switch on a client. Rows open over the record,
+   * with [back] as the way back. After a run or a pause, [onChange] gets the fresh view; without
+   * it the block redraws itself. [hideEmpty] leaves [el] empty when there is nothing to show.
+   */
+  function renderAutomations(el, subject, view, opts = {}) {
+    const { back = null, hideEmpty = false, onChange = null } = opts;
+    if (!view) {
+      el.innerHTML = hideEmpty ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${esc(d.STR.loadFailed)}</p></div></div>`;
+      return;
+    }
+    const upcoming = view.upcoming || [];
+    const tasks = view.tasks || [];
+    const recent = view.recent || [];
+    const manual = view.manualAgents || [];
+    const paused = view.automationPaused === true;
+    const rows = upcoming.length + tasks.length + recent.length;
+    if (hideEmpty && !rows && !manual.length) { el.innerHTML = ''; return; }
+    const group = (label, items) => (items.length ? `<li class="worklist__group">${esc(label)}</li>${items.join('')}` : '');
+    const list = rows
+      ? `<ul class="worklist">${group(tr('automations.upcoming'), upcoming.map(r => autoRunRow(r, subject)))}${group(tr('automations.tasks'), tasks.map(taskRow))}${group(tr('automations.recent'), recent.map(r => autoRunRow(r, subject)))}</ul>`
+      : (hideEmpty ? '' : `<div class="empty"><p class="empty__title">${esc(tr('automations.empty'))}</p><p class="empty__desc">${esc(tr('automations.emptyDesc'))}</p></div>`);
+    const runner = manual.length && !paused
+      ? `<div class="panel__filters"><select class="sel" data-auto-agent aria-label="${esc(tr('automations.runLabel'))}">${manual.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select><button class="btn btn--sm" type="button" data-auto-start>${esc(A.runNow)}</button></div>`
+      : '';
+    const pause = view.automationPaused != null && !paused
+      ? `<div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-auto-pause="1">${esc(tr('automations.pause'))}</button></div>`
+      : '';
+    const notice = paused
+      ? `<div class="notice notice--warn"><div class="notice__text"><strong>${esc(tr('automations.pausedTitle'))}</strong><span>${esc(tr('automations.pausedDesc'))}</span></div><div class="notice__actions"><button class="btn btn--sm" type="button" data-auto-pause="0">${esc(tr('automations.resume'))}</button></div></div>`
+      : '';
+    const open = upcoming.length + tasks.length;
+    el.innerHTML = `${notice}<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(tr('automations.title'))}${open ? ` <span class="tag">${open}</span>` : ''}</h2>${pause}</header>${runner}${list}</section>`;
+
+    const refetch = async () => {
+      const next = await d.api(subjectPath(subject)).catch(() => null);
+      if (!next || !el.isConnected) return;
+      if (onChange) onChange(next);
+      else renderAutomations(el, subject, next, opts);
+    };
+    const runs = [...upcoming, ...recent];
+    $$('[data-auto-run]', el).forEach(b => b.addEventListener('click', () => {
+      const run = runs.find(r => r.id === b.dataset.autoRun);
+      if (run) d.openFrom(back, () => openRun(run.id));
+    }));
+    $$('[data-task]', el).forEach(b => b.addEventListener('click', async () => {
+      const task = tasks.find(t => t.id === b.dataset.task);
+      if (!task) return;
+      await ensurePeople();
+      d.openFrom(back, () => openTask(task));
+    }));
+    $('[data-auto-start]', el)?.addEventListener('click', async e => {
+      const button = e.currentTarget;
+      const agentId = $('[data-auto-agent]', el).value;
+      button.disabled = true;
+      try {
+        await d.api(`/app/api/agents/${encodeURIComponent(agentId)}/run`, { method: 'POST', body: JSON.stringify({ subjectType: subject.type, subjectId: subject.id }) });
+        d.toast(A.started);
+        await refetch();
+      } catch (err) {
+        button.disabled = false;
+        d.toast(err?.code ? reasonText(err.code) : A.actionFailed);
+      }
+    });
+    $$('[data-auto-pause]', el).forEach(b => b.addEventListener('click', async () => {
+      const pausing = b.dataset.autoPause === '1';
+      b.disabled = true;
+      try {
+        await d.api(`${subjectPath(subject)}/automation`, { method: 'PUT', body: JSON.stringify({ paused: pausing }) });
+        d.toast(tr(pausing ? 'automations.pausedToast' : 'automations.resumedToast'));
+        await refetch();
+      } catch {
+        b.disabled = false;
+        d.toast(A.actionFailed);
+      }
+    }));
+  }
+
+  /** Loads and draws the Automations block for [subject] into [el] once it arrives, if [el] is still shown. */
+  async function mountAutomations(el, subject, opts = {}) {
+    const view = await d.api(subjectPath(subject)).catch(() => null);
+    if (el.isConnected) renderAutomations(el, subject, view, opts);
+  }
+
   // ── activity ──────────────────────────────────────────────────────
   function renderActivity(pane) {
     const chips = ['', 'open', 'attention', 'done'].map(f => `<button class="chip ${ui.activity === f ? 'is-on' : ''}" type="button" data-activity="${f}">${esc(tr(`activity.${f || 'all'}`))}</button>`).join('');
@@ -1773,6 +1878,6 @@
 
   window.AgentsUI = {
     init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon,
-    focusRef, openRef,
+    focusRef, openRef, renderAutomations, mountAutomations, reasonText,
   };
 })();

@@ -124,10 +124,12 @@ Rows deep-link: `data-go` switches module and `data-open` opens that invoice / q
 1. Profile card: initials, contact lines (email opens mail, address opens Maps), NIF, "client since · visits · no-shows · last activity", Edit. Then Call, WhatsApp (`wa.me`; a number typed without a country code is Portuguese) and Open chat when a WhatsApp conversation matches the phone (last 9 digits, like bookings), and the staff notes.
 2. Money strip, up to four cells, each only with its module on, in this order: outstanding (a pending invoice past its due date counts as overdue, as on Home), next booking, to invoice (open Serviços), billed. In proposal (open quotes) only fills a free cell.
 3. Needs attention, only when something does: overdue invoices, past bookings never marked done or no-show (so never billed), bookings to confirm, open work to invoice (one click to an "Invoice open work" form with the rows ticked), quotes awaiting a reply or not sent yet, invoices due within 7 days.
-4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices. Every row opens its own drawer.
+4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices · Automations (with Agents on: runs in progress, open tasks and recent runs on the client and its documents, each saying what the agent did; "run an agent" for agents run by hand on clients; Pause automations). Every row opens its own drawer.
 5. A sticky create bar: New booking, Add service, New quote, New invoice, each prefilled with the client.
 
 Drawers opened from the record show `← client` and return to it (same tab, fresh data) once they save; ×, scrim and Escape leave it. Edit holds name, NIF, phone, email, address and notes ("only your team sees these"). The phone field warns as soon as another client has the number, whatever the formatting, and links to them. Phone is unique per tenant for clients, suppliers and employees, so saving the exact same number is refused with a clear message (`409 phone_taken`) instead of a generic failure; the warning is what catches the same number typed differently. A new client opens its record after saving. Staff notes never reach the bot's CRM tools. The NIF prints on quotes and invoices on the client-number line.
+
+Pausing a client's automations is any member's brake for a client who asked not to be contacted: agents neither start nor carry on anything on the client or its documents until someone resumes (runs already waiting end as cancelled). The card says so, and the Automations tab shows a `.notice--warn` with Resume in place of the pause button and the run row.
 
 ## Invoices
 
@@ -175,7 +177,9 @@ Optional `agents` module, grouped with Persona and the AI assistant. `app/agents
 6. **Activity**: a runs table with In progress / Needs attention / Finished chips and a "Show tests" check. The run drawer shows the trigger, an outcome `.notice` and each step's result on `ol.flow`, with Retry or Cancel.
 7. **Settings**: the company defaults form (read-only for non-admins) beside a usage `dl.dash-facts` of platform limits.
 
-The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval.
+The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval; there's no "Open record" when the trail already goes back to that record.
+
+Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand).
 
 ## Settings (tenant)
 

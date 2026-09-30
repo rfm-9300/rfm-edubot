@@ -901,7 +901,8 @@ const AGENT_SUBJECT_OPENERS = {
   booking: id => openBookingById(id),
   service: id => openServiceDetail(id),
 };
-const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]);
+// Trail keys are `${type}:${id}` like subjects, so a run opened from its own record doesn't link back to it.
+const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) && !linksBackTo(`${subject.type}:${subject.id}`);
 async function openAgentSubject(subject, back) {
   if (!canOpenAgentSubject(subject)) return;
   if (subject.type === 'conversation') {
@@ -929,6 +930,15 @@ function agentsDeps() {
       loadModule('overview').then(render).catch(() => renderNav());
     },
   };
+}
+// Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
+// of the way (hidden) when there's none of that.
+function mountRecordAutomations(parent, subject, back) {
+  if (!hasModule('agents') || !window.AgentsUI) return;
+  const el = document.createElement('div');
+  el.hidden = true;
+  parent.appendChild(el);
+  window.AgentsUI.mountAutomations(el, subject, { back, hideEmpty: true }).then(() => { el.hidden = !el.childElementCount; });
 }
 
 function hero(title, desc, stats = '', nav = '') {
@@ -3472,7 +3482,7 @@ async function loadClientRecord(id) {
   const conversations = !hasModule('conversations') ? Promise.resolve([])
     : state.fetched.conversations ? Promise.resolve(state.conversations)
     : api('/app/api/conversations').catch(() => []);
-  const [client, quotes, invoices, services, bookings, payments, chats] = await Promise.all([
+  const [client, quotes, invoices, services, bookings, payments, chats, automations] = await Promise.all([
     api(`/app/api/crm/clients/${q}`).catch(() => null),
     related('quotes', `/app/api/crm/quotes?clientId=${q}`),
     related('invoices', `/app/api/crm/invoices?clientId=${q}`),
@@ -3480,6 +3490,7 @@ async function loadClientRecord(id) {
     related('bookings', `/app/api/bookings?clientId=${q}`),
     related('payments', `/app/api/crm/payments?clientId=${q}`),
     conversations,
+    hasModule('agents') ? api(`/app/api/agents/subjects/client/${q}`).catch(() => null) : null,
     ensureBookingData(),
   ]);
   return {
@@ -3490,6 +3501,7 @@ async function loadClientRecord(id) {
     bookings: bookings || [],
     payments: payments || [],
     conversation: client ? matchConversation(client, chats || []) : null,
+    automations,
   };
 }
 
@@ -3564,7 +3576,8 @@ function contactButtons(phone, extra = '') {
 }
 
 // `lines` and `actions` are trusted HTML built by the caller (escaped values); everything else is escaped here.
-function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null }) {
+// `warning` is a one-line status under the head, like automations being paused for a client.
+function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null, warning = '' }) {
   return `<section class="record-card">
     <div class="record-card__head">
       <span class="record-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
@@ -3575,6 +3588,7 @@ function recordCardHtml({ name, lines, since, contact = '', notes = '', actions 
       <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${actions}</div>
     </div>
     ${archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(archivedAt) }))}</p>` : ''}
+    ${warning ? `<p class="hint hint--warn">${escapeHTML(warning)}</p>` : ''}
     ${contact ? `<div class="record-card__contact">${contact}</div>` : ''}
     ${notes ? `<div class="record-card__notes"><span class="record-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(notes)}</div>` : ''}
   </section>`;
@@ -3684,6 +3698,7 @@ function clientCardHtml(r, bk) {
   return recordCardHtml({
     name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes,
     actions: recordRemovalButton(c), archivedAt: c.archivedAt,
+    warning: c.automationPaused && hasModule('agents') ? I18N.t('app.agents.automations.pausedTitle') : '',
   });
 }
 
@@ -3875,6 +3890,7 @@ function clientFinanceHtml(r, m, act) {
 function clientPaneHtml(r, m, bk) {
   // An archived client gets no new documents until it is restored.
   const act = kind => (r.client.archivedAt ? null : kind);
+  if (r.tab === 'automations') return '<div data-client-automations></div>';
   if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
   if (r.tab === 'bookings') {
     if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, act('booking'), STR.bookingsNewForClient);
@@ -3936,6 +3952,7 @@ function clientTabs(r) {
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
+  if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
 }
@@ -3971,6 +3988,17 @@ function renderClientRecord(focusTab = false) {
   $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.recordTab; renderClientRecord(true); }));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.recordOpen)));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.recordAct)));
+  const automations = $('[data-client-automations]', body);
+  if (automations) {
+    window.AgentsUI.renderAutomations(automations, { type: 'client', id: r.client.id }, r.automations, {
+      back: clientTrailEntry(r.client.id, r.client.name, 'automations'),
+      onChange: view => {
+        r.automations = view;
+        r.client = { ...r.client, automationPaused: view.automationPaused === true };
+        renderClientRecord();
+      },
+    });
+  }
   if (focusTab) $('[data-record-tab].is-on', body)?.focus();
 }
 
@@ -4912,6 +4940,7 @@ async function openQuoteDetail(id) {
   });
   wirePdfButtons(form);
   openDrawer(quote.number, form);
+  mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
 }
 
 function renderInvoices(root) {
@@ -5219,6 +5248,7 @@ async function openInvoiceDetail(id) {
   $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
+  mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
 }
 
 async function markPaymentPaid(id, number = state.payments.find(p => p.id === id)?.number || '') {
@@ -6619,6 +6649,7 @@ async function openBookingDetail(b) {
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(b.clientId)));
   $('[data-booking-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(b.clientServiceId)));
   openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
+  mountRecordAutomations(body, { type: 'booking', id: b.id }, here);
 }
 
 function invoiceBooking(b) {

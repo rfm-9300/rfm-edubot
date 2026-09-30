@@ -753,6 +753,19 @@ window.__I18N_CATALOGS['en'] = {
         crm_payment_create: 'Payment to make', crm_service_create: 'Service', booking_confirm: 'Confirm', booking_cancel: 'Cancel booking', booking_create: 'Booking',
         doc_pdf: 'PDF', data_summary: 'Summary', ai_task: 'AI task', ai_compose: 'AI text', flow_wait: 'Wait', flow_branch: 'Choice', flow_stop: 'Stop',
       },
+      did: {
+        whatsapp_send: 'Sent a WhatsApp message', instagram_reply: 'Replied on Instagram', email_send: 'Sent an email', email_reply: 'Replied to the email', team_notify: 'Notified the team', team_task_create: 'Created a task',
+        crm_client_create: 'Added a client', crm_client_update: 'Updated the client', crm_quote_set_status: 'Changed the quote status', crm_invoice_from_quote: 'Invoiced the quote', crm_invoice_from_open_services: 'Invoiced open services',
+        crm_payment_create: 'Added a payment to make', crm_service_create: 'Added a service', booking_confirm: 'Confirmed the booking', booking_cancel: 'Cancelled the booking', booking_create: 'Created a booking',
+        doc_pdf: 'Prepared the PDF', data_summary: 'Built a summary', ai_task: 'Did a task with AI', ai_compose: 'Wrote a text with AI',
+      },
+      automations: {
+        title: 'Automations', upcoming: 'In progress', tasks: 'Open tasks', recent: 'Recent',
+        empty: 'No automations for this client yet', emptyDesc: 'When an agent works on this client or their quotes, invoices and bookings, you’ll see what it did and what comes next.',
+        runLabel: 'Agent to run', pause: 'Pause automations', resume: 'Resume',
+        pausedTitle: 'Automations are paused for this client', pausedDesc: 'Agents won’t start or carry on anything for this client or their documents until you resume.',
+        pausedToast: 'Automations paused for this client', resumedToast: 'Automations resumed for this client',
+      },
       entities: { client: 'Client', quote: 'Quote', invoice: 'Invoice', payment: 'Payment to make', booking: 'Booking', service: 'Service', conversation: 'Chat', contact: 'Contact', instagram_comment: 'Instagram comment', email: 'Email', none: 'No record', company: 'Company', event: 'Event', now: 'Now', today: 'Today' },
       fields: {
         event: 'Event', toStatus: 'To status', channel: 'Channel', keywords: 'Words in the message', frequency: 'How often', time: 'Time', weekdays: 'Days', dayOfMonth: 'Day of the month', everyHours: 'Every (hours)', forEach: 'For each', where: 'Only records where',
