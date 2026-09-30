@@ -1,5 +1,7 @@
 package com.rfm.edubot.agents
 
+import com.auth0.jwt.JWT
+import com.auth0.jwt.algorithms.Algorithm
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.agents.actions.AgentActions
 import com.rfm.edubot.agents.model.ActionPreview
@@ -73,13 +75,16 @@ import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.long
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
+import java.util.Date
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
+import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
 
 class AgentRoutesTest {
@@ -139,6 +144,7 @@ class AgentRoutesTest {
             configureAdminAuth(runtimeConfig, tenants, users)
             routing {
                 agentRoutes(agents, agentRuntime, tenants)
+                agentAdminRoutes(agents, agentRuntime, tenants)
                 notificationRoutes(agents.notifications)
             }
         }
@@ -152,6 +158,12 @@ class AgentRoutesTest {
     }
 
     private suspend fun HttpResponse.obj(): JsonObject = json.parseToJsonElement(bodyAsText()).jsonObject
+
+    private fun operatorToken(): String = JWT.create()
+        .withIssuer(admin.jwtIssuer)
+        .withSubject("admin")
+        .withExpiresAt(Date(System.currentTimeMillis() + 600_000))
+        .sign(Algorithm.HMAC256(admin.jwtSecret))
 
     private val validDefinition = buildJsonObject {
         put("triggers", json.parseToJsonElement("""[{"id":"t1","type":"event","config":{"event":"invoice.created"}}]"""))
@@ -505,5 +517,44 @@ class AgentRoutesTest {
 
         module.settings.savePlatform(company.tenant.id, module.settings.get(company.tenant.id).platform.copy(agentsPaused = true))
         assertEquals("platform", http.send("GET", "/app/api/agents/overview", company.memberToken).obj()["pausedBy"]!!.jsonPrimitive.content, "the backoffice pause wins")
+    }
+
+    @Test
+    fun `the backoffice sees a company's agents, pauses them all and sets the limits only it controls`() = routes { http ->
+        val company = company()
+        val operator = operatorToken()
+        val base = "/admin/api/tenants/${company.tenant.slug}/agents"
+        val id = http.send("POST", "/app/api/agents", company.adminToken, buildJsonObject { put("name", "Faturas"); put("definition", validDefinition) }).obj()["id"]!!.jsonPrimitive.content
+        runBlocking {
+            val agent = module.agents.findById(company.tenant.id, ObjectId(id))!!
+            fun run(status: RunStatus, age: Duration = 1.days, dryRun: Boolean = false) = AgentRun(
+                tenantId = company.tenant.id, agentId = agent.id, agentName = agent.name, agentVersion = 1, definition = agent.definition,
+                trigger = RunTrigger(type = TriggerTypes.MANUAL, firedAt = now - age), dedupeKey = ObjectId().toHexString(),
+                status = status, dryRun = dryRun, createdAt = now - age, updatedAt = now - age,
+            )
+            listOf(run(RunStatus.SUCCEEDED), run(RunStatus.SUCCEEDED), run(RunStatus.FAILED), run(RunStatus.FAILED, dryRun = true), run(RunStatus.SUCCEEDED, age = 8.days))
+                .forEach { module.runs.insertIfAbsent(it) }
+        }
+
+        assertEquals(HttpStatusCode.Unauthorized, http.send("GET", base, company.adminToken).status, "a company's own admin isn't an operator")
+        assertEquals(HttpStatusCode.NotFound, http.send("GET", "/admin/api/tenants/nope/agents", operator).status)
+        val view = http.send("GET", base, operator).obj()
+        assertEquals(listOf(id), view["agents"]!!.jsonArray.map { it.jsonObject["id"]!!.jsonPrimitive.content })
+        assertEquals(mapOf("SUCCEEDED" to 2L, "FAILED" to 1L), view["runs7d"]!!.jsonObject.mapValues { it.value.jsonPrimitive.long }, "the last seven days, test runs left out")
+        assertEquals(false, view["settings"]!!.jsonObject["agentsPaused"]!!.jsonPrimitive.boolean)
+
+        assertEquals(true, http.send("POST", "$base/pause", operator).obj()["agentsPaused"]!!.jsonPrimitive.boolean)
+        assertEquals("platform", http.send("GET", "/app/api/agents/overview", company.memberToken).obj()["pausedBy"]!!.jsonPrimitive.content)
+        assertEquals(false, http.send("POST", "$base/resume", operator).obj()["agentsPaused"]!!.jsonPrimitive.boolean)
+        assertEquals(false, http.send("GET", "/app/api/agents/overview", company.memberToken).obj()["paused"]!!.jsonPrimitive.boolean)
+
+        val limits = http.send("PUT", "$base/limits", operator, buildJsonObject { put("maxActiveAgents", 1_000); put("runsPerDay", 50) }).obj()
+        assertEquals(500, limits["maxActiveAgents"]!!.jsonPrimitive.int, "limits stay in range")
+        assertEquals(50, limits["runsPerDay"]!!.jsonPrimitive.int)
+        assertEquals(300, limits["emailSendsPerDay"]!!.jsonPrimitive.int, "a limit left out keeps its value")
+        assertEquals(HttpStatusCode.BadRequest, http.send("PUT", "$base/limits", operator).status)
+        assertEquals(HttpStatusCode.Unauthorized, http.send("PUT", "$base/limits", company.adminToken, buildJsonObject { put("runsPerDay", 1) }).status)
+        val platform = http.send("GET", "/app/api/agents/settings", company.adminToken).obj()["platform"]!!.jsonObject
+        assertEquals(50, platform["runsPerDay"]!!.jsonPrimitive.int, "the company sees the limits it can't change")
     }
 }
