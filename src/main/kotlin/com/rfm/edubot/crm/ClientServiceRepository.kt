@@ -6,11 +6,17 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.ClientService
 import com.rfm.edubot.crm.model.ClientServiceStatus
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -19,6 +25,7 @@ enum class ClientServiceDelete { Removed, NotFound, Invoiced }
 
 class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.client_services")
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): ClientService? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClientService()
@@ -73,8 +80,15 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             updatedAt = now,
         )
         collection.insertOne(service.toDocument())
+        events.append(tenantId, DomainEventTypes.SERVICE_CREATED, SubjectRef.of(SubjectTypes.SERVICE, service.id), EventPayloads.service(service), service.relatedRefs())
         return service
     }
+
+    private fun ClientService.relatedRefs(): List<SubjectRef> = listOfNotNull(
+        SubjectRef.of(SubjectTypes.CLIENT, clientId),
+        bookingId?.let { SubjectRef.of(SubjectTypes.BOOKING, it) },
+        invoiceId?.let { SubjectRef.of(SubjectTypes.INVOICE, it) },
+    )
 
     suspend fun update(
         id: ObjectId,
@@ -122,19 +136,23 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
     suspend fun markInvoiced(ids: List<ObjectId>, invoiceId: ObjectId): Int {
         if (ids.isEmpty()) return 0
         val now = SystemClock.now()
+        val open = Filters.and(Filters.`in`("_id", ids), Filters.eq("status", ClientServiceStatus.OPEN.name))
+        val rows = collection.find(scoped(open)).toList().map { it.toClientService() }
         val result = collection.updateMany(
-            scoped(
-                Filters.and(
-                    Filters.`in`("_id", ids),
-                    Filters.eq("status", ClientServiceStatus.OPEN.name),
-                ),
-            ),
+            scoped(open),
             Updates.combine(
                 Updates.set("status", ClientServiceStatus.INVOICED.name),
                 Updates.set("invoiceId", invoiceId),
                 Updates.set("updatedAt", now.toDate()),
             ),
         )
+        rows.forEach { row ->
+            val invoiced = row.copy(status = ClientServiceStatus.INVOICED, invoiceId = invoiceId)
+            events.append(
+                tenantId, DomainEventTypes.SERVICE_INVOICED, SubjectRef.of(SubjectTypes.SERVICE, row.id),
+                EventPayloads.service(invoiced) { put("invoiceId", invoiceId.toHexString()) }, invoiced.relatedRefs(),
+            )
+        }
         return result.modifiedCount.toInt()
     }
 

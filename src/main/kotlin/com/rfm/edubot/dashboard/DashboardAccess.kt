@@ -3,6 +3,8 @@ package com.rfm.edubot.dashboard
 import com.auth0.jwt.interfaces.Payload
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorType
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
@@ -56,5 +58,9 @@ internal fun ApplicationCall.attachDashboardContext(context: DashboardContext) {
 internal fun ApplicationCall.dashboardContext(): DashboardContext? = attributes.getOrNull(DashboardContextKey)
 
 internal fun DashboardContext.requireModule(id: String): Boolean = id in DashboardModules.effectiveFor(tenant)
+
+/** Who a change made through this dashboard session is attributed to. */
+internal fun DashboardContext.actor(): Actor =
+    user?.let { Actor(ActorType.USER, it.id.toHexString(), it.email) } ?: Actor(ActorType.OPERATOR, name = "operator")
 
 internal fun String.toObjectIdOrNull(): ObjectId? = runCatching { ObjectId(this) }.getOrNull()

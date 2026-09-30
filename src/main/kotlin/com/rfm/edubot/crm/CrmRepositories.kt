@@ -11,12 +11,18 @@ import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.crm.StandardItem
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -25,6 +31,7 @@ import java.util.Date
 class ClientRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.clients")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
@@ -64,7 +71,25 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             listOf("crm.quotes", "crm.invoices", "crm.client_services", "bookings.appointments", "crm.payments"),
         )
 
-    suspend fun setArchived(id: ObjectId, archived: Boolean): Client? = collection.setArchived(tenantId, id, archived)?.toClient()
+    suspend fun setArchived(id: ObjectId, archived: Boolean): Client? {
+        val client = collection.setArchived(tenantId, id, archived)?.toClient() ?: return null
+        val type = if (archived) DomainEventTypes.CLIENT_ARCHIVED else DomainEventTypes.CLIENT_RESTORED
+        events.append(tenantId, type, SubjectRef.of(SubjectTypes.CLIENT, client.id), EventPayloads.client(client))
+        return client
+    }
+
+    /** Agents skip a paused client entirely. */
+    suspend fun setAutomationPaused(id: ObjectId, paused: Boolean): Client? =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(Updates.set("automationPaused", paused), Updates.set("updatedAt", SystemClock.now().toDate())),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toClient()
+
+    suspend fun findByEmail(email: String): Client? {
+        val normalized = email.trim().lowercase().takeIf { it.contains('@') } ?: return null
+        return collection.find(scoped(Filters.regex("email", "^${Regex.escape(normalized)}$", "i"))).firstOrNull()?.toClient()
+    }
 
     /**
      * The client with this phone however it was typed ("+351 912 345 678" = "912345678"): numbers of
@@ -111,7 +136,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return doc?.toClient()
+        val client = doc?.toClient() ?: return null
+        events.append(tenantId, DomainEventTypes.CLIENT_UPDATED, SubjectRef.of(SubjectTypes.CLIENT, client.id), EventPayloads.client(client))
+        return client
     }
 
     suspend fun create(
@@ -137,6 +164,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             updatedAt = now,
         )
         collection.insertOne(client.toDocument())
+        events.append(tenantId, DomainEventTypes.CLIENT_CREATED, SubjectRef.of(SubjectTypes.CLIENT, client.id), EventPayloads.client(client))
         return client
     }
 
@@ -155,6 +183,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
+        automationPaused = getBoolean("automationPaused") ?: false,
     )
 
     private fun Client.toDocument() = Document("_id", id)
@@ -168,6 +197,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         .append("notes", notes)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+        .append("automationPaused", automationPaused)
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
@@ -175,6 +205,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
 class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.quotes")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Quote? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toQuote()
 
@@ -200,6 +231,10 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
             updatedAt = now,
         )
         collection.insertOne(quote.toDocument())
+        events.append(
+            tenantId, DomainEventTypes.QUOTE_CREATED, SubjectRef.of(SubjectTypes.QUOTE, quote.id),
+            EventPayloads.quote(quote), EventPayloads.clientRefs(quote.clientId),
+        )
         return quote
     }
 
@@ -208,6 +243,7 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
 
     suspend fun update(id: ObjectId, items: List<LineItem>?, notes: String?, validUntil: LocalDate?, status: QuoteStatus?): Quote? {
         val now = SystemClock.now()
+        val before = findById(id) ?: return null
         val ops = mutableListOf<Bson>(Updates.set("updatedAt", now.toDate()))
         items?.let {
             ops.add(Updates.set("items", it.map { item -> item.toDocument() }))
@@ -216,12 +252,26 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         notes?.let { ops.add(Updates.set("notes", it)) }
         validUntil?.let { ops.add(Updates.set("validUntil", it.toString())) }
         status?.let { ops.add(Updates.set("status", it.name)) }
+        if (status == QuoteStatus.SENT && before.sentAt == null) ops.add(Updates.set("sentAt", now.toDate()))
+        if (status == QuoteStatus.ACEITO && before.acceptedAt == null) ops.add(Updates.set("acceptedAt", now.toDate()))
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(ops),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return doc?.toQuote()
+        val quote = doc?.toQuote() ?: return null
+        val subject = SubjectRef.of(SubjectTypes.QUOTE, quote.id)
+        val related = EventPayloads.clientRefs(quote.clientId)
+        if (status != null && status != before.status) {
+            events.append(
+                tenantId, DomainEventTypes.QUOTE_STATUS_CHANGED, subject,
+                EventPayloads.quote(quote) { put("from", before.status.name); put("to", status.name) }, related,
+            )
+        }
+        if (items != null || notes != null || validUntil != null) {
+            events.append(tenantId, DomainEventTypes.QUOTE_UPDATED, subject, EventPayloads.quote(quote), related)
+        }
+        return quote
     }
 
     suspend fun setPdfPath(id: ObjectId, pdfPath: String) {
@@ -271,6 +321,8 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         pdfPath = getString("pdfPath"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
+        sentAt = getDate("sentAt")?.toInstantValue(),
+        acceptedAt = getDate("acceptedAt")?.toInstantValue(),
     )
 
     private fun Quote.toDocument() = Document("_id", id)
@@ -285,6 +337,8 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         .append("pdfPath", pdfPath)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+        .append("sentAt", sentAt?.toDate())
+        .append("acceptedAt", acceptedAt?.toDate())
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
@@ -292,6 +346,7 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
 class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.invoices")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Invoice? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toInvoice()
 
@@ -317,8 +372,15 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             updatedAt = now,
         )
         collection.insertOne(invoice.toDocument())
+        events.append(
+            tenantId, DomainEventTypes.INVOICE_CREATED, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
+            EventPayloads.invoice(invoice), invoice.relatedRefs(),
+        )
         return invoice
     }
+
+    private fun Invoice.relatedRefs(): List<SubjectRef> =
+        EventPayloads.clientRefs(clientId) + listOfNotNull(quoteId?.let { SubjectRef.of(SubjectTypes.QUOTE, it) })
 
     suspend fun setPdfPath(id: ObjectId, pdfPath: String) {
         collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("pdfPath", pdfPath))
@@ -359,13 +421,20 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     }
 
     suspend fun markPaid(id: ObjectId): Invoice? {
-        val now = SystemClock.now()
-        val doc = collection.findOneAndUpdate(
+        val now = Instant.fromEpochMilliseconds(SystemClock.now().toEpochMilliseconds())
+        val before = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(Updates.set("status", InvoiceStatus.PAID.name), Updates.set("paidAt", now.toDate()), Updates.set("updatedAt", now.toDate())),
-            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
-        )
-        return doc?.toInvoice()
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.BEFORE),
+        )?.toInvoice() ?: return null
+        val invoice = before.copy(status = InvoiceStatus.PAID, paidAt = now, updatedAt = now)
+        if (before.status != InvoiceStatus.PAID) {
+            events.append(
+                tenantId, DomainEventTypes.INVOICE_PAID, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
+                EventPayloads.invoice(invoice) { put("from", before.status.name) }, invoice.relatedRefs(),
+            )
+        }
+        return invoice
     }
 
     private fun Document.toInvoice() = Invoice(

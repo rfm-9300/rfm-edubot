@@ -110,12 +110,24 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmClients.dropIndexIfExists("phone_1")
             crmClients.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
             crmClients.createIndex(Document("name", "text"))
+            crmClients.createIndex(
+                Document("tenantId", 1).append("email", 1),
+                IndexOptions().partialFilterExpression(Document("email", Document("\$type", "string"))),
+            )
 
             val crmQuotes = db.getCollection<Document>("crm.quotes")
             crmQuotes.dropIndexIfExists("number_1")
             crmQuotes.createIndex(Document("tenantId", 1).append("clientId", 1))
             crmQuotes.createIndex(Document("tenantId", 1).append("status", 1))
             crmQuotes.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+            crmQuotes.createIndex(Document("tenantId", 1).append("status", 1).append("validUntil", 1))
+
+            val domainEvents = db.getCollection<Document>("domain_events")
+            domainEvents.createIndex(Document("dispatch.status", 1).append("occurredAt", 1))
+            domainEvents.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("tenantId", 1).append("related.type", 1).append("related.id", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("tenantId", 1).append("actor.type", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("occurredAt", 1), IndexOptions().expireAfter(365, TimeUnit.DAYS))
 
             val crmInvoices = db.getCollection<Document>("crm.invoices")
             crmInvoices.dropIndexIfExists("number_1")

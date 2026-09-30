@@ -1,5 +1,9 @@
 package com.rfm.edubot.instagram
 
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.instagram.model.InstagramComment
 import com.rfm.edubot.instagram.model.InstagramMedia
 import com.rfm.edubot.oauth.InstagramOAuthScopes
@@ -11,6 +15,8 @@ import com.rfm.edubot.webhook.dto.InstagramCommentValue
 import io.ktor.client.HttpClient
 import io.ktor.http.HttpStatusCode
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
 
 class InstagramSocialService(
@@ -25,6 +31,7 @@ class InstagramSocialService(
         val mediaId = comment.media?.id?.takeIf { it.isNotBlank() } ?: return
         val media = InstagramMediaRepository(mongo, tenant.id).upsertStub(mediaId)
         val fromId = comment.from?.id
+        val fromAccount = fromId != null && fromId == accountId
         InstagramCommentRepository(mongo, tenant.id).upsert(
             InstagramComment(
                 tenantId = tenant.id,
@@ -33,12 +40,25 @@ class InstagramSocialService(
                 text = comment.text.orEmpty(),
                 fromId = fromId,
                 fromUsername = comment.from?.username,
-                fromAccount = fromId != null && fromId == accountId,
+                fromAccount = fromAccount,
                 createdAt = receivedAt,
                 updatedAt = receivedAt,
             ),
         )
         log.info("Stored Instagram comment: tenant={} mediaId={} commentId={}", tenant.slug, mediaId, commentId)
+        if (!fromAccount) {
+            DomainEventLog(mongo).append(
+                tenant.id,
+                DomainEventTypes.INSTAGRAM_COMMENT_RECEIVED,
+                SubjectRef(SubjectTypes.INSTAGRAM_COMMENT, commentId),
+                buildJsonObject {
+                    put("commentId", commentId)
+                    put("mediaId", mediaId)
+                    put("text", comment.text.orEmpty().take(1000))
+                    comment.from?.username?.let { put("fromUsername", it) }
+                },
+            )
+        }
     }
 
     suspend fun summary(tenant: Tenant, refresh: Boolean): InstagramSummaryDto {

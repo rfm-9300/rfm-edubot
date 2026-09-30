@@ -1,6 +1,8 @@
 package com.rfm.edubot.bookings
 
 import com.mongodb.client.model.Filters
+import com.mongodb.client.model.FindOneAndUpdateOptions
+import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.bookings.model.AvailabilityRule
 import com.rfm.edubot.bookings.model.BookableService
@@ -12,10 +14,16 @@ import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.isBookable
 import com.rfm.edubot.crm.isService
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -115,6 +123,7 @@ class AvailabilityRepository(mongoModule: MongoModule, private val tenantId: Obj
 
 class BookingRepository(private val mongoModule: MongoModule, val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("bookings.appointments")
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Booking? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toBooking()?.let { withServiceNames(listOf(it)).single() }
@@ -164,12 +173,13 @@ class BookingRepository(private val mongoModule: MongoModule, val tenantId: Obje
 
     suspend fun create(booking: Booking): Booking {
         collection.insertOne(booking.toDocument())
+        events.append(tenantId, DomainEventTypes.BOOKING_CREATED, SubjectRef.of(SubjectTypes.BOOKING, booking.id), EventPayloads.booking(booking), booking.relatedRefs())
         return booking
     }
 
     /** Writes every mutable field of [booking]; returns null when it no longer exists. */
     suspend fun save(booking: Booking): Booking? {
-        val result = collection.updateOne(
+        val before = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", booking.id)),
             Updates.combine(
                 Updates.set("catalogItemId", booking.serviceId),
@@ -185,9 +195,25 @@ class BookingRepository(private val mongoModule: MongoModule, val tenantId: Obje
                 Updates.set("notes", booking.notes),
                 Updates.set("updatedAt", booking.updatedAt.toDate()),
             ),
-        )
-        return if (result.matchedCount > 0) booking else null
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.BEFORE),
+        )?.toBooking() ?: return null
+        val subject = SubjectRef.of(SubjectTypes.BOOKING, booking.id)
+        if (before.status != booking.status) {
+            events.append(
+                tenantId, DomainEventTypes.BOOKING_STATUS_CHANGED, subject,
+                EventPayloads.booking(booking) { put("from", before.status.name); put("to", booking.status.name) }, booking.relatedRefs(),
+            )
+        }
+        if (before.startAt.toEpochMilliseconds() != booking.startAt.toEpochMilliseconds()) {
+            events.append(
+                tenantId, DomainEventTypes.BOOKING_RESCHEDULED, subject,
+                EventPayloads.booking(booking) { put("previousStartAt", before.startAt.toString()) }, booking.relatedRefs(),
+            )
+        }
+        return booking
     }
+
+    private fun Booking.relatedRefs(): List<SubjectRef> = listOfNotNull(clientId?.let { SubjectRef.of(SubjectTypes.CLIENT, it) })
 
     suspend fun setClientServiceId(id: ObjectId, clientServiceId: ObjectId) {
         collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("clientServiceId", clientServiceId))

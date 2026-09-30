@@ -21,6 +21,8 @@ data class Client(
     val updatedAt: Instant,
     /** Set on a client that has documents and was removed: hidden from lists and pickers, restorable. */
     val archivedAt: Instant? = null,
+    /** Agents skip this client entirely: no reminders, no follow-ups, no automated changes. */
+    val automationPaused: Boolean = false,
 )
 
 data class LineItem(
@@ -120,6 +122,9 @@ data class Quote(
     val pdfPath: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** When the quote was first marked sent / accepted; follow-up agents count days from these. */
+    val sentAt: Instant? = null,
+    val acceptedAt: Instant? = null,
 )
 
 data class Invoice(

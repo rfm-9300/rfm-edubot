@@ -7,11 +7,18 @@ import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.PaymentStatus
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -19,6 +26,7 @@ import org.bson.types.ObjectId
 class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.payments")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Payment? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toPayment()
@@ -64,22 +72,36 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             updatedAt = now,
         )
         collection.insertOne(payment.toDocument())
+        events.append(tenantId, DomainEventTypes.PAYMENT_CREATED, SubjectRef.of(SubjectTypes.PAYMENT, payment.id), EventPayloads.payment(payment), payment.relatedRefs())
         return payment
     }
 
     suspend fun markPaid(id: ObjectId): Payment? {
-        val now = SystemClock.now()
-        val doc = collection.findOneAndUpdate(
+        val now = Instant.fromEpochMilliseconds(SystemClock.now().toEpochMilliseconds())
+        val before = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(
                 Updates.set("status", PaymentStatus.PAID.name),
                 Updates.set("paidAt", now.toDate()),
                 Updates.set("updatedAt", now.toDate()),
             ),
-            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
-        )
-        return doc?.toPayment()
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.BEFORE),
+        )?.toPayment() ?: return null
+        val payment = before.copy(status = PaymentStatus.PAID, paidAt = now, updatedAt = now)
+        if (before.status != PaymentStatus.PAID) {
+            events.append(
+                tenantId, DomainEventTypes.PAYMENT_PAID, SubjectRef.of(SubjectTypes.PAYMENT, payment.id),
+                EventPayloads.payment(payment) { put("from", before.status.name) }, payment.relatedRefs(),
+            )
+        }
+        return payment
     }
+
+    private fun Payment.relatedRefs(): List<SubjectRef> = listOfNotNull(
+        clientId?.let { SubjectRef.of(SubjectTypes.CLIENT, it) },
+        supplierId?.let { SubjectRef.of(SubjectTypes.SUPPLIER, it) },
+        employeeId?.let { SubjectRef.of(SubjectTypes.EMPLOYEE, it) },
+    )
 
     /** Links the payment to [clientId], or unlinks it when null. */
     suspend fun setClient(id: ObjectId, clientId: ObjectId?): Payment? {

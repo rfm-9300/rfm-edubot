@@ -24,6 +24,8 @@ import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
@@ -64,6 +66,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration.Companion.minutes
@@ -171,7 +174,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             val pipeline = pipelineFactory.getOrCreate(tenant)
             conversationLanes.submit("${tenant.id}:${inbound.platform}:${inbound.waId}") {
                 try {
-                    pipeline.handle(inbound, responder)
+                    withContext(ActorContext(Actor.bot(inbound.platform.name))) { pipeline.handle(inbound, responder) }
                 } catch (e: Exception) {
                     LoggerFactory.getLogger("PipelineConsumer").error(
                         "Pipeline failed for tenant={} waId={}: {}",

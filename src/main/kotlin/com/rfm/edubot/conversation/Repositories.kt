@@ -17,11 +17,18 @@ import com.rfm.edubot.conversation.model.TokenUsage
 import com.rfm.edubot.conversation.model.User
 import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.conversation.model.UserRole
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Platform
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -31,6 +38,7 @@ import java.util.Date
 class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("users")
     private val log = LoggerFactory.getLogger("UserRepository")
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findByWaId(waId: String, channel: Platform = Platform.WHATSAPP): User? {
         val doc = collection.find(scoped(channel, Filters.eq("waId", waId))).firstOrNull()
@@ -62,8 +70,11 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         )
         collection.insertOne(user.toDocument())
         log.info("Created new user: waId={}", waId)
+        events.append(tenantId, DomainEventTypes.CONTACT_CREATED, SubjectRef.of(SubjectTypes.CONTACT, user.id), EventPayloads.contact(user))
         return user
     }
+
+    suspend fun findById(id: ObjectId): User? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toUser()
 
     suspend fun list(query: String? = null, limit: Int = 100): List<User> {
         val term = query?.trim()?.takeIf { it.isNotBlank() }
@@ -138,6 +149,7 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
 class ConversationRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("conversations")
     private val log = LoggerFactory.getLogger("ConversationRepository")
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findByWaId(waId: String, channel: Platform = Platform.WHATSAPP): Conversation? {
         val doc = collection.find(scoped(channel, Filters.eq("waId", waId))).firstOrNull()
@@ -253,6 +265,7 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
     }
 
     suspend fun setAutoReplyEnabled(convoId: ObjectId, enabled: Boolean, pausedBy: String? = null): Conversation? {
+        val before = if (enabled) null else findById(convoId)
         val update = if (enabled) {
             Updates.combine(Updates.set("autoReplyEnabled", true), Updates.unset("autoReplyPausedAt"), Updates.unset("autoReplyPausedBy"))
         } else {
@@ -263,7 +276,15 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
             )
         }
         collection.updateOne(scoped(Filters.eq("_id", convoId)), update)
-        return findById(convoId)
+        val after = findById(convoId)
+        if (after != null && before?.autoReplyEnabled == true) {
+            events.append(
+                tenantId, DomainEventTypes.CONVERSATION_HANDOFF, SubjectRef.of(SubjectTypes.CONVERSATION, after.id),
+                EventPayloads.conversation(after) { pausedBy?.let { put("pausedBy", it) } },
+                listOf(SubjectRef.of(SubjectTypes.CONTACT, after.userId)),
+            )
+        }
+        return after
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
@@ -273,12 +294,32 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
 class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("messages")
     private val log = LoggerFactory.getLogger("MessageRepository")
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun insert(message: Message): Message {
         val doc = message.toDocument()
         collection.insertOne(doc)
         log.debug("Inserted message: id={}, role={}", message.id, message.role)
+        if (message.role == UserRole.USER) {
+            val payload = buildJsonObject {
+                put("channel", message.channel.name)
+                put("waId", message.waId)
+                put("messageId", message.id.toHexString())
+                put("contentType", message.content.typeName())
+                (message.content as? MessageContent.Text)?.let { put("text", it.body.take(MAX_EVENT_TEXT)) }
+            }
+            events.append(tenantId, DomainEventTypes.MESSAGE_RECEIVED, SubjectRef.of(SubjectTypes.CONVERSATION, message.conversationId), payload)
+        }
         return message
+    }
+
+    private fun MessageContent.typeName(): String = when (this) {
+        is MessageContent.Text -> "text"
+        is MessageContent.Template -> "template"
+        is MessageContent.Image -> "image"
+        is MessageContent.Audio -> "audio"
+        is MessageContent.Document -> "document"
+        is MessageContent.Video -> "video"
     }
 
     /** Like [insert], but returns false instead of throwing when this tenant already stored the same `waMessageId`. */
@@ -498,6 +539,10 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
     private fun scoped(channel: Platform, filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("channel", channel.name), filter)
+
+    private companion object {
+        const val MAX_EVENT_TEXT = 1000
+    }
 }
 
 private fun Document.getPlatform(): Platform = getString("channel")?.let { Platform.valueOf(it) } ?: Platform.WHATSAPP
