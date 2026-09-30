@@ -65,6 +65,7 @@ import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
@@ -197,6 +198,10 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         } catch (e: Exception) {
             log.error("Could not re-queue unfinished inbound messages: {}", e.message, e)
         }
+    }
+    // Background work stops before Mongo closes; unfinished messages and agent runs resume at the next boot.
+    monitor.subscribe(ApplicationStopping) {
+        pipelineScope.cancel()
     }
     monitor.subscribe(ApplicationStopped) {
         LoggerFactory.getLogger("Application").info("Shutting down...")
