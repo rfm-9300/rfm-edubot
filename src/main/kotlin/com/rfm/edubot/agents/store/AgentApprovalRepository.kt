@@ -39,6 +39,11 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit.coerceIn(1, 500)).toList().map { it.toApproval() }
     }
 
+    /** Pending approvals that expire soonest. */
+    suspend fun expiringFirst(tenantId: ObjectId, limit: Int = 3): List<AgentApproval> =
+        collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("status", ApprovalStatus.PENDING.name), Filters.ne("dryRun", true)))
+            .sort(Document("expiresAt", 1)).limit(limit.coerceIn(1, 50)).toList().map { it.toApproval() }
+
     suspend fun countPending(tenantId: ObjectId): Long =
         collection.countDocuments(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("status", ApprovalStatus.PENDING.name), Filters.ne("dryRun", true)))
 

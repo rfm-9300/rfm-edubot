@@ -45,9 +45,14 @@ class AgentTaskRepository(mongo: MongoModule, private val clock: () -> Instant =
         return collection.find(Filters.and(filters)).sort(Document("dueAt", 1).append("createdAt", -1)).limit(limit.coerceIn(1, 500)).toList().map { it.toTask() }
     }
 
+    /** Open tasks due before [before], earliest first. Tasks without a due date are never due. */
+    suspend fun dueBefore(tenantId: ObjectId, before: Instant, limit: Int = 3): List<AgentTask> =
+        collection.find(scoped(tenantId, Filters.and(Filters.eq("status", TaskStatus.OPEN.name), Filters.lt("dueAt", before.toDate()))))
+            .sort(Document("dueAt", 1)).limit(limit.coerceIn(1, 50)).toList().map { it.toTask() }
+
     suspend fun countOpen(tenantId: ObjectId, dueBefore: Instant? = null): Long {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId), Filters.eq("status", TaskStatus.OPEN.name))
-        dueBefore?.let { filters += Filters.lte("dueAt", it.toDate()) }
+        dueBefore?.let { filters += Filters.lt("dueAt", it.toDate()) }
         return collection.countDocuments(Filters.and(filters))
     }
 

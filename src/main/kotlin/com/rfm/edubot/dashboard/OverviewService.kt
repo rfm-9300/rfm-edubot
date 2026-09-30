@@ -2,6 +2,15 @@ package com.rfm.edubot.dashboard
 
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.Projections
+import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.AgentTask
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
+import com.rfm.edubot.agents.store.AgentSettingsRepository
+import com.rfm.edubot.agents.store.AgentTaskRepository
 import com.rfm.edubot.bookings.BookingRepository
 import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.conversation.ConversationRepository
@@ -28,6 +37,7 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
+import kotlin.time.Duration.Companion.days
 
 class OverviewService(private val mongo: MongoModule) {
     /**
@@ -81,6 +91,7 @@ class OverviewService(private val mongo: MongoModule) {
                 null
             }
         }
+        val agents = async { if (DashboardModules.AGENTS in modules) agents(tenant.id, window) else null }
         val personaEmpty = async {
             if (DashboardModules.PERSONA in modules) {
                 val persona = PersonaRepository(mongo).findByTenant(tenant.id)
@@ -121,9 +132,10 @@ class OverviewService(private val mongo: MongoModule) {
         val employeesDto = employees.await()
         val paymentsDto = payments.await()
         val assistantDto = assistant.await()
+        val agentsBlock = agents.await()
 
         val waiting = waitingList.await()
-        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, waiting)
+        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting)
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -139,6 +151,7 @@ class OverviewService(private val mongo: MongoModule) {
             dueSoonCount = (cashDto?.dueSoonCount ?: 0) + (paymentsDto?.dueSoonCount ?: 0),
             expiringQuotes = pipelineDto?.expiringSoonCount ?: 0,
             pendingAssistant = assistantDto?.pendingActions ?: 0,
+            agentAttention = agentsBlock?.let { (it.dto.pendingApprovals + it.dto.tasksDue).toInt() + it.failed.size } ?: 0,
         )
         OverviewHomeLayout.apply(
             OverviewDto(
@@ -168,6 +181,7 @@ class OverviewService(private val mongo: MongoModule) {
                 employees = employeesDto,
                 payments = paymentsDto,
                 assistant = assistantDto,
+                agents = agentsBlock?.dto,
                 setup = setup,
                 cashFlow = cashFlow.await(),
                 activity = activity.await(),
@@ -573,6 +587,40 @@ class OverviewService(private val mongo: MongoModule) {
         )
     }
 
+    /** The Agents card counts, plus the few approvals, due tasks and recent failures "Needs you" lists. */
+    private class AgentsBlock(val dto: OverviewAgentsDto, val approvals: List<AgentApproval>, val tasksDue: List<AgentTask>, val failed: List<AgentRun>)
+
+    private suspend fun agents(tenantId: ObjectId, window: OverviewMath.Window): AgentsBlock = coroutineScope {
+        val runs = AgentRunRepository(mongo)
+        val tasks = AgentTaskRepository(mongo)
+        val approvals = AgentApprovalRepository(mongo)
+        val settings = async { AgentSettingsRepository(mongo).get(tenantId) }
+        val active = async { AgentRepository(mongo).countActive(tenantId) }
+        val runsToday = async { runs.countSince(tenantId, window.now - 1.days) }
+        val pending = async { approvals.countPending(tenantId) }
+        val open = async { tasks.countOpen(tenantId) }
+        val due = async { tasks.countOpen(tenantId, dueBefore = window.tomorrowStart) }
+        val failedWeek = async { runs.countByStatus(tenantId, listOf(RunStatus.FAILED, RunStatus.NEEDS_REVIEW), window.now - 7.days) }
+        val expiring = async { approvals.expiringFirst(tenantId, OverviewMath.AGENT_ITEMS) }
+        val dueList = async { tasks.dueBefore(tenantId, window.tomorrowStart, OverviewMath.AGENT_ITEMS) }
+        val failed = async { runs.failedSince(tenantId, window.now - OverviewMath.AGENT_FAILED_DAYS.days, OverviewMath.AGENT_ITEMS) }
+        val limits = settings.await()
+        AgentsBlock(
+            dto = OverviewAgentsDto(
+                activeAgents = active.await(),
+                runsToday = runsToday.await(),
+                pendingApprovals = pending.await(),
+                openTasks = open.await(),
+                tasksDue = due.await(),
+                failedThisWeek = failedWeek.await(),
+                paused = limits.company.paused || limits.platform.agentsPaused,
+            ),
+            approvals = expiring.await(),
+            tasksDue = dueList.await(),
+            failed = failed.await(),
+        )
+    }
+
     private suspend fun social(tenant: Tenant): OverviewSocialDto {
         val binding = tenant.binding(Platform.INSTAGRAM)
         val unreplied = InstagramCommentRepository(mongo, tenant.id).countUnreplied()
@@ -594,6 +642,7 @@ class OverviewService(private val mongo: MongoModule) {
         social: OverviewSocialDto?,
         assistant: OverviewAssistantDto?,
         payments: OverviewPaymentsDto?,
+        agents: AgentsBlock?,
         waiting: List<WaitingConversation>,
     ): List<OverviewAttentionItemDto> {
         val items = mutableListOf<OverviewAttentionItemDto>()
@@ -733,6 +782,36 @@ class OverviewService(private val mongo: MongoModule) {
                 detail = assistant!!.pendingActions.toString(),
             )
         }
+        if (agents != null) {
+            fun detail(vararg parts: String?) = parts.filterNotNull().filter { it.isNotBlank() }.joinToString(" · ")
+            agents.approvals.forEach {
+                items += OverviewAttentionItemDto(
+                    kind = OverviewMath.KIND_AGENT_APPROVAL,
+                    tab = DashboardModules.AGENTS,
+                    id = it.id.toHexString(),
+                    detail = detail(it.agentName, it.subjectLabel),
+                    at = it.createdAt.toString(),
+                )
+            }
+            agents.tasksDue.forEach {
+                items += OverviewAttentionItemDto(
+                    kind = OverviewMath.KIND_AGENT_TASK_DUE,
+                    tab = DashboardModules.AGENTS,
+                    id = it.id.toHexString(),
+                    detail = detail(it.title, it.subjectLabel),
+                    at = it.dueAt?.toString(),
+                )
+            }
+            agents.failed.forEach {
+                items += OverviewAttentionItemDto(
+                    kind = OverviewMath.KIND_AGENT_FAILED,
+                    tab = DashboardModules.AGENTS,
+                    id = it.id.toHexString(),
+                    detail = detail(it.agentName, it.subjectLabel),
+                    at = (it.finishedAt ?: it.updatedAt).toString(),
+                )
+            }
+        }
         return rankAttention(items)
     }
 
@@ -741,8 +820,11 @@ class OverviewService(private val mongo: MongoModule) {
             OverviewMath.KIND_OVERDUE_INVOICE,
             OverviewMath.KIND_OVERDUE_PAYMENT,
             OverviewMath.KIND_WAITING_CHAT,
+            OverviewMath.KIND_AGENT_APPROVAL,
             OverviewMath.KIND_PENDING_BOOKING,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
+            OverviewMath.KIND_AGENT_TASK_DUE,
+            OverviewMath.KIND_AGENT_FAILED,
             OverviewMath.KIND_DUE_SOON_INVOICE,
             OverviewMath.KIND_DUE_SOON_PAYMENT,
             OverviewMath.KIND_QUOTE_EXPIRING,

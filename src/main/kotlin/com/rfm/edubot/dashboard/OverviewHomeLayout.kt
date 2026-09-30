@@ -24,12 +24,13 @@ object OverviewHomeLayout {
     const val SUPPLIERS = "suppliers"
     const val EMPLOYEES = "employees"
     const val ASSISTANT = "assistant"
+    const val AGENTS = "agents"
 
     const val GROUP_SECTIONS = "sections"
     const val GROUP_SNAPSHOTS = "snapshots"
 
     val sections = listOf(HIGHLIGHTS, PULSE, ATTENTION, SETUP)
-    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT)
+    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT, AGENTS)
     val all = (sections + snapshots).toSet()
 
     fun sanitize(hidden: List<String>?): List<String> =
@@ -51,6 +52,7 @@ object OverviewHomeLayout {
         addSnapshot(SOCIAL, DashboardModules.INSTAGRAM in modules)
         addSnapshot(CATALOG, DashboardModules.CATALOG in modules)
         addSnapshot(ASSISTANT, DashboardModules.AI_ASSISTANT in modules)
+        addSnapshot(AGENTS, DashboardModules.AGENTS in modules)
         return options
     }
 

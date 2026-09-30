@@ -30,6 +30,7 @@ data class OverviewDto(
     val employees: OverviewSuppliersDto? = null,
     val payments: OverviewPaymentsDto? = null,
     val assistant: OverviewAssistantDto? = null,
+    val agents: OverviewAgentsDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),
     val hiddenCards: List<String> = emptyList(),
     /** Filled only for `GET /overview?extended=1` (the minimal Home layout); empty otherwise. */
@@ -220,6 +221,18 @@ data class OverviewPaymentsDto(
 @Serializable
 data class OverviewAssistantDto(
     val pendingActions: Int,
+)
+
+/** Agents module summary. Runs today counts the last 24 hours, as on the Agents screen. */
+@Serializable
+data class OverviewAgentsDto(
+    val activeAgents: Long,
+    val runsToday: Long,
+    val pendingApprovals: Long,
+    val openTasks: Long,
+    val tasksDue: Long,
+    val failedThisWeek: Long,
+    val paused: Boolean,
 )
 
 @Serializable

@@ -24,6 +24,9 @@ object OverviewMath {
     const val KIND_INSTAGRAM_COMMENT = "instagram_comment"
     const val KIND_QUOTE_EXPIRING = "quote_expiring"
     const val KIND_ASSISTANT_ACTION = "assistant_action"
+    const val KIND_AGENT_APPROVAL = "agent_approval"
+    const val KIND_AGENT_TASK_DUE = "agent_task_due"
+    const val KIND_AGENT_FAILED = "agent_failed"
 
     const val HIGHLIGHT_COLLECTED = "collected_month"
     const val HIGHLIGHT_OUTSTANDING = "outstanding"
@@ -51,6 +54,10 @@ object OverviewMath {
     const val TOP_CLIENTS = 5
     const val RECENT_LIMIT = 8
     const val AGENDA_LIMIT = 8
+    /** Approvals, due tasks and failed runs each list at most this many rows in "Needs you". */
+    const val AGENT_ITEMS = 3
+    /** Failed runs can't be dismissed, so "Needs you" only lists recent ones; the card counts the week. */
+    const val AGENT_FAILED_DAYS = 3
 
     data class Window(
         val zone: TimeZone,
@@ -106,9 +113,10 @@ object OverviewMath {
         dueSoonCount: Int,
         expiringQuotes: Int,
         pendingAssistant: Int,
+        agentAttention: Int = 0,
     ): String {
         if (overdueCount > 0) return HEALTH_URGENT
-        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant
+        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant + agentAttention
         return if (watch > 0) HEALTH_WATCH else HEALTH_OK
     }
 

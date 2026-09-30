@@ -147,6 +147,17 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         return collection.countDocuments(Filters.and(filters))
     }
 
+    /** Real runs that failed or stopped for review since [since], newest first. */
+    suspend fun failedSince(tenantId: ObjectId, since: Instant, limit: Int = 3): List<AgentRun> =
+        collection.find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.`in`("status", listOf(RunStatus.FAILED.name, RunStatus.NEEDS_REVIEW.name)),
+                Filters.ne("dryRun", true),
+                Filters.gte("createdAt", since.toDate()),
+            ),
+        ).sort(Document("createdAt", -1)).limit(limit.coerceIn(1, 50)).toList().map { it.toRun() }
+
     suspend fun countByStatus(tenantId: ObjectId, statuses: Collection<RunStatus>, since: Instant? = null): Long {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId), Filters.`in`("status", statuses.map { it.name }), Filters.ne("dryRun", true))
         since?.let { filters += Filters.gte("createdAt", it.toDate()) }
