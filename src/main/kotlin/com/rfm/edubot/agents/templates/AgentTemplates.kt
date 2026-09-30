@@ -387,6 +387,42 @@ object AgentTemplates {
                 policy = policy(),
             )
         },
+        AgentTemplate(
+            key = "email_lead_capture", category = EMAIL, kind = AgentKind.AI_WORKER, icon = "mail",
+            params = Schema.obj("newContactsOnly" to Schema.boolean(default = true)),
+        ) {
+            AgentDefinition(
+                triggers = listOf(onEmail(sender = if (flag("newContactsOnly")) "unknown" else "any")),
+                // Newsletters, notifications and bounces are never requests: no model call for them.
+                conditions = whenAll(cond("email.automated", "eq", false)),
+                steps = listOf(
+                    ai("s1", copy("instructions"), output("isRequest", "boolean"), output("name"), output("phone"), output("summary")),
+                    task("s2", copy("task"), guard = whenAll(cond("steps.s1.output.isRequest", "eq", true)), detail = copy("detail")),
+                ),
+                policy = policy(),
+            )
+        },
+        AgentTemplate(
+            key = "supplier_bill_intake", category = EMAIL, kind = AgentKind.AI_WORKER, icon = "receipt",
+            params = Schema.obj(
+                "fromContains" to Schema.string(maxLength = 200),
+                "pdfOnly" to Schema.boolean(default = true),
+                audienceParam,
+                "createTask" to Schema.boolean(default = false),
+            ),
+        ) {
+            val isBill = whenAll(cond("steps.s1.output.isBill", "eq", true))
+            AgentDefinition(
+                // Billing systems send most bills, so automated senders stay in.
+                triggers = listOf(onEmail(fromContains = text("fromContains"), hasPdf = flag("pdfOnly").takeIf { it })),
+                steps = listOfNotNull(
+                    ai("s1", copy("instructions"), output("isBill", "boolean"), output("description"), output("amount"), output("dueDate", "date")),
+                    notify("s2", copy("notify"), guard = isBill),
+                    task("s3", copy("task"), guard = isBill, detail = copy("detail")).takeIf { flag("createTask") },
+                ),
+                policy = policy(),
+            )
+        },
 
         // Housekeeping
         AgentTemplate(
@@ -510,8 +546,8 @@ private class TemplateScope(private val key: String, val params: JsonObject, pri
     fun notify(id: String, message: String, guard: ConditionGroup? = null) =
         StepSpec(id, "team.notify", json("message" to message, "audience" to (text("audience") ?: "admins")), guard = guard)
 
-    fun task(id: String, title: String, guard: ConditionGroup? = null) =
-        StepSpec(id, "team.task.create", json("title" to title, "dueInDays" to 0), guard = guard)
+    fun task(id: String, title: String, guard: ConditionGroup? = null, detail: String? = null) =
+        StepSpec(id, "team.task.create", json("title" to title, "detail" to detail, "dueInDays" to 0), guard = guard)
 
     /** An AI step that only reads what the run already knows (no tools), which keeps it to one model call. */
     fun ai(id: String, instructions: String, vararg outputs: JsonObject) =
@@ -559,6 +595,9 @@ private fun onSchedule(frequency: String, time: String?, weekdays: List<Int>? = 
 
 private fun onDate(entity: String, offsetDays: Int = 0, offsetHours: Int = 0, at: String? = null, statuses: List<String>) =
     TriggerSpec("t1", TriggerTypes.DATE_OFFSET, json("entity" to entity, "offsetDays" to offsetDays, "offsetHours" to offsetHours, "at" to at, "statuses" to statuses))
+
+private fun onEmail(sender: String = "any", fromContains: String? = null, hasPdf: Boolean? = null) =
+    TriggerSpec("t1", TriggerTypes.EMAIL_RECEIVED, json("sender" to sender, "fromContains" to fromContains, "hasPdf" to hasPdf))
 
 private fun onInactivity(entity: String, days: Int = 0, minutes: Int = 0) =
     TriggerSpec("t1", TriggerTypes.INACTIVITY, json("entity" to entity, "days" to days.takeIf { it > 0 }, "minutes" to minutes.takeIf { it > 0 }))

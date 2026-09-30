@@ -98,7 +98,7 @@ class ValueFormatter(locale: String, private val zone: TimeZone, currencyCode: S
             "upper" -> text.uppercase(javaLocale)
             "lower" -> text.lowercase(javaLocale)
             "first" -> text.trim().substringBefore(' ')
-            "default" -> text.ifBlank { argument.orEmpty() }
+            "default" -> if (text.isBlank()) argument.orEmpty() else natural(text)
             else -> text
         }
     }

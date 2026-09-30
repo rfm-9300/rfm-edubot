@@ -35,6 +35,7 @@ class TemplateRendererTest {
         assertEquals(pt.formatCents(123_450), TemplateRenderer.render("{{invoice.totalCents | money}}", variables, pt))
         assertEquals("15:30", TemplateRenderer.render("{{booking.start | time}}", variables, pt))
         assertEquals("sem email", TemplateRenderer.render("{{client.email | default: sem email}}", variables, pt))
+        assertEquals("03/10/2026", TemplateRenderer.render("{{invoice.dueDate | default: sem data}}", variables, pt), "a value that is there reads as without the filter")
         assertEquals("ANA", TemplateRenderer.render("{{client.firstName | upper}}", variables, pt))
     }
 

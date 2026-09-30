@@ -8,7 +8,10 @@ import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.Availability
 import com.rfm.edubot.agents.registry.IntegrationKind
 import com.rfm.edubot.agents.registry.TriggerTypes
+import com.rfm.edubot.agents.runtime.TemplateRenderer
+import com.rfm.edubot.agents.runtime.ValueFormatter
 import com.rfm.edubot.dashboard.DashboardModules
+import kotlinx.datetime.TimeZone
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
@@ -17,6 +20,7 @@ import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -112,6 +116,66 @@ class AgentTemplatesTest {
     }
 
     @Test
+    fun `email lead capture reads new senders' mail, skips machines before any AI call, and files real requests as tasks`() {
+        val agent = built("email_lead_capture", locale = "en")
+        val trigger = agent.definition.triggers.single()
+        assertEquals(TriggerTypes.EMAIL_RECEIVED, trigger.type)
+        assertEquals("unknown", trigger.config["sender"]!!.jsonPrimitive.content)
+        val automated = agent.definition.conditions!!.conditions.single()
+        assertEquals("email.automated" to false, automated.field to automated.value!!.jsonPrimitive.boolean)
+
+        val (read, file) = agent.definition.steps
+        assertEquals("ai.task", read.action)
+        assertEquals(listOf("isRequest", "name", "phone", "summary"), read.input["outputs"]!!.jsonArray.map { it.jsonObject["name"]!!.jsonPrimitive.content })
+        assertEquals("team.task.create", file.action)
+        assertEquals("steps.s1.output.isRequest", file.guard!!.conditions.single().field)
+        assertTrue(file.input["detail"]!!.jsonPrimitive.content.contains("{{email.from}}"))
+
+        val anyone = built("email_lead_capture", buildJsonObject { put("newContactsOnly", false) })
+        assertEquals("any", anyone.definition.triggers.single().config["sender"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `supplier bill intake narrows the inbox as asked and tells the team only about bills`() {
+        val agent = built("supplier_bill_intake", locale = "en")
+        val config = agent.definition.triggers.single().config
+        assertEquals(true, config["hasPdf"]!!.jsonPrimitive.boolean)
+        assertEquals(null, config["fromContains"])
+        assertEquals(listOf("ai.task", "team.notify"), agent.definition.steps.map { it.action })
+        val outputs = agent.definition.steps.first().input["outputs"]!!.jsonArray.associate { it.jsonObject["name"]!!.jsonPrimitive.content to it.jsonObject["type"]!!.jsonPrimitive.content }
+        assertEquals(mapOf("isBill" to "boolean", "description" to "text", "amount" to "text", "dueDate" to "date"), outputs)
+        assertEquals("steps.s1.output.isBill", agent.definition.steps.last().guard!!.conditions.single().field)
+
+        val narrowed = built("supplier_bill_intake", buildJsonObject { put("fromContains", " edp.pt "); put("pdfOnly", false); put("createTask", true) })
+        val narrowedConfig = narrowed.definition.triggers.single().config
+        assertEquals("edp.pt", narrowedConfig["fromContains"]!!.jsonPrimitive.content)
+        assertEquals(null, narrowedConfig["hasPdf"], "any email from them, PDF or not")
+        assertEquals(listOf("ai.task", "team.notify", "team.task.create"), narrowed.definition.steps.map { it.action })
+    }
+
+    @Test
+    fun `a bill whose email leaves out the amount or the date still reads well`() {
+        val message = built("supplier_bill_intake", locale = "pt-PT").definition.steps[1].input["message"]!!.jsonPrimitive.content
+        fun rendered(output: JsonObject) = TemplateRenderer.render(
+            message,
+            buildJsonObject {
+                putJsonObject("email") { put("fromName", "EDP Comercial") }
+                putJsonObject("steps") { putJsonObject("s1") { put("output", output) } }
+            },
+            ValueFormatter("pt-PT", TimeZone.of("Europe/Lisbon")),
+        )
+
+        assertEquals(
+            "Fatura de fornecedor de EDP Comercial: Eletricidade de setembro · valor não indicado no email · vencimento: não indicado.",
+            rendered(buildJsonObject { put("isBill", true); put("description", "Eletricidade de setembro") }),
+        )
+        assertEquals(
+            "Fatura de fornecedor de EDP Comercial: Eletricidade de setembro · 84,20 € · vencimento: 30/10/2026.",
+            rendered(buildJsonObject { put("isBill", true); put("description", "Eletricidade de setembro"); put("amount", "84,20 €"); put("dueDate", "2026-10-30") }),
+        )
+    }
+
+    @Test
     fun `the thank-you after a service links the review page only when there is one`() {
         val plain = built("post_service_follow_up", locale = "en").definition.steps.last().input["text"]!!.jsonPrimitive.content
         val withLink = built("post_service_follow_up", buildJsonObject { put("reviewUrl", "https://g.page/r/obras/review") }, locale = "en")
@@ -169,6 +233,12 @@ class AgentTemplatesTest {
         assertEquals("needs_module:bookings", reason("daily_agenda"))
         assertFalse(available("email_invoice_when_created"))
         assertEquals("needs_integration:GMAIL", reason("email_invoice_when_created"))
+        assertFalse(available("email_lead_capture"))
+        assertEquals("needs_integration:GMAIL_INBOX", reason("supplier_bill_intake"))
+        val sendingOnly = AgentTemplates.catalog("en", Availability(small.modules, setOf(IntegrationKind.GMAIL)), validator)
+            .associateBy { it["key"]!!.jsonPrimitive.content }
+        assertTrue(sendingOnly.getValue("email_invoice_when_created")["available"]!!.jsonPrimitive.content.toBoolean())
+        assertEquals("needs_integration:GMAIL_INBOX", sendingOnly.getValue("email_lead_capture")["reason"]?.jsonPrimitive?.content, "sending alone doesn't read the inbox")
         assertTrue(available("payables_digest"))
         assertTrue(available("weekly_cash_briefing"))
         assertEquals("Payments due this week", entries.getValue("payables_digest")["name"]!!.jsonPrimitive.content)
