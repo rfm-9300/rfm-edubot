@@ -123,7 +123,10 @@ class AgentRuntime(
     suspend fun retryRun(tenant: Tenant, runId: ObjectId): AgentRun? {
         val run = module.runs.findById(tenant.id, runId) ?: return null
         if (run.status != RunStatus.FAILED && run.status != RunStatus.NEEDS_REVIEW) return null
-        val steps = run.steps.map { if (it.stepId == run.definition.steps.getOrNull(run.currentStep)?.id) it.copy(attempts = 0) else it }
+        val stepId = run.definition.steps.getOrNull(run.currentStep)?.id
+        // A person chose to try again, so an interrupted send may go out once more.
+        if (stepId != null && run.status == RunStatus.NEEDS_REVIEW) module.services.outboundLog.markFailed("${run.id.toHexString()}:$stepId", "retried_by_user")
+        val steps = run.steps.map { if (it.stepId == stepId) it.copy(attempts = 0) else it }
         val reopened = module.runs.save(run.copy(status = RunStatus.WAITING, resumeAt = clock(), finishedAt = null, error = null, outcome = null, steps = steps))
         submit(reopened.id, AgentScheduler.laneKey(reopened.tenantId, reopened.subject, reopened.id))
         return reopened

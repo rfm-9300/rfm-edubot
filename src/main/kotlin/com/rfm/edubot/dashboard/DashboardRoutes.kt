@@ -1414,7 +1414,7 @@ private suspend fun runPersonaTest(
     val text: String,
     val status: String,
     val createdAt: String,
-    /** "customer", "ai" or "agent". */
+    /** "customer", "ai", "agent" (a person in the inbox) or "automation" (an agent in the Agents module). */
     val author: String,
     /** "text", "template", "image", "audio", "document" or "video". */
     val kind: String,
@@ -1541,6 +1541,7 @@ private fun com.rfm.edubot.conversation.model.Message.kind(): String = when (con
 private fun com.rfm.edubot.conversation.model.Message.authorLabel(): String = when {
     role == UserRole.USER -> "customer"
     author == com.rfm.edubot.conversation.model.MessageAuthor.AGENT -> "agent"
+    author == com.rfm.edubot.conversation.model.MessageAuthor.AUTOMATION -> "automation"
     else -> "ai"
 }
 private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(

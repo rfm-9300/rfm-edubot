@@ -496,6 +496,7 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             statusAt = getInstantOrNull("statusAt"),
             errorCode = getInteger("errorCode"),
             errorText = getString("errorText"),
+            origin = getString("origin"),
         )
     }
 
@@ -535,6 +536,7 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             .append("statusAt", statusAt?.toDate())
             .append("errorCode", errorCode)
             .append("errorText", errorText)
+            .append("origin", origin)
     }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)

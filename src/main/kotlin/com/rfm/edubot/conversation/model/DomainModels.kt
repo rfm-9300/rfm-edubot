@@ -18,8 +18,11 @@ enum class MessageStatus {
     RECEIVED, PROCESSING, SENT, DELIVERED, READ, FAILED
 }
 
-/** Who wrote an outbound message. Null on customer messages and on rows stored before it existed. */
-enum class MessageAuthor { AI, AGENT }
+/**
+ * Who wrote an outbound message: the reply bot, a person in the inbox, or an automation agent.
+ * Null on customer messages and on rows stored before it existed.
+ */
+enum class MessageAuthor { AI, AGENT, AUTOMATION }
 
 enum class UserStatus {
     ACTIVE, BLOCKED, RATE_LIMITED
@@ -85,6 +88,8 @@ data class Message(
     /** Meta's error code and text when [status] is FAILED. */
     val errorCode: Int? = null,
     val errorText: String? = null,
+    /** `agent:<id>` on messages an automation agent sent. */
+    val origin: String? = null,
 )
 
 sealed class MessageContent {

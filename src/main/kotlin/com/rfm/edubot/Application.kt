@@ -12,6 +12,14 @@ import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
+import com.rfm.edubot.agents.AgentsModule
+import com.rfm.edubot.agents.actions.AgentActions
+import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.agents.registry.AgentRegistry
+import com.rfm.edubot.agents.registry.TriggerTypes
+import com.rfm.edubot.agents.runtime.AgentRuntime
+import com.rfm.edubot.agents.runtime.AgentRuntimeConfig
+import com.rfm.edubot.agents.runtime.AgentServices
 import com.rfm.edubot.bookings.BookingCatalogMigration
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
@@ -50,6 +58,7 @@ import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.TenantSeeder
+import com.rfm.edubot.shared.jobs.SchedulerLease
 import com.rfm.edubot.webhook.webhookRoutes
 import com.rfm.edubot.whatsapp.signup.WhatsAppSignupClient
 import com.rfm.edubot.whatsapp.signup.whatsAppSignupRoutes
@@ -71,6 +80,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) {
     val baseConfig = AppConfig.load()
@@ -157,6 +167,28 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         scope = pipelineScope,
         onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
     )
+
+    val agentServices = AgentServices(
+        mongo = mongoModule,
+        aiClient = aiClient,
+        outbound = { tenant, platform -> runCatching { pipelineFactory.responderFor(tenant, platform) }.getOrNull() },
+        whatsApp = { pipelineFactory.whatsAppFor(it) },
+        instagramSocial = instagramSocial,
+        pdfStoragePath = { runtimeConfig.get().pdfStoragePath },
+    )
+    val agentsModule = AgentsModule(mongoModule, AgentRegistry(AgentActions.builtIn, TriggerTypes.all), agentServices)
+    val agentRuntime = AgentRuntime(
+        module = agentsModule,
+        tenants = { id -> tenantRepository.findById(id) },
+        scope = pipelineScope,
+        lease = SchedulerLease(mongoModule),
+        config = AgentRuntimeConfig(
+            tick = appConfig.agents.tickSeconds.seconds,
+            lanes = appConfig.agents.lanes,
+            maxConcurrentPerCompany = appConfig.agents.maxConcurrentRunsPerCompany,
+        ),
+    )
+    agentRuntime.start()
 
     val conversationLanes = ConversationLanes(pipelineScope)
     pipelineScope.launch {
@@ -276,6 +308,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,
         )
+        agentRoutes(agentsModule, agentRuntime)
         adminRoutes()
         tenantAdminRoutes(
             mongo = mongoModule,

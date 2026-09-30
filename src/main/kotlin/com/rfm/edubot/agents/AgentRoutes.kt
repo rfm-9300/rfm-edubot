@@ -1,6 +1,7 @@
 package com.rfm.edubot.agents
 
 import com.rfm.edubot.agents.registry.AgentCatalog
+import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.dashboardContext
@@ -14,7 +15,7 @@ import io.ktor.server.routing.get
 import io.ktor.server.routing.route
 
 /** The Agents module's dashboard API under `/app/api/agents`. */
-fun Route.agentRoutes(agents: AgentsModule) {
+fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime) {
     authenticate("dashboard") {
         route("/app/api/agents") {
             get("/catalog") {

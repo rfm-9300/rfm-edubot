@@ -30,6 +30,28 @@ class OutboundLogRepository(mongo: MongoModule, private val clock: () -> Instant
         false
     }
 
+    enum class Acquire { STARTED, ALREADY_SENT, IN_DOUBT }
+
+    /**
+     * Claims the send for [entry]'s key: a fresh key or a failed earlier try may go ahead; a key that
+     * was sent never goes twice; one still SENDING (interrupted mid-call) needs a person to decide.
+     */
+    suspend fun acquire(entry: OutboundLogEntry): Acquire {
+        if (begin(entry)) return Acquire.STARTED
+        val existing = find(entry.idempotencyKey) ?: return if (begin(entry)) Acquire.STARTED else Acquire.IN_DOUBT
+        return when (existing.status) {
+            OutboundStatus.SENT -> Acquire.ALREADY_SENT
+            OutboundStatus.SENDING -> Acquire.IN_DOUBT
+            OutboundStatus.FAILED -> {
+                val retried = collection.updateOne(
+                    Filters.and(Filters.eq("idempotencyKey", entry.idempotencyKey), Filters.eq("status", OutboundStatus.FAILED.name)),
+                    Updates.combine(Updates.set("status", OutboundStatus.SENDING.name), Updates.set("at", entry.at.toDate()), Updates.unset("error")),
+                ).modifiedCount > 0
+                if (retried) Acquire.STARTED else Acquire.IN_DOUBT
+            }
+        }
+    }
+
     suspend fun find(idempotencyKey: String): OutboundLogEntry? =
         collection.find(Filters.eq("idempotencyKey", idempotencyKey)).firstOrNull()?.toEntry()
 

@@ -40,6 +40,8 @@ class AgentServices(
     val outboundLog: OutboundLogRepository = OutboundLogRepository(mongo),
     val dashboardUsers: DashboardUserRepository = DashboardUserRepository(mongo),
     val usage: (Tenant) -> TenantUsageRepository = { TenantUsageRepository(mongo, it.id) },
+    /** Where generated quote and invoice PDFs are kept (`app.pdf.storagePath`). */
+    val pdfStoragePath: () -> String = { "./data/pdfs" },
     val clock: () -> Instant = SystemClock::now,
 )
 

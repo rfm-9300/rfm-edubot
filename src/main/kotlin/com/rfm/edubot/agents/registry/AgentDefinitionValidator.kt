@@ -5,6 +5,7 @@ import com.rfm.edubot.agents.model.Autonomy
 import com.rfm.edubot.agents.model.ConditionGroup
 import com.rfm.edubot.agents.runtime.ConditionEvaluator
 import com.rfm.edubot.agents.runtime.TemplateRenderer
+import com.rfm.edubot.agents.store.AgentJson
 import com.rfm.edubot.events.DomainEventTypes
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
@@ -68,6 +69,11 @@ class AgentDefinitionValidator(private val registry: AgentRegistry) {
                 if (!referenceKnown(reference, known, earlier, paramNames)) problems += DefinitionProblem("$path.input", "unknown_variable", reference)
             }
             step.guard?.let { checkConditions(it, "$path.guard", known + earlierOutputs(earlier), problems) }
+            if (step.action == "flow.branch") {
+                step.input["conditions"]
+                    ?.let { runCatching { AgentJson.json.decodeFromJsonElement(ConditionGroup.serializer(), it) }.getOrNull() }
+                    ?.let { checkConditions(it, "$path.input.conditions", known, problems) }
+            }
 
             val autonomy = step.autonomy ?: definition.policy.autonomy
             if (action.sideEffect == SideEffect.EXTERNAL_MESSAGE && autonomy == Autonomy.AUTO) {
@@ -108,7 +114,7 @@ class AgentDefinitionValidator(private val registry: AgentRegistry) {
 
     /** Step ids a branch step may jump to. */
     private fun branchTargets(input: JsonObject): List<String> =
-        listOfNotNull(input.string("thenGoTo"), input.string("elseGoTo")).filter { it != "end" }
+        listOfNotNull(input.string("thenGoTo"), input.string("elseGoTo")).filter { it != "end" && it != "next" }
 
     companion object {
         const val MAX_TRIGGERS = 5
