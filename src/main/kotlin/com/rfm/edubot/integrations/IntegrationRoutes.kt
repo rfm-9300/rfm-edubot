@@ -11,7 +11,7 @@ import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.integrations.email.EmailAddresses
 import com.rfm.edubot.integrations.email.EmailSendResult
 import com.rfm.edubot.integrations.email.EmailService
-import com.rfm.edubot.integrations.google.GmailClient
+import com.rfm.edubot.integrations.email.httpStatus
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
 import com.rfm.edubot.oauth.OAuthState
@@ -201,13 +201,6 @@ private const val MAX_SIGNATURE = 2000
 private fun googleResult(status: String, reason: String? = null): String = buildString {
     append("/app/?google=").append(status.encodeURLParameter())
     if (reason != null) append("&reason=").append(reason.encodeURLParameter())
-}
-
-private fun EmailSendResult.Failed.httpStatus(): HttpStatusCode = when (key) {
-    EmailService.DAILY_LIMIT, GmailClient.RATE_LIMITED -> HttpStatusCode.TooManyRequests
-    EmailService.NO_ACCOUNT, EmailService.NEEDS_RECONNECT -> HttpStatusCode.Conflict
-    EmailService.INVALID_RECIPIENT, EmailService.TOO_MANY_RECIPIENTS, EmailService.INVALID_MESSAGE, EmailService.TOO_LARGE -> HttpStatusCode.BadRequest
-    else -> HttpStatusCode.BadGateway
 }
 
 private sealed interface SettingsUpdate {

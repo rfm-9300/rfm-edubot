@@ -43,6 +43,7 @@ import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.TokenCipher
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailService
+import com.rfm.edubot.integrations.email.emailRoutes
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
@@ -371,6 +372,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             tenants = tenantRepository,
             users = dashboardUserRepository,
         )
+        emailRoutes(emailService, mongoModule)
         whatsAppSignupRoutes(
             configProvider = { runtimeConfig.get().whatsapp },
             signupClient = whatsAppSignupClient,

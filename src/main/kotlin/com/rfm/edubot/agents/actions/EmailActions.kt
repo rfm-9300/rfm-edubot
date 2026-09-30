@@ -1,6 +1,7 @@
 package com.rfm.edubot.agents.actions
 
 import com.rfm.edubot.agents.model.ActionPreview
+import com.rfm.edubot.agents.model.OutboundStatus
 import com.rfm.edubot.agents.registry.ActionCategory
 import com.rfm.edubot.agents.registry.ActionResult
 import com.rfm.edubot.agents.registry.AgentAction
@@ -10,6 +11,7 @@ import com.rfm.edubot.agents.registry.SideEffect
 import com.rfm.edubot.agents.registry.string
 import com.rfm.edubot.agents.runtime.RunContext
 import com.rfm.edubot.integrations.email.EmailAttachment
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailSendResult
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.email.OutgoingEmail
@@ -21,6 +23,7 @@ import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
+import kotlin.time.Duration.Companion.days
 
 /**
  * An email from the company's connected Gmail account to the record's client, a team member or an
@@ -51,13 +54,14 @@ object EmailSendAction : AgentAction {
         val to = recipient(input, ctx)
         val cc = addresses(input.string("cc"))
         val bcc = addresses(input.string("bcc"))
+        val pdf = input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it) }
         return ActionPreview(
             kind = "email",
             channel = "email",
             recipients = listOfNotNull(to),
             subject = input.string("subject"),
             body = input.string("text"),
-            attachments = listOfNotNull(input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it)?.filename }),
+            attachments = listOfNotNull(pdf?.filename),
             fields = buildMap {
                 if (cc.isNotEmpty()) put("cc", cc.joinToString(", "))
                 if (bcc.isNotEmpty()) put("bcc", bcc.joinToString(", "))
@@ -67,6 +71,7 @@ object EmailSendAction : AgentAction {
             warnings = buildList {
                 if (to == null) add("no_email")
                 if (ctx.services.email?.isAvailable(ctx.tenant) != true) add("no_email_account")
+                if (pdf != null && to != null && documentJustSent(ctx, to)) add(ALREADY_EMAILED)
             },
         )
     }
@@ -78,6 +83,7 @@ object EmailSendAction : AgentAction {
         val to = recipient(input, ctx) ?: return ActionResult.Skipped("no_email")
         AgentMessaging.capped(ctx, EmailService.CHANNEL, to)?.let { return it }
         val pdf = input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it) }
+        if (pdf != null && documentJustSent(ctx, to)) return ActionResult.Skipped(ALREADY_EMAILED)
         val email = OutgoingEmail(
             to = listOf(to),
             subject = subject,
@@ -103,6 +109,16 @@ object EmailSendAction : AgentAction {
         }
     }
 
+    /**
+     * Someone else (a person with "Send by email", another agent) emailed this record's document to [to] in the
+     * last day. This step's own send doesn't count, so a retried step still reports it as sent.
+     */
+    private suspend fun documentJustSent(ctx: RunContext, to: String): Boolean {
+        val record = ctx.run.subject ?: return false
+        if (ctx.services.outboundLog.find(ctx.idempotencyKey)?.status == OutboundStatus.SENT) return false
+        return EmailMessageRepository(ctx.services.mongo).documentSent(ctx.tenant.id, record, to, ctx.now - 1.days)
+    }
+
     /** The account's allowance comes back at the company's midnight: the step waits for it once, then gives up. */
     private fun nextDay(ctx: RunContext): ActionResult {
         val attempts = ctx.run.steps.firstOrNull { it.stepId == ctx.step.id }?.attempts ?: 0
@@ -124,4 +140,6 @@ object EmailSendAction : AgentAction {
 
     private fun addresses(raw: String?): List<String> =
         raw.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
+
+    const val ALREADY_EMAILED = "already_emailed"
 }

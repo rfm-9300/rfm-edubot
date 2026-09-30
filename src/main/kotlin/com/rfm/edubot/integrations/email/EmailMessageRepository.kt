@@ -2,6 +2,7 @@ package com.rfm.edubot.integrations.email
 
 import com.mongodb.ErrorCategory
 import com.mongodb.MongoWriteException
+import com.mongodb.client.model.CountOptions
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.agents.store.instant
@@ -41,6 +42,21 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
     suspend fun forClient(tenantId: ObjectId, clientId: ObjectId, limit: Int = 50): List<EmailMessage> =
         collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("clientId", clientId)))
             .sort(Document("date", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toMessage() }
+
+    /** Whether [record]'s document went to [recipient] since [since], so an agent doesn't send it again after a person just did. */
+    suspend fun documentSent(tenantId: ObjectId, record: SubjectRef, recipient: String, since: Instant): Boolean =
+        collection.countDocuments(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.eq("direction", EmailDirection.OUTBOUND.name),
+                Filters.eq("record.type", record.type),
+                Filters.eq("record.id", record.id),
+                Filters.eq("to", EmailAddresses.normalize(recipient) ?: recipient.trim().lowercase()),
+                Filters.gte("date", since.toDate()),
+                Filters.exists("attachments.0", true),
+            ),
+            CountOptions().limit(1),
+        ) > 0
 
     suspend fun inThread(tenantId: ObjectId, threadId: String): List<EmailMessage> =
         collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("threadId", threadId)))

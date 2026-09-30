@@ -201,6 +201,12 @@ class EmailSendActionTest {
         assertEquals("Orçamentos", stored.sentByName)
         assertEquals(ctx.run.id.toHexString(), stored.runId)
         assertEquals(OutboundStatus.SENT, ctx.services.outboundLog.find(ctx.idempotencyKey)?.status)
+
+        val otherRun = context(tenant, quote)
+        assertEquals(listOf("already_emailed"), preview(email, otherRun).warnings)
+        assertEquals(ActionResult.Skipped("already_emailed"), execute(email, otherRun), "the client got this quote today")
+        assertIs<ActionResult.Done>(execute(input(), otherRun), "a note about the quote without it still goes")
+        assertEquals(2, google.sends.size)
     }
 
     @Test

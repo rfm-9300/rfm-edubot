@@ -47,6 +47,9 @@ class EmailService(
 ) : EmailSender {
     private val log = LoggerFactory.getLogger("EmailService")
 
+    /** The platform has a Google OAuth client and a token key. */
+    val configured: Boolean get() = google.configured
+
     /** The account email goes out from when none is named. */
     suspend fun sender(tenant: Tenant): IntegrationConnection? =
         google.connections.defaultFor(tenant.id, IntegrationProviders.GOOGLE)
