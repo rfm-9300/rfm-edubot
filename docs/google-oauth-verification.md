@@ -12,7 +12,7 @@ application client, authorization code, `access_type=offline`), one grant per co
 | `openid`, `email` | non-sensitive | at connect | Identify the connected account and show its address in Settings. |
 | `https://www.googleapis.com/auth/gmail.send` | **sensitive** | at connect | Send the emails a person or an automation of the company writes. |
 | `https://www.googleapis.com/auth/gmail.readonly` | **restricted** | only with "Use my inbox in automations" | Read new inbox messages to link them to clients and start the company's email automations. |
-| `https://www.googleapis.com/auth/gmail.modify` | **restricted** | same, together with `gmail.readonly` | Mark the inbox messages an automation handled. |
+| `https://www.googleapis.com/auth/gmail.modify` | **restricted** | same, together with `gmail.readonly` | Planned: mark the inbox messages an automation handled. Not used yet (see below). |
 
 Sending needs brand verification plus sensitive-scope verification. Inbox reading needs
 restricted-scope verification and a yearly **CASA** security assessment; it stays off (the scopes
@@ -53,11 +53,17 @@ own address. We send only emails that a signed-in user of that company sends fro
 that an automation the company created and turned on sends. Each sent email is shown on the
 client's record. We never read the mailbox with this scope.
 
-**`gmail.readonly` / `gmail.modify`** (Phase 4): when a company turns on "Use my inbox in
-automations", we read new messages arriving in its inbox, link them to the company's clients by
-sender address, show them on the client's record, and run the email automations the company chose
-(for example, logging a supplier's bill or replying to a new lead). `gmail.modify` is used only to
-mark the messages an automation handled. Nothing else in the mailbox is read, changed or deleted.
+**`gmail.readonly` / `gmail.modify`** (Phase 4): when a company admin turns on "Use my inbox in
+automations", we read the messages that arrive in its inbox from then on (not its own sent mail,
+spam, or promotions from strangers), link them to the company's clients by sender address, show
+them on the client's record, and run the email automations the company chose (for example, logging
+a supplier's bill or replying to a new lead in its thread; replies go out with `gmail.send`).
+We keep a message's text for 90 days and never keep attachment contents. Nothing in the mailbox is
+changed or deleted.
+
+`gmail.modify` is requested with `gmail.readonly`, as the plan pairs them, but no feature uses it
+yet. Before the restricted-scope submission, either give it its use (labelling the messages an
+automation handled) or drop it from `GoogleScopes.inbox`: reviewers refuse scopes the app doesn't use.
 
 ## Limited Use: where the app keeps its promises
 
@@ -66,8 +72,8 @@ mark the messages an automation handled. Nothing else in the mailbox is read, ch
 | Disclose the use and link the policy | `/privacy` section 5 carries Google's Limited Use sentence and the link (`LegalRoutesTest`). |
 | Use only for user-facing features | Sends come from dashboard buttons or the company's own automations (`EmailService`, `email.send`). |
 | Tokens protected | AES-256-GCM at rest (`TokenCipher`), never sent to the browser (`IntegrationConnectionDto`). |
-| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`); attachment contents never stored. |
-| Delete on request | Disconnect deletes tokens and kept mail and revokes the grant (`DELETE /app/api/integrations/{id}`); `/data-deletion` explains it. |
+| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`), with what automation runs and approvals made of it; runs and events never store the text itself; attachment contents never stored. |
+| Delete on request | Disconnect deletes tokens and kept mail, redacts the account's emails from the activity log, runs and approvals, and revokes the grant (`DELETE /app/api/integrations/{id}`, `EmailService.forget`); `/data-deletion` explains it. |
 | No ads, no model training | Stated on `/privacy`; Gmail text reaches the LLM provider only inside a step the company set up. |
 | No human reading | Stated on `/privacy`; support access only when the company asks. |
 | Least privilege | Send-only at connect; restricted scopes only after the company opts in. |
@@ -89,6 +95,11 @@ mark the messages an automation handled. Nothing else in the mailbox is read, ch
    client's Emails tab no longer lists the mail.
 8. Don't show passwords, tokens, the client secret or real customer data.
 
+For the restricted-scope video (Phase 4), also: open **Manage** on the account, turn on **Use my
+inbox in automations**, show Google's second consent screen (reading email), send a test email from
+the synthetic client's address, and show it on the client's **Emails** tab and the run of an email
+automation (for example the lead reply, answered in the same thread).
+
 ## Restricted scopes and CASA (Phase 4)
 
 - Verification of `gmail.readonly` / `gmail.modify` needs a **CASA Tier 2** assessment by an
@@ -106,4 +117,5 @@ mark the messages an automation handled. Nothing else in the mailbox is read, ch
 - [ ] `INTEGRATIONS_ENCRYPTION_KEY` set in the production environment and backed up.
 - [ ] `/privacy` and `/data-deletion` reachable over HTTPS on the dashboard host.
 - [ ] Brand + `gmail.send` verification submitted with the video; app switched to **In production**.
-- [ ] (Phase 4) Restricted scopes submitted; CASA passed; then inbox reading enabled.
+- [ ] (Phase 4) `gmail.modify` given its use or dropped from `GoogleScopes.inbox`.
+- [ ] (Phase 4) Restricted scopes submitted; CASA passed; then inbox reading enabled (`GMAIL_INBOX_ENABLED=true`).
