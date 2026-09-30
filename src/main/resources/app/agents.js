@@ -7,14 +7,14 @@
   const ui = { tab: 'agents', listFilter: '', category: '', inbox: 'approvals', activity: '', showTests: false };
   const data = {
     overview: null, agents: [], catalog: null, approvals: [], tasks: [], runs: [], settings: null,
-    people: null, waTemplates: null, bookable: null,
+    people: null, waTemplates: null, bookable: null, persona: null,
   };
 
   const TABS = ['agents', 'templates', 'inbox', 'activity', 'settings'];
   const RUN_GROUPS = { open: ['QUEUED', 'RUNNING', 'WAITING', 'AWAITING_APPROVAL'], attention: ['FAILED', 'NEEDS_REVIEW'], done: ['SUCCEEDED', 'CANCELLED', 'SKIPPED'] };
   const STATUS_EVENTS = new Set(['quote.created', 'quote.status_changed', 'booking.created', 'booking.status_changed']);
   const CHANNEL_EVENTS = new Set(['message.received', 'contact.created', 'conversation.handoff']);
-  const LONG_TEXT = new Set(['text', 'message', 'detail', 'notes', 'instructions', 'body']);
+  const LONG_TEXT = new Set(['text', 'message', 'detail', 'notes', 'instructions', 'body', 'brief']);
   const MAX_TRIGGERS = 5;
   const MAX_STEPS = 25;
   const AGENT_TONES = { ACTIVE: 'ok', PAUSED: 'warn' };
@@ -217,7 +217,7 @@
     const parts = String(path).split('.');
     if (parts[0] === 'steps') {
       const field = parts.slice(3).join('.') || parts[2] || '';
-      return tr('builder.stepOutput', { step: stepRef(parts[1], steps), field: tr(`outputs.${field}`, null, field) });
+      return tr('builder.stepOutput', { step: stepRef(parts[1], steps), field: outputLabel(field) });
     }
     if (parts[0] === 'params') return parts.slice(1).join('.');
     if (parts.length === 1) return entityLabel(parts[0]);
@@ -243,6 +243,8 @@
     if (step.action === 'email.send') return i.subject || '';
     if (step.action === 'team.notify') return i.message || '';
     if (step.action === 'team.task.create') return i.title || '';
+    if (step.action === 'ai.task') return i.instructions || '';
+    if (step.action === 'ai.compose') return i.brief || '';
     if (step.action === 'flow.branch') return groupText(i.conditions, steps);
     if (step.action === 'flow.wait') {
       const parts = [];
@@ -254,6 +256,26 @@
   }
   const autonomyOf = (step, definition) => step.autonomy || definition?.policy?.autonomy || 'APPROVE';
   const sideEffectOf = step => actionSpec(step.action)?.sideEffect || 'NONE';
+  /** An action an AI task may be allowed to take: it changes something or reaches someone. Look-ups are always on. */
+  const aiWritable = a => !!a?.aiCallable && !(a.category === 'DATA' && a.sideEffect === 'NONE');
+  /** "Before acting" matters: the step has an effect, or it's an AI task allowed to take actions. */
+  const actsOnItsOwn = step => sideEffectOf(step) !== 'NONE' || (step.action === 'ai.task' && (step.input?.actions || []).length > 0);
+  const OUTPUT_TYPES = { number: 'NUMBER', boolean: 'BOOLEAN', date: 'DATE' };
+  /** What a step hands to later ones as `steps.<id>.output.<name>`: an AI task's own fields, else the action's outputs. */
+  function stepOutputFields(step) {
+    if (step.action === 'ai.task') {
+      const declared = Array.isArray(step.input?.outputs) ? step.input.outputs : (actionSpec('ai.task')?.inputSchema?.properties?.outputs?.default || []);
+      return declared.filter(o => o?.name).map(o => ({ name: o.name, type: OUTPUT_TYPES[o.type] || 'TEXT', options: o.type === 'choice' ? (o.options || []) : null }));
+    }
+    return Object.keys(actionSpec(step.action)?.outputSchema?.properties || {}).map(name => ({ name, type: 'TEXT', options: null }));
+  }
+  const outputLabel = name => tr(`outputs.${name}`, null, name);
+  const lowerFirst = text => (text ? text.charAt(0).toLocaleLowerCase(locale()) + text.slice(1) : '');
+  /** A field name the server takes: letters, digits and _, starting with a letter ("Intenção do cliente" → "Intencao_do_cliente"). */
+  function outputName(text) {
+    const plain = String(text || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().replace(/[^A-Za-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+    return (plain && !/^[A-Za-z]/.test(plain) ? `f_${plain}` : plain).slice(0, 40);
+  }
 
   // ── loading and the module page ───────────────────────────────────
   async function loadInbox() {
@@ -565,13 +587,12 @@
 
   function flowStepHtml(step, index, def, result = null) {
     const steps = def?.steps || [];
-    const effect = sideEffectOf(step);
-    const autonomy = effect === 'NONE' ? '' : pill(autonomyOf(step, def) === 'AUTO' ? 'ok' : autonomyOf(step, def) === 'DRAFT' ? '' : 'warn', tr(`autonomy.${autonomyOf(step, def)}`));
+    const autonomy = actsOnItsOwn(step) ? pill(autonomyOf(step, def) === 'AUTO' ? 'ok' : autonomyOf(step, def) === 'DRAFT' ? '' : 'warn', tr(`autonomy.${autonomyOf(step, def)}`)) : '';
     const detail = stepDetail(step, steps);
     const guard = step.guard?.conditions?.length ? `<div class="flow__detail">${esc(tr('flow.onlyIf', { text: groupText(step.guard, steps) }))}</div>` : '';
     const state = result ? STEP_STATE[result.status] || '' : '';
     const side = result ? stepPill(result.status) : autonomy;
-    const note = result ? stepNoteHtml(result, steps) : '';
+    const note = result ? stepNoteHtml(result, steps, step) : aiPlanHtml(step);
     return `<li class="flow__step"${state ? ` data-state="${state}"` : ''}>
       <span class="flow__index">${index + 1}</span>
       <div class="flow__main">
@@ -581,18 +602,66 @@
       <div class="flow__side">${side}</div>
     </li>`;
   }
-  function stepNoteHtml(result, steps) {
+  /** An AI task's fields and the actions it may take, under its instructions. */
+  function aiPlanHtml(step) {
+    if (step.action !== 'ai.task') return '';
+    const fields = stepOutputFields(step).map(f => lowerFirst(outputLabel(f.name)));
+    const actions = (step.input?.actions || []).map(key => lowerFirst(actionLabel(key)));
+    return [
+      fields.length ? `<div class="flow__detail">${esc(tr('flow.returns', { fields: joinList(fields) }))}</div>` : '',
+      actions.length ? `<div class="flow__detail">${esc(tr('flow.mayDo', { actions: joinList(actions) }))}</div>` : '',
+    ].join('');
+  }
+  function stepNoteHtml(result, steps, step) {
     const lines = [];
     if (result.note) lines.push(`<div class="flow__detail">${esc(reasonText(result.note, steps))}</div>`);
     if (result.error) lines.push(`<div class="flow__detail flow__detail--bad">${esc(reasonText(result.error, steps))}</div>`);
-    const preview = result.status === 'DRAFTED' ? result.output : null;
-    (preview?.warnings || []).forEach(w => lines.push(`<p class="hint hint--warn">${esc(tr(`warnings.${w}`, null, w))}</p>`));
-    if (preview?.subject) lines.push(`<div class="flow__detail">${esc(preview.subject)}</div>`);
-    if (preview?.body) lines.push(`<div class="wa-preview"><div class="bubble bubble--out bubble--ai"><div class="bubble__text">${esc(preview.body)}</div></div></div>`);
-    if ((preview?.attachments || []).length) lines.push(`<div class="flow__detail">${esc(tr('inbox.attachments', { files: preview.attachments.join(', ') }))}</div>`);
-    if (preview?.fields && Object.keys(preview.fields).length) lines.push(previewFactsHtml(preview.fields, result.action, steps));
+    if (result.action === 'ai.task') lines.push(aiResultHtml(result.output, steps, step));
+    else if (result.action === 'ai.compose') lines.push(composedHtml(result.output));
+    else if (result.status === 'DRAFTED') lines.push(previewHtml(result.output, result.action, steps));
     if (result.status === 'DONE' && result.action === 'data.summary' && result.output?.text) lines.push(`<div class="flow__detail">${esc(result.output.text)}</div>`);
     return lines.join('');
+  }
+  const bubbleHtml = text => `<div class="wa-preview"><div class="bubble bubble--out bubble--ai"><div class="bubble__text">${esc(text)}</div></div></div>`;
+  /** What an action would do: who it reaches, its warnings, subject, text, attachments and details. */
+  function previewHtml(preview, action, steps) {
+    if (!preview) return '';
+    const lines = [];
+    if ((preview.recipients || []).length) lines.push(`<div class="flow__detail">${esc(`${tr('inbox.recipients')}: ${preview.recipients.join(', ')}`)}</div>`);
+    (preview.warnings || []).forEach(w => lines.push(`<p class="hint hint--warn">${esc(tr(`warnings.${w}`, null, w))}</p>`));
+    if (preview.subject) lines.push(`<div class="flow__detail">${esc(preview.subject)}</div>`);
+    if (preview.body) lines.push(bubbleHtml(preview.body));
+    if ((preview.attachments || []).length) lines.push(`<div class="flow__detail">${esc(tr('inbox.attachments', { files: preview.attachments.join(', ') }))}</div>`);
+    if (preview.fields && Object.keys(preview.fields).length) lines.push(previewFactsHtml(preview.fields, action, steps));
+    return lines.join('');
+  }
+  /** An AI task's result: the fields it returned, what it did and, drafted, what it would have done. */
+  function aiResultHtml(output, steps, step) {
+    const out = output || {};
+    // After an approval the approved action's own output (ids…) is merged in: show the declared fields only.
+    const declared = step ? stepOutputFields(step).map(f => f.name) : null;
+    const fields = Object.entries(out).filter(([k, v]) => v !== null && typeof v !== 'object' && (!declared || declared.includes(k)));
+    const lines = [];
+    if (fields.length) lines.push(`<dl class="dash-facts">${fields.map(([k, v]) => `<div><dt>${esc(outputLabel(k))}</dt><dd>${esc(aiValue(v))}</dd></div>`).join('')}</dl>`);
+    if ((out.actions || []).length) lines.push(`<ul class="plain-list">${out.actions.map(a => `<li>${esc(aiActionText(a, steps))}</li>`).join('')}</ul>`);
+    (out.proposals || []).forEach(p => lines.push(`<ul class="plain-list"><li><strong>${esc(tr('run.aiDrafted', { action: actionLabel(p.action) }))}</strong></li></ul>${previewHtml(p.preview, p.action, steps)}`));
+    return lines.join('');
+  }
+  function aiValue(v) {
+    if (typeof v === 'boolean') return v ? A.yes : A.no;
+    if (typeof v === 'number') return new Intl.NumberFormat(locale()).format(v);
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? d.fmtDay(v) : String(v);
+  }
+  /** One action an AI task took: "Notified the team", or "Skipped · Send a WhatsApp message · <why>". */
+  function aiActionText(entry, steps) {
+    const text = entry.status === 'done'
+      ? tr(`did.${dotKey(entry.action)}`, null, actionLabel(entry.action))
+      : tr(`run.ai_${entry.status}`, { action: actionLabel(entry.action) }, actionLabel(entry.action));
+    return entry.note ? `${text} · ${reasonText(entry.note, steps)}` : text;
+  }
+  function composedHtml(output) {
+    if (!output?.text) return '';
+    return `${output.subject ? `<div class="flow__detail">${esc(output.subject)}</div>` : ''}${bubbleHtml(output.text)}`;
   }
   /** An action preview's details (`deposit_percent`, `from`/`to` statuses, `wait_until`, drafted inputs…) as facts. */
   function previewFactsHtml(fields, action, steps) {
@@ -632,6 +701,7 @@
     if (problem.code === 'unknown_variable' || problem.code === 'unknown_field') return problem.detail ? `{{${problem.detail}}}` : '';
     if (problem.code === 'unknown_event') return eventLabel(problem.detail);
     if (problem.code === 'wrong_subject') return entityLabel(problem.detail);
+    if (problem.code === 'not_ai_callable') return actionLabel(problem.detail);
     return problem.detail || '';
   }
   function problemPlace(path, def) {
@@ -958,6 +1028,8 @@
     if (widget === 'weekdays') return row(chipsHtml(path, [1, 2, 3, 4, 5, 6, 7].map(n => [n, weekdayName(n, 'short')]), value || [], 'int'), true);
     if (widget === 'statuses') return row(chipsHtml(path, entityStatuses(ctx.entity).map(s => [s, d.statusLabel(ctx.entity, s)]), value || [], 'str'), true);
     if (widget === 'tags') return row(`<input class="inp" id="${id}" data-bind="${path}" data-type="tags" value="${esc((value || []).join(', '))}" />`, true, A.tagsHint);
+    if (widget === 'ai-outputs') return aiOutputsHtml(prop, value, path, label);
+    if (widget === 'ai-actions') return aiActionsHtml(value, path, label, ctx);
     if (widget === 'event') {
       const events = catalog().events.filter(e => e.available || e.type === value).map(e => [e.type, eventLabel(e.type)]);
       return row(select(events, 'str', true), true);
@@ -998,9 +1070,41 @@
     return parts.filter(p => p.type === 'unit' || p.type === 'percentSign').map(p => p.value).join('').trim();
   };
 
-  function chipsHtml(path, options, selected, type) {
+  function chipsHtml(path, options, selected, type, rerender = false) {
     const on = new Set((selected || []).map(String));
-    return `<div class="chip-picks" role="group">${options.map(([v, text]) => `<button class="chip ${on.has(String(v)) ? 'is-on' : ''}" type="button" aria-pressed="${on.has(String(v))}" data-toggle="${path}" data-toggle-type="${type}" data-value="${esc(v)}">${esc(text)}</button>`).join('')}</div>`;
+    return `<div class="chip-picks" role="group">${options.map(([v, text]) => `<button class="chip ${on.has(String(v)) ? 'is-on' : ''}" type="button" aria-pressed="${on.has(String(v))}" data-toggle="${path}" data-toggle-type="${type}" data-value="${esc(v)}"${rerender ? ' data-rerender' : ''}>${esc(text)}</button>`).join('')}</div>`;
+  }
+
+  /** An AI task's fields to return, one row each: name, type, what it should contain and, for a choice, its options. */
+  function aiOutputsHtml(prop, value, path, label) {
+    const rows = Array.isArray(value) ? value : (prop.default || []);
+    const types = prop.items?.properties?.type?.enum || ['text'];
+    const items = rows.map((o, i) => {
+      const at = `${path}.${i}`;
+      const type = o?.type || 'text';
+      const options = type === 'choice'
+        ? `<input class="inp ai-output__options" data-bind="${at}.options" data-type="tags" maxlength="800" value="${esc((o?.options || []).join(', '))}" aria-label="${esc(tr('builder.outputOptions'))}" placeholder="${esc(tr('builder.outputOptions'))}" />`
+        : '';
+      return `<div class="ai-output">
+        <input class="inp inp--mono" data-bind="${at}.name" data-type="str" data-output-name maxlength="40" value="${esc(o?.name || '')}" aria-label="${esc(tr('builder.outputName'))}" placeholder="${esc(tr('builder.outputName'))}" />
+        <select class="sel" data-bind="${at}.type" data-type="str" data-rerender aria-label="${esc(tr('builder.outputType'))}">${types.map(t => `<option value="${esc(t)}" ${t === type ? 'selected' : ''}>${esc(enumLabel('outputType', t))}</option>`).join('')}</select>
+        <input class="inp ai-output__desc" data-bind="${at}.description" data-type="raw" maxlength="200" value="${esc(o?.description || '')}" aria-label="${esc(tr('builder.outputDescription'))}" placeholder="${esc(tr('builder.outputDescription'))}" />
+        ${rows.length > 1 ? `<button class="iconbtn" type="button" data-act="list-remove" data-path="${at}" aria-label="${esc(A.remove)}">×</button>` : '<span></span>'}
+        ${options}
+      </div>`;
+    }).join('');
+    const add = rows.length < (prop.maxItems || 10)
+      ? `<button class="btn btn--sm btn--ghost" type="button" data-act="list-add" data-path="${path}" data-item="${esc(JSON.stringify({ type: 'text' }))}"><span class="btn__plus">+</span> ${esc(tr('builder.addOutput'))}</button>`
+      : '';
+    return `<div class="form__row form__row--full"><span class="lbl">${esc(label)}</span><div class="ai-outputs">${items}${add}</div><p class="hint">${esc(tr('builder.outputsHint'))}</p></div>`;
+  }
+  /** What an AI task may do besides reading: none by default. Offered when available and fitting the record. */
+  function aiActionsHtml(value, path, label, ctx) {
+    const selected = (value || []).map(String);
+    const fits = a => a.available && (!(a.subjectTypes || []).length || a.subjectTypes.includes(ctx.subjectType));
+    const options = catalog().actions.filter(a => aiWritable(a) && (fits(a) || selected.includes(a.key))).map(a => [a.key, actionLabel(a.key)]);
+    const control = options.length ? chipsHtml(path, options, selected, 'str', true) : `<p class="hint">${esc(tr('builder.noAiActions'))}</p>`;
+    return `<div class="form__row form__row--full"><span class="lbl">${esc(label)} <span class="opt">${esc(A.optional)}</span></span>${control}<p class="hint">${esc(tr('builder.aiActionsHint'))}</p></div>`;
   }
 
   /** Suggested variables as chips, and every variable in a select, for a template text field. */
@@ -1068,6 +1172,10 @@
     const statuses = entity ? entityStatuses(entity === 'comment' ? 'instagram_comment' : entity) : [];
     if (statuses.length && !['in', 'not_in'].includes(c.op)) {
       return `<select class="sel" data-bind="${path}.value" data-type="str" aria-label="${esc(A.value)}">${statuses.map(s => `<option value="${s}" ${s === value ? 'selected' : ''}>${esc(d.statusLabel(entity, s))}</option>`).join('')}</select>`;
+    }
+    if (field?.options?.length && !['in', 'not_in'].includes(c.op)) {
+      const choices = field.options.includes(value) || value === '' ? field.options : [value, ...field.options];
+      return `<select class="sel" data-bind="${path}.value" data-type="str" aria-label="${esc(A.value)}">${value === '' ? `<option value="" selected>${esc(A.value)}</option>` : ''}${choices.map(o => `<option value="${esc(o)}" ${o === value ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select>`;
     }
     if (field?.type === 'BOOLEAN') {
       return `<select class="sel" data-bind="${path}.value" data-type="bool-select" aria-label="${esc(A.value)}"><option value="true" ${c.value === true || c.value === 'true' ? 'selected' : ''}>${esc(A.yes)}</option><option value="false" ${c.value === false || c.value === 'false' ? 'selected' : ''}>${esc(A.no)}</option></select>`;
@@ -1151,6 +1259,7 @@
         const next = list.includes(value) ? list.filter(v => v !== value) : [...list, value];
         const typed = toggle.dataset.toggleType === 'int' ? next.map(Number).sort((a, b) => a - b) : next;
         setAt(target, toggle.dataset.toggle, typed.length ? typed : undefined);
+        if (toggle.hasAttribute('data-rerender')) return rerender();
         toggle.classList.toggle('is-on', next.includes(value));
         toggle.setAttribute('aria-pressed', String(next.includes(value)));
         return;
@@ -1169,6 +1278,14 @@
         const group = getAt(target, groupPath);
         group.conditions.splice(index, 1);
         if (!group.conditions.length && !/\.input\./.test(groupPath) && !/config\.where$/.test(groupPath)) setAt(target, groupPath, undefined);
+        rerender();
+      } else if (act.dataset.act === 'list-add') {
+        const list = getAt(target, path);
+        setAt(target, path, [...(Array.isArray(list) ? list : []), act.dataset.item ? JSON.parse(act.dataset.item) : '']);
+        rerender();
+      } else if (act.dataset.act === 'list-remove') {
+        const list = getAt(target, path.replace(/\.\d+$/, ''));
+        if (Array.isArray(list)) list.splice(Number(path.split('.').pop()), 1);
         rerender();
       }
     });
@@ -1194,7 +1311,7 @@
 
   // ── builder ───────────────────────────────────────────────────────
   async function openBuilder(agent, kept = null) {
-    await Promise.all([ensureCatalog(), ensurePeople(), ensureWaTemplates(), ensureBookable()]);
+    await Promise.all([ensureCatalog(), ensurePeople(), ensureWaTemplates(), ensureBookable(), loadPersona()]);
     const draft = kept?.draft || {
       name: agent.name,
       description: agent.description || '',
@@ -1271,8 +1388,15 @@
       else delete rule.conditions;
       return;
     }
+    if (el.matches('[data-output-name]')) {
+      const name = outputName(el.value);
+      if (name !== el.value) el.value = name;
+      return;
+    }
     const bind = el.dataset?.bind || '';
-    let m = bind.match(/^definition\.exitRules\.(\d+)\.event$/);
+    let m = bind.match(/^definition\.steps\.(\d+)\.input\.outputs\.(\d+)\.type$/);
+    if (m && el.value !== 'choice') delete def.steps[Number(m[1])].input.outputs[Number(m[2])].options;
+    m = bind.match(/^definition\.exitRules\.(\d+)\.event$/);
     if (m) delete def.exitRules[Number(m[1])].conditions;
     m = bind.match(/^definition\.triggers\.(\d+)\.config\.(event|entity|forEach)$/);
     if (m) {
@@ -1284,11 +1408,20 @@
 
   function normalizeDefinition(def) {
     def.triggers = def.triggers || [];
-    def.steps = def.steps || [];
+    def.steps = (def.steps || []).map(withListDefaults);
     def.exitRules = def.exitRules || [];
     def.policy = def.policy || {};
     def.voice = def.voice || {};
     return def;
+  }
+  /** Lists edited row by row start from the schema's default, so the first edit keeps the rows shown. */
+  function withListDefaults(step) {
+    const props = actionSpec(step.action)?.inputSchema?.properties || {};
+    step.input = step.input || {};
+    Object.entries(props).forEach(([name, prop]) => {
+      if (prop['x-widget'] === 'ai-outputs' && !Array.isArray(step.input[name])) step.input[name] = clone(prop.default || []);
+    });
+    return step;
   }
   /** Drops what the builder leaves behind: empty strings, empty lists, groups without conditions. */
   function cleanDefinition(def) {
@@ -1328,8 +1461,8 @@
     const def = draft.definition;
     if (kind === 'trigger-add' && def.triggers.length < MAX_TRIGGERS) def.triggers.push({ id: nextId(def.triggers, 't'), type: value, config: {} });
     if (kind === 'trigger-type') def.triggers[Number(index)] = { ...def.triggers[Number(index)], type: value, config: {} };
-    if (kind === 'step-add' && def.steps.length < MAX_STEPS) def.steps.push({ id: nextId(def.steps, 's'), action: value, input: value === 'flow.wait' ? { days: 1, hours: 0, minutes: 0 } : {} });
-    if (kind === 'step-action') def.steps[Number(index)] = { ...def.steps[Number(index)], action: value, input: {} };
+    if (kind === 'step-add' && def.steps.length < MAX_STEPS) def.steps.push(withListDefaults({ id: nextId(def.steps, 's'), action: value, input: value === 'flow.wait' ? { days: 1, hours: 0, minutes: 0 } : {} }));
+    if (kind === 'step-action') def.steps[Number(index)] = withListDefaults({ ...def.steps[Number(index)], action: value, input: {} });
     if (kind === 'exit-add') def.exitRules.push({ event: value });
   }
 
@@ -1393,13 +1526,12 @@
     const cards = def.steps.map((s, i) => {
       const spec = actionSpec(s.action);
       const earlier = def.steps.slice(0, i);
-      const stepOutputs = earlier.flatMap(e => Object.keys(actionSpec(e.action)?.outputSchema?.properties || {}).map(key => ({ path: `steps.${e.id}.output.${key}`, type: 'TEXT' })));
+      const stepOutputs = earlier.flatMap(e => stepOutputFields(e).map(f => ({ path: `steps.${e.id}.output.${f.name}`, type: f.type, options: f.options })));
       const ctx = {
         kind: 'step', key: s.action, subjectType, stepOutputs, draft: { definition: def },
         laterSteps: def.steps.slice(i + 1).map((l, j) => ({ ...l, n: i + j + 2 })),
       };
-      const effect = spec?.sideEffect || 'NONE';
-      const autonomy = effect === 'NONE' ? '' : `<div class="form__row"><label class="lbl" for="ag-auto-${i}">${esc(A.autonomyLabel)}</label>
+      const autonomy = !actsOnItsOwn(s) ? '' : `<div class="form__row"><label class="lbl" for="ag-auto-${i}">${esc(A.autonomyLabel)}</label>
         <select class="sel" id="ag-auto-${i}" data-bind="definition.steps.${i}.autonomy" data-type="str"><option value="">${esc(tr('builder.autonomyInherit', { value: tr(`autonomy.${def.policy.autonomy || 'APPROVE'}`) }))}</option>${['APPROVE', 'AUTO', 'DRAFT'].map(v => `<option value="${v}" ${s.autonomy === v ? 'selected' : ''}>${esc(tr(`autonomy.${v}`))}</option>`).join('')}</select></div>`;
       const onError = `<div class="form__row"><label class="lbl" for="ag-err-${i}">${esc(A.onErrorLabel)}</label>
         <select class="sel" id="ag-err-${i}" data-bind="definition.steps.${i}.onError" data-type="str">${['RETRY_THEN_FAIL', 'CONTINUE', 'STOP'].map(v => `<option value="${v}" ${(s.onError || 'RETRY_THEN_FAIL') === v ? 'selected' : ''}>${esc(tr(`enum.onError.${v}`))}</option>`).join('')}</select></div>`;
@@ -1467,8 +1599,13 @@
       <div class="form__row"><label class="lbl" for="ag-v-tone">${esc(A.toneLabel)}</label><select class="sel" id="ag-v-tone" data-bind="definition.voice.tone" data-type="str">${['friendly', 'formal', 'brief'].map(t => `<option value="${t}" ${(v.tone || 'friendly') === t ? 'selected' : ''}>${esc(tr(`enum.tone.${t}`))}</option>`).join('')}</select></div>
       <div class="form__row form__row--full"><label class="lbl" for="ag-v-sig">${esc(A.signatureLabel)} <span class="opt">${esc(A.optional)}</span></label><input class="inp" id="ag-v-sig" maxlength="200" data-bind="definition.voice.signature" data-type="raw" value="${esc(v.signature || '')}" /></div>
       <div class="form__row form__row--full"><label class="lbl" for="ag-v-ins">${esc(A.instructionsLabel)} <span class="opt">${esc(A.optional)}</span></label><textarea class="txt" id="ag-v-ins" rows="3" maxlength="2000" data-bind="definition.voice.instructions" data-type="raw">${esc(v.instructions || '')}</textarea></div>
-      <div class="form__row form__row--full"><label class="form__check"><input type="checkbox" data-bind="definition.voice.usePersona" data-type="bool" ${v.usePersona ? 'checked' : ''} /> ${esc(A.usePersona)}</label></div>
+      <div class="form__row form__row--full"><label class="form__check"><input type="checkbox" data-bind="definition.voice.usePersona" data-type="bool" data-rerender ${v.usePersona ? 'checked' : ''} /> ${esc(A.usePersona)}</label>${v.usePersona && personaEmpty() ? `<p class="hint hint--warn">${esc(tr('persona.emptyHint'))}</p>` : ''}</div>
     </div>`;
+  }
+  /** The company hasn't taught its Persona anything yet (unknown counts as taught). */
+  const personaEmpty = () => !!data.persona && !String(data.persona.compiledInstructions || '').trim();
+  async function loadPersona() {
+    data.persona = d.state.persona || await d.api('/app/api/persona').catch(() => null);
   }
 
   // ── inbox: approvals and tasks ────────────────────────────────────
@@ -1800,6 +1937,58 @@
     if (el.isConnected) renderAutomations(el, subject, view, opts);
   }
 
+  // ── Persona page: agents that write with AI ───────────────────────
+  /** On the Persona page, the agents whose AI-written texts may follow it; draws nothing when there are none. */
+  async function mountPersonaAgents(el, persona) {
+    const [list, overview] = await Promise.all([
+      d.api('/app/api/agents').catch(() => null),
+      d.api('/app/api/agents/overview').catch(() => null),
+      ensureCatalog().catch(() => null),
+    ]);
+    if (!el.isConnected || !list) return;
+    if (overview) data.overview = overview;
+    data.persona = persona || null;
+    renderPersonaAgents(el, list.filter(a => (a.definition?.steps || []).some(s => s.action === 'ai.compose')));
+  }
+  function renderPersonaAgents(el, agents) {
+    if (!agents.length) { el.innerHTML = ''; return; }
+    const manage = canManage();
+    const rows = agents.map(a => `<tr class="conversation-row" data-persona-agent="${esc(a.id)}">
+        <td class="check"><input type="checkbox" data-persona-follow="${esc(a.id)}" ${a.definition?.voice?.usePersona ? 'checked' : ''} ${manage ? '' : 'disabled'} aria-label="${esc(tr('persona.followAgent', { name: a.name }))}" /></td>
+        <td class="name"><span class="agent-cell">${agentIcon(a.icon)}<span class="agent-cell__text"><span class="agent-cell__name">${esc(a.name)}</span><span class="agent-cell__sub">${recipeHtml(a.definition, 3)}</span></span></span></td>
+        <td>${agentPill(a.status)}</td>
+      </tr>`).join('');
+    const notes = [
+      personaEmpty() ? `<p class="hint hint--warn">${esc(tr('persona.empty'))}</p>` : '',
+      manage ? '' : `<p class="hint">${esc(tr('persona.readOnly'))}</p>`,
+    ].join('');
+    el.innerHTML = `<section class="panel">
+      <header class="panel__head"><div><h2 class="panel__title">${esc(tr('persona.title'))} <span class="tag">${agents.length}</span></h2><p class="panel__meta">${esc(tr('persona.desc'))}</p></div></header>
+      ${notes ? `<div class="panel__body">${notes}</div>` : ''}
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${esc(tr('persona.thFollows'))}</th><th>${esc(A.thAgent)}</th><th>${esc(A.thStatus)}</th></tr></thead><tbody>${rows}</tbody></table></div>
+    </section>`;
+    $$('[data-persona-agent]', el).forEach(r => r.addEventListener('click', e => {
+      if (e.target.closest('input')) return;
+      openAgent(r.dataset.personaAgent);
+    }));
+    $$('[data-persona-follow]', el).forEach(box => box.addEventListener('change', async () => {
+      const agent = agents.find(a => a.id === box.dataset.personaFollow);
+      const follow = box.checked;
+      box.disabled = true;
+      try {
+        const definition = { ...agent.definition, voice: { ...(agent.definition.voice || {}), usePersona: follow } };
+        const saved = await d.api(`/app/api/agents/${encodeURIComponent(agent.id)}`, { method: 'PUT', body: JSON.stringify({ definition }) });
+        agent.definition = saved.definition || definition;
+        d.toast(tr(follow ? 'persona.followed' : 'persona.unfollowed', { name: agent.name }));
+      } catch (err) {
+        box.checked = !follow;
+        d.toast(err?.status === 422 ? A.activeInvalid : A.saveFailed);
+      } finally {
+        box.disabled = false;
+      }
+    }));
+  }
+
   // ── activity ──────────────────────────────────────────────────────
   function renderActivity(pane) {
     const chips = ['', 'open', 'attention', 'done'].map(f => `<button class="chip ${ui.activity === f ? 'is-on' : ''}" type="button" data-activity="${f}">${esc(tr(`activity.${f || 'all'}`))}</button>`).join('');
@@ -1895,6 +2084,6 @@
 
   window.AgentsUI = {
     init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon,
-    focusRef, openRef, renderAutomations, mountAutomations, reasonText,
+    focusRef, openRef, renderAutomations, mountAutomations, mountPersonaAgents, reasonText,
   };
 })();

@@ -5896,6 +5896,8 @@ function renderPersona(root) {
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${STR.thSource}</th><th>${STR.thState}</th><th>${STR.thCreated}</th><th class="right">${STR.thActions}</th></tr></thead><tbody>${sourceRows || `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(STR.noSourcesTitle)}</p><p class="empty__desc">${escapeHTML(STR.noSourcesDesc)}</p></div></td></tr>`}</tbody></table></div>
     </div>
 
+    <div class="persona-agents" id="persona-agents" hidden></div>
+
     <div class="panel" style="padding:18px">
       <div class="settings-tabs">
         <button type="button" class="chip ${state.personaAdvanced ? 'is-on' : ''}" id="persona-advanced-toggle">${escapeHTML(STR.personaAdvanced)}</button>
@@ -5912,6 +5914,10 @@ function renderPersona(root) {
       </form>` : ''}
     </div>`;
 
+  const personaAgents = $('#persona-agents');
+  if (personaAgents && hasModule('agents') && window.AgentsUI) {
+    window.AgentsUI.mountPersonaAgents(personaAgents, p).then(() => { personaAgents.hidden = !personaAgents.childElementCount; });
+  }
   $('#persona-advanced-toggle')?.addEventListener('click', () => {
     state.personaAdvanced = !state.personaAdvanced;
     render();

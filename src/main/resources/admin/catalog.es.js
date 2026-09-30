@@ -679,6 +679,7 @@ window.__I18N_CATALOGS['es'] = {
         waitAt: 'retoma a las {time}', waitBusinessDay: 'en un día laborable',
         quiet: 'Silencio {start}–{end}', noQuiet: 'A cualquier hora del día', quietCompany: 'Horas de silencio de la empresa', businessDays: 'Solo días laborables',
         maxRuns: 'Hasta {n} ejecuciones al día', cooldown: 'Una vez cada {hours} h por registro', adminsApprove: 'Aprueban los administradores',
+        returns: 'Devuelve {fields}', mayDo: 'Puede {actions}',
       },
       autonomy: { AUTO: 'Actúa solo', APPROVE: 'Pregunta primero', DRAFT: 'Solo borrador' },
       record: {
@@ -693,9 +694,14 @@ window.__I18N_CATALOGS['es'] = {
         policy: 'Reglas', voice: 'Voz', autonomyInherit: 'Por defecto del agente ({value})', stepOutput: '{step} · {field}', templateParam: 'Variable de plantilla {name}',
         quiet_company: 'Por defecto de la empresa', quiet_custom: 'Horas personalizadas', quiet_off: 'Sin horas de silencio',
         business_default: 'Por defecto de la empresa', business_true: 'Solo días laborables', business_false: 'Cualquier día',
+        outputName: 'Nombre del campo', outputType: 'Tipo', outputDescription: 'Qué debe contener (opcional)', outputOptions: 'Opciones, separadas por comas', addOutput: 'Añadir campo',
+        outputsHint: 'Los pasos siguientes pueden usar estos campos en su texto y sus condiciones.',
+        aiActionsHint: 'Si lo dejas vacío, solo consulta datos. Lo que elijas sigue «Antes de actuar», y un mensaje a alguien que no está registrado siempre espera tu aprobación.',
+        noAiActions: 'No hay acciones que pueda hacer en este tipo de registro.',
       },
       run: {
         title: 'Ejecución', record: 'Registro', noRecord: 'Sin registro', trigger: 'Activado por', finished: 'Terminó', finishedWhen: 'Terminó {when}', continues: 'Continúa', ai: 'IA', tokens: '{n} tokens',
+        aiDrafted: 'Borrador · {action}', ai_skipped: 'Omitido · {action}', ai_failed: 'Falló · {action}', ai_deferred: 'Aplazado · {action}',
         resumes: 'Continúa {when}', stepOf: 'Paso {n} de {total} · {action}', openRecord: 'Abrir registro',
         cancel: 'Cancelar ejecución', cancelTitle: '¿Cancelar esta ejecución?', cancelBody: 'Los pasos que faltan no se harán. Lo que ya ocurrió se mantiene.', cancelled: 'Ejecución cancelada',
         retry: 'Reintentar', retried: 'Reintentando la ejecución',
@@ -767,6 +773,12 @@ window.__I18N_CATALOGS['es'] = {
         pausedTitle: 'Las automatizaciones están en pausa para este cliente', pausedDesc: 'Los agentes no inician ni continúan nada para este cliente ni sus documentos hasta que las reanudes.',
         pausedToast: 'Automatizaciones en pausa para este cliente', resumedToast: 'Automatizaciones reanudadas para este cliente',
       },
+      persona: {
+        title: 'Agentes que escriben con IA', desc: 'Sus pasos «Escribir con IA» pueden seguir el tono y las reglas de esta Persona.', thFollows: 'La sigue',
+        followAgent: 'Seguir la Persona: {name}', followed: '{name} ahora sigue la Persona', unfollowed: '{name} ya no sigue la Persona',
+        empty: 'Tu Persona aún está vacía: hasta que la enseñes, estos agentes solo usan sus propios ajustes de Voz.', emptyHint: 'Tu Persona aún está vacía, así que solo se aplican los ajustes de arriba.',
+        readOnly: 'Solo los administradores pueden cambiar qué agentes la siguen.',
+      },
       entities: { client: 'Cliente', quote: 'Presupuesto', invoice: 'Factura', payment: 'Pago pendiente', booking: 'Reserva', service: 'Servicio', conversation: 'Conversación', contact: 'Contacto', instagram_comment: 'Comentario de Instagram', email: 'Email', none: 'Sin registro', company: 'Empresa', event: 'Evento', now: 'Ahora', today: 'Hoy' },
       fields: {
         event: 'Evento', toStatus: 'Al estado', channel: 'Canal', keywords: 'Palabras en el mensaje', frequency: 'Frecuencia', time: 'Hora', weekdays: 'Días', dayOfMonth: 'Día del mes', everyHours: 'Cada (horas)', forEach: 'Para cada', where: 'Solo registros donde',
@@ -779,9 +791,12 @@ window.__I18N_CATALOGS['es'] = {
         payeeType: 'Pagar a', payeeId: 'Proveedor o colaborador', description: 'Descripción', amountEur: 'Importe (€)', quantity: 'Cantidad', unit: 'Unidad',
         serviceId: 'Servicio', startAt: 'Fecha y hora', contactName: 'Nombre del contacto', contactPhone: 'Teléfono del contacto', document: 'Documento', kind: 'Resumen', limit: 'Hasta (líneas)',
         conditions: 'Condiciones', thenGoTo: 'Si se cumplen, ir a', elseGoTo: 'Si no, ir a', outcome: 'Resultado', businessDay: 'Retomar en un día laborable', subject: 'Asunto', body: 'Mensaje',
+        instructions: 'Qué debe hacer', outputs: 'Campos que devuelve', readData: 'Dejar que consulte clientes, presupuestos, facturas y reservas', actions: 'Acciones que puede hacer', brief: 'Qué debe decir el mensaje', length: 'Longitud', type: 'Tipo', options: 'Opciones',
       },
       enum: {
-        channel: { WHATSAPP: 'WhatsApp', INSTAGRAM: 'Instagram', WEB: 'Chat web' },
+        channel: { WHATSAPP: 'WhatsApp', INSTAGRAM: 'Instagram', WEB: 'Chat web', whatsapp: 'WhatsApp', email: 'Email', instagram: 'Instagram', internal: 'Para el equipo' },
+        length: { short: 'Corto', medium: 'Medio', long: 'Largo' },
+        outputType: { text: 'Texto', number: 'Número', boolean: 'Sí o no', date: 'Fecha', choice: 'Una opción de una lista' },
         frequency: { hourly: 'Cada pocas horas', daily: 'A diario', weekly: 'Cada semana', monthly: 'Cada mes' },
         sender: { any: 'Cualquiera', known: 'Un cliente', unknown: 'Alguien nuevo' },
         to: { client: 'El cliente', contact: 'El contacto de la conversación', phone: 'Un número de teléfono', user: 'Alguien del equipo', email: 'Una dirección de email' },
@@ -814,6 +829,7 @@ window.__I18N_CATALOGS['es'] = {
       outputs: {
         clientId: 'Cliente', number: 'Número', existing: 'Ya existía', invoiceId: 'Factura', totalCents: 'Total (céntimos)', rows: 'Servicios facturados',
         paymentId: 'Pago', serviceId: 'Servicio', bookingId: 'Reserva', status: 'Estado', filename: 'Nombre del archivo', text: 'Texto', count: 'Elementos', lines: 'Líneas',
+        summary: 'Resumen', intent: 'Intención', subject: 'Asunto',
       },
       problems: {
         no_trigger: 'Elige cuándo se ejecuta el agente.', too_many_triggers: 'Usa como máximo 5 disparadores.', no_steps: 'Añade al menos un paso.', too_many_steps: 'Usa como máximo 25 pasos.',
@@ -825,6 +841,7 @@ window.__I18N_CATALOGS['es'] = {
         out_of_range: 'Fuera de rango.', unknown_operator: 'Condición desconocida.', required: 'Obligatorio.', not_allowed: 'Valor no permitido.', too_long: 'Demasiado largo.',
         too_small: 'Demasiado pequeño.', too_large: 'Demasiado grande.', not_number: 'Debe ser un número.', not_integer: 'Debe ser un número entero.', not_string: 'Debe ser texto.', not_boolean: 'Debe ser sí o no.',
         not_array: 'Debe ser una lista.', not_object: 'Valor no válido.', too_many: 'Demasiados elementos.', invalid_time: 'Usa una hora como 09:00.', invalid_conditions: 'Condiciones no válidas.', invalid_url: 'Usa un enlace completo que empiece por https://.',
+        invalid_name: '«{detail}» no puede ser el nombre de un campo. Usa letras, números y _.', duplicate_name: 'Hay dos campos llamados «{detail}».', no_options: 'Indica las opciones para elegir.', not_ai_callable: '«{detail}» no lo puede hacer un paso de IA.',
       },
       reasons: {
         completed: 'Terminó', branch_end: 'Terminó en una elección', stopped: 'Se detuvo', exit: 'Terminó: {event}', rejected: 'Acción rechazada', approval_expired: 'La aprobación caducó',
@@ -850,6 +867,7 @@ window.__I18N_CATALOGS['es'] = {
         no_email: 'sin dirección de email', empty_subject: 'El email no tenía asunto', no_email_account: 'No hay ninguna cuenta de Gmail conectada', needs_reconnect: 'Hay que volver a conectar la cuenta de Gmail',
         invalid_recipient: 'Una dirección de email no es válida', too_many_recipients: 'Demasiados destinatarios', invalid_message: 'No se pudo preparar el email', message_too_large: 'El email es demasiado grande para enviarlo',
         daily_send_limit: 'La cuenta llegó a su límite diario de emails', already_emailed: 'Ya le enviaste este documento por email hoy',
+        token_budget: 'La empresa llegó a su límite mensual de IA', run_token_limit: 'Esta ejecución llegó a su límite de IA', ai_unavailable: 'La IA no está disponible ahora mismo', no_result: 'La IA no devolvió un resultado', empty_brief: 'No había nada sobre lo que escribir',
       },
       previewKinds: { message: 'Mensaje', email: 'Email', crm: 'Cambio en un registro', task: 'Tarea', notify: 'Aviso al equipo', document: 'Documento', generic: 'Acción' },
       emptyOptions: { toStatus: 'Cualquier estado', channel: 'Cualquier canal', forEach: 'Ningún registro (una sola ejecución)', assigneeUserId: 'Sin asignar' },

@@ -680,6 +680,7 @@ window.__I18N_CATALOGS['en'] = {
         waitAt: 'lands at {time}', waitBusinessDay: 'on a business day',
         quiet: 'Quiet {start}–{end}', noQuiet: 'Any time of day', quietCompany: 'Company quiet hours', businessDays: 'Business days only',
         maxRuns: 'Up to {n} runs a day', cooldown: 'Once every {hours} h per record', adminsApprove: 'Admins approve',
+        returns: 'Returns {fields}', mayDo: 'It may {actions}',
       },
       autonomy: { AUTO: 'Acts on its own', APPROVE: 'Asks first', DRAFT: 'Draft only' },
       record: {
@@ -694,9 +695,14 @@ window.__I18N_CATALOGS['en'] = {
         policy: 'Rules', voice: 'Voice', autonomyInherit: 'Agent default ({value})', stepOutput: '{step} · {field}', templateParam: 'Template variable {name}',
         quiet_company: 'Company default', quiet_custom: 'Custom hours', quiet_off: 'No quiet hours',
         business_default: 'Company default', business_true: 'Business days only', business_false: 'Any day',
+        outputName: 'Field name', outputType: 'Type', outputDescription: 'What it should contain (optional)', outputOptions: 'Options, separated by commas', addOutput: 'Add a field',
+        outputsHint: 'Later steps can use these fields in their text and conditions.',
+        aiActionsHint: 'Leave empty and it only looks things up. What you pick follows “Before acting”, and a message to someone who isn’t on file always waits for approval.',
+        noAiActions: 'No actions it can take for this kind of record.',
       },
       run: {
         title: 'Run', record: 'Record', noRecord: 'No record', trigger: 'Woken up by', finished: 'Finished', finishedWhen: 'Finished {when}', continues: 'Continues', ai: 'AI', tokens: '{n} tokens',
+        aiDrafted: 'Drafted · {action}', ai_skipped: 'Skipped · {action}', ai_failed: 'Failed · {action}', ai_deferred: 'Held for later · {action}',
         resumes: 'Continues {when}', stepOf: 'Step {n} of {total} · {action}', openRecord: 'Open record',
         cancel: 'Cancel run', cancelTitle: 'Cancel this run?', cancelBody: 'Its remaining steps won’t happen. What already happened stays.', cancelled: 'Run cancelled',
         retry: 'Retry', retried: 'Retrying the run',
@@ -768,6 +774,12 @@ window.__I18N_CATALOGS['en'] = {
         pausedTitle: 'Automations are paused for this client', pausedDesc: 'Agents won’t start or carry on anything for this client or their documents until you resume.',
         pausedToast: 'Automations paused for this client', resumedToast: 'Automations resumed for this client',
       },
+      persona: {
+        title: 'Agents that write with AI', desc: 'Their “Write with AI” steps can follow this Persona’s tone and rules.', thFollows: 'Follows it',
+        followAgent: 'Follow the Persona: {name}', followed: '{name} now follows the Persona', unfollowed: '{name} no longer follows the Persona',
+        empty: 'Your Persona is still empty: until you teach it, these agents only use their own Voice settings.', emptyHint: 'Your Persona is still empty, so only the settings above apply.',
+        readOnly: 'Only admins can change which agents follow it.',
+      },
       entities: { client: 'Client', quote: 'Quote', invoice: 'Invoice', payment: 'Payment to make', booking: 'Booking', service: 'Service', conversation: 'Chat', contact: 'Contact', instagram_comment: 'Instagram comment', email: 'Email', none: 'No record', company: 'Company', event: 'Event', now: 'Now', today: 'Today' },
       fields: {
         event: 'Event', toStatus: 'To status', channel: 'Channel', keywords: 'Words in the message', frequency: 'How often', time: 'Time', weekdays: 'Days', dayOfMonth: 'Day of the month', everyHours: 'Every (hours)', forEach: 'For each', where: 'Only records where',
@@ -780,9 +792,12 @@ window.__I18N_CATALOGS['en'] = {
         payeeType: 'Pay to', payeeId: 'Supplier or employee', description: 'Description', amountEur: 'Amount (€)', quantity: 'Quantity', unit: 'Unit',
         serviceId: 'Service', startAt: 'Date and time', contactName: 'Contact name', contactPhone: 'Contact phone', document: 'Document', kind: 'Summary', limit: 'Up to (lines)',
         conditions: 'Conditions', thenGoTo: 'If they match, go to', elseGoTo: 'Otherwise, go to', outcome: 'Outcome', businessDay: 'Land on a business day', subject: 'Subject', body: 'Message',
+        instructions: 'What it should do', outputs: 'Fields to return', readData: 'Let it look up clients, quotes, invoices and bookings', actions: 'Actions it may take', brief: 'What the message should say', length: 'Length', type: 'Type', options: 'Options',
       },
       enum: {
-        channel: { WHATSAPP: 'WhatsApp', INSTAGRAM: 'Instagram', WEB: 'Website chat' },
+        channel: { WHATSAPP: 'WhatsApp', INSTAGRAM: 'Instagram', WEB: 'Website chat', whatsapp: 'WhatsApp', email: 'Email', instagram: 'Instagram', internal: 'For the team' },
+        length: { short: 'Short', medium: 'Medium', long: 'Long' },
+        outputType: { text: 'Text', number: 'Number', boolean: 'Yes or no', date: 'Date', choice: 'One of a list' },
         frequency: { hourly: 'Every few hours', daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly' },
         sender: { any: 'Anyone', known: 'A client', unknown: 'Someone new' },
         to: { client: 'The client', contact: 'The chat contact', phone: 'A phone number', user: 'A team member', email: 'An email address' },
@@ -815,6 +830,7 @@ window.__I18N_CATALOGS['en'] = {
       outputs: {
         clientId: 'Client', number: 'Number', existing: 'Already existed', invoiceId: 'Invoice', totalCents: 'Total (cents)', rows: 'Services invoiced',
         paymentId: 'Payment', serviceId: 'Service', bookingId: 'Booking', status: 'Status', filename: 'File name', text: 'Text', count: 'Items', lines: 'Lines',
+        summary: 'Summary', intent: 'Intent', subject: 'Subject',
       },
       problems: {
         no_trigger: 'Choose when the agent runs.', too_many_triggers: 'Use at most 5 triggers.', no_steps: 'Add at least one step.', too_many_steps: 'Use at most 25 steps.',
@@ -826,6 +842,7 @@ window.__I18N_CATALOGS['en'] = {
         out_of_range: 'Out of range.', unknown_operator: 'Unknown condition.', required: 'Required.', not_allowed: 'Not an allowed value.', too_long: 'Too long.',
         too_small: 'Too small.', too_large: 'Too large.', not_number: 'Must be a number.', not_integer: 'Must be a whole number.', not_string: 'Must be text.', not_boolean: 'Must be yes or no.',
         not_array: 'Must be a list.', not_object: 'Invalid value.', too_many: 'Too many items.', invalid_time: 'Use a time like 09:00.', invalid_conditions: 'Invalid conditions.', invalid_url: 'Use a full link starting with https://.',
+        invalid_name: '“{detail}” can’t be a field name. Use letters, numbers and _.', duplicate_name: 'Two fields are called “{detail}”.', no_options: 'List the options to choose from.', not_ai_callable: '“{detail}” can’t be done by an AI step.',
       },
       reasons: {
         completed: 'Completed', branch_end: 'Ended by a choice', stopped: 'Stopped', exit: 'Ended: {event}', rejected: 'Rejected', approval_expired: 'The approval expired',
@@ -851,6 +868,7 @@ window.__I18N_CATALOGS['en'] = {
         no_email: 'no email address', empty_subject: 'The email had no subject', no_email_account: 'No Gmail account is connected', needs_reconnect: 'The Gmail account needs to be reconnected',
         invalid_recipient: 'An email address isn’t valid', too_many_recipients: 'Too many recipients', invalid_message: 'The email couldn’t be put together', message_too_large: 'The email is too large to send',
         daily_send_limit: 'The account reached its daily email limit', already_emailed: 'This document was already emailed to them today',
+        token_budget: 'The company reached its monthly AI limit', run_token_limit: 'This run reached its AI limit', ai_unavailable: 'AI isn’t available right now', no_result: 'The AI didn’t return a result', empty_brief: 'There was nothing to write about',
       },
       previewKinds: { message: 'Message', email: 'Email', crm: 'Record change', task: 'Task', notify: 'Team notification', document: 'Document', generic: 'Action' },
       emptyOptions: { toStatus: 'Any status', channel: 'Any channel', forEach: 'No record (a single run)', assigneeUserId: 'Unassigned' },
