@@ -9,9 +9,17 @@ enum class UserRole {
     USER, ASSISTANT, SYSTEM
 }
 
+/**
+ * Inbound messages stay RECEIVED. Outbound messages whose WhatsApp id we keep move
+ * SENT → DELIVERED → READ, or to FAILED, as Meta's status webhooks arrive. Outbound rows without
+ * a WhatsApp id (AI replies, Instagram) are stored as DELIVERED once the send call succeeds.
+ */
 enum class MessageStatus {
-    RECEIVED, PROCESSING, DELIVERED, FAILED
+    RECEIVED, PROCESSING, SENT, DELIVERED, READ, FAILED
 }
+
+/** Who wrote an outbound message. Null on customer messages and on rows stored before it existed. */
+enum class MessageAuthor { AI, AGENT }
 
 enum class UserStatus {
     ACTIVE, BLOCKED, RATE_LIMITED
@@ -48,6 +56,12 @@ data class Conversation(
     val systemPromptVersion: String = "v1",
     val autoReplyEnabled: Boolean = true,
     val createdAt: Instant,
+    /** Last customer message; WhatsApp only allows free-form replies for 24 hours after it. */
+    val lastInboundAt: Instant? = null,
+    val unreadCount: Int = 0,
+    val autoReplyPausedAt: Instant? = null,
+    /** Dashboard user whose reply or click paused the AI. */
+    val autoReplyPausedBy: String? = null,
 )
 
 data class Message(
@@ -64,14 +78,23 @@ data class Message(
     val costUsd: Double = 0.0,
     val status: MessageStatus = MessageStatus.RECEIVED,
     val createdAt: Instant,
+    val author: MessageAuthor? = null,
+    val agentUserId: String? = null,
+    val agentName: String? = null,
+    val statusAt: Instant? = null,
+    /** Meta's error code and text when [status] is FAILED. */
+    val errorCode: Int? = null,
+    val errorText: String? = null,
 )
 
 sealed class MessageContent {
     data class Text(val body: String) : MessageContent()
+    /** An approved WhatsApp template; [body] is the text as sent, with its variables filled in. */
+    data class Template(val name: String, val language: String, val body: String) : MessageContent()
     data class Image(val mediaId: String, val caption: String? = null) : MessageContent()
     data class Audio(val mediaId: String, val transcription: String? = null) : MessageContent()
-    data class Document(val mediaId: String) : MessageContent()
-    data class Video(val mediaId: String) : MessageContent()
+    data class Document(val mediaId: String, val fileName: String? = null, val caption: String? = null) : MessageContent()
+    data class Video(val mediaId: String, val caption: String? = null) : MessageContent()
 }
 
 data class TokenUsage(

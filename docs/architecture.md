@@ -318,13 +318,87 @@ The dashboard lists unreplied comments, recent media, and can reply via
 `instagram_business_manage_comments` in addition to basic + messages; existing bindings must
 reconnect before comments work. App Review for that permission is a separate submission from DMs.
 
+### Conversations inbox
+
+`/app` → Conversations is where a person reads and answers customers (WhatsApp, Instagram DMs;
+website chat is read-only). `InboxService` (`dashboard/`) holds the rules; the routes are thin.
+
+- **Who wrote it.** Outbound messages carry `author` (`AI` from `MessagePipeline`, `AGENT` from the
+  dashboard) plus the agent's user id and email. Rows stored before this have no author and show as AI.
+- **Human takeover.** An agent reply (text or template) sets `autoReplyEnabled = false` with
+  `autoReplyPausedBy`/`autoReplyPausedAt`, so the AI stops answering that customer until someone
+  presses Resume. Paused conversations still store inbound messages (the pipeline's paused branch).
+- **24-hour window.** WhatsApp allows free-form replies only for 24 hours after the customer's last
+  message. The pipeline records `lastInboundAt` (and increments `unreadCount`) when it stores a new
+  customer message; `InboxService` refuses free-form text after the window (`409 window_closed`, before
+  calling Meta), and the list exposes `windowExpiresAt`. Conversations stored before `lastInboundAt`
+  existed fall back to their newest customer message.
+- **Templates.** `GET /app/api/whatsapp/templates` lists the WABA's approved templates (needs the
+  binding's `wabaId` from Embedded Signup; cached 60 s). Templates whose send needs input the dashboard
+  doesn't collect (media header, dynamic button, one-time code) are listed as not sendable. Templates
+  work outside the window: `POST …/conversations/{id}/template`, and `POST /app/api/conversations/start`
+  opens a conversation with a new number. That one sends first and only then creates the contact, using
+  the WhatsApp id Meta resolved the number to (`contacts[0].wa_id`), so the customer's reply lands in
+  the same conversation.
+- **Delivery ticks.** Sends keep Meta's message id (`waMessageId`) and start as `SENT`. WhatsApp
+  status webhooks (`delivered`, `read`, `failed` + error code) update the row through
+  `DeliveryStatusRecorder`; a status only moves forward and `FAILED` sticks, because webhooks arrive late,
+  twice or out of order. Meta often accepts an out-of-window text and fails it later with `131047`, so
+  the tick, not the send call, is the truth. AI replies keep no id and show no ticks.
+- **Errors.** Meta's error codes map to dashboard keys in `WhatsAppErrors.key` (`inboxErr_<key>` in the
+  catalogs); the API answers `{ error, detail }`, where `detail` is Meta's own text for unknown codes.
+- **Template management.** Settings → WhatsApp templates lists every template with Meta's review status
+  (`GET /app/api/whatsapp/templates?all=1`; the send picker only gets approved ones), creates them
+  (`POST /app/api/whatsapp/templates`, validated by `TemplateDraft.problem()` before Meta sees it: name
+  format, positional variables in order and not at the edges, one example per variable, header/footer
+  ≤ 60 characters, ≤ 3 quick replies) and deletes one language version (`DELETE …/templates/{name}?id=`).
+  Creating or deleting clears the 60 s template cache.
+- **Customer media and replies.** `WhatsAppInbound.toInbound` turns quick-reply taps, list/button
+  replies, shared locations (name, address, map link) and contacts into text the AI reads. Photos,
+  voice notes, videos, documents and stickers carry an `InboundMedia` through the queue (and the replay
+  document) and are stored as media messages without an automatic reply, so they show as waiting; the
+  AI context marks them as "[The customer sent a photo you cannot open …]". The dashboard fetches them
+  through `GET …/conversations/{id}/media/{messageId}`, which resolves Meta's 5-minute download URL with
+  the tenant's token (20 MB cap; Meta keeps media 30 days). The page shows them from blob URLs because an
+  `<img src>` can't send the bearer token, and only JPEG/PNG/WebP/GIF, audio and video render inline.
+- **Live updates.** No socket: the open thread polls `GET …/conversations/{id}/updates?since=<cursor>`
+  every 4 s (messages created or re-statused since the cursor, plus the conversation), the list every
+  15 s; both pause while the browser tab is hidden. The cursor is server time taken before the query,
+  minus 5 s, and the client merges by id.
+
+```mermaid
+sequenceDiagram
+    participant UI as /app inbox
+    participant API as DashboardRoutes + InboxService
+    participant DB as MongoDB
+    participant WA as WhatsApp Cloud API
+    participant W as WebhookRoutes
+
+    UI->>API: POST /conversations/{id}/messages {text}
+    API->>DB: lastInboundAt within 24 h?
+    alt window closed
+        API-->>UI: 409 window_closed (composer offers a template)
+    else open
+        API->>WA: POST /{phone-number-id}/messages
+        WA-->>API: messages[0].id (wamid)
+        API->>DB: insert Message(AGENT, SENT, wamid), markRead, pause AI
+        API-->>UI: 201 message
+    end
+    WA->>W: statuses[] delivered / read / failed(code)
+    W->>DB: applyDeliveryStatus(wamid) — forward only
+    loop every 4 s while the thread is open
+        UI->>API: GET /conversations/{id}/updates?since=cursor
+        API-->>UI: new + re-statused messages, conversation
+    end
+```
+
 ## MongoDB Collections
 
 | Collection | Purpose | Key Index |
 |---|---|---|
 | `users` | User profiles, status (ACTIVE/BLOCKED) | unique on `waId` |
-| `conversations` | One conversation per user, tracks summary + token totals | unique on `userId` |
-| `messages` | Full message history (user + assistant turns) | `conversationId`, `createdAt` |
+| `conversations` | One conversation per user: summary, token totals, `autoReplyEnabled` (+ who paused it), `lastInboundAt`, `unreadCount` | unique on `userId` |
+| `messages` | Full message history (user + assistant turns, text, templates and customer media by Meta media id); outbound rows carry `author`, `waMessageId`, delivery `status`/`statusAt` and Meta's error | `conversationId`, `createdAt`; unique partial `(tenantId, waMessageId)` |
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
@@ -372,7 +446,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Channel adapters at the edges** — webhook ingress normalizes WhatsApp and Instagram payloads into `InboundMessage`; the consumer selects an `OutboundClient` from the tenant's channel binding before calling the shared `MessagePipeline`.
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
 - **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, and i18n. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
-- **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar, while the backoffice keeps the classic look. Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. The older classic Home code in `app.js` is no longer reachable. Conversations is a split inbox (`lastPreview` / `waiting` on `GET /app/api/conversations`). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
+- **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar, while the backoffice keeps the classic look. Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. The older classic Home code in `app.js` is no longer reachable. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
 - **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry optional `email`, `taxId` (NIF, printed on quotes and invoices beside the client number) and staff-only `notes`, which `CrmTools` never returns to the bot. `PATCH` keeps those three when omitted and clears them on an empty string. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.

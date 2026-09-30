@@ -97,6 +97,7 @@ private fun InboundMessage.toDocument(): Document = Document("tenantId", tenantI
     .append("timestamp", timestamp)
     .append("eventId", eventId)
     .append("registerOnly", registerOnly)
+    .append("media", media?.let { Document("kind", it.kind).append("mediaId", it.mediaId).append("mimeType", it.mimeType).append("fileName", it.fileName) })
 
 private fun Document.toInboundMessage(): InboundMessage = InboundMessage(
     tenantId = getObjectId("tenantId"),
@@ -110,4 +111,5 @@ private fun Document.toInboundMessage(): InboundMessage = InboundMessage(
     timestamp = getString("timestamp"),
     eventId = getString("eventId"),
     registerOnly = getBoolean("registerOnly", false),
+    media = get("media", Document::class.java)?.let { InboundMedia(it.getString("kind"), it.getString("mediaId"), it.getString("mimeType"), it.getString("fileName")) },
 )

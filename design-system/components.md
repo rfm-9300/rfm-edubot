@@ -268,7 +268,7 @@ Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
 In the `/app` skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
 
-Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda. Clickable rows may use `.conversation-row`.
+Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda.
 
 ## Empty
 
@@ -333,6 +333,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans.
 - Fields: `.inp` `.sel` `.txt`. Money/IDs: `.inp--mono` `.inp--right`.
 - Labels: `.lbl` uppercase. Required: `.req`. Optional: `.opt`.
+- Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
 
 ### Suggestions under a field
@@ -511,9 +512,59 @@ When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a 
 | `.assistant__thread` / `.is-active` | Thread list item |
 | `.assistant__action` | Confirm-before-execute card |
 
-User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that.
+User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that. The customer inbox has its own components (next section).
 
-Inbox list items also use `.assistant__thread`, plus `.inbox__preview` (last message) and `.inbox__meta` (channel · time). Waiting threads prefix the preview with the waiting label.
+## Conversations inbox
+
+`/app` → Conversations. A fixed-height `.inbox` grid: `.inbox__list` (filters + rows) and `.inbox__thread` (head, banners, log, composer). Both scroll inside; the page does not. Under 920px it is one column and `data-thread-open` on `.inbox` shows the list or the thread.
+
+```html
+<div class="inbox" data-thread-open="true">
+  <aside class="inbox__list">
+    <div class="inbox__list-head">
+      <div class="inbox__list-top"><select class="sel inbox__asset">…</select><button class="btn btn--primary btn--sm inbox__new">New message</button></div>
+      <div class="inbox__filters"><button class="chip is-on">All</button><button class="chip">Needs reply<span class="chip__count">2</span></button></div>
+    </div>
+    <ul class="inbox__rows" role="list">
+      <li><button class="inbox-row is-active is-unread is-waiting" aria-current="true" aria-label="Ana Silva · 2 unread · …">
+        <span class="inbox-avatar">AS</span>
+        <span class="inbox-row__main">
+          <span class="inbox-row__top"><span class="inbox-row__name">Ana Silva</span><time class="inbox-row__time">5 min</time></span>
+          <span class="inbox-row__bottom"><span class="inbox-row__preview"><span class="tick tick--read">…</span>Até amanhã</span><span class="inbox-row__flag">AI paused</span><span class="inbox-row__badge">2</span></span>
+        </span>
+      </button></li>
+    </ul>
+  </aside>
+  <section class="inbox__thread">
+    <header class="thread-head">back · avatar · <div class="thread-head__who">name + sub</div> <div class="thread-head__tools">pills + AI button</div></header>
+    <div class="thread-banner thread-banner--warn">…Resume AI</div>
+    <div class="thread-log" role="log"><div class="thread-day"><span>Today</span></div><article class="bubble bubble--in bubble--customer">…</article></div>
+    <button class="thread-jump" hidden>New messages</button>
+    <footer class="composer">…</footer>
+  </section>
+</div>
+```
+
+| Class | Role |
+|---|---|
+| `.inbox-row` `.is-active` `.is-unread` `.is-waiting` | List row. Active = `--accent-soft` fill; unread = heavier text; waiting = `--warn` dot on the avatar (also in the row's `aria-label`) |
+| `.inbox-row__badge` / `.inbox-row__flag` | Unread count (accent fill) / "AI paused" (warn tint) |
+| `.inbox-avatar` (`--lg`) | Initials on `--accent-soft` (text `--accent-deep`, `--accent` on dark) |
+| `.chip__count` | Small mono count inside a filter chip |
+| `.thread-head` `__back` `__who` `__name` `__sub` `__tools` | Thread header; `__back` only under 920px |
+| `.thread-banner` (`--warn`) `__text` `__meta` | Full-width notice under the header: read-only website chat, AI paused (with Resume) |
+| `.thread-log` / `.thread-day` / `.thread-skeleton` | Transcript on `--surface-2` (`--bg-deep` dark), day separators, loading bars |
+| `.thread-jump` | "New messages" pill floating over the log's bottom edge when messages arrive while scrolled up |
+| `.bubble` `--in` `--out` + `--customer` `--agent` `--ai`, `.is-pending` `.is-failed` | Message. Customer: surface + hairline, left. Agent (a person): `--accent-soft`, right. AI: surface + dashed hairline, right. Parts: `__author` `__text` (pre-wrap) `__media` `__meta` `__error` |
+| `.tick` `--pending` `--sent` `--delivered` `--read` `--failed` | Delivery state as an inline SVG with `role="img"` + `aria-label`; read = `--info`, failed = `--bad`. Only for messages with a WhatsApp id |
+| `.composer` `__form` `__input` `__actions` `__foot` `__counter` `__error` `__notice` `__notice-text` | Reply box: auto-growing textarea, Template + Send, hint and counter (`.hint`, toned with `--warn` / `--bad`); `__notice` replaces the form when WhatsApp's 24-hour window is closed or the channel is gone |
+| `.inbox-ico` | 16px line icon (inline SVG, `currentColor`) inside buttons |
+| `.wa-send` `.wa-params` `.wa-param` `.wa-preview` (`__buttons` `__footer`) `.wa-var` | Template drawer: variables and a live preview bubble; unfilled variables show as `.wa-var`. `.wa-send__manage` sits left in the foot. WhatsApp template UI uses `wa-`; `tpl-` belongs to the PDF document studio |
+| `.bubble__media-box` (`.is-expanded`) with `.bubble__media-status` (`.is-error`), `.bubble__image-btn` + `.bubble__image`, `.bubble__audio`, `.bubble__video`, `.bubble__file` (`__file-action`) | Customer media inside a bubble: a dashed placeholder while it loads, then the photo (click toggles `.is-expanded`), a native player, or a download row for documents. Links in `.bubble__text` use `--info-ink`, underlined |
+| `.wa-templates` (`__body` `__table` `__excerpt` `__reason`) | Settings → WhatsApp templates: a `.panel` whose table shows the body excerpt under the name and the rejection reason under a `.pill--bad` status |
+| `.wa-editor` `__grid` `__preview` `__tools` `__buttons` `__button` `__add` | New-template drawer (`drawer__panel--wide`): fields beside a sticky preview column; one column under 760px |
+
+Rules: status and time lines are mono; everything else is sans. Media is fetched with the bearer token and shown from a blob URL; only JPEG/PNG/WebP/GIF, audio and video render inline, anything else downloads. The window pill is `.pill--ok` (open), `.pill--warn` (under 2 h left) or plain `.pill` (closed). Under 620px the composer buttons become icon-only and keep their label for screen readers.
 
 ## Work queue
 
@@ -693,6 +744,8 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 ## Utilities
 
 `.row` `.col` `.muted` `.mono` `.sub` `.right` — use these instead of one-off flex/color classes.
+
+`.visually-hidden` keeps text for screen readers only: live-region announcements (the inbox's "New message from …") and labels of controls that show just an icon.
 
 ## Sidebar KPIs
 

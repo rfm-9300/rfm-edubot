@@ -28,8 +28,6 @@ import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.MessageContent
-import com.rfm.edubot.conversation.model.Message
-import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.crm.ClientRepository
@@ -77,7 +75,9 @@ import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantLocales
+import com.rfm.edubot.whatsapp.TemplateDraft
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
@@ -110,6 +110,7 @@ import kotlinx.serialization.json.put
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 import java.util.Date
+import kotlin.time.Duration.Companion.seconds
 
 fun Route.dashboardStaticRoutes() {
     get("/app") { call.respondRedirect("/app/") }
@@ -141,6 +142,7 @@ fun Route.dashboardRoutes(
     channelBindingService: ChannelBindingService,
     instagramSocial: InstagramSocialService,
 ) {
+    val inbox = InboxService(mongo, { pipelineFactory.whatsAppFor(it) }, { tenant, platform -> pipelineFactory.responderFor(tenant, platform) })
     authenticate("dashboard") {
         route("/app/api") {
             get("/me") {
@@ -181,10 +183,29 @@ fun Route.dashboardRoutes(
             get("/conversations") {
                 val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
-                val conversations = ConversationRepository(mongo, ctx.tenant.id).list(call.request.queryParameters["q"])
-                val displayNames = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(conversations.map { it.userId })
-                val lastMessages = MessageRepository(mongo, ctx.tenant.id).lastByConversationIds(conversations.map { it.id })
-                call.respond(conversations.map { it.dto(displayNames[it.userId], lastMessages[it.id]) })
+                val query = call.request.queryParameters["q"]?.takeIf { it.isNotBlank() }
+                val nameMatches = query?.let { q -> UserRepository(mongo, ctx.tenant.id).list(q).map { it.id } }.orEmpty()
+                val conversations = ConversationRepository(mongo, ctx.tenant.id).list(query, userIds = nameMatches)
+                call.respond(inboxDtos(mongo, ctx.tenant, inbox, conversations))
+            }
+            get("/conversations/{id}/updates") {
+                val ctx = call.dashboardContext() ?: return@get
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@get
+                val since = call.request.queryParameters["since"]?.let { runCatching { kotlinx.datetime.Instant.parse(it) }.getOrNull() }
+                // Taken before the query and a little early: the client merges by id, so overlap is harmless and nothing slips between polls.
+                val cursor = SystemClock.now() - INBOX_CURSOR_OVERLAP
+                val messages = MessageRepository(mongo, ctx.tenant.id).let { repo ->
+                    if (since == null) repo.threadByConversation(conversation.id) else repo.changedSince(conversation.id, since)
+                }
+                call.respond(ThreadUpdatesDto(cursor.toString(), inboxDtos(mongo, ctx.tenant, inbox, listOf(conversation)).single(), messages.map { it.dto() }))
+            }
+            post("/conversations/{id}/read") {
+                val ctx = call.dashboardContext() ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@post
+                val updated = ConversationRepository(mongo, ctx.tenant.id).markRead(conversation.id) ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(inboxDtos(mongo, ctx.tenant, inbox, listOf(updated)).single())
             }
             get("/conversations/{id}/messages") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -198,51 +219,97 @@ fun Route.dashboardRoutes(
                 val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
                     ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
                 val request = call.receive<AutoReplyRequest>()
-                val conversation = ConversationRepository(mongo, ctx.tenant.id).setAutoReplyEnabled(conversationId, request.enabled)
+                val conversation = ConversationRepository(mongo, ctx.tenant.id).setAutoReplyEnabled(conversationId, request.enabled, ctx.agent().name)
                     ?: return@patch call.respond(HttpStatusCode.NotFound)
-                val displayName = UserRepository(mongo, ctx.tenant.id).displayNamesByIds(listOf(conversation.userId))[conversation.userId]
-                val last = MessageRepository(mongo, ctx.tenant.id).lastByConversationIds(listOf(conversation.id))[conversation.id]
-                call.respond(conversation.dto(displayName, last))
+                call.respond(inboxDtos(mongo, ctx.tenant, inbox, listOf(conversation)).single())
             }
             post("/conversations/{id}/messages") {
                 val ctx = call.dashboardContext() ?: return@post
                 if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
-                val conversationId = runCatching { ObjectId(call.parameters["id"]) }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid conversation id"))
-                val conversation = ConversationRepository(mongo, ctx.tenant.id).findById(conversationId)
-                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@post
                 val request = call.receive<OutboundMessageRequest>()
-                val text = request.text.trim()
-                if (text.isBlank() || text.length > 1000) {
-                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "message must contain 1 to 1000 characters"))
-                }
-                if (conversation.channel == Platform.WEB) {
-                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "website conversations do not support operator messages"))
-                }
                 val binding = ctx.tenant.binding(conversation.channel)
-                if (binding == null || binding.externalId != request.assetExternalId) {
-                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "selected asset does not match this conversation"))
+                if (request.assetExternalId != null && binding?.externalId != request.assetExternalId) {
+                    return@post call.respond(HttpStatusCode.BadRequest, InboxErrorDto("asset_mismatch"))
                 }
-
-                try {
-                    pipelineFactory.responderFor(ctx.tenant, conversation.channel).sendText(conversation.waId, text)
-                } catch (e: Exception) {
-                    return@post call.respond(HttpStatusCode.BadGateway, mapOf("error" to (e.message ?: "message delivery failed")))
-                }
-
-                val message = Message(
-                    tenantId = ctx.tenant.id,
-                    conversationId = conversation.id,
-                    channel = conversation.channel,
-                    waId = conversation.waId,
-                    role = UserRole.ASSISTANT,
-                    content = MessageContent.Text(text),
-                    status = MessageStatus.DELIVERED,
-                    createdAt = SystemClock.now(),
-                )
-                MessageRepository(mongo, ctx.tenant.id).insert(message)
-                ConversationRepository(mongo, ctx.tenant.id).bumpActivity(conversation.id)
+                val message = call.inboxAction { inbox.sendText(ctx.tenant, conversation, request.text, ctx.agent()) } ?: return@post
                 call.respond(HttpStatusCode.Created, message.dto())
+            }
+            post("/conversations/{id}/messages/{messageId}/retry") {
+                val ctx = call.dashboardContext() ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@post
+                val messageId = runCatching { ObjectId(call.parameters["messageId"]) }.getOrNull()
+                    ?: return@post call.respond(HttpStatusCode.BadRequest, InboxErrorDto("not_found"))
+                val message = call.inboxAction { inbox.retry(ctx.tenant, conversation, messageId) } ?: return@post
+                call.respond(message.dto())
+            }
+            post("/conversations/{id}/template") {
+                val ctx = call.dashboardContext() ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@post
+                val request = call.receive<TemplateSendRequest>()
+                val message = call.inboxAction {
+                    inbox.sendTemplate(ctx.tenant, conversation, InboxService.TemplateRequest(request.name, request.language, request.params), ctx.agent())
+                } ?: return@post
+                call.respond(HttpStatusCode.Created, message.dto())
+            }
+            post("/conversations/start") {
+                val ctx = call.dashboardContext() ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val request = call.receive<StartConversationRequest>()
+                val (conversation, message) = call.inboxAction {
+                    inbox.startConversation(ctx.tenant, request.phone, InboxService.TemplateRequest(request.name, request.language, request.params), ctx.agent())
+                } ?: return@post
+                call.respond(HttpStatusCode.Created, StartedConversationDto(inboxDtos(mongo, ctx.tenant, inbox, listOf(conversation)).single(), message.dto()))
+            }
+            get("/whatsapp/templates") {
+                val ctx = call.dashboardContext() ?: return@get
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
+                val refresh = call.request.queryParameters["refresh"] == "1"
+                val all = call.request.queryParameters["all"] == "1"
+                val templates = call.inboxAction { if (all) inbox.allTemplates(ctx.tenant, refresh) else inbox.templates(ctx.tenant, refresh) } ?: return@get
+                call.respond(templates.map { it.dto() })
+            }
+            post("/whatsapp/templates") {
+                val ctx = call.dashboardContext() ?: return@post
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@post call.respond(HttpStatusCode.Forbidden)
+                val request = call.receive<TemplateDraftRequest>()
+                val draft = TemplateDraft(
+                    name = request.name.trim(),
+                    language = request.language.trim(),
+                    category = request.category.trim().uppercase(),
+                    header = request.header?.trim()?.takeIf { it.isNotEmpty() },
+                    body = request.body,
+                    bodyExamples = request.examples.map { it.trim() },
+                    footer = request.footer?.trim()?.takeIf { it.isNotEmpty() },
+                    quickReplies = request.quickReplies.map { it.trim() }.filter { it.isNotEmpty() },
+                )
+                val created = call.inboxAction { inbox.createTemplate(ctx.tenant, draft) } ?: return@post
+                call.respond(HttpStatusCode.Created, CreatedTemplateDto(created.id, draft.name, draft.language, created.status ?: "PENDING", created.category ?: draft.category))
+            }
+            delete("/whatsapp/templates/{name}") {
+                val ctx = call.dashboardContext() ?: return@delete
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@delete call.respond(HttpStatusCode.Forbidden)
+                val name = call.parameters["name"].orEmpty()
+                call.inboxAction { inbox.deleteTemplate(ctx.tenant, name, call.request.queryParameters["id"]?.takeIf { it.isNotBlank() }) } ?: return@delete
+                call.respond(HttpStatusCode.NoContent)
+            }
+            get("/conversations/{id}/media/{messageId}") {
+                val ctx = call.dashboardContext() ?: return@get
+                if (!ctx.requireModule(DashboardModules.CONVERSATIONS)) return@get call.respond(HttpStatusCode.Forbidden)
+                val conversation = call.inboxConversation(mongo, ctx) ?: return@get
+                val messageId = runCatching { ObjectId(call.parameters["messageId"]) }.getOrNull()
+                    ?: return@get call.respond(HttpStatusCode.BadRequest, InboxErrorDto("not_found"))
+                val (file, fileName) = call.inboxAction { inbox.media(ctx.tenant, conversation, messageId) } ?: return@get
+                call.response.headers.append(HttpHeaders.CacheControl, "private, max-age=3600")
+                call.response.headers.append("X-Content-Type-Options", "nosniff")
+                fileName?.let { name ->
+                    val safe = name.replace(Regex("""[^\w.\- ]"""), "_").take(120)
+                    call.response.headers.append(HttpHeaders.ContentDisposition, "attachment; filename=\"$safe\"")
+                }
+                val type = runCatching { ContentType.parse(file.mimeType) }.getOrDefault(ContentType.Application.OctetStream)
+                call.respondBytes(file.bytes, type)
             }
             get("/persona") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -1356,10 +1423,71 @@ private suspend fun runPersonaTest(
     val lastRole: String? = null,
     val waiting: Boolean = false,
     val autoReplyEnabled: Boolean = true,
+    // No defaults below: the JSON config drops default values, and the inbox reads these every poll.
+    val unreadCount: Int,
+    val lastAuthor: String?,
+    val lastKind: String?,
+    val lastStatus: String?,
+    val lastTracked: Boolean,
+    val lastInboundAt: String?,
+    /** WhatsApp only: free-form replies are allowed until then; templates after. */
+    val windowExpiresAt: String?,
+    val autoReplyPausedAt: String?,
+    val autoReplyPausedBy: String?,
 )
 @Serializable private data class AutoReplyRequest(val enabled: Boolean)
-@Serializable private data class OutboundMessageRequest(val text: String, val assetExternalId: String)
-@Serializable private data class ThreadMessageDto(val id: String, val role: String, val text: String, val status: String, val createdAt: String)
+@Serializable private data class OutboundMessageRequest(val text: String, val assetExternalId: String? = null)
+@Serializable private data class ThreadMessageDto(
+    val id: String,
+    val role: String,
+    val text: String,
+    val status: String,
+    val createdAt: String,
+    /** "customer", "ai" or "agent". */
+    val author: String,
+    /** "text", "template", "image", "audio", "document" or "video". */
+    val kind: String,
+    /** Has a WhatsApp id, so delivery ticks apply. */
+    val tracked: Boolean,
+    val agentName: String?,
+    val agentUserId: String?,
+    val templateName: String?,
+    val fileName: String?,
+    val statusAt: String?,
+    val errorCode: Int?,
+    val errorKey: String?,
+    val errorText: String?,
+)
+@Serializable private data class ThreadUpdatesDto(val cursor: String, val conversation: ConversationDto, val messages: List<ThreadMessageDto>)
+@Serializable private data class TemplateSendRequest(val name: String, val language: String, val params: Map<String, String> = emptyMap())
+@Serializable private data class StartConversationRequest(val phone: String, val name: String, val language: String, val params: Map<String, String> = emptyMap())
+@Serializable private data class StartedConversationDto(val conversation: ConversationDto, val message: ThreadMessageDto)
+@Serializable private data class InboxErrorDto(val error: String, val detail: String? = null)
+@Serializable private data class WhatsAppTemplateDto(
+    val id: String?,
+    val name: String,
+    val language: String,
+    val category: String?,
+    val status: String,
+    val rejectedReason: String?,
+    val header: String?,
+    val body: String,
+    val footer: String?,
+    val buttons: List<String>,
+    val params: List<String>,
+    val sendable: Boolean,
+)
+@Serializable private data class TemplateDraftRequest(
+    val name: String,
+    val language: String,
+    val category: String,
+    val header: String? = null,
+    val body: String,
+    val examples: List<String> = emptyList(),
+    val footer: String? = null,
+    val quickReplies: List<String> = emptyList(),
+)
+@Serializable private data class CreatedTemplateDto(val id: String?, val name: String, val language: String, val status: String, val category: String)
 @Serializable private data class WebWidgetRequest(val allowedOrigins: List<String> = emptyList())
 @Serializable private data class LocaleRequest(val locale: String)
 @Serializable private data class OverviewLayoutRequest(val hidden: List<String> = emptyList())
@@ -1394,7 +1522,9 @@ private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: 
 private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, channel.name, displayName, status.name, lastSeenAt.toString())
 private fun com.rfm.edubot.conversation.model.Conversation.dto(
     displayName: String?,
-    last: com.rfm.edubot.conversation.model.Message? = null,
+    last: com.rfm.edubot.conversation.model.Message?,
+    lastInbound: kotlinx.datetime.Instant?,
+    windowExpiresAt: kotlinx.datetime.Instant?,
 ) = ConversationDto(
     id.toHexString(),
     waId,
@@ -1407,9 +1537,104 @@ private fun com.rfm.edubot.conversation.model.Conversation.dto(
     lastRole = last?.role?.name,
     waiting = last?.role == UserRole.USER,
     autoReplyEnabled = autoReplyEnabled,
+    unreadCount = unreadCount,
+    lastAuthor = last?.authorLabel(),
+    lastKind = last?.kind(),
+    lastStatus = last?.status?.name,
+    lastTracked = last?.waMessageId != null,
+    lastInboundAt = lastInbound?.toString(),
+    windowExpiresAt = windowExpiresAt?.toString(),
+    autoReplyPausedAt = autoReplyPausedAt?.toString(),
+    autoReplyPausedBy = autoReplyPausedBy,
 )
 private fun com.rfm.edubot.conversation.model.Message.previewText(): String {
-    val text = (content as? MessageContent.Text)?.body.orEmpty().trim()
+    val text = displayText().trim()
     return if (text.length <= 120) text else text.take(117) + "…"
 }
-private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(id.toHexString(), role.name, (content as? MessageContent.Text)?.body ?: "", status.name, createdAt.toString())
+private fun com.rfm.edubot.conversation.model.Message.displayText(): String = when (val c = content) {
+    is MessageContent.Text -> c.body
+    is MessageContent.Template -> c.body
+    is MessageContent.Image -> c.caption.orEmpty()
+    is MessageContent.Audio -> c.transcription.orEmpty()
+    is MessageContent.Video -> c.caption.orEmpty()
+    is MessageContent.Document -> c.caption.orEmpty()
+}
+private fun com.rfm.edubot.conversation.model.Message.kind(): String = when (content) {
+    is MessageContent.Text -> "text"
+    is MessageContent.Template -> "template"
+    is MessageContent.Image -> "image"
+    is MessageContent.Audio -> "audio"
+    is MessageContent.Document -> "document"
+    is MessageContent.Video -> "video"
+}
+private fun com.rfm.edubot.conversation.model.Message.authorLabel(): String = when {
+    role == UserRole.USER -> "customer"
+    author == com.rfm.edubot.conversation.model.MessageAuthor.AGENT -> "agent"
+    else -> "ai"
+}
+private fun com.rfm.edubot.conversation.model.Message.dto() = ThreadMessageDto(
+    id = id.toHexString(),
+    role = role.name,
+    text = displayText(),
+    status = status.name,
+    createdAt = createdAt.toString(),
+    author = authorLabel(),
+    kind = kind(),
+    tracked = waMessageId != null,
+    agentName = agentName,
+    agentUserId = agentUserId,
+    templateName = (content as? MessageContent.Template)?.name,
+    fileName = (content as? MessageContent.Document)?.fileName,
+    statusAt = statusAt?.toString(),
+    errorCode = errorCode,
+    errorKey = errorCode?.let { com.rfm.edubot.whatsapp.WhatsAppErrors.key(it) },
+    errorText = errorText,
+)
+private fun com.rfm.edubot.whatsapp.WhatsAppTemplate.dto() =
+    WhatsAppTemplateDto(id, name, language, category, status, rejectedReason, header, body, footer, buttons, params, sendable)
+
+private val INBOX_CURSOR_OVERLAP = 5.seconds
+
+private fun DashboardContext.agent() = InboxService.Agent(userId = user?.id?.toHexString(), name = user?.email)
+
+/** List rows for [conversations], with each WhatsApp conversation's 24-hour reply window. */
+private suspend fun inboxDtos(mongo: MongoModule, tenant: Tenant, inbox: InboxService, conversations: List<com.rfm.edubot.conversation.model.Conversation>): List<ConversationDto> {
+    if (conversations.isEmpty()) return emptyList()
+    val messages = MessageRepository(mongo, tenant.id)
+    val displayNames = UserRepository(mongo, tenant.id).displayNamesByIds(conversations.map { it.userId })
+    val lastMessages = messages.lastByConversationIds(conversations.map { it.id })
+    val legacyInbound = messages.lastInboundByConversationIds(conversations.filter { it.lastInboundAt == null }.map { it.id })
+    return conversations.map { convo ->
+        val lastInbound = convo.lastInboundAt ?: legacyInbound[convo.id]
+        convo.dto(displayNames[convo.userId], lastMessages[convo.id], lastInbound, inbox.windowExpiresAt(convo, lastInbound))
+    }
+}
+
+private suspend fun ApplicationCall.inboxConversation(mongo: MongoModule, ctx: DashboardContext): com.rfm.edubot.conversation.model.Conversation? {
+    val id = runCatching { ObjectId(parameters["id"]) }.getOrNull()
+    if (id == null) {
+        respond(HttpStatusCode.BadRequest, InboxErrorDto("not_found"))
+        return null
+    }
+    return ConversationRepository(mongo, ctx.tenant.id).findById(id) ?: run {
+        respond(HttpStatusCode.NotFound, InboxErrorDto("not_found"))
+        null
+    }
+}
+
+/** Runs an inbox action, answering its [InboxError] as `{ error, detail }` so the dashboard can explain it. */
+private suspend fun <T> ApplicationCall.inboxAction(block: suspend () -> T): T? = try {
+    block()
+} catch (e: InboxError) {
+    val status = when (e.key) {
+        "invalid_text", "invalid_phone", "template_params", "templates_whatsapp_only", "web_read_only", "template_unsupported", "not_retryable",
+        "template_name_invalid", "template_language_invalid", "template_category_invalid", "template_header_invalid", "template_footer_invalid",
+        "template_body_invalid", "template_variables_invalid", "template_examples_missing", "template_buttons_invalid" -> HttpStatusCode.BadRequest
+        "not_found", "template_not_found" -> HttpStatusCode.NotFound
+        "window_closed", "no_channel", "no_waba" -> HttpStatusCode.Conflict
+        "media_too_large" -> HttpStatusCode.PayloadTooLarge
+        else -> HttpStatusCode.BadGateway
+    }
+    respond(status, InboxErrorDto(e.key, e.detail))
+    null
+}

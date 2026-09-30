@@ -1,6 +1,7 @@
 package com.rfm.edubot.webhook
 
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.instagram.InstagramSocialService
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.InboundMessage
@@ -37,6 +38,7 @@ fun Routing.webhookRoutes(
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
     instagramSocial: InstagramSocialService,
+    deliveryStatuses: DeliveryStatusRecorder,
 ) {
     route("/webhook") {
         get {
@@ -87,7 +89,7 @@ fun Routing.webhookRoutes(
             }
 
             when (objectType) {
-                "whatsapp_business_account" -> handleWhatsAppWebhook(body, messageQueue, deduplicationService, tenantRegistry)
+                "whatsapp_business_account" -> handleWhatsAppWebhook(body, messageQueue, deduplicationService, tenantRegistry, deliveryStatuses)
                 "instagram" -> handleInstagramWebhook(body, messageQueue, deduplicationService, tenantRegistry, instagramSocial)
                 else -> log.info("Ignoring unsupported webhook object={}", objectType)
             }
@@ -102,6 +104,7 @@ private suspend fun handleWhatsAppWebhook(
     messageQueue: MessageQueue,
     deduplicationService: DeduplicationService,
     tenantRegistry: TenantRegistry,
+    deliveryStatuses: DeliveryStatusRecorder,
 ) {
     val payload = try {
         json.decodeFromString(WebhookPayload.serializer(), body)
@@ -124,35 +127,30 @@ private suspend fun handleWhatsAppWebhook(
 
             value.messages?.let { messages ->
                 for (message in messages) {
-                    val inbound = message.text?.body?.takeIf { it.isNotBlank() }?.let { messageText ->
-                        InboundMessage(
-                            tenantId = tenant.id,
-                            phoneNumberId = phoneNumberId,
-                            platform = Platform.WHATSAPP,
-                            channelExternalId = phoneNumberId,
-                            waId = message.from,
-                            waMessageId = message.id,
-                            profileName = value.contacts?.firstOrNull()?.profile?.name,
-                            messageText = messageText,
-                            timestamp = message.timestamp,
-                            eventId = message.id,
-                        )
-                    }
+                    val inbound = message.toInbound(tenant.id, phoneNumberId, value.contacts?.firstOrNull()?.profile?.name)
                     if (deduplicationService.isDuplicate(message.id, body, tenant.id, inbound)) {
                         log.debug("Skipping duplicate message: id={}", message.id)
                         continue
                     }
                     if (inbound == null) {
-                        log.debug("Skipping non-text message: type={}", message.type)
+                        log.debug("Skipping unsupported message: type={}", message.type)
                         continue
                     }
 
                     messageQueue.enqueue(inbound)
-                    log.info("Enqueued WhatsApp message: tenant={} from={} id={}", tenant.slug, message.from, message.id)
+                    log.info("Enqueued WhatsApp message: tenant={} from={} id={} type={}", tenant.slug, message.from, message.id, message.type)
                 }
             }
 
-            value.statuses?.forEach { status -> log.info("Status update: id={} status={}", status.id, status.status) }
+            value.statuses?.forEach { status ->
+                val error = status.errors?.firstOrNull()
+                log.info("Status update: tenant={} id={} status={} errorCode={}", tenant.slug, status.id, status.status, error?.code)
+                try {
+                    deliveryStatuses.record(tenant.id, status.id, status.status, error?.code, error?.text)
+                } catch (e: Exception) {
+                    log.warn("Failed to store WhatsApp status: id={} status={}", status.id, status.status, e)
+                }
+            }
         }
     }
 }

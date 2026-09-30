@@ -12,6 +12,8 @@ import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.Conversation
 import com.rfm.edubot.conversation.model.Message
+import com.rfm.edubot.conversation.model.MessageAuthor
+import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.User
 import com.rfm.edubot.conversation.model.UserStatus
 import com.rfm.edubot.crm.ClientRepository
@@ -38,6 +40,7 @@ import org.bson.types.ObjectId
 import kotlin.test.AfterTest
 import kotlin.test.BeforeTest
 import kotlin.test.Test
+import kotlin.test.assertEquals
 
 /**
  * MessagePipeline.handle() is the single path every inbound message from every tenant and
@@ -113,6 +116,7 @@ class MessagePipelineTest {
         coEvery { messages.insertIfAbsent(any()) } returns true
         coEvery { messages.lastNByWaId(any(), any(), any()) } returns emptyList()
         coEvery { conversations.bumpActivity(any(), any()) } returns Unit
+        coEvery { conversations.recordInbound(any(), any()) } returns Unit
         coEvery { deduplicationService.markProcessed(any()) } returns Unit
         coEvery { deduplicationService.markFailed(any()) } returns Unit
         coEvery { responder.sendText(any(), any()) } returns Unit
@@ -179,10 +183,29 @@ class MessagePipelineTest {
         pipeline.handle(inbound(), responder)
 
         coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
+        coVerify(exactly = 1) { conversations.recordInbound(pausedConvo.id, any()) }
         coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
         coVerify(exactly = 0) { responder.sendText(any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
         coVerify(exactly = 0) { deduplicationService.markFailed(any()) }
+    }
+
+    @Test
+    fun `a customer photo is stored for the inbox and never reaches the AI`() = runBlocking {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        val convo = conversation(u.id)
+        coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insertIfAbsent(capture(stored)) } returns true
+
+        pipeline.handle(inbound("A mancha no sofá").copy(media = InboundMedia("image", "media-1", "image/jpeg")), responder)
+
+        assertEquals(MessageContent.Image("media-1", "A mancha no sofá"), stored.single().content)
+        coVerify(exactly = 1) { conversations.recordInbound(convo.id, any()) }
+        coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { responder.sendText(any(), any()) }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
     }
 
     @Test
@@ -211,10 +234,15 @@ class MessagePipelineTest {
         coEvery { aiClient.complete(any(), any(), any(), any()) } returns
             AiResponse.Text(content = "Oi! Tudo bem, e você?", usage = null, responseId = "resp-1")
 
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insert(capture(stored)) } answers { firstArg() }
+
         pipeline.handle(inbound("oi, tudo bem?"), responder)
 
         coVerify(exactly = 1) { responder.sendText(u.waId, "Oi! Tudo bem, e você?") }
         coVerify(exactly = 1) { conversations.bumpActivity(convo.id, any()) }
+        coVerify(exactly = 1) { conversations.recordInbound(convo.id, any()) }
+        assertEquals(MessageAuthor.AI, stored.single().author)
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
         coVerify(exactly = 0) { deduplicationService.markFailed(any()) }
     }
@@ -233,6 +261,7 @@ class MessagePipelineTest {
 
         pipeline.handle(inbound("oi, tudo bem?"), responder)
 
+        coVerify(exactly = 0) { conversations.recordInbound(any(), any()) }
         coVerify(exactly = 1) { responder.sendText(u.waId, "Oi! Tudo bem, e você?") }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
         coVerify(exactly = 0) { deduplicationService.markFailed(any()) }

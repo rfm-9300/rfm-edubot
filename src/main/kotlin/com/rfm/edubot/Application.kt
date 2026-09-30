@@ -12,6 +12,7 @@ import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
+import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
@@ -226,6 +227,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             deduplicationService = deduplicationService,
             tenantRegistry = tenantRegistry,
             instagramSocial = instagramSocial,
+            deliveryStatuses = DeliveryStatusRecorder(mongoModule),
         )
         authRoutes(runtimeConfig)
         platformSettingsRoutes(platformSettingsService)

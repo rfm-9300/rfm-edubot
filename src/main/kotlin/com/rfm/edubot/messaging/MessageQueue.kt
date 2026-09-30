@@ -16,7 +16,12 @@ data class InboundMessage(
     val timestamp: String,
     val eventId: String,
     val registerOnly: Boolean = false,
+    /** Set for photos, voice notes, videos, documents and stickers; [messageText] is then the caption. */
+    val media: InboundMedia? = null,
 )
+
+/** [kind] is "image", "audio", "video", "document" or "sticker"; [mediaId] is Meta's id for downloading it. */
+data class InboundMedia(val kind: String, val mediaId: String, val mimeType: String? = null, val fileName: String? = null)
 
 class MessageQueue(capacity: Int = Channel.UNLIMITED) {
     private val channel = Channel<InboundMessage>(capacity)

@@ -51,15 +51,7 @@ class TenantPipelineFactory(
     fun responderFor(tenant: Tenant, platform: Platform): OutboundClient {
         val binding = tenant.binding(platform) ?: throw IllegalStateException("Tenant ${tenant.slug} has no $platform binding")
         return when (platform) {
-            Platform.WHATSAPP -> {
-                val cfg = runtimeConfig.get()
-                WhatsAppClient(
-                    accessToken = binding.accessToken.ifBlank { cfg.whatsapp.accessToken },
-                    phoneNumberId = binding.externalId,
-                    apiVersion = cfg.whatsapp.apiVersion,
-                    httpClient = whatsappHttpClient,
-                )
-            }
+            Platform.WHATSAPP -> whatsAppFor(tenant)!!
             Platform.INSTAGRAM -> InstagramClient(
                 accessToken = binding.accessToken,
                 instagramAccountId = binding.externalId,
@@ -68,6 +60,18 @@ class TenantPipelineFactory(
             )
             Platform.WEB -> WebChatOutboundClient(webChannelRegistry)
         }
+    }
+
+    /** The tenant's WhatsApp sender, or null when no WhatsApp number is connected. */
+    fun whatsAppFor(tenant: Tenant): WhatsAppClient? {
+        val binding = tenant.binding(Platform.WHATSAPP) ?: return null
+        val cfg = runtimeConfig.get()
+        return WhatsAppClient(
+            accessToken = binding.accessToken.ifBlank { cfg.whatsapp.accessToken },
+            phoneNumberId = binding.externalId,
+            apiVersion = cfg.whatsapp.apiVersion,
+            httpClient = whatsappHttpClient,
+        )
     }
 
     private fun build(tenant: Tenant): MessagePipeline {

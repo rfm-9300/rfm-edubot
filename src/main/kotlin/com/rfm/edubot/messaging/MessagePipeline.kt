@@ -22,6 +22,7 @@ import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.Conversation
 import com.rfm.edubot.conversation.model.Message
+import com.rfm.edubot.conversation.model.MessageAuthor
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.TokenUsage
@@ -78,11 +79,41 @@ class MessagePipeline(
                 return
             }
 
+            // The AI can't see photos or hear voice notes: store them for the inbox, where they show as waiting.
+            inbound.media?.let { media ->
+                val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
+                val caption = inbound.messageText.takeIf { it.isNotBlank() }
+                val content = when (media.kind) {
+                    "audio" -> MessageContent.Audio(media.mediaId)
+                    "video" -> MessageContent.Video(media.mediaId, caption)
+                    "document" -> MessageContent.Document(media.mediaId, media.fileName, caption)
+                    else -> MessageContent.Image(media.mediaId, caption)
+                }
+                val stored = messages.insertIfAbsent(
+                    Message(
+                        tenantId = inbound.tenantId,
+                        conversationId = conversation.id,
+                        channel = inbound.platform,
+                        waId = user.waId,
+                        role = UserRole.USER,
+                        waMessageId = inbound.waMessageId,
+                        content = content,
+                        status = MessageStatus.RECEIVED,
+                        createdAt = SystemClock.now(),
+                    )
+                )
+                if (stored) conversations.recordInbound(conversation.id)
+                conversations.bumpActivity(conversation.id)
+                deduplicationService.markProcessed(inbound.eventId)
+                log.info("Stored customer media without an automatic reply: kind={}, waId={}", media.kind, inbound.waId)
+                return
+            }
+
             if (inbound.registerOnly) {
                 val existing = conversations.findByWaId(inbound.waId, inbound.platform)
                 if (existing == null) {
                     val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
-                    messages.insertIfAbsent(
+                    val stored = messages.insertIfAbsent(
                         Message(
                             tenantId = inbound.tenantId,
                             conversationId = conversation.id,
@@ -95,6 +126,7 @@ class MessagePipeline(
                             createdAt = SystemClock.now(),
                         )
                     )
+                    if (stored) conversations.recordInbound(conversation.id)
                     conversations.bumpActivity(conversation.id)
                     log.info("Registered conversation without automatic reply: platform={}, waId={}", inbound.platform, inbound.waId)
                 }
@@ -104,7 +136,7 @@ class MessagePipeline(
 
             val existingConversation = conversations.findByWaId(inbound.waId, inbound.platform)
             if (existingConversation != null && !existingConversation.autoReplyEnabled) {
-                messages.insertIfAbsent(
+                val stored = messages.insertIfAbsent(
                     Message(
                         tenantId = inbound.tenantId,
                         conversationId = existingConversation.id,
@@ -117,6 +149,7 @@ class MessagePipeline(
                         createdAt = SystemClock.now(),
                     )
                 )
+                if (stored) conversations.recordInbound(existingConversation.id)
                 conversations.bumpActivity(existingConversation.id)
                 deduplicationService.markProcessed(inbound.eventId)
                 log.info("Automatic reply paused for conversation; stored inbound message only: platform={}, waId={}", inbound.platform, inbound.waId)
@@ -145,7 +178,7 @@ class MessagePipeline(
                 createdAt = SystemClock.now(),
             )
             // A message re-queued after a restart may already be stored; carry on so it still gets its reply.
-            messages.insertIfAbsent(userMessage)
+            if (messages.insertIfAbsent(userMessage)) conversations.recordInbound(conversation.id)
 
             if (tenantUsage != null && tenantUsage.tokensUsedThisMonth() >= monthlyTokenBudget) {
                 log.warn(
@@ -163,6 +196,7 @@ class MessagePipeline(
                     content = MessageContent.Text(budgetReply),
                     status = MessageStatus.DELIVERED,
                     createdAt = SystemClock.now(),
+                    author = MessageAuthor.AI,
                 )
                 messages.insert(assistantMessage)
                 responder.sendText(user.waId, budgetReply)
@@ -207,6 +241,7 @@ class MessagePipeline(
                     content = MessageContent.Text(pdfReply),
                     status = MessageStatus.DELIVERED,
                     createdAt = SystemClock.now(),
+                    author = MessageAuthor.AI,
                 )
                 messages.insert(assistantMessage)
                 responder.sendText(user.waId, pdfReply)
@@ -373,6 +408,7 @@ class MessagePipeline(
                 costUsd = 0.0,
                 status = MessageStatus.DELIVERED,
                 createdAt = SystemClock.now(),
+                author = MessageAuthor.AI,
             )
             messages.insert(assistantMessage)
 
@@ -432,13 +468,26 @@ class MessagePipeline(
                     }
                     contextMessages.add(ChatMessage(role = role, content = (msg.content as MessageContent.Text).body))
                 }
-                else -> {}
+                is MessageContent.Template -> contextMessages.add(ChatMessage(role = "assistant", content = (msg.content as MessageContent.Template).body))
+                else -> if (msg.role == UserRole.USER) mediaNote(msg.content)?.let { contextMessages.add(ChatMessage(role = "user", content = it)) }
             }
         }
 
         contextMessages.add(ChatMessage(role = "user", content = newUserMessage))
 
         return contextMessages
+    }
+
+    /** Tells the AI a customer sent media it cannot open, with the caption when there was one. */
+    private fun mediaNote(content: MessageContent): String? {
+        val (kind, caption) = when (content) {
+            is MessageContent.Image -> "photo" to content.caption
+            is MessageContent.Audio -> "voice message" to content.transcription
+            is MessageContent.Video -> "video" to content.caption
+            is MessageContent.Document -> "document${content.fileName?.let { " ($it)" }.orEmpty()}" to content.caption
+            else -> return null
+        }
+        return "[The customer sent a $kind you cannot open${caption?.takeIf { it.isNotBlank() }?.let { ": \"$it\"" }.orEmpty()}]"
     }
 
     private suspend fun sendCreatedDocuments(waId: String, createdDocuments: List<CreatedDocument>, responder: OutboundClient) {

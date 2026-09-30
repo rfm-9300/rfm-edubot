@@ -142,6 +142,21 @@ class DeduplicationServiceTest {
     }
 
     @Test
+    fun `a queued photo keeps its media after a restart`() = runBlocking {
+        val service = freshService()
+        val photo = queued("evt-photo").copy(
+            platform = Platform.WHATSAPP,
+            registerOnly = false,
+            messageText = "A mancha no sofá",
+            media = InboundMedia("image", "media-1", "image/jpeg", null),
+        )
+        service.isDuplicate(photo.eventId, "{}", photo.tenantId, photo)
+
+        val now = Clock.System.now()
+        assertEquals(listOf(photo), service.unprocessedInbound(now - 1.minutes, now + 1.minutes))
+    }
+
+    @Test
     fun `finished events, events with no queued message, and events outside the window are not re-queued`() = runBlocking {
         val service = freshService()
         val processed = queued("evt-processed")

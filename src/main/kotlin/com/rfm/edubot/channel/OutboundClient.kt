@@ -16,4 +16,4 @@ interface ProfileLookupClient {
     suspend fun profileName(id: String): String?
 }
 
-class OutboundDeliveryException(message: String) : RuntimeException(message)
+open class OutboundDeliveryException(message: String) : RuntimeException(message)
