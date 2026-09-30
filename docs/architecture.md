@@ -2,7 +2,7 @@
 
 Multi-channel AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling. A tenant can bind WhatsApp and Instagram DM accounts to the same agent; the pipeline stays shared and channel-specific behavior is isolated at ingress and egress.
 
-Automations ("Agents") and the Google/Gmail integration are planned in [plan-agents-automations.md](plan-agents-automations.md) and described under [Agents and automations](#agents-and-automations) below.
+Automations ("Agents") and the Google/Gmail integration follow [plan-agents-automations.md](plan-agents-automations.md) and are described under [Agents and automations](#agents-and-automations) and [Google and Gmail integration](#google-and-gmail-integration) below.
 
 ## Request Flow
 
@@ -60,6 +60,7 @@ graph TD
         AR[AdminRoutes]
         WV[WebhookVerifier]
         Health["/health  /ready  /app  /backoffice"]
+        AGR[Agent, integration<br/>and email routes]
     end
 
     subgraph Messaging
@@ -75,12 +76,27 @@ graph TD
         CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
         DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
+        EV[DomainEventLog<br/>domain_events outbox]
+    end
+
+    subgraph Automations["Agents runtime"]
+        ADP[AgentDispatcher<br/>events]
+        ASC[AgentScheduler<br/>time, on a lease]
+        AEX[AgentRunExecutor<br/>steps, approvals, guardrails]
+        NT[Notifications + tasks]
+    end
+
+    subgraph Integrations
+        GI[GoogleIntegration<br/>OAuth + token refresh]
+        ES[EmailService<br/>Gmail send]
+        GS[GmailSyncWorker<br/>inbox, on a lease]
     end
 
     subgraph External
         AI[AiClient<br/>OpenRouter]
         OC[OutboundClient<br/>WhatsApp / Instagram]
         PDF[PdfGenerator<br/>PDFBox]
+        GAPI[Google OAuth<br/>+ Gmail API]
     end
 
     subgraph Persistence
@@ -98,7 +114,17 @@ graph TD
     AR --> CRM
     AR --> DA
     DA --> AI & CRM & Mongo
+    DA --> AEX
+    CRM --> EV
+    EV --> ADP
+    ADP & ASC --> AEX
+    AEX --> CRM & AI & OC & ES & NT
+    AGR --> AEX & GI & ES
+    ES & GS --> GI
+    GI --> GAPI
+    ES & GS --> EV
     UR & CR & MR & CRM & DS --> Mongo
+    EV & AEX & NT & GI & ES & GS --> Mongo
     Health --> Mongo
 ```
 
@@ -117,9 +143,13 @@ graph TD
 | `instagram/` | Instagram DM Graph API outbound adapter plus post/comment inbox (webhook ingest, Graph list/reply) |
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
+| `events/` | Domain event outbox (`DomainEventLog`): repositories append after their own write, the agent dispatcher claims events, record drawers read them as an activity timeline |
+| `agents/` | Agents module: models and stores, registry (triggers, actions, validator, catalog), runtime (dispatcher, scheduler, starter, executor, guardrails, context builder), actions, templates, AI drafting and assistant tools, dashboard and backoffice routes |
+| `integrations/` | Connected accounts (`integration_connections`, `TokenCipher`), Google OAuth and token refresh, Gmail client and inbox sync, `EmailService`, email retention, integration and email routes |
+| `notifications/` | The dashboard bell: notifications per audience with read state, and their routes |
 | `persistence/` | MongoDB wiring, index creation at startup |
 | `config/` | `AppConfig` (env/HOCON), `RuntimeConfig` + Mongo `platform_settings` overrides |
-| `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes |
+| `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes; `jobs/` has `PeriodicJob` and `SchedulerLease` (a Mongo lease, so one instance runs each background job) |
 | `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages |
 
 ## Tenant Module Access
@@ -426,6 +456,17 @@ sequenceDiagram
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
+| `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |
+| `agents` | Agent definitions (triggers, steps, policy), status, run stats, next schedule | `tenantId+status+updatedAt`; `tenantId+eventTypes`; `status+nextFireAt` |
+| `agent_runs` | One run per trigger firing: a copy of the definition, step results, status, `resumeAt` | unique `(tenantId, agentId, dedupeKey)`; `status+resumeAt`; `tenantId+clientId+createdAt`; TTL 180 days on `finishedAt` |
+| `agent_approvals` | Actions waiting for a person, with the preview they approve | unique `(runId, stepId, seq)`; `status+expiresAt` |
+| `agent_tasks` | Follow-ups for people, from agents or made by hand | `tenantId+status+dueAt`; `tenantId+assigneeUserId+status`; `tenantId+clientId+status` |
+| `agent_settings` | A company's agent settings and the limits only the backoffice sets | `_id` = tenant id |
+| `notifications` | Dashboard bell entries for all, admins or one user | `tenantId+audience+userId+createdAt`; TTL 90 days |
+| `outbound_log` | Every message agents and email send outside the company, claimed before the provider call | unique `idempotencyKey`; `tenantId+recipient+at`; TTL 30 days |
+| `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
+| `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId` |
+| `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
 
 ## Dashboard AI Assistant
 
@@ -441,10 +482,155 @@ protected by dashboard JWT authentication and the normal server-side module gate
 
 ## Agents and automations
 
-The opt-in `agents` module runs company-owned automations on one engine: domain events, schedules,
-date offsets and inactivity wake agents up, and their steps run CRM, messaging, email, flow and AI
-actions under approvals and guardrails. The design, data model and phases are in
-[plan-agents-automations.md](plan-agents-automations.md).
+The opt-in `agents` module (the backoffice turns it on per company) runs company-owned automations
+on one engine. The design, data model and phases are in [plan-agents-automations.md](plan-agents-automations.md).
+An agent is a definition in `agents`: triggers, steps (one action each, with an optional guard, an
+autonomy and an error policy), exit rules, and a policy (daily cap, per-record cooldown, approvers,
+quiet hours). The dashboard edits agents under **Agents** (list, builder, template gallery, inbox,
+activity, settings); the same runtime serves the assistant's agent tools and the backoffice.
+
+```mermaid
+flowchart LR
+    EVT["Domain event<br/>CRM, bookings, chats, email"] --> DSP[AgentDispatcher]
+    TIME["Schedule, date offset,<br/>inactivity"] --> SCH[AgentScheduler]
+    MAN["Run on a record,<br/>Test, assistant"] --> ST
+    DSP -->|exit rules| EXIT[Open runs end]
+    DSP & SCH --> ST["AgentRunStarter<br/>pauses, caps, cooldown,<br/>opt-out, conditions, dedupe"]
+    ST --> RUNS[(agent_runs)]
+    RUNS --> EX["AgentRunExecutor<br/>on the agent lanes"]
+    EX --> STEP{Autonomy}
+    STEP -->|AUTO| ACT["Action<br/>CRM, WhatsApp, Instagram,<br/>email, AI, data, team"]
+    STEP -->|APPROVE| APR[(agent_approvals)]
+    APR -->|a person approves| ACT
+    STEP -->|DRAFT| NOTE[Written down, not done]
+    ACT --> OUT[(outbound_log)]
+    ACT --> EV2["domain_events<br/>actor AGENT"]
+    EX -->|flow.wait, quiet hours, retry| WAIT[WAITING until resumeAt]
+    WAIT --> SCH
+    EX --> NT["Notifications<br/>and tasks"]
+```
+
+- **What wakes an agent.** Repositories append a domain event to `domain_events` after their own
+  write. `AgentDispatcher` is woken after each append (with a 2-second poll as fallback) and claims
+  events one at a time. Each event first ends open runs whose exit rules match (a paid invoice stops
+  its reminders), then starts the agents whose event triggers match. An event an agent caused never
+  triggers that agent again, and chains of reactions stop at depth 3. `AgentScheduler` runs every
+  `AGENTS_TICK_SECONDS` on the `agents-scheduler` lease. It fires due schedules, sweeps date offsets
+  (days before or after a record's date) and inactivity, resumes waiting runs, expires approvals and
+  recovers runs a stopped instance left mid-step. People also start runs on a record. **Test** does
+  a dry run that sends and changes nothing, on the record a person picks or else the newest one (for
+  email agents, the newest email received).
+- **Starting a run.** `AgentRunStarter` checks the company and platform pauses, the agent's and the
+  company's daily caps, the per-record cooldown, the client's automation pause and the agent's
+  "only if" conditions. It then stores the run under a dedupe key, unique per agent, so a trigger that fires
+  twice starts one run. Runs execute on the agents' own lanes (`AGENTS_LANES`, separate from the
+  chat lanes), at most `AGENTS_MAX_CONCURRENT_RUNS_PER_COMPANY` per company at a time.
+- **Steps.** `AgentRunExecutor` rebuilds the run's variables from live data (`AgentContextBuilder`)
+  before it continues after a wait, so a guard sees that the invoice was paid meanwhile. A step that
+  changes something acts (`AUTO`), asks first (`APPROVE`), or only writes down what it would do
+  (`DRAFT`). An approval shows the final text, recipients, attachments and warnings; people may edit
+  the text before approving, and a decision happens once. Messages to people outside the company
+  respect quiet hours, business days and per-recipient caps. They are claimed in `outbound_log`
+  before the provider call, so a restart never sends twice, and a send cut off mid-call waits for a
+  person's review instead of being repeated. Progress is saved after every step. Five failed runs in
+  a row pause the agent and tell the admins.
+- **Actions.** CRM: create or update a client, set a quote's status, invoice a quote or open
+  services, add a service, a bill to pay or a booking. Messaging: `whatsapp.send` (free text inside
+  WhatsApp's 24-hour window, an approved template outside it) and `instagram.reply`. Email:
+  `email.send` and `email.reply` in the thread. AI: `ai.task` and `ai.compose`. Data:
+  `data.summary` and `doc.pdf`. Flow: `flow.wait`, `flow.branch` and `flow.stop`. Team:
+  `team.notify` and `team.task.create`. A WhatsApp step can fall back to email, then to a task for
+  a person.
+- **AI steps.** The model gets what customers and strangers wrote inside `<untrusted_content>`
+  and is told it is data, so instructions hidden in an email can't steer the agent. Tokens count
+  toward the company's monthly budget (`tenant_usage`, source `agents`); over budget, the step fails
+  with `token_budget`.
+- **Building agents.** The gallery builds agents from templates (`AgentTemplates`) in the company's
+  language. **Describe it** (`POST /app/api/agents/draft`, `AgentDrafter`) gives the model the
+  catalog of triggers, events, actions and variables, validates the definition it returns, sends the
+  problems back once to fix, and saves a draft with no more autonomy than the company's default.
+  Nothing is activated. The dashboard assistant gets the agents as tools (`AgentTools`): reads run
+  at once, writes are confirmed one by one, and pausing, activating and drafting are for admins.
+- **Where people see it.** Approvals and tasks in the Agents inbox, the bell (`notifications`, kept
+  90 days), Home's agents card and attention list, an Automations block on each record (upcoming and
+  recent runs, what agents changed, open tasks, and a pause switch on clients), and a badge on chat
+  messages an automation sent.
+- **Limits.** In Agents → Settings, a company sets its default autonomy, quiet hours, business days,
+  per-recipient caps (2 a day, 5 a week) and approval expiry (3 days), and can pause all its agents.
+  The backoffice has its own pause for a company's agents, and it alone sets the company's maximum
+  active agents (25), runs per day (2,000) and email sends per day (300).
+
+## Google and Gmail integration
+
+A company admin connects the company's own Gmail or Google Workspace account in **Settings →
+Channels → Email (Google)**, so quotes, invoices and automation emails go out from the company's
+address. The scopes, Google's verification and its Limited Use rules are in
+[google-oauth-verification.md](google-oauth-verification.md).
+
+```mermaid
+sequenceDiagram
+    participant A as Company admin
+    participant R as IntegrationRoutes
+    participant G as Google OAuth
+    participant C as integration_connections
+    participant S as EmailService
+    participant M as Gmail API
+    participant W as GmailSyncWorker
+    participant E as domain_events
+
+    A->>R: GET /app/api/integrations/google/connect
+    R-->>A: consent URL with a signed state
+    A->>G: consent to gmail.send (with ?inbox=1 also gmail.readonly + gmail.modify)
+    G->>R: GET /integrations/google/callback with code and state
+    R->>G: exchange the code for tokens
+    R->>C: tokens sealed with TokenCipher (AES-256-GCM)
+    Note over S,M: Send by email, test email, email.send and email.reply steps
+    S->>C: access token, refreshed when under 5 minutes remain
+    S->>M: messages.send, claimed in outbound_log first
+    S->>E: email.sent
+    loop every GMAIL_SYNC_SECONDS on a lease, when GMAIL_INBOX_ENABLED
+        W->>M: history.list after the account's cursor
+        W->>M: messages.get for each new message
+        W->>W: store once in email_messages, match a client by sender
+        W->>E: email.received wakes email agents
+    end
+```
+
+- **Connecting.** Only the company's own admins connect; an operator impersonating the company
+  can't, because they would consent with their own Google account. The callback stores the tokens
+  sealed with `TokenCipher` (keys in `INTEGRATIONS_ENCRYPTION_KEY`: the first seals, the others only
+  open values sealed before a rotation). Tokens never reach the browser. Connecting asks for
+  `gmail.send` only. Turning on **Use my inbox in automations** asks for `gmail.readonly` and
+  `gmail.modify` with incremental consent, and is offered only when `GMAIL_INBOX_ENABLED` is on. The
+  OAuth client comes from `GOOGLE_OAUTH_*` or the backoffice's platform settings. Without the client
+  or the key, the Email row stays hidden.
+- **Tokens.** `GoogleTokenProvider` refreshes an access token when under five minutes remain, one
+  refresh per connection at a time (an in-memory lock, as the app runs as one instance). When Google
+  refuses the grant, the connection needs a reconnect: its admins get one notification, Home lists
+  it, and sending from it stops until someone reconnects.
+- **Sending.** `EmailService` sends from the company's default account, in the branded layout with
+  the account's sender name, reply-to and signature. Each send is claimed in `outbound_log` first,
+  so one key never goes out twice, and each company has a daily allowance. Sent mail is kept in
+  `email_messages`, shown on the client's Emails tab, and announced as `email.sent`. It serves
+  **Send by email** on quotes and invoices, the test email in Settings, and the `email.send` and
+  `email.reply` steps.
+- **Reading the inbox.** With `GMAIL_INBOX_ENABLED`, `GmailSyncWorker` runs every
+  `GMAIL_SYNC_SECONDS` on a lease. For each account with inbox sync on, it reads Gmail's history
+  after the account's cursor (the first time, the mail since inbox sync was turned on). It stores each
+  new message once, links it to a client by the sender's address and announces `email.received`.
+  The `email.received` trigger narrows that by sender (any, a known client, unknown), words in the
+  sender, subject or text, and PDF attachments. The company's own mail, spam and newsletters from
+  strangers are skipped. Automatic replies are kept but announce nothing, so two mailboxes can't
+  answer each other forever. When Google refuses a read for missing permission, only that inbox
+  pauses and Settings offers to allow reading again; sending carries on. Gmail push through Pub/Sub
+  (`GMAIL_PUBSUB_TOPIC`) is reserved for later, so the inbox is polled.
+- **Keeping little.** Email text is kept for 90 days after its date (`EmailRetention`, every 6
+  hours), and so is what automation runs and approvals were given and produced from it. Run
+  variables and event payloads never store the text itself. Attachment contents are never stored,
+  only their name, type and size, and a PDF's text isn't read. Disconnecting deletes the tokens and
+  the account's mail, removes it from events, runs and approvals, and revokes the grant when no other
+  company uses the account. Tasks and notifications an automation made from an email keep what its
+  steps wrote into them, like an AI summary: notifications expire after 90 days, tasks stay.
 
 ## Context Building
 
