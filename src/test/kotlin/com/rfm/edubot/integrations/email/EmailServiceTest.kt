@@ -1,7 +1,16 @@
 package com.rfm.edubot.integrations.email
 
+import com.rfm.edubot.agents.model.ActionPreview
+import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentDefinition
+import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.ApprovalStatus
 import com.rfm.edubot.agents.model.OutboundStatus
 import com.rfm.edubot.agents.model.PlatformAgentLimits
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.config.AppConfig
@@ -33,7 +42,9 @@ import jakarta.mail.internet.InternetAddress
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -43,6 +54,7 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertIs
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.hours
 
@@ -74,12 +86,14 @@ class EmailServiceTest {
     private val outboundLog = OutboundLogRepository(mongo, clock)
     private val events = DomainEventLog(mongo, clock)
     private val settings = AgentSettingsRepository(mongo, clock)
+    private val runs = AgentRunRepository(mongo, clock)
+    private val approvals = AgentApprovalRepository(mongo, clock)
 
     private fun service(google: FakeGoogle, configured: Boolean = true, inbox: Boolean = false): EmailService {
         val oauth = google.client()
         val config = if (configured) google.config.copy(inboxEnabled = inbox) else AppConfig.GoogleConfig()
         val tokens = GoogleTokenProvider(connections, oauth, cipher, notifications, clock)
-        return EmailService(GoogleIntegration({ config }, cipher, oauth, connections, tokens, GmailClient(google.http)), messages, outboundLog, events, settings, clock)
+        return EmailService(GoogleIntegration({ config }, cipher, oauth, connections, tokens, GmailClient(google.http)), messages, outboundLog, events, settings, runs, approvals, clock)
     }
 
     private fun company(template: DocumentTemplate = DocumentTemplate()) = Tenant(
@@ -166,6 +180,8 @@ class EmailServiceTest {
         assertEquals(SubjectRef.of(SubjectTypes.EMAIL, stored.id), event.subject)
         assertEquals("Orçamento Q-7", event.payload["subject"]!!.jsonPrimitive.content)
         assertEquals("true", event.payload["hasPdf"]!!.jsonPrimitive.content)
+        assertEquals(connection.id.toHexString(), event.payload["connectionId"]!!.jsonPrimitive.content)
+        assertFalse("snippet" in event.payload || "text" in event.payload, "the activity log keeps no email text")
         assertTrue(quote in event.related)
         assertEquals(1, sentToday(connection))
     }
@@ -304,6 +320,65 @@ class EmailServiceTest {
         assertEquals("insufficient_permissions", after.lastError)
         assertEquals(1, notifications.listFor(narrowed.id, reader = "admin-1", isAdmin = true).size)
         assertEquals(0, sentToday(connection))
+    }
+
+    @Test
+    fun `disconnecting an account forgets its mail and what the activity log, runs and approvals repeated of it`(): Unit = runBlocking {
+        val tenant = company()
+        val leaving = account(tenant, scopes = GoogleScopes.inbox)
+        val staying = account(tenant, email = "geral@example.pt", scopes = GoogleScopes.inbox)
+        val clientId = ObjectId()
+        suspend fun received(connection: IntegrationConnection): Pair<EmailMessage, SubjectRef> {
+            val email = messages.insert(
+                EmailMessage(
+                    tenantId = tenant.id, connectionId = connection.id, providerMessageId = ObjectId().toHexString(), direction = EmailDirection.INBOUND,
+                    from = "maria@cliente.pt", fromName = "Maria Silva", to = listOf(connection.accountEmail), subject = "Pintura da sala",
+                    snippet = "Queria um orçamento", bodyText = "Queria um orçamento para pintar a sala.", clientId = clientId, date = now, createdAt = now,
+                ),
+            )
+            val ref = SubjectRef.of(SubjectTypes.EMAIL, email.id)
+            events.append(
+                tenant.id, DomainEventTypes.EMAIL_RECEIVED, ref,
+                buildJsonObject { put("from", email.from); put("fromName", "Maria Silva"); put("subject", email.subject); put("clientId", clientId.toHexString()) },
+                related = listOf(SubjectRef.of(SubjectTypes.CLIENT, clientId)),
+            )
+            runs.insertIfAbsent(
+                AgentRun(
+                    tenantId = tenant.id, agentId = ObjectId(), agentName = "Pedidos", agentVersion = 1, definition = AgentDefinition(),
+                    trigger = RunTrigger(type = "email_received", firedAt = now), subject = ref, subjectLabel = email.subject, status = RunStatus.AWAITING_APPROVAL,
+                    context = buildJsonObject { put("email", buildJsonObject { put("from", email.from); put("subject", email.subject) }) },
+                    dedupeKey = "event:${ObjectId()}:e1", createdAt = now, updatedAt = now,
+                ),
+            )
+            approvals.insert(
+                AgentApproval(
+                    tenantId = tenant.id, agentId = ObjectId(), agentName = "Pedidos", runId = ObjectId(), stepId = "s1", action = "email.reply",
+                    input = buildJsonObject { put("text", "Olá Maria, obrigado pelo pedido.") }, preview = ActionPreview(kind = "message", body = "Olá Maria, obrigado pelo pedido."),
+                    subject = ref, subjectLabel = email.subject, createdAt = now, expiresAt = now + 72.hours,
+                ),
+            )
+            return email to ref
+        }
+        val (gone, goneRef) = received(leaving)
+        val (kept, keptRef) = received(staying)
+
+        assertEquals(1, service(FakeGoogle(), inbox = true).forget(leaving))
+
+        assertNull(messages.find(tenant.id, gone.id))
+        assertEquals(kept, messages.find(tenant.id, kept.id))
+        val redacted = events.timeline(tenant.id, goneRef).single().payload
+        assertEquals(setOf("clientId"), redacted.keys, "who wrote and about what go with the email")
+        assertEquals(setOf("from", "fromName", "subject", "clientId"), events.timeline(tenant.id, keptRef).single().payload.keys)
+        val ended = runs.list(tenant.id, subject = goneRef).single()
+        assertEquals(RunStatus.CANCELLED, ended.status)
+        assertNull(ended.subjectLabel)
+        assertFalse("email" in ended.context)
+        assertEquals(RunStatus.AWAITING_APPROVAL, runs.list(tenant.id, subject = keptRef).single().status)
+        val approvalsLeft = approvals.list(tenant.id, status = null).associateBy { it.subject }
+        assertEquals(ApprovalStatus.CANCELLED, approvalsLeft.getValue(goneRef).status)
+        assertTrue(approvalsLeft.getValue(goneRef).input.isEmpty())
+        assertEquals(ApprovalStatus.PENDING, approvalsLeft.getValue(keptRef).status)
+        assertEquals("Pintura da sala", approvalsLeft.getValue(keptRef).subjectLabel)
     }
 
     @Test

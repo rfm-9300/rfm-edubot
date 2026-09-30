@@ -9,6 +9,7 @@ import com.rfm.edubot.agents.model.AgentApproval
 import com.rfm.edubot.agents.model.ApprovalStatus
 import com.rfm.edubot.agents.model.Approvers
 import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.BsonJson
 import com.rfm.edubot.shared.SystemClock
@@ -94,6 +95,35 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
         )
     }
 
+    /**
+     * Forgets what approvals about these emails copied of them (subject, the proposed input and its
+     * preview) because their account was disconnected. The ones still waiting end with their runs.
+     */
+    suspend fun forgetEmails(tenantId: ObjectId, ids: Collection<String>) {
+        val now = clock()
+        ids.chunked(FORGET_CHUNK).forEach { chunk ->
+            val about = aboutEmails(tenantId, chunk)
+            collection.updateMany(
+                Filters.and(about, Filters.eq("status", ApprovalStatus.PENDING.name)),
+                Updates.combine(Updates.set("status", ApprovalStatus.CANCELLED.name), Updates.set("decidedAt", now.toDate())),
+            )
+            collection.updateMany(about, Updates.combine(Updates.set("input", Document()), Updates.unset("preview"), Updates.unset("subjectLabel")))
+        }
+    }
+
+    /** The text of these emails was deleted (retention); decided approvals drop what was drawn from it. A pending one still needs its input. */
+    suspend fun forgetEmailText(tenantId: ObjectId, ids: Collection<String>) {
+        ids.chunked(FORGET_CHUNK).forEach { chunk ->
+            collection.updateMany(
+                Filters.and(aboutEmails(tenantId, chunk), Filters.ne("status", ApprovalStatus.PENDING.name)),
+                Updates.combine(Updates.set("input", Document()), Updates.unset("preview")),
+            )
+        }
+    }
+
+    private fun aboutEmails(tenantId: ObjectId, ids: List<String>): Bson =
+        Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("subject.type", SubjectTypes.EMAIL), Filters.`in`("subject.id", ids))
+
     private suspend fun decide(tenantId: ObjectId, id: ObjectId, update: Bson): AgentApproval? =
         collection.findOneAndUpdate(
             Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("_id", id), Filters.eq("status", ApprovalStatus.PENDING.name)),
@@ -151,5 +181,6 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
 
     companion object {
         const val COLLECTION = "agent_approvals"
+        private const val FORGET_CHUNK = 500
     }
 }

@@ -19,6 +19,8 @@ import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.JsonObject
+import org.bson.BsonType
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -64,7 +66,7 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
             Updates.combine(
                 Updates.set("status", saved.status.name),
                 Updates.set("currentStep", saved.currentStep),
-                Updates.set("context", BsonJson.toDocument(saved.context)),
+                Updates.set("context", storedContext(saved.context)),
                 Updates.set("steps", saved.steps.map { AgentJson.toDocument(StepResult.serializer(), it) }),
                 Updates.set("resumeAt", saved.resumeAt?.toDate()),
                 Updates.set("subjectLabel", saved.subjectLabel),
@@ -84,7 +86,7 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
     suspend fun cancelIfOpen(id: ObjectId, outcome: String): AgentRun? {
         val now = clock()
         return collection.findOneAndUpdate(
-            Filters.and(Filters.eq("_id", id), Filters.`in`("status", listOf(RunStatus.QUEUED, RunStatus.WAITING, RunStatus.AWAITING_APPROVAL, RunStatus.NEEDS_REVIEW).map { it.name })),
+            Filters.and(Filters.eq("_id", id), Filters.`in`("status", CANCELLABLE)),
             Updates.combine(
                 Updates.set("status", RunStatus.CANCELLED.name),
                 Updates.set("outcome", outcome),
@@ -196,6 +198,54 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
             ),
         ).sort(Document("createdAt", -1)).limit(1).firstOrNull()?.toRun()
 
+    /**
+     * Forgets what runs about these emails copied of them (sender, subject, what their steps were given
+     * and produced) because their account was disconnected. Runs still waiting end: nothing is left to act on.
+     */
+    suspend fun forgetEmails(tenantId: ObjectId, ids: Collection<String>) {
+        val now = clock()
+        ids.chunked(FORGET_CHUNK).forEach { chunk ->
+            val about = aboutEmails(tenantId, chunk)
+            collection.updateMany(
+                Filters.and(about, Filters.`in`("status", CANCELLABLE)),
+                Updates.combine(
+                    Updates.set("status", RunStatus.CANCELLED.name),
+                    Updates.set("outcome", RECORD_REMOVED),
+                    Updates.set("finishedAt", now.toDate()),
+                    Updates.set("updatedAt", now.toDate()),
+                    Updates.unset("resumeAt"),
+                ),
+            )
+            collection.updateMany(about, Updates.combine(Updates.unset("context.email"), Updates.unset("context.event"), Updates.unset("subjectLabel")))
+            forgetStepData(about)
+        }
+    }
+
+    /** The text of these emails was deleted (retention), so what steps were given and produced from it goes too. */
+    suspend fun forgetEmailText(tenantId: ObjectId, ids: Collection<String>) {
+        ids.chunked(FORGET_CHUNK).forEach { forgetStepData(aboutEmails(tenantId, it)) }
+    }
+
+    private fun aboutEmails(tenantId: ObjectId, ids: List<String>): Bson =
+        Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("subject.type", SubjectTypes.EMAIL), Filters.`in`("subject.id", ids))
+
+    private suspend fun forgetStepData(about: Bson) {
+        // `$[]` fails on a document without a steps array.
+        collection.updateMany(
+            Filters.and(about, Filters.type("steps", BsonType.ARRAY)),
+            Updates.combine(Updates.unset("steps.$[].input"), Updates.unset("steps.$[].output")),
+        )
+    }
+
+    /**
+     * A run keeps no email text: every step reads it again from the stored email, whose text is deleted
+     * after the retention period.
+     */
+    private fun storedContext(context: JsonObject): Document {
+        val email = context["email"] as? JsonObject ?: return BsonJson.toDocument(context)
+        return BsonJson.toDocument(JsonObject(context + ("email" to JsonObject(email - EMAIL_TEXT))))
+    }
+
     private fun AgentRun.toDocument() = Document("_id", id)
         .append("tenantId", tenantId)
         .append("agentId", agentId)
@@ -209,7 +259,7 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         .append("dedupeKey", dedupeKey)
         .append("status", status.name)
         .append("currentStep", currentStep)
-        .append("context", BsonJson.toDocument(context))
+        .append("context", storedContext(context))
         .append("steps", steps.map { AgentJson.toDocument(StepResult.serializer(), it) })
         .append("resumeAt", resumeAt?.toDate())
         .append("depth", depth)
@@ -263,5 +313,11 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
     companion object {
         const val COLLECTION = "agent_runs"
         private val OPEN_STATUSES = RunStatus.entries.filter { it.open }.map { it.name }
+        private val CANCELLABLE = listOf(RunStatus.QUEUED, RunStatus.WAITING, RunStatus.AWAITING_APPROVAL, RunStatus.NEEDS_REVIEW).map { it.name }
+        private val EMAIL_TEXT = setOf("text", "snippet")
+        private const val FORGET_CHUNK = 500
+
+        /** What a run ends with when its record is gone; the executor says the same when it finds out itself. */
+        const val RECORD_REMOVED = "record_removed"
     }
 }

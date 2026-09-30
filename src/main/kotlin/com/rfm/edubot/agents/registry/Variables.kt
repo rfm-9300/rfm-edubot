@@ -88,7 +88,7 @@ object AgentVariables {
         "email",
         "id" to VarType.ID, "from" to VarType.TEXT, "fromName" to VarType.TEXT, "subject" to VarType.TEXT,
         "snippet" to VarType.TEXT, "text" to VarType.TEXT, "hasAttachments" to VarType.BOOLEAN, "hasPdf" to VarType.BOOLEAN,
-        "knownClient" to VarType.BOOLEAN, "threadId" to VarType.TEXT,
+        "knownClient" to VarType.BOOLEAN, "threadId" to VarType.TEXT, "automated" to VarType.BOOLEAN,
     )
 
     fun forSubject(subjectType: String?): List<VariableSpec> {

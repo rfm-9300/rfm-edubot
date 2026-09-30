@@ -3,6 +3,7 @@ package com.rfm.edubot.agents.runtime
 import com.rfm.edubot.events.DomainEvent
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -11,6 +12,7 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -43,14 +45,23 @@ class AgentDispatcherFiltersTest {
     }
 
     @Test
-    fun `email filters check the sender, words and attachments`() {
+    fun `email filters check the sender, words and attachments`(): Unit = runBlocking {
         val email = event(
             "email.received",
-            buildJsonObject { put("from", "compras@fornecedor.pt"); put("subject", "Fatura 2026/88"); put("hasPdf", "true"); put("clientId", "") },
+            buildJsonObject { put("from", "compras@fornecedor.pt"); put("subject", "Fatura 2026/88"); put("hasPdf", true) },
         )
-        assertTrue(AgentDispatcher.emailFilters(buildJsonObject { put("sender", "unknown"); put("hasPdf", true) }, email))
-        assertFalse(AgentDispatcher.emailFilters(buildJsonObject { put("sender", "known") }, email))
-        assertTrue(AgentDispatcher.emailFilters(buildJsonObject { put("subjectContains", buildJsonArray { add(JsonPrimitive("fatura")) }) }, email))
-        assertFalse(AgentDispatcher.emailFilters(buildJsonObject { put("fromContains", "cliente") }, email))
+        var reads = 0
+        val body: suspend () -> String = { reads++; "Segue em anexo a fatura de setembro, a pagar até dia 15." }
+        assertTrue(AgentDispatcher.emailFilters(buildJsonObject { put("sender", "unknown"); put("hasPdf", true) }, email, body))
+        assertFalse(AgentDispatcher.emailFilters(buildJsonObject { put("sender", "known") }, email, body))
+        assertTrue(AgentDispatcher.emailFilters(buildJsonObject { put("subjectContains", buildJsonArray { add(JsonPrimitive("fatura")) }) }, email, body))
+        assertFalse(AgentDispatcher.emailFilters(buildJsonObject { put("fromContains", "cliente") }, email, body))
+        assertEquals(0, reads, "the text is only read to look for words in it")
+
+        assertTrue(AgentDispatcher.emailFilters(buildJsonObject { put("bodyContains", buildJsonArray { add(JsonPrimitive("A PAGAR")) }) }, email, body))
+        assertFalse(AgentDispatcher.emailFilters(buildJsonObject { put("bodyContains", buildJsonArray { add(JsonPrimitive("orçamento")) }) }, email, body))
+        val narrowed = buildJsonObject { put("fromContains", "cliente"); put("bodyContains", buildJsonArray { add(JsonPrimitive("fatura")) }) }
+        assertFalse(AgentDispatcher.emailFilters(narrowed, email, body))
+        assertEquals(2, reads, "nor when the sender already rules it out")
     }
 }

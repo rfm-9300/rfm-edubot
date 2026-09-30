@@ -3,6 +3,8 @@ package com.rfm.edubot.integrations.email
 import com.rfm.edubot.agents.EmailAvailability
 import com.rfm.edubot.agents.model.OutboundLogEntry
 import com.rfm.edubot.agents.model.OutboundStatus
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.events.Actor
@@ -43,6 +45,8 @@ class EmailService(
     private val outboundLog: OutboundLogRepository,
     private val events: DomainEventLog,
     private val agentSettings: AgentSettingsRepository,
+    private val runs: AgentRunRepository,
+    private val approvals: AgentApprovalRepository,
     private val clock: () -> Instant = SystemClock::now,
 ) : EmailSender {
     private val log = LoggerFactory.getLogger("EmailService")
@@ -94,8 +98,17 @@ class EmailService(
         return sendFrom(tenant, connection, test)
     }
 
-    /** Disconnecting an account forgets the mail kept from it. */
-    suspend fun forget(connection: IntegrationConnection): Long = messages.deleteForConnection(connection.tenantId, connection.id)
+    /**
+     * Disconnecting an account forgets the mail kept from it, and what the activity log, automation runs
+     * and approvals repeated of it: who wrote, to whom, about what, and what steps made of it.
+     */
+    suspend fun forget(connection: IntegrationConnection): Long {
+        val ids = messages.idsForConnection(connection.tenantId, connection.id).map { it.toHexString() }
+        events.redact(connection.tenantId, SubjectTypes.EMAIL, ids, EVENT_FIELDS)
+        runs.forgetEmails(connection.tenantId, ids)
+        approvals.forgetEmails(connection.tenantId, ids)
+        return messages.deleteForConnection(connection.tenantId, connection.id)
+    }
 
     /** Sends from [connection], one of [tenant]'s accounts. Without [idempotencyKey] every call is a new email. */
     suspend fun sendFrom(tenant: Tenant, connection: IntegrationConnection, email: OutgoingEmail, idempotencyKey: String? = null): EmailSendResult {
@@ -275,8 +288,8 @@ class EmailService(
                 put("from", connection.accountEmail)
                 put("to", prepared.to.joinToString(", "))
                 put("subject", prepared.subject)
-                put("snippet", stored.snippet)
                 put("hasPdf", email.attachments.any { it.mimeType == PDF })
+                put("connectionId", connection.id.toHexString())
                 sent.threadId?.let { put("threadId", it) }
                 email.clientId?.let { put("clientId", it.toHexString()) }
             },
@@ -313,5 +326,8 @@ class EmailService(
         const val SEND_FAILED = "send_failed"
         private const val UNAUTHORIZED = "unauthorized"
         private const val PDF = "application/pdf"
+
+        /** What `email.*` events say of an email, which goes with the email. */
+        private val EVENT_FIELDS = listOf("from", "fromName", "to", "subject", "snippet", "text")
     }
 }

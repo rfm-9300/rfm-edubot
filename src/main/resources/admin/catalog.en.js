@@ -850,7 +850,7 @@ window.__I18N_CATALOGS['en'] = {
         serviceName: 'Service', start: 'Start', startDate: 'Date', startTime: 'Time', end: 'End', contactName: 'Contact name', contactPhone: 'Contact phone', price: 'Price', source: 'Booked via', hoursUntilStart: 'Hours until start',
         channel: 'Channel', waId: 'Phone or account', lastMessage: 'Last message', waitingMinutes: 'Minutes waiting', autoReplyEnabled: 'Bot on', windowOpen: '24-hour window open', unreadCount: 'Unread',
         displayName: 'Name', text: 'Text', fromUsername: 'Username', mediaId: 'Post',
-        from: 'From', fromName: 'Sender name', subject: 'Subject', snippet: 'Preview', hasAttachments: 'Has attachments', hasPdf: 'Has a PDF', knownClient: 'Is a client', threadId: 'Thread',
+        from: 'From', fromName: 'Sender name', subject: 'Subject', snippet: 'Preview', hasAttachments: 'Has attachments', hasPdf: 'Has a PDF', knownClient: 'Is a client', threadId: 'Thread', automated: 'Sent automatically',
         type: 'Type', to: 'To', actorType: 'Done by',
       },
       outputs: {

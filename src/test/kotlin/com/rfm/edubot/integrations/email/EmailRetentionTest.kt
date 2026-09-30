@@ -1,11 +1,24 @@
 package com.rfm.edubot.integrations.email
 
+import com.rfm.edubot.agents.model.ActionPreview
+import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentDefinition
+import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.ApprovalStatus
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.model.StepResult
+import com.rfm.edubot.agents.model.StepStatus
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.testing.TestMongo
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -37,7 +50,9 @@ class EmailRetentionTest {
     private var now = Instant.parse("2026-09-30T12:00:00Z")
     private val clock = { now }
     private val messages = EmailMessageRepository(mongo, clock)
-    private val retention = EmailRetention(messages, clock = clock)
+    private val runs = AgentRunRepository(mongo, clock)
+    private val approvals = AgentApprovalRepository(mongo, clock)
+    private val retention = EmailRetention(messages, runs, approvals, clock = clock)
     private val tenantId = ObjectId()
     private val clientId = ObjectId()
 
@@ -90,6 +105,35 @@ class EmailRetentionTest {
         now += 2.days
         assertEquals(1, retention.purge())
         assertNull(messages.find(tenantId, recent.id)!!.bodyText)
+    }
+
+    @Test
+    fun `what automations made of an email's text goes with it`(): Unit = runBlocking {
+        val old = messages.insert(email(now - 91.days).copy(direction = EmailDirection.INBOUND, from = "maria@example.pt", to = listOf("obras@example.pt")))
+        val recent = messages.insert(email(now - 10.days).copy(direction = EmailDirection.INBOUND, from = "maria@example.pt", to = listOf("obras@example.pt")))
+        fun run(email: EmailMessage) = AgentRun(
+            tenantId = tenantId, agentId = ObjectId(), agentName = "Pedidos", agentVersion = 1, definition = AgentDefinition(),
+            trigger = RunTrigger(type = "email_received", firedAt = email.date), subject = SubjectRef.of(SubjectTypes.EMAIL, email.id), subjectLabel = email.subject,
+            status = RunStatus.SUCCEEDED, dedupeKey = "event:${email.id}:e1", createdAt = email.date, updatedAt = email.date,
+            steps = listOf(StepResult("s1", "ai.task", StepStatus.DONE, input = buildJsonObject { put("instructions", "Resume: ${email.bodyText}") })),
+        )
+        fun approval(email: EmailMessage) = AgentApproval(
+            tenantId = tenantId, agentId = ObjectId(), agentName = "Pedidos", runId = ObjectId(), stepId = "s2", action = "email.reply",
+            input = buildJsonObject { put("text", "Sobre o ORC-001…") }, preview = ActionPreview(kind = "message", body = "Sobre o ORC-001…"),
+            subject = SubjectRef.of(SubjectTypes.EMAIL, email.id), status = ApprovalStatus.APPROVED, createdAt = email.date, expiresAt = email.date + 3.days,
+        )
+        val oldRun = runs.insertIfAbsent(run(old))!!
+        val recentRun = runs.insertIfAbsent(run(recent))!!
+        val oldApproval = approvals.insert(approval(old))
+        val recentApproval = approvals.insert(approval(recent))
+
+        assertEquals(1, retention.purge())
+
+        assertNull(runs.load(oldRun.id)!!.steps.single().input)
+        assertEquals("Orçamento ORC-001", runs.load(oldRun.id)!!.subjectLabel)
+        assertEquals(recentRun.steps, runs.load(recentRun.id)!!.steps)
+        assertTrue(approvals.findById(tenantId, oldApproval.id)!!.input.isEmpty())
+        assertEquals(recentApproval.input, approvals.findById(tenantId, recentApproval.id)!!.input)
     }
 
     @Test

@@ -62,17 +62,26 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("threadId", threadId)))
             .sort(Document("date", 1)).toList().map { it.toMessage() }
 
+    suspend fun idsForConnection(tenantId: ObjectId, connectionId: ObjectId): List<ObjectId> =
+        collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("connectionId", connectionId)))
+            .projection(Document("_id", 1)).toList().map { it.getObjectId("_id") }
+
     /** Disconnecting an account forgets its mail. */
     suspend fun deleteForConnection(tenantId: ObjectId, connectionId: ObjectId): Long =
         collection.deleteMany(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("connectionId", connectionId))).deletedCount
 
+    /** Emails dated before [before] that still hold their text, as (company, email) ids. */
+    suspend fun textDue(before: Instant, limit: Int): List<Pair<ObjectId, ObjectId>> =
+        collection.find(Filters.and(Filters.eq("bodyPurgedAt", null), Filters.lt("date", before.toDate())))
+            .projection(Document("tenantId", 1)).limit(limit).toList().map { it.getObjectId("tenantId") to it.getObjectId("_id") }
+
     /**
-     * Drops the text of emails dated before [before], the snippet included (it is the text's start);
-     * subject, addresses and attachment names stay as the record of what was sent.
+     * Drops the text of these emails, the snippet included (it is the text's start); subject, addresses
+     * and attachment names stay as the record of what was sent.
      */
-    suspend fun purgeBodies(before: Instant): Long =
+    suspend fun purgeBodies(ids: Collection<ObjectId>): Long =
         collection.updateMany(
-            Filters.and(Filters.eq("bodyPurgedAt", null), Filters.lt("date", before.toDate())),
+            Filters.and(Filters.`in`("_id", ids), Filters.eq("bodyPurgedAt", null)),
             Updates.combine(Updates.unset("bodyText"), Updates.set("snippet", ""), Updates.set("bodyPurgedAt", clock().toDate())),
         ).modifiedCount
 

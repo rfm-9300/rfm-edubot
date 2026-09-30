@@ -220,7 +220,7 @@ class GmailSyncWorker(
                     email.fromName?.let { put("fromName", it) }
                     put("subject", email.subject)
                     put("hasAttachments", email.attachments.isNotEmpty())
-                    put("hasPdf", email.attachments.any(GmailMessages::isPdf))
+                    put("hasPdf", email.attachments.any { it.isPdf })
                     put("automated", email.automated)
                     put("connectionId", email.connectionId.toHexString())
                     email.threadId?.let { put("threadId", it) }

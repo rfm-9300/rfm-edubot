@@ -20,6 +20,7 @@ import com.rfm.edubot.agents.registry.Schema
 import com.rfm.edubot.agents.registry.SchemaValidator
 import com.rfm.edubot.agents.registry.SideEffect
 import com.rfm.edubot.agents.store.AgentJson
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.notifications.NotificationAudience
@@ -117,7 +118,7 @@ class AgentRunExecutor(
 
         val locale = run.definition.voice.language?.takeIf { it.isNotBlank() } ?: tenant.locale
         val subject = contextBuilder.build(tenant, run.subject, previous = run.context, locale = locale)
-        if (!subject.exists) return finish(run, RunStatus.CANCELLED, "record_removed")
+        if (!subject.exists) return finish(run, RunStatus.CANCELLED, AgentRunRepository.RECORD_REMOVED)
         if (subject.automationPaused && !run.dryRun) return finish(run, RunStatus.CANCELLED, "automation_paused")
         var variables = subject.variables
         run = run.copy(startedAt = run.startedAt ?: now, subjectLabel = subject.label ?: run.subjectLabel, context = variables)

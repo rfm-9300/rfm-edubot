@@ -849,7 +849,7 @@ window.__I18N_CATALOGS['es'] = {
         serviceName: 'Servicio', start: 'Inicio', startDate: 'Fecha', startTime: 'Hora', end: 'Fin', contactName: 'Nombre del contacto', contactPhone: 'Teléfono del contacto', price: 'Precio', source: 'Reservado por', hoursUntilStart: 'Horas hasta el inicio',
         channel: 'Canal', waId: 'Teléfono o cuenta', lastMessage: 'Último mensaje', waitingMinutes: 'Minutos esperando', autoReplyEnabled: 'Bot activado', windowOpen: 'Ventana de 24 horas abierta', unreadCount: 'Sin leer',
         displayName: 'Nombre', text: 'Texto', fromUsername: 'Nombre de usuario', mediaId: 'Publicación',
-        from: 'De', fromName: 'Nombre del remitente', subject: 'Asunto', snippet: 'Vista previa', hasAttachments: 'Tiene adjuntos', hasPdf: 'Tiene un PDF', knownClient: 'Es cliente', threadId: 'Hilo',
+        from: 'De', fromName: 'Nombre del remitente', subject: 'Asunto', snippet: 'Vista previa', hasAttachments: 'Tiene adjuntos', hasPdf: 'Tiene un PDF', knownClient: 'Es cliente', threadId: 'Hilo', automated: 'Enviado automáticamente',
         type: 'Tipo', to: 'Para', actorType: 'Hecho por',
       },
       outputs: {

@@ -16,6 +16,8 @@ import com.rfm.edubot.agents.registry.SchemaValidator
 import com.rfm.edubot.agents.runtime.AgentContextBuilder
 import com.rfm.edubot.agents.runtime.AgentServices
 import com.rfm.edubot.agents.runtime.RunContext
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.config.AppConfig
@@ -96,7 +98,7 @@ class EmailSendActionTest {
         val tokens = GoogleTokenProvider(connections, oauth, cipher, NotificationRepository(mongo, clock), clock)
         EmailService(
             GoogleIntegration({ google.config }, cipher, oauth, connections, tokens, GmailClient(google.http)),
-            messages, OutboundLogRepository(mongo, clock), DomainEventLog(mongo, clock), settings, clock,
+            messages, OutboundLogRepository(mongo, clock), DomainEventLog(mongo, clock), settings, AgentRunRepository(mongo, clock), AgentApprovalRepository(mongo, clock), clock,
         )
     }
 

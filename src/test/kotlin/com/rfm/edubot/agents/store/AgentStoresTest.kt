@@ -1,15 +1,20 @@
 package com.rfm.edubot.agents.store
 
+import com.mongodb.client.model.Filters
+import com.mongodb.client.model.Updates
 import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.model.Agent
 import com.rfm.edubot.agents.model.AgentApproval
 import com.rfm.edubot.agents.model.AgentDefinition
 import com.rfm.edubot.agents.model.AgentRun
 import com.rfm.edubot.agents.model.AgentStatus
+import com.rfm.edubot.agents.model.ApprovalStatus
 import com.rfm.edubot.agents.model.OutboundLogEntry
 import com.rfm.edubot.agents.model.OutboundStatus
 import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.model.StepResult
+import com.rfm.edubot.agents.model.StepStatus
 import com.rfm.edubot.agents.model.TriggerSpec
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
@@ -21,7 +26,10 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.bson.Document
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -167,6 +175,113 @@ class AgentStoresTest {
         notifications.markAllRead(tenantId, "admin-1", isAdmin = true)
         assertEquals(0, notifications.unreadCount(tenantId, "admin-1", isAdmin = true))
         assertEquals(1, notifications.unreadCount(tenantId, "member-1", isAdmin = false))
+    }
+
+    private fun emailRun(tenantId: ObjectId, emailId: ObjectId, status: RunStatus) = run(tenantId, ObjectId(), "event:${ObjectId()}:e1").copy(
+        subject = SubjectRef.of(SubjectTypes.EMAIL, emailId),
+        subjectLabel = "Pintura da sala",
+        status = status,
+        context = buildJsonObject {
+            put("email", buildJsonObject { put("from", "maria@cliente.pt"); put("subject", "Pintura da sala"); put("text", "Queria um orçamento."); put("snippet", "Queria um") })
+            put("event", buildJsonObject { put("type", "email.received"); put("from", "maria@cliente.pt") })
+        },
+        steps = listOf(
+            StepResult("s1", "ai.task", StepStatus.DONE, input = buildJsonObject { put("instructions", "Resume: Queria um orçamento.") }, output = buildJsonObject { put("summary", "Pede orçamento") }),
+        ),
+    )
+
+    private fun emailApproval(tenantId: ObjectId, emailId: ObjectId, status: ApprovalStatus = ApprovalStatus.PENDING) = AgentApproval(
+        tenantId = tenantId, agentId = ObjectId(), agentName = "Pedidos", runId = ObjectId(), stepId = "s2",
+        action = "email.reply", input = buildJsonObject { put("text", "Olá Maria, sobre a pintura da sala…") },
+        preview = ActionPreview(kind = "message", channel = "email", body = "Olá Maria, sobre a pintura da sala…"),
+        subject = SubjectRef.of(SubjectTypes.EMAIL, emailId), subjectLabel = "Pintura da sala", status = status, createdAt = now, expiresAt = now + 3.days,
+    )
+
+    @Test
+    fun `a run keeps who wrote an email and about what, never its text`() = runBlocking {
+        val runs = AgentRunRepository(mongoModule) { now }
+        val stored = runs.insertIfAbsent(emailRun(ObjectId(), ObjectId(), RunStatus.QUEUED))!!
+
+        val email = runs.load(stored.id)!!.context["email"]!!.jsonObject
+        assertEquals(setOf("from", "subject"), email.keys)
+        runs.save(stored.copy(status = RunStatus.SUCCEEDED))
+        assertEquals(setOf("from", "subject"), runs.load(stored.id)!!.context["email"]!!.jsonObject.keys, "nor when the executor checkpoints it")
+        assertEquals("maria@cliente.pt", runs.load(stored.id)!!.context["event"]!!.jsonObject["from"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `forgetting emails ends the runs and approvals waiting on them and drops what all of them copied`() = runBlocking {
+        val runs = AgentRunRepository(mongoModule) { now }
+        val approvals = AgentApprovalRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val email = ObjectId()
+        val waiting = runs.insertIfAbsent(emailRun(tenantId, email, RunStatus.WAITING).copy(resumeAt = now + 1.days))!!
+        val done = runs.insertIfAbsent(emailRun(tenantId, email, RunStatus.SUCCEEDED))!!
+        // Stored before runs always had steps: `$[]` must not trip over it.
+        val stepless = runs.insertIfAbsent(emailRun(tenantId, email, RunStatus.FAILED))!!
+        mongoModule.database.getCollection<Document>(AgentRunRepository.COLLECTION).updateOne(Filters.eq("_id", stepless.id), Updates.unset("steps"))
+        val otherEmail = runs.insertIfAbsent(emailRun(tenantId, ObjectId(), RunStatus.WAITING))!!
+        val otherCompany = runs.insertIfAbsent(emailRun(ObjectId(), email, RunStatus.WAITING))!!
+        val pending = approvals.insert(emailApproval(tenantId, email))
+        val decided = approvals.insert(emailApproval(tenantId, email, ApprovalStatus.APPROVED))
+        val untouched = approvals.insert(emailApproval(tenantId, ObjectId()))
+
+        runs.forgetEmails(tenantId, listOf(email.toHexString()))
+        approvals.forgetEmails(tenantId, listOf(email.toHexString()))
+
+        val ended = runs.load(waiting.id)!!
+        assertEquals(RunStatus.CANCELLED, ended.status)
+        assertEquals("record_removed", ended.outcome)
+        assertEquals(now, ended.finishedAt)
+        assertNull(ended.resumeAt)
+        for (forgotten in listOf(ended, runs.load(done.id)!!, runs.load(stepless.id)!!)) {
+            assertFalse("email" in forgotten.context || "event" in forgotten.context)
+            assertNull(forgotten.subjectLabel)
+            assertTrue(forgotten.steps.all { it.input == null && it.output == null })
+        }
+        assertEquals(RunStatus.SUCCEEDED, runs.load(done.id)!!.status, "a finished run keeps its outcome")
+        assertEquals(listOf(StepStatus.DONE), runs.load(done.id)!!.steps.map { it.status }, "and the record of its steps")
+        for (kept in listOf(otherEmail, otherCompany)) {
+            val again = runs.load(kept.id)!!
+            assertEquals(RunStatus.WAITING, again.status)
+            assertEquals("Pintura da sala", again.subjectLabel)
+            assertEquals(kept.steps.single().input, again.steps.single().input)
+        }
+
+        assertEquals(ApprovalStatus.CANCELLED, approvals.findById(tenantId, pending.id)!!.status)
+        assertEquals(ApprovalStatus.APPROVED, approvals.findById(tenantId, decided.id)!!.status)
+        for (id in listOf(pending.id, decided.id)) {
+            val forgotten = approvals.findById(tenantId, id)!!
+            assertTrue(forgotten.input.isEmpty())
+            assertEquals(ActionPreview(kind = "generic"), forgotten.preview)
+            assertNull(forgotten.subjectLabel)
+        }
+        assertEquals(untouched, approvals.findById(tenantId, untouched.id))
+    }
+
+    @Test
+    fun `when an email's text goes, what steps and decided approvals made of it goes too`() = runBlocking {
+        val runs = AgentRunRepository(mongoModule) { now }
+        val approvals = AgentApprovalRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val email = ObjectId()
+        val run = runs.insertIfAbsent(emailRun(tenantId, email, RunStatus.SUCCEEDED))!!
+        val pending = approvals.insert(emailApproval(tenantId, email))
+        val decided = approvals.insert(emailApproval(tenantId, email, ApprovalStatus.REJECTED))
+
+        runs.forgetEmailText(tenantId, listOf(email.toHexString()))
+        approvals.forgetEmailText(tenantId, listOf(email.toHexString()))
+
+        val after = runs.load(run.id)!!
+        assertTrue(after.steps.all { it.input == null && it.output == null })
+        assertEquals("Pintura da sala", after.subjectLabel, "who wrote and about what stay, as on the email itself")
+        assertEquals("maria@cliente.pt", after.context["email"]!!.jsonObject["from"]!!.jsonPrimitive.content)
+        assertEquals(RunStatus.SUCCEEDED, after.status)
+        assertEquals(pending, approvals.findById(tenantId, pending.id), "a pending approval still needs what it would do")
+        val forgotten = approvals.findById(tenantId, decided.id)!!
+        assertTrue(forgotten.input.isEmpty())
+        assertEquals(ActionPreview(kind = "generic"), forgotten.preview)
+        assertEquals("Pintura da sala", forgotten.subjectLabel)
     }
 
     @Test

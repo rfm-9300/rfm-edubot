@@ -1,6 +1,8 @@
 package com.rfm.edubot.integrations.email
 
 import com.rfm.edubot.admin.configureAdminAuth
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.config.AppConfig
@@ -104,7 +106,9 @@ class EmailRoutesTest {
     private val json = Json { ignoreUnknownKeys = true }
     private val google = FakeGoogle()
     private val integration = GoogleIntegration.create(mongo, { google.config }, cipher, google.http, NotificationRepository(mongo))
-    private val service = EmailService(integration, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), AgentSettingsRepository(mongo))
+    private val service = EmailService(
+        integration, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), AgentSettingsRepository(mongo), AgentRunRepository(mongo), AgentApprovalRepository(mongo),
+    )
 
     private class Company(val tenant: Tenant, val member: DashboardUser, val memberToken: String)
 

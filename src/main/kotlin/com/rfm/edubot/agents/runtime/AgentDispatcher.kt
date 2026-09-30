@@ -14,6 +14,8 @@ import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.DomainEventSignal
 import com.rfm.edubot.events.DomainEventTypes
 import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantTimeZones
 import kotlinx.coroutines.CancellationException
@@ -48,6 +50,7 @@ class AgentDispatcher(
     private val log = LoggerFactory.getLogger("AgentDispatcher")
     private val clock get() = module.services.clock
     private val activeByTenant = ConcurrentHashMap<ObjectId, List<Agent>>()
+    private val emails = EmailMessageRepository(module.mongo)
 
     fun start(scope: CoroutineScope): Job = scope.launch {
         warm()
@@ -101,12 +104,14 @@ class AgentDispatcher(
         }
         val tenant = tenants(event.tenantId) ?: return
         applyExitRules(tenant, agents, event)
+        var body: String? = null
+        val emailBody: suspend () -> String = { body ?: storedBody(event).also { body = it } }
         for (agent in agents) {
             if (event.actor.type == ActorType.AGENT && event.actor.id == agent.id.toHexString()) continue
             for (trigger in agent.definition.triggers) {
                 val fires = when (trigger.type) {
                     TriggerTypes.EVENT -> trigger.config.string("event") == event.type && eventFilters(trigger.config, event)
-                    TriggerTypes.EMAIL_RECEIVED -> event.type == DomainEventTypes.EMAIL_RECEIVED && emailFilters(trigger.config, event)
+                    TriggerTypes.EMAIL_RECEIVED -> event.type == DomainEventTypes.EMAIL_RECEIVED && emailFilters(trigger.config, event, emailBody)
                     else -> false
                 }
                 if (!fires) continue
@@ -120,6 +125,14 @@ class AgentDispatcher(
                 )
             }
         }
+    }
+
+    /** The text of the email an `email.received` event is about; the event itself carries none. */
+    private suspend fun storedBody(event: DomainEvent): String {
+        if (event.subject.type != SubjectTypes.EMAIL) return ""
+        val id = runCatching { ObjectId(event.subject.id) }.getOrNull() ?: return ""
+        val email = emails.find(event.tenantId, id) ?: return ""
+        return email.bodyText ?: email.snippet
     }
 
     /** Ends open runs on the event's record, or on records it relates to, whose agent says this event ends them. */
@@ -171,7 +184,8 @@ class AgentDispatcher(
             return true
         }
 
-        fun emailFilters(config: JsonObject, event: DomainEvent): Boolean {
+        /** The email trigger's narrowing; [body] is read only when the words to look for in it are all that's left to check. */
+        suspend fun emailFilters(config: JsonObject, event: DomainEvent, body: suspend () -> String): Boolean {
             fun field(name: String) = (event.payload[name] as? JsonPrimitive)?.contentOrNull.orEmpty()
             when (config.string("sender")) {
                 "known" -> if (field("clientId").isBlank()) return false
@@ -181,11 +195,11 @@ class AgentDispatcher(
             config.strings("subjectContains").takeIf { it.isNotEmpty() }?.let { words ->
                 if (words.none { field("subject").contains(it, ignoreCase = true) }) return false
             }
+            if (config.bool("hasPdf") == true && field("hasPdf") != "true") return false
             config.strings("bodyContains").takeIf { it.isNotEmpty() }?.let { words ->
-                val text = field("snippet") + " " + field("text")
+                val text = body()
                 if (words.none { text.contains(it, ignoreCase = true) }) return false
             }
-            if (config.bool("hasPdf") == true && field("hasPdf") != "true") return false
             return true
         }
     }

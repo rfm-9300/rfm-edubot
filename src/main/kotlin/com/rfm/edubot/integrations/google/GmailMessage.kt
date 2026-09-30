@@ -38,7 +38,7 @@ data class GmailMessage(
     /** Sent by a machine (newsletters, notifications, no-reply senders): automations may read it, never answer it. */
     val automated: Boolean,
 ) {
-    val hasPdf: Boolean get() = attachments.any { GmailMessages.isPdf(it) }
+    val hasPdf: Boolean get() = attachments.any { it.isPdf }
 }
 
 object GmailMessages {
@@ -87,9 +87,6 @@ object GmailMessages {
             automated = automated,
         )
     }
-
-    fun isPdf(attachment: EmailAttachmentInfo): Boolean =
-        attachment.mimeType.equals("application/pdf", ignoreCase = true) || attachment.filename.endsWith(".pdf", ignoreCase = true)
 
     /** `"Maria" <maria@example.com>, joao@example.com` → the valid addresses, lower-cased, with their names. */
     fun addresses(raw: String?): List<MailAddress> {

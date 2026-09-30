@@ -108,6 +108,17 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
             ),
         ).sort(Document("occurredAt", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toEvent() }
 
+    /** Removes [fields] from the payloads of the events on these records, e.g. the senders and subjects of emails that were deleted. */
+    suspend fun redact(tenantId: ObjectId, subjectType: String, ids: Collection<String>, fields: Collection<String>): Long {
+        if (fields.isEmpty()) return 0
+        return ids.chunked(REDACT_CHUNK).sumOf { chunk ->
+            collection.updateMany(
+                Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("subject.type", subjectType), Filters.`in`("subject.id", chunk)),
+                Updates.combine(fields.map { Updates.unset("payload.$it") }),
+            ).modifiedCount
+        }
+    }
+
     /** Recent events caused by agents, for the Home activity and the Agents module. */
     suspend fun recentByActorType(tenantId: ObjectId, type: ActorType, since: Instant, limit: Int = 50): List<DomainEvent> =
         collection.find(
@@ -135,6 +146,7 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
         const val DONE = "DONE"
         const val FAILED = "FAILED"
         private const val MAX_DISPATCH_ATTEMPTS = 5
+        private const val REDACT_CHUNK = 500
         private val log = LoggerFactory.getLogger("DomainEventLog")
     }
 }

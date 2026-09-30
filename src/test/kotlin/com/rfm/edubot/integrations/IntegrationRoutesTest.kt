@@ -5,6 +5,8 @@ import com.auth0.jwt.algorithms.Algorithm
 import com.mongodb.client.model.Filters
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.agents.model.PlatformAgentLimits
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.config.AppConfig
@@ -143,7 +145,7 @@ class IntegrationRoutesTest {
     }
 
     private fun emailFor(google: GoogleIntegration) =
-        EmailService(google, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), settings)
+        EmailService(google, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), settings, AgentRunRepository(mongo), AgentApprovalRepository(mongo))
 
     private fun routes(google: GoogleIntegration, block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
         application {

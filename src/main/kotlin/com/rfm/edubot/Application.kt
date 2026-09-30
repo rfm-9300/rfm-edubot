@@ -24,6 +24,8 @@ import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.AgentRuntimeConfig
 import com.rfm.edubot.agents.runtime.AgentServices
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
@@ -202,8 +204,11 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         outboundLog = OutboundLogRepository(mongoModule),
         events = DomainEventLog(mongoModule),
         agentSettings = AgentSettingsRepository(mongoModule),
+        runs = AgentRunRepository(mongoModule),
+        approvals = AgentApprovalRepository(mongoModule),
     )
-    EmailRetention(EmailMessageRepository(mongoModule)).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
+    EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
+        .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
     if (appConfig.google.inboxEnabled) {
         GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
             .job(SchedulerLease(mongoModule), appConfig.google.syncSeconds.seconds)

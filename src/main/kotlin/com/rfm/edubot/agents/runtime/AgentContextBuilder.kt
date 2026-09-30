@@ -22,6 +22,7 @@ import com.rfm.edubot.events.DomainEvent
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.instagram.InstagramCommentRepository
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
@@ -244,16 +245,26 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
                 }
                 Loaded(mapOf("comment" to variables), comment.fromUsername?.let { "@$it" } ?: comment.commentId, null, false)
             }
-            SubjectTypes.EMAIL -> emailLoader?.invoke(tenant, subject.id)?.let { (variables, clientId) ->
-                val client = clientId?.let { ClientRepository(mongo, tenant.id).findById(it) }
-                Loaded(withClient("email", variables, tenant, client, today, formatter), (variables["subject"] as? JsonPrimitive)?.content, client?.id, client?.automationPaused ?: false)
+            SubjectTypes.EMAIL -> id?.let { EmailMessageRepository(mongo).find(tenant.id, it) }?.let { email ->
+                val client = email.clientId?.let { ClientRepository(mongo, tenant.id).findById(it) }
+                val variables = buildJsonObject {
+                    put("id", email.id.toHexString())
+                    put("from", email.from)
+                    put("fromName", email.fromName?.takeIf { it.isNotBlank() } ?: email.from)
+                    put("subject", email.subject)
+                    put("snippet", email.snippet)
+                    put("text", (email.bodyText ?: email.snippet).take(MAX_EMAIL_TEXT))
+                    put("hasAttachments", email.attachments.isNotEmpty())
+                    put("hasPdf", email.attachments.any { it.isPdf })
+                    put("knownClient", client != null)
+                    email.threadId?.let { put("threadId", it) }
+                    put("automated", email.automated)
+                }
+                Loaded(withClient("email", variables, tenant, client, today, formatter), email.subject.ifBlank { email.from }, client?.id, client?.automationPaused ?: false)
             }
             else -> null
         } ?: Loaded(emptyMap(), null, null, false, exists = false)
     }
-
-    /** Loads an email's variables and matched client; set once the Gmail inbox is wired. */
-    var emailLoader: (suspend (Tenant, String) -> Pair<JsonObject, ObjectId?>?)? = null
 
     private suspend fun withClient(key: String, variables: JsonObject, tenant: Tenant, client: Client?, today: LocalDate, formatter: ValueFormatter): Map<String, JsonElement> =
         buildMap {
@@ -298,4 +309,9 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
                 .sort(Document("createdAt", -1)).limit(1).toList().firstOrNull()
                 ?.getDate("createdAt")?.let { Instant.fromEpochMilliseconds(it.time) }
         }.maxOrNull()
+
+    private companion object {
+        /** How much of an email's text steps see. */
+        const val MAX_EMAIL_TEXT = 8_000
+    }
 }

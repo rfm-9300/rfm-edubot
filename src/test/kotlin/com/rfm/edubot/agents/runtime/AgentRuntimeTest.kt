@@ -34,8 +34,13 @@ import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.email.EmailDirection
+import com.rfm.edubot.integrations.email.EmailMessage
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.notifications.NotificationKinds
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.Tenant
@@ -50,7 +55,9 @@ import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
@@ -61,6 +68,7 @@ import org.junit.jupiter.api.BeforeEach
 import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.days
@@ -340,6 +348,38 @@ class AgentRuntimeTest {
         assertEquals(1, resumed.currentStep)
         assertEquals(StepStatus.DONE, resumed.steps.single().status)
         assertTrue(sent.isEmpty())
+    }
+
+    @Test
+    fun `a received email starts the agents looking for its words, and the run keeps none of its text`() = runBlocking {
+        fun lookingFor(word: String) = TriggerSpec("e1", TriggerTypes.EMAIL_RECEIVED, buildJsonObject { put("bodyContains", buildJsonArray { add(JsonPrimitive(word)) }) })
+        val leads = agent(AgentDefinition(listOf(lookingFor("orçamento")), steps = listOf(step("s1", "test.note", text("{{email.fromName}}: {{email.subject}} ({{email.text}})"))), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
+        val bills = agent(AgentDefinition(listOf(lookingFor("fatura")), steps = listOf(step("s1", "test.note", text("bill"))), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
+        val client = ClientRepository(mongo, tenant.id).create("Maria Silva", "+351 912 345 678", email = "maria@cliente.pt")
+        val email = EmailMessageRepository(mongo).insert(
+            EmailMessage(
+                tenantId = tenant.id, connectionId = ObjectId(), providerMessageId = "m1", direction = EmailDirection.INBOUND,
+                from = "maria@cliente.pt", fromName = "Maria Silva", to = listOf("obras@example.pt"), subject = "Pintura da sala",
+                snippet = "Olá, queria um orçamento", bodyText = "Olá, queria um orçamento para pintar a sala.", clientId = client.id, date = now, createdAt = now,
+            ),
+        )
+        DomainEventLog(mongo).append(
+            tenant.id, DomainEventTypes.EMAIL_RECEIVED, SubjectRef.of(SubjectTypes.EMAIL, email.id),
+            buildJsonObject { put("from", email.from); put("subject", email.subject); put("clientId", client.id.toHexString()) },
+            related = listOf(SubjectRef.of(SubjectTypes.CLIENT, client.id)),
+        )
+
+        runtime.dispatcher.drain()
+        val run = awaitRun(leads) { it.status == RunStatus.SUCCEEDED }
+
+        assertEquals(listOf("Maria Silva: Pintura da sala (Olá, queria um orçamento para pintar a sala.)"), noted, "steps read the email's text from the email itself")
+        assertEquals(0, runsFor(bills).size, "the words weren't in this email")
+        assertEquals(client.id, run.clientId)
+        assertEquals("Pintura da sala", run.subjectLabel)
+        val stored = run.context["email"]!!.jsonObject
+        assertEquals("maria@cliente.pt", stored["from"]!!.jsonPrimitive.content)
+        assertEquals("true", stored["knownClient"]!!.jsonPrimitive.content)
+        assertFalse("text" in stored || "snippet" in stored, "the run's context keeps no copy of the email's text")
     }
 
     @Test

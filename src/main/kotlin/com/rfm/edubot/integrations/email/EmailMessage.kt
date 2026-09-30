@@ -6,7 +6,9 @@ import org.bson.types.ObjectId
 
 enum class EmailDirection { OUTBOUND, INBOUND }
 
-data class EmailAttachmentInfo(val filename: String, val mimeType: String, val size: Int)
+data class EmailAttachmentInfo(val filename: String, val mimeType: String, val size: Int) {
+    val isPdf: Boolean get() = mimeType.equals("application/pdf", ignoreCase = true) || filename.endsWith(".pdf", ignoreCase = true)
+}
 
 /**
  * One email sent from or received in a company's connected account (`email_messages`), for the
