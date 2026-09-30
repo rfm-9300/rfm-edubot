@@ -1477,7 +1477,7 @@
     const q = (d.state.search || '').toLowerCase();
     const items = approvals
       ? data.approvals.filter(a => !q || `${a.agentName} ${a.subjectLabel || ''} ${a.preview?.body || ''}`.toLowerCase().includes(q)).map(approvalRow)
-      : data.tasks.filter(t => !q || `${t.title} ${t.subjectLabel || ''}`.toLowerCase().includes(q)).map(taskRow);
+      : data.tasks.filter(t => !q || `${t.title} ${t.subjectLabel || ''}`.toLowerCase().includes(q)).map(t => taskRow(t));
     const empty = approvals
       ? `<div class="empty"><p class="empty__title">${esc(tr('inbox.emptyApprovals'))}</p><p class="empty__desc">${esc(tr('inbox.emptyApprovalsDesc'))}</p></div>`
       : `<div class="empty"><p class="empty__title">${esc(tr('inbox.emptyTasks'))}</p><p class="empty__desc">${esc(tr('inbox.emptyTasksDesc'))}</p></div>`;
@@ -1501,11 +1501,13 @@
       <span class="worklist__side"><span class="worklist__meta">${pill(expiresSoon ? 'warn' : '', tr('inbox.expires', { when: d.relTime(a.expiresAt) }))}</span><span class="worklist__when">${esc(d.relTime(a.createdAt))}</span></span>
     </button></li>`;
   }
-  function taskRow(t) {
+  /** A task row; on the record [shownOn] it's about, the record's own label is left out. */
+  function taskRow(t, shownOn = null) {
     const overdue = t.status === 'OPEN' && t.dueAt && new Date(t.dueAt).getTime() < Date.now();
+    const here = shownOn && t.subject && t.subject.type === shownOn.type && t.subject.id === shownOn.id;
     return `<li><button class="worklist__item" type="button" data-task="${esc(t.id)}" data-tone="${t.status !== 'OPEN' ? 'muted' : overdue ? 'bad' : 'info'}">
       <span class="worklist__dot" aria-hidden="true"></span>
-      <span class="worklist__main"><span class="worklist__title">${esc(t.title)}</span><span class="worklist__detail">${esc([t.subjectLabel, t.agentName ? tr('inbox.fromAgent', { agent: t.agentName }) : ''].filter(Boolean).join(' · '))}</span></span>
+      <span class="worklist__main"><span class="worklist__title">${esc(t.title)}</span><span class="worklist__detail">${esc([here ? '' : t.subjectLabel, t.agentName ? tr('inbox.fromAgent', { agent: t.agentName }) : ''].filter(Boolean).join(' · '))}</span></span>
       <span class="worklist__side">${t.assigneeName ? `<span class="worklist__meta">${esc(t.assigneeName)}</span>` : ''}${t.dueAt ? `<span class="worklist__when">${esc(d.relTime(t.dueAt))}</span>` : ''}</span>
     </button></li>`;
   }
@@ -1720,7 +1722,7 @@
     if (hideEmpty && !rows && !manual.length) { el.innerHTML = ''; return; }
     const group = (label, items) => (items.length ? `<li class="worklist__group">${esc(label)}</li>${items.join('')}` : '');
     const list = rows
-      ? `<ul class="worklist">${group(tr('automations.upcoming'), upcoming.map(r => autoRunRow(r, subject)))}${group(tr('automations.tasks'), tasks.map(taskRow))}${group(tr('automations.recent'), recent.map(r => autoRunRow(r, subject)))}</ul>`
+      ? `<ul class="worklist">${group(tr('automations.upcoming'), upcoming.map(r => autoRunRow(r, subject)))}${group(tr('automations.tasks'), tasks.map(t => taskRow(t, subject)))}${group(tr('automations.recent'), recent.map(r => autoRunRow(r, subject)))}</ul>`
       : (hideEmpty ? '' : `<div class="empty"><p class="empty__title">${esc(tr('automations.empty'))}</p><p class="empty__desc">${esc(tr('automations.emptyDesc'))}</p></div>`);
     const runner = manual.length && !paused
       ? `<div class="panel__filters"><select class="sel" data-auto-agent aria-label="${esc(tr('automations.runLabel'))}">${manual.map(a => `<option value="${esc(a.id)}">${esc(a.name)}</option>`).join('')}</select><button class="btn btn--sm" type="button" data-auto-start>${esc(A.runNow)}</button></div>`
