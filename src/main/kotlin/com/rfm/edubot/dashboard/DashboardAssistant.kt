@@ -5,11 +5,17 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.ai.AiClient
-import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
+import com.rfm.edubot.ai.tools.BookingToolPack
+import com.rfm.edubot.ai.tools.CompositeToolPack
+import com.rfm.edubot.ai.tools.CrmToolPack
+import com.rfm.edubot.ai.tools.TokenCount
+import com.rfm.edubot.ai.tools.ToolLoop
+import com.rfm.edubot.ai.tools.ToolPack
+import com.rfm.edubot.ai.tools.WriteDecision
 import com.rfm.edubot.bookings.BookingTools
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
@@ -205,6 +211,10 @@ internal class DashboardAssistantService(
     private val mongo: MongoModule,
     private val aiClient: AiClient,
     val repository: DashboardAssistantRepository = DashboardAssistantRepository(mongo),
+    /** More tools for a tenant (the agents pack when that module is on); their writes are confirmed like the rest. */
+    private val extraTools: (Tenant) -> ToolPack? = { null },
+    private val extraPrompts: (Tenant, List<String>) -> List<String> = { _, _ -> emptyList() },
+    private val onUsage: suspend (Tenant, TokenCount) -> Unit = { _, _ -> },
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("DashboardAssistantService")
@@ -257,7 +267,6 @@ internal class DashboardAssistantService(
     ) {
         val tools = assistantTools(tenant)
         val definitions = DashboardAssistantToolPolicy.filterDefinitions(tools.definitions, enabledModules)
-        val allowed = definitions.map { it.name }.toSet()
         val context = mutableListOf(ChatMessage(role = "system", content = ASSISTANT_PROMPT))
         context.add(ChatMessage(role = "system", content = SystemPrompts.currentDateTimeContext(tenant.timezone)))
         SystemPrompts.crmPromptFor(enabledModules.toSet())?.let { crmPrompt ->
@@ -266,70 +275,49 @@ internal class DashboardAssistantService(
         if (DashboardModules.BOOKINGS in enabledModules) {
             context.add(ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE))
         }
+        extraPrompts(tenant, enabledModules).forEach { context.add(ChatMessage(role = "system", content = it)) }
         history.takeLast(30).forEach { context.add(ChatMessage(role = it.role, content = it.content)) }
         extra?.let(context::add)
 
-        repeat(4) {
-            when (val response = aiClient.complete(context, definitions, modelOverride = tenant.openrouterModel)) {
-                is AiResponse.Text -> {
-                    repository.addMessage(tenant.id, ownerKey, threadId, "assistant", response.content)
-                    return
-                }
-                is AiResponse.ToolUse -> {
-                    context.add(response.message)
-                    var hasPendingWrite = false
-                    response.calls.forEach { call ->
-                        when {
-                            call.name !in allowed -> context.add(toolResult(call, buildJsonObject { put("error", "tool_not_allowed") }))
-                            DashboardAssistantToolPolicy.isReadOnly(call.name) -> {
-                                val result = runCatching { tools.execute(call) }
-                                    .getOrElse { buildJsonObject { put("error", "tool_failed"); put("message", it.message ?: "tool failure") } }
-                                context.add(toolResult(call, result))
-                            }
-                            else -> {
-                                hasPendingWrite = true
-                                repository.addMessage(
-                                    tenant.id,
-                                    ownerKey,
-                                    threadId,
-                                    "assistant",
-                                    "",
-                                    AssistantAction(call.id, call.name, call.arguments, "PENDING"),
-                                )
-                            }
-                        }
-                    }
-                    if (hasPendingWrite) return
-                }
-            }
-        }
-        val fallback = aiClient.complete(
-            context + ChatMessage(role = "system", content = "Answer the user now without calling tools."),
-            emptyList(),
+        // Every write waits for the user's confirmation in the dashboard.
+        val result = ToolLoop(aiClient).run(
+            messages = context,
+            tools = tools,
+            definitions = definitions,
+            maxIterations = 4,
             modelOverride = tenant.openrouterModel,
+            decide = { WriteDecision.PROPOSE },
         )
-        val content = (fallback as? AiResponse.Text)?.content ?: "Unable to complete this request."
-        repository.addMessage(tenant.id, ownerKey, threadId, "assistant", content)
+        onUsage(tenant, result.usage)
+        if (result.proposals.isNotEmpty()) {
+            result.proposals.forEach { call ->
+                repository.addMessage(
+                    tenant.id,
+                    ownerKey,
+                    threadId,
+                    "assistant",
+                    "",
+                    AssistantAction(call.id, call.name, call.arguments, "PENDING"),
+                )
+            }
+            return
+        }
+        repository.addMessage(tenant.id, ownerKey, threadId, "assistant", result.text ?: "Unable to complete this request.")
     }
 
-    private fun assistantTools(tenant: Tenant): AssistantToolFacade {
+    private fun assistantTools(tenant: Tenant): ToolPack {
         val crm = CrmTools(
             ClientRepository(mongo, tenant.id),
             QuoteRepository(mongo, tenant.id),
             InvoiceRepository(mongo, tenant.id),
             StandardItemRepository(mongo, tenant.id),
         )
-        return AssistantToolFacade(crm, bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools())
+        return CompositeToolPack(
+            CrmToolPack(crm),
+            BookingToolPack(bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools()),
+            extraTools(tenant),
+        )
     }
-
-    private class AssistantToolFacade(private val crm: CrmTools, private val booking: BookingTools) {
-        val definitions: List<ToolDefinition> = crm.definitions + booking.definitions
-        suspend fun execute(call: ToolCall): JsonObject =
-            if (booking.knows(call.name)) booking.execute(call) else crm.execute(call)
-    }
-
-    private fun toolResult(call: ToolCall, result: JsonObject) =
-        ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id)
 
     companion object {
         private val ASSISTANT_PROMPT = """

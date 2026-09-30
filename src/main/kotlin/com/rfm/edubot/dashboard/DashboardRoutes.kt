@@ -4,9 +4,10 @@ import at.favre.lib.crypto.bcrypt.BCrypt
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.rfm.edubot.ai.AiClient
-import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
+import com.rfm.edubot.ai.tools.CrmToolPack
+import com.rfm.edubot.ai.tools.ToolLoop
 import com.rfm.edubot.admin.CreateClientRequest
 import com.rfm.edubot.admin.CreateClientServiceRequest
 import com.rfm.edubot.admin.CreateInvoiceRequest
@@ -1297,8 +1298,6 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
     .withExpiresAt(Date(System.currentTimeMillis() + expiryHours * 60L * 60L * 1000L))
     .sign(Algorithm.HMAC256(config.jwtSecret))
 
-private val personaTestJson = Json { ignoreUnknownKeys = true; explicitNulls = false }
-
 /**
  * Ephemeral persona playground: runs the tenant's saved persona against an in-memory chat history
  * with read-only CRM tools only. Nothing is persisted, dedup/rate-limit are bypassed, and write
@@ -1326,57 +1325,29 @@ private suspend fun runPersonaTest(
         context.add(ChatMessage(role = role, content = msg.content))
     }
 
-    val crmTools = CrmTools(
-        ClientRepository(mongo, tenant.id),
-        QuoteRepository(mongo, tenant.id),
-        InvoiceRepository(mongo, tenant.id),
-        StandardItemRepository(mongo, tenant.id),
+    val crmTools = CrmToolPack(
+        CrmTools(
+            ClientRepository(mongo, tenant.id),
+            QuoteRepository(mongo, tenant.id),
+            InvoiceRepository(mongo, tenant.id),
+            StandardItemRepository(mongo, tenant.id),
+        ),
     )
-    val toolDefs = crmTools.readOnlyDefinitionsFor(modules)
-    val allowedTools = toolDefs.map { it.name }.toSet()
-
-    var reply = "Desculpe, não consegui processar isso."
-    var iterations = 0
-    var completed = false
-    while (!completed && iterations < 4) {
-        iterations += 1
-        when (val response = aiClient.complete(context, toolDefs, modelOverride = tenant.openrouterModel)) {
-            is AiResponse.Text -> {
-                reply = response.content
-                completed = true
+    val result = ToolLoop(aiClient).run(
+        messages = context,
+        tools = crmTools,
+        definitions = crmTools.readOnlyDefinitionsFor(modules),
+        maxIterations = 4,
+        modelOverride = tenant.openrouterModel,
+        fallbackInstruction = "Responda agora ao utilizador sem chamar ferramentas.",
+        deniedResult = {
+            buildJsonObject {
+                put("error", "tool_not_available_in_test")
+                put("message", "This action is disabled in the persona test chat.")
             }
-            is AiResponse.ToolUse -> {
-                context.add(response.message)
-                for (call in response.calls) {
-                    val result = if (call.name in allowedTools) {
-                        try {
-                            crmTools.execute(call)
-                        } catch (e: Exception) {
-                            buildJsonObject {
-                                put("error", "tool_failed")
-                                put("message", e.message ?: "tool failure")
-                            }
-                        }
-                    } else {
-                        buildJsonObject {
-                            put("error", "tool_not_available_in_test")
-                            put("message", "This action is disabled in the persona test chat.")
-                        }
-                    }
-                    context.add(ChatMessage(role = "tool", content = personaTestJson.encodeToString(result), toolCallId = call.id))
-                }
-            }
-        }
-    }
-    if (!completed) {
-        val final = aiClient.complete(
-            context + ChatMessage(role = "system", content = "Responda agora ao utilizador sem chamar ferramentas."),
-            emptyList(),
-            modelOverride = tenant.openrouterModel,
-        )
-        if (final is AiResponse.Text) reply = final.content
-    }
-    return reply
+        },
+    )
+    return result.text ?: "Desculpe, não consegui processar isso."
 }
 
 @Serializable private data class DashboardLoginResponse(val token: String)
