@@ -9,66 +9,131 @@
     body { font: 16px/1.6 -apple-system, system-ui, Segoe UI, Roboto, sans-serif;
            max-width: 760px; margin: 0 auto; padding: 40px 20px; color: #1a1a1a; }
     @media (prefers-color-scheme: dark) { body { color: #e6e6e6; background: #121212; } a { color: #6ea8fe; } }
-    h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; }
+    h1 { font-size: 1.8rem; } h2 { font-size: 1.2rem; margin-top: 2rem; } h3 { font-size: 1.05rem; margin-top: 1.4rem; }
     code { background: rgba(127,127,127,.18); padding: 1px 5px; border-radius: 4px; }
     .meta { opacity: .7; font-size: .9rem; }
   </style>
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: 8 June 2026</p>
+  <p class="meta">Last updated: 30 September 2026</p>
 
-  <p>TheBotsLab (&ldquo;we&rdquo;, &ldquo;us&rdquo;) operates a messaging assistant that lets a
-  business receive and answer customer messages on <strong>WhatsApp</strong> and
-  <strong>Instagram</strong> through an automated AI agent. This policy explains what data we process
-  when a business connects an account and when its customers send messages.</p>
+  <p>TheBotsLab (&ldquo;we&rdquo;, &ldquo;us&rdquo;) operates a CRM with a messaging assistant: a business
+  receives and answers customer messages on <strong>WhatsApp</strong> and <strong>Instagram</strong>
+  through an automated AI agent, keeps its clients, quotes and invoices, runs
+  <strong>automations</strong> it sets up, and can send email from its own <strong>Gmail or Google
+  Workspace</strong> account. This policy explains what data we process when a business connects an
+  account and when its customers write to it.</p>
 
   <h2>1. Who this applies to</h2>
-  <p>Two groups: the <strong>business</strong> that connects its own WhatsApp or Instagram
-  professional account to our service, and the <strong>end users</strong> who message that business.</p>
+  <p>Two groups: the <strong>business</strong> that uses our service and connects its own WhatsApp,
+  Instagram or Google account to it, and the <strong>end users</strong> (the business&rsquo;s customers)
+  who message or email that business.</p>
 
   <h2>2. Data we collect</h2>
   <ul>
     <li><strong>Connected account data</strong> — when a business connects an Instagram account, we
       receive and store its Instagram account ID, username, and an access token issued by Meta. For
-      WhatsApp we store the phone number ID and access token. Tokens are used only to send and receive
-      messages on that account&rsquo;s behalf and are never shown back to the browser.</li>
+      WhatsApp we store the phone number ID and access token. For Google, see
+      <a href="#google">section 5</a>. Tokens are used only to act on that account&rsquo;s behalf and are
+      never shown back to the browser.</li>
     <li><strong>Message data</strong> — the content, sender ID, and timestamps of direct messages sent
       to a connected account, plus the replies we generate, so the assistant can maintain conversation
       context.</li>
+    <li><strong>Business records</strong> — the clients, quotes, invoices, bookings and payments the
+      business keeps with us, and the automations it sets up: their runs, the approvals and tasks they
+      create, and the messages and emails they send.</li>
     <li><strong>Operational data</strong> — delivery status and minimal logs (identifiers and
       timestamps, not message bodies) used to run and debug the service.</li>
   </ul>
 
   <h2>3. How we use it</h2>
-  <p>Solely to deliver the service: receive incoming messages, generate a relevant reply with an AI
-  model, and send that reply back on the same channel. We do <strong>not</strong> sell personal data,
-  use it for advertising, or build cross-site profiles.</p>
+  <p>Solely to deliver the service to the business: receive incoming messages, generate a relevant reply
+  with an AI model, send that reply back on the same channel, run the automations the business turned
+  on, and send the emails the business or its automations write. We do <strong>not</strong> sell
+  personal data, use it for advertising, or build cross-site profiles.</p>
 
   <h2>4. Third parties we share with</h2>
   <ul>
     <li><strong>Meta Platforms</strong> — the WhatsApp Business and Instagram Graph APIs, to receive
       and send messages.</li>
+    <li><strong>Google</strong> — the Gmail API, to send email from an account the business connected
+      (<a href="#google">section 5</a>).</li>
     <li><strong>OpenRouter / the underlying LLM provider</strong> — message text is sent to generate a
-      reply. We do not send access tokens to the model provider.</li>
-    <li><strong>Our database (MongoDB)</strong> — message and account data is stored on infrastructure
-      we control.</li>
+      reply, and the text an automation step works on is sent to produce its result. We do not send
+      access tokens to the model provider.</li>
+    <li><strong>Our database (MongoDB)</strong> — message, account and business data is stored on
+      infrastructure we control.</li>
   </ul>
 
-  <h2>5. Retention</h2>
-  <p>We keep connected-account data for as long as the account stays connected, and conversation data
-  for as long as needed to provide the service. When a business disconnects an account — or Meta sends
-  us a deauthorization for it — we remove the stored access token and stop processing messages for that
-  account.</p>
+  <h2 id="google">5. Google account and Gmail data</h2>
+  <p>A company administrator can connect the company&rsquo;s Gmail or Google Workspace account in the
+  dashboard (<strong>Settings → Channels → Email (Google)</strong>), so quotes, invoices and messages go
+  out from the company&rsquo;s own address.</p>
 
-  <h2>6. Your rights &amp; deleting your data</h2>
+  <h3>What we access</h3>
+  <ul>
+    <li><strong>Your Google account&rsquo;s email address</strong> (scopes <code>openid</code> and
+      <code>email</code>), to know which account was connected and to show it in the dashboard.</li>
+    <li><strong>Sending email as that account</strong> (scope <code>gmail.send</code>). We send only the
+      emails a person in the company sends from the dashboard (for example &ldquo;Send by email&rdquo; on
+      a quote), the test email they ask for, and the emails of automations the company set up and turned
+      on. This scope does not let us read your mailbox.</li>
+    <li><strong>Reading the inbox</strong> (scopes <code>gmail.readonly</code> and
+      <code>gmail.modify</code>) — only if the company turns on &ldquo;Use my inbox in automations&rdquo;,
+      which asks Google for this separately. We then read new messages in the inbox to link them to the
+      company&rsquo;s clients, show them on the client&rsquo;s record and start the automations the
+      company chose (for example, logging a supplier&rsquo;s bill). We don&rsquo;t read, send or change
+      anything else.</li>
+  </ul>
+
+  <h3>How we store it</h3>
+  <ul>
+    <li>Google&rsquo;s access and refresh tokens are encrypted at rest (AES-256-GCM) and used only by our
+      servers to call Google; they are never sent to the browser.</li>
+    <li>For each email we send or receive we keep the sender, recipients, subject, date, attachment
+      names and the text, so the company sees its email history on the client&rsquo;s record.
+      <strong>The text is deleted 90 days after the email&rsquo;s date</strong>; the subject, recipients
+      and attachment names stay as the record of what was sent. We don&rsquo;t keep attachment
+      contents.</li>
+    <li>When the company disconnects the account, we delete its tokens and all the email we kept from
+      it, and revoke our access with Google (unless another company on our service still uses the same
+      Google account).</li>
+  </ul>
+
+  <h3>Limited Use</h3>
+  <p>TheBotsLab&rsquo;s use and transfer to any other app of information received from Google APIs will
+  adhere to the <a href="https://developers.google.com/terms/api-services-user-data-policy">Google API
+  Services User Data Policy</a>, including the Limited Use requirements. In particular:</p>
+  <ul>
+    <li>We use Gmail data only to provide the features described above, which the company can see and
+      control in the dashboard.</li>
+    <li>We don&rsquo;t transfer it to others, except to the AI model provider when an automation the
+      company set up works on an email (for example, drafting a reply), to produce that result only; as
+      needed for security or to comply with the law; or as part of a merger, acquisition or sale of our
+      business, with your explicit consent beforehand.</li>
+    <li>We never use Gmail data for advertising, and we never use it to develop, improve or train
+      generalized AI or machine-learning models.</li>
+    <li>No person reads Gmail data, unless the company asks us to for support, it is needed for security
+      (such as investigating abuse), or the law requires it.</li>
+  </ul>
+
+  <h2>6. Retention</h2>
+  <p>We keep connected-account data for as long as the account stays connected, and conversation data
+  for as long as needed to provide the service. Email text is deleted after 90 days (<a href="#google">section
+  5</a>). When a business disconnects an account — or Meta sends us a deauthorization for it — we remove
+  the stored access token and stop processing messages for that account; disconnecting a Google account
+  also deletes the email kept from it.</p>
+
+  <h2>7. Your rights &amp; deleting your data</h2>
   <p>You can request access to, or deletion of, the data we hold about you at any time. See our
   <a href="/data-deletion">Data Deletion</a> page, or email us at
   <a href="mailto:hello@thebotslab.pt">hello@thebotslab.pt</a>. A business can also disconnect an account at
-  any time from the operator dashboard or from its Instagram settings, which triggers removal of the
-  stored token for that account.</p>
+  any time from the dashboard, from its Instagram settings, or from its Google Account
+  (<a href="https://myaccount.google.com/permissions">Third-party connections</a>), which ends our access
+  to that account.</p>
 
-  <h2>7. Contact</h2>
+  <h2>8. Contact</h2>
   <p>Questions about this policy: <a href="mailto:hello@thebotslab.pt">hello@thebotslab.pt</a>.</p>
 </body>
 </html>
