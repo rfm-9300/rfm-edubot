@@ -179,7 +179,7 @@ Optional `agents` module, grouped with Persona and the AI assistant. `app/agents
 
 The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval; there's no "Open record" when the trail already goes back to that record.
 
-Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand); and the top-bar notifications (see Notifications).
+Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand); and the top-bar notifications (see Notifications). After "Run now" there, the block looks again every 1.5 s (up to five times) until the run is no longer queued or running, so it ends on what happened.
 
 ## Settings (tenant)
 

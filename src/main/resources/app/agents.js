@@ -1742,6 +1742,18 @@
       if (onChange) onChange(next);
       else renderAutomations(el, subject, next, opts);
     };
+    // A run started by hand usually ends within seconds: look again until it has, while this drawer is open.
+    const settle = async gen => {
+      for (let i = 0; i < 5; i++) {
+        const next = await d.api(subjectPath(subject)).catch(() => null);
+        if (!next || gen !== d.drawerGen()) return;
+        if (onChange) onChange(next);
+        else if (el.isConnected) renderAutomations(el, subject, next, opts);
+        else return;
+        if (!(next.upcoming || []).some(r => r.status === 'QUEUED' || r.status === 'RUNNING')) return;
+        await new Promise(resolve => setTimeout(resolve, 1500));
+      }
+    };
     const runs = [...upcoming, ...recent];
     $$('[data-auto-run]', el).forEach(b => b.addEventListener('click', () => {
       const run = runs.find(r => r.id === b.dataset.autoRun);
@@ -1760,7 +1772,7 @@
       try {
         await d.api(`/app/api/agents/${encodeURIComponent(agentId)}/run`, { method: 'POST', body: JSON.stringify({ subjectType: subject.type, subjectId: subject.id }) });
         d.toast(A.started);
-        await refetch();
+        await settle(d.drawerGen());
       } catch (err) {
         button.disabled = false;
         d.toast(err?.code ? reasonText(err.code) : A.actionFailed);
