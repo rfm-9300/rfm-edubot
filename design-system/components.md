@@ -744,6 +744,25 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 </div>
 ```
 
+## Email (Google)
+
+Gmail shows up in four places, all built from existing parts ([patterns.md](patterns.md#email-google)); strings live under `app.integrations.google.*`.
+
+- **Settings → Channels**: one "Email (Google)" row per connected account in the channels `.tbl`: the account in `.mono`, the status as text when it can send, `.pill--warn` when it needs reconnecting, `.pill--bad` when access was removed, and `.pill--info` Default once there are two accounts. Actions: Reconnect (`.btn--primary`, admins), Manage (admins and operators), and a ghost "Add account" on the last row. With no account the row offers Connect, or a muted "a company admin connects it". The row is hidden while the platform has no Google OAuth client.
+- **Account drawer** (Settings): a `.notice--warn` with Reconnect while the account can't send (a test email Google refuses reopens the drawer in that state), a `dl.dash-facts` (account, connected by, sent today of the daily limit), then the form: sender name, reply-to, signature (`.txt`) and, with several accounts, a `.form__check` "Send from this account by default". `.actions`: Save, Send a test email (ghost), Disconnect (ghost; the confirm carries `.btn--danger`).
+- **Send by email** (quote and invoice `.detail__foot`): a drawer form with To, Cc, Subject, Message (`.txt`), a `.form__check` for the PDF (its file name in the label) and a `.hint` naming the sending account (and, for a pending quote, that sending marks it sent). A client without an email gets a `.hint--warn` under To. When nothing can send, a `.notice--warn` names the sending account that needs reconnecting (or says none is connected yet), with Open Settings, and Send stays disabled.
+- **Client record → Emails**: a `.worklist` of messages, newest first (dot `info` sent, `accent` received; title: subject; detail: recipient · attachments · snippet; when: relative date), or `.empty`. A row opens the message drawer, titled with the subject: `.detail__head` (sender name + direction pill), `dl.dash-facts` (from address, to, cc, date, sent by), the text in `.email-body` (or a `.hint` once the retention period dropped it) and "Open the quote / invoice" in `.detail__foot`.
+
+```html
+<div class="email-body">Olá Ana,
+
+Segue em anexo o orçamento ORC-001.</div>
+```
+
+`.email-body` is an email's plain text in the reading font with its line breaks kept (`--surface-2`, `--line-soft`, scrolls past 420px). Escape the text. Not for script output (`.log-tail`) or chat (`.bubble`).
+
+A `.notice` placed straight in a drawer `.form` (like in `.record` and `.builder`) drops its bottom margin; the form's gap spaces it.
+
 ## Log tail
 
 ```html

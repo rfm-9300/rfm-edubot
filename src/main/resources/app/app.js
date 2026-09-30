@@ -20,6 +20,8 @@ let state = {
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
   settingsSection: 'channels', personaAdvanced: false, overviewLayout: null, overviewExtended: false,
   whatsAppSignup: { enabled: false },
+  // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
+  integrations: null, email: null,
   fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false },
 };
 let personaChatBusy = false;
@@ -31,6 +33,13 @@ let fbSdkPromise = null;
 const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
+const GOOGLE = I18N.section('app.integrations.google');
+const googleText = (key, params) => I18N.t(`app.integrations.google.${key}`, params);
+// Server error keys the catalog doesn't know read as the fallback.
+const googleTextOr = (key, fallback) => {
+  const text = googleText(key);
+  return typeof text === 'string' && text !== `app.integrations.google.${key}` ? text : fallback;
+};
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 // AI chat bubbles render as plain pre-wrapped text (see .chat__msg in style.css), but the model
 // writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
@@ -821,6 +830,8 @@ function wireCompaniesPanel(root) {
 }
 
 async function bootAuthed() {
+  state.email = null;
+  state.integrations = null;
   state.me = await api('/app/api/me');
   // Adopt the tenant's language (unless the user picked an explicit override this session), then
   // refresh the static chrome that was rendered before /me resolved.
@@ -997,6 +1008,7 @@ async function loadModule(tab) {
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
+    await refreshGoogle();
     state.documentTemplate = await api('/app/api/settings/document-template').catch(() => null);
     state.overviewLayout = await api('/app/api/settings/overview').catch(() => ({ hidden: [], available: [] }));
     state.companies = companiesEnabled() ? await api('/app/api/companies').catch(() => null) : null;
@@ -3671,7 +3683,9 @@ async function loadClientRecord(id) {
   const conversations = !hasModule('conversations') ? Promise.resolve([])
     : state.fetched.conversations ? Promise.resolve(state.conversations)
     : api('/app/api/conversations').catch(() => []);
-  const [client, quotes, invoices, services, bookings, payments, chats, automations] = await Promise.all([
+  // Mail is kept only while an account is connected, so without one there's no Emails tab.
+  const emails = emailStatus().then(s => (s?.configured && s.from ? api(`/app/api/email/messages?clientId=${q}`).catch(() => null) : null));
+  const [client, quotes, invoices, services, bookings, payments, chats, automations, mail] = await Promise.all([
     api(`/app/api/crm/clients/${q}`).catch(() => null),
     related('quotes', `/app/api/crm/quotes?clientId=${q}`),
     related('invoices', `/app/api/crm/invoices?clientId=${q}`),
@@ -3680,6 +3694,7 @@ async function loadClientRecord(id) {
     related('payments', `/app/api/crm/payments?clientId=${q}`),
     conversations,
     hasModule('agents') ? api(`/app/api/agents/subjects/client/${q}`).catch(() => null) : null,
+    emails,
     ensureBookingData(),
   ]);
   return {
@@ -3691,6 +3706,7 @@ async function loadClientRecord(id) {
     payments: payments || [],
     conversation: client ? matchConversation(client, chats || []) : null,
     automations,
+    emails: mail,
   };
 }
 
@@ -4081,6 +4097,10 @@ function clientPaneHtml(r, m, bk) {
   const act = kind => (r.client.archivedAt ? null : kind);
   if (r.tab === 'automations') return '<div data-client-automations></div>';
   if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
+  if (r.tab === 'emails') {
+    if (!r.emails?.length) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(GOOGLE.empty)}</p><p class="empty__desc">${escapeHTML(GOOGLE.emptyDesc)}</p></div></div>`;
+    return `<div class="panel"><ul class="worklist">${r.emails.map(emailRowHtml).join('')}</ul></div>`;
+  }
   if (r.tab === 'bookings') {
     if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, act('booking'), STR.bookingsNewForClient);
     const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="booking:${escapeHTML(b.id)}">
@@ -4141,6 +4161,7 @@ function clientTabs(r) {
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
+  if (r.emails) tabs.push(['emails', GOOGLE.tab, r.emails.length]);
   if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
@@ -4207,6 +4228,10 @@ function openClientItem(ref) {
   if (kind === 'invoice') return openFromClient(() => openInvoiceDetail(id));
   if (kind === 'payment') return openFromClient(() => openPaymentDetail(id));
   if (kind === 'quote') return openFromClient(() => openQuoteDetail(id));
+  if (kind === 'email') {
+    const message = r.emails?.find(e => e.id === id);
+    return message && openFromClient(() => openEmailMessage(message));
+  }
   if (kind === 'booking') {
     const booking = r.bookings.find(b => b.id === id);
     return booking && openFromClient(() => openBookingDetail(booking));
@@ -5061,9 +5086,11 @@ function itemsTable(items) {
 
 async function openQuoteDetail(id) {
   let quote = state.quotes.find(q => q.id === id);
+  const email = emailStatus();
   try { quote = await api(`/app/api/crm/quotes/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!quote) return;
+  const canEmail = !!(await email)?.configured && quote.status !== 'CANCELLED';
   // Converting marks the quote accepted; its invoice is the one that points back at it.
   const invoice = hasModule('invoices') && quote.status === 'ACEITO'
     ? (await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).catch(() => [])).find(i => i.quoteId === quote.id) || null
@@ -5092,6 +5119,7 @@ async function openQuoteDetail(id) {
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
       <input class="inp" id="q-due" type="date" value="${new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)}" /></div>` : ''}
     <div class="detail__foot">
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
       ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
       ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
@@ -5100,6 +5128,7 @@ async function openQuoteDetail(id) {
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
   $('[data-open-invoice]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
+  $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('quote', quote.id, quote.number)));
   form.querySelectorAll('[data-q-status]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     try {
@@ -5408,9 +5437,11 @@ async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id
 
 async function openInvoiceDetail(id) {
   let inv = state.invoices.find(i => i.id === id);
+  const email = emailStatus();
   try { inv = await api(`/app/api/crm/invoices/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!inv) return;
+  const canEmail = !!(await email)?.configured && inv.status !== 'CANCELLED';
   const status = effectiveStatus(inv);
   const unpaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
   const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
@@ -5429,15 +5460,135 @@ async function openInvoiceDetail(id) {
     ${itemsTable(inv.items)}
     <div class="detail__foot">
       ${unpaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
   $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
   $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number));
+  $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
+}
+
+const newRequestId = () => (window.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
+
+// A quote or invoice to its client, from the company's Gmail, with the PDF attached.
+async function openSendEmail(type, id, number) {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
+  const gen = openDrawer(googleText('sendTitle', { number }), form, false, { eyebrow: GOOGLE.sendByEmail });
+  let draft;
+  try { draft = await api(`/app/api/email/draft?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`); }
+  catch (err) {
+    if (gen !== drawerGen) return;
+    closeDrawer();
+    if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+    return;
+  }
+  if (gen !== drawerGen) return;
+  // The server sends a drawer's email once, however often Send is pressed.
+  const requestId = newRequestId();
+  const admin = state.me?.principalType === 'tenant' && state.me?.user?.role === 'TENANT_ADMIN';
+  const required = ' <span class="req">●</span>';
+  // `from` without `canSend`: the company's sending account is there but Google stopped accepting it.
+  const blocked = draft.canSend ? null : draft.from
+    ? { title: googleText('sendReconnectTitle', { account: draft.from }), desc: admin ? GOOGLE.sendReconnectDesc : GOOGLE.sendReconnectMember }
+    : { title: GOOGLE.noAccountTitle, desc: admin ? GOOGLE.noAccountDesc : GOOGLE.noAccountMember };
+  form.innerHTML = `
+    ${!blocked ? '' : `<div class="notice notice--warn">
+      <div class="notice__text"><strong>${escapeHTML(blocked.title)}</strong><span>${escapeHTML(blocked.desc)}</span></div>
+      ${hasModule('settings') ? `<div class="notice__actions"><button class="btn btn--sm" type="button" data-se-settings>${escapeHTML(GOOGLE.openSettings)}</button></div>` : ''}
+    </div>`}
+    <div class="form__row"><label class="lbl" for="se-to">${escapeHTML(GOOGLE.to)}${required}</label>
+      <input class="inp" id="se-to" type="email" required maxlength="254" autocomplete="off" value="${escapeHTML(draft.to || '')}" />
+      ${draft.to ? '' : `<p class="hint hint--warn">${escapeHTML(GOOGLE.noClientEmail)}</p>`}</div>
+    <div class="form__row"><label class="lbl" for="se-cc">${escapeHTML(GOOGLE.cc)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <input class="inp" id="se-cc" maxlength="1000" autocomplete="off" />
+      <p class="hint">${escapeHTML(GOOGLE.ccHint)}</p></div>
+    <div class="form__row"><label class="lbl" for="se-subject">${escapeHTML(GOOGLE.subject)}${required}</label>
+      <input class="inp" id="se-subject" required maxlength="300" value="${escapeHTML(draft.subject)}" /></div>
+    <div class="form__row"><label class="lbl" for="se-text">${escapeHTML(GOOGLE.message)}${required}</label>
+      <textarea class="txt" id="se-text" rows="9" required maxlength="20000">${escapeHTML(draft.text)}</textarea></div>
+    <label class="form__check"><input type="checkbox" id="se-pdf" checked /> ${escapeHTML(googleText('attach', { file: draft.attachment }))}</label>
+    ${draft.from && draft.canSend ? `<p class="hint">${escapeHTML([googleText('from', { account: draft.from }), draft.marksSent ? GOOGLE.marksSent : ''].filter(Boolean).join(' '))}</p>` : ''}
+    <div class="actions"><button class="btn btn--primary" type="submit" ${draft.canSend ? '' : 'disabled'}>${escapeHTML(GOOGLE.send)}</button></div>`;
+  $('[data-se-settings]', form)?.addEventListener('click', () => {
+    closeDrawer({ dismissed: true });
+    state.settingsSection = 'channels';
+    setActive('settings');
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const payload = {
+      type, id, requestId,
+      to: $('#se-to', form).value.trim(),
+      cc: $('#se-cc', form).value.trim() || null,
+      subject: $('#se-subject', form).value.trim(),
+      text: $('#se-text', form).value.trim(),
+      attachPdf: $('#se-pdf', form).checked,
+    };
+    const missing = !payload.to ? 'no_email' : !payload.subject ? 'empty_subject' : !payload.text ? 'empty_message' : '';
+    if (missing) return toast(googleText(`sendErrors.${missing}`));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const sent = await api('/app/api/email/send', { method: 'POST', body: JSON.stringify(payload) });
+      toast(sent.alreadySent ? GOOGLE.alreadySent : googleText('sent', { to: sent.to }));
+      if (sent.markedSent && state.active === 'quotes') { await loadModule('quotes').catch(() => {}); render(); }
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+    }
+  });
+}
+
+function emailRowHtml(m) {
+  const outbound = m.direction === 'OUTBOUND';
+  return recordRowHtml({
+    tone: outbound ? 'info' : 'accent',
+    title: m.subject || '—',
+    detail: [
+      outbound ? googleText('sentTo', { to: (m.to || []).join(', ') }) : googleText('receivedFrom', { from: m.fromName || m.from }),
+      (m.attachments || []).join(', '),
+      m.snippet,
+    ].filter(Boolean).join(' · '),
+    when: relTime(m.date),
+    open: `email:${m.id}`,
+  });
+}
+
+function openEmailMessage(m) {
+  const outbound = m.direction === 'OUTBOUND';
+  const here = { key: `email:${m.id}`, label: m.subject || GOOGLE.msgEyebrow, open: () => openEmailMessage(m) };
+  const named = ['USER', 'AGENT'].includes(m.sentByType);
+  const sentBy = !m.sentByType ? '' : named ? (m.sentBy ? googleText(`by.${m.sentByType}`, { name: m.sentBy }) : '') : googleTextOr(`by.${m.sentByType}`, '');
+  const doc = m.recordType === 'quote' && hasModule('quotes') ? { key: `quote:${m.recordId}`, label: GOOGLE.openQuote, open: () => openQuoteDetail(m.recordId) }
+    : m.recordType === 'invoice' && hasModule('invoices') ? { key: `invoice:${m.recordId}`, label: GOOGLE.openInvoice, open: () => openInvoiceDetail(m.recordId) }
+      : null;
+  const fact = (label, value) => (value ? `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>` : '');
+  const attachments = m.attachments || [];
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="detail__head"><div class="detail__client">${escapeHTML(m.fromName || m.from || '—')}</div>
+      <div class="detail__amount"><span class="pill ${outbound ? 'pill--info' : 'pill--accent'}">${escapeHTML(googleTextOr(`direction.${m.direction}`, m.direction))}</span></div></div>
+    <dl class="dash-facts">
+      ${m.fromName ? fact(GOOGLE.msgFrom, m.from) : ''}
+      ${fact(GOOGLE.msgTo, (m.to || []).join(', '))}
+      ${fact(GOOGLE.msgCc, (m.cc || []).join(', '))}
+      ${fact(GOOGLE.msgDate, fmtDate(m.date))}
+      ${fact(GOOGLE.msgSentBy, sentBy)}
+    </dl>
+    ${m.bodyPurged ? `<p class="hint">${escapeHTML(GOOGLE.purged)}</p>` : `<div class="email-body">${escapeHTML(m.body ?? m.snippet ?? '')}</div>`}
+    ${attachments.length ? `<p class="hint">${escapeHTML(googleText('attachments', { files: attachments.join(', ') }))}</p>` : ''}
+    ${doc && !linksBackTo(doc.key) ? `<div class="detail__foot"><button class="btn btn--sm btn--ghost" type="button" data-email-doc>${escapeHTML(doc.label)}</button></div>` : ''}`;
+  $('[data-email-doc]', form)?.addEventListener('click', () => openFrom(here, doc.open));
+  openDrawer(m.subject || GOOGLE.msgEyebrow, form, false, { eyebrow: GOOGLE.msgEyebrow });
 }
 
 async function markPaymentPaid(id, number = state.payments.find(p => p.id === id)?.number || '') {
@@ -5950,11 +6101,13 @@ function renderSettings(root) {
             <td class="right">${state.whatsAppSignup?.enabled ? `<button class="btn btn--sm" id="wa-connect">${escapeHTML(wa ? STR.waReconnect : STR.waConnect)}</button>` : ''}</td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button>${ig ? ` <button class="btn btn--sm btn--ghost" id="ig-disconnect">${escapeHTML(STR.igDisconnect)}</button>` : ''}</td></tr>
+          ${googleRowsHtml()}
           <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
       </table></div>
       <div class="hint" style="margin-top:10px">${escapeHTML(ig && !ig.commentsEnabled ? STR.instagramReconnectBanner : STR.channelsHint)}</div>
+      ${state.integrations?.google?.configured && !googleAccounts().length ? `<div class="hint" style="margin-top:6px">${escapeHTML(GOOGLE.hint)}</div>` : ''}
     </div>`;
   const widgetPanel = `<div class="panel widget-customizer">
       <div class="widget-customizer__head">
@@ -6070,6 +6223,8 @@ function renderSettings(root) {
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
   $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));
+  $$('[data-google-connect]', root).forEach(b => b.addEventListener('click', () => connectGoogle(b.dataset.googleConnect)));
+  $$('[data-google-account]', root).forEach(b => b.addEventListener('click', () => openEmailAccount(b.dataset.googleAccount)));
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
     const locale = localeSel.value;
@@ -6197,6 +6352,234 @@ async function disconnectInstagram(ig) {
   } catch { toast(STR.igDisconnectFailed); }
 }
 
+// ── Email (Google) ──────────────────────────────────────────────────────────────
+const googleAccounts = () => (state.integrations?.connections || []).filter(c => c.provider === 'google');
+
+async function refreshGoogle() {
+  const [integrations, email] = await Promise.all([
+    hasModule('settings') ? api('/app/api/integrations').catch(() => state.integrations) : Promise.resolve(state.integrations),
+    api('/app/api/email').catch(() => state.email),
+  ]);
+  state.integrations = integrations;
+  state.email = email;
+}
+
+// Whether the company can email documents, and from which account; Settings refreshes it.
+async function emailStatus() {
+  if (!state.email) state.email = await api('/app/api/email').catch(() => null);
+  return state.email;
+}
+
+// Hidden while the platform has no Google OAuth client.
+function googleRowsHtml() {
+  const info = state.integrations;
+  if (!info?.google?.configured) return '';
+  const canConnect = !!info.google.canConnect;
+  const accounts = googleAccounts();
+  const name = `<td class="name">${escapeHTML(GOOGLE.rowName)}</td>`;
+  if (!accounts.length) {
+    const action = canConnect
+      ? `<button class="btn btn--sm" type="button" data-google-connect>${escapeHTML(GOOGLE.connect)}</button>`
+      : `<span class="muted">${escapeHTML(GOOGLE.adminsOnly)}</span>`;
+    return `<tr>${name}<td class="mono">—</td><td><span class="muted">${escapeHTML(STR.notConnected)}</span></td><td class="right">${action}</td></tr>`;
+  }
+  return accounts.map((c, i) => {
+    const status = c.status === 'ACTIVE'
+      ? escapeHTML(GOOGLE.status.ACTIVE)
+      : `<span class="pill pill--${c.status === 'REVOKED' ? 'bad' : 'warn'}">${escapeHTML(googleTextOr(`status.${c.status}`, c.status))}</span>`;
+    const isDefault = accounts.length > 1 && c.isDefault ? ` <span class="pill pill--info">${escapeHTML(GOOGLE.isDefault)}</span>` : '';
+    const actions = [
+      canConnect && c.status !== 'ACTIVE' ? `<button class="btn btn--sm btn--primary" type="button" data-google-connect="${escapeHTML(c.accountEmail)}">${escapeHTML(GOOGLE.reconnect)}</button>` : '',
+      info.canManage ? `<button class="btn btn--sm" type="button" data-google-account="${escapeHTML(c.id)}">${escapeHTML(GOOGLE.manage)}</button>` : '',
+      canConnect && i === accounts.length - 1 ? `<button class="btn btn--sm btn--ghost" type="button" data-google-connect>${escapeHTML(GOOGLE.addAccount)}</button>` : '',
+    ].filter(Boolean).join(' ');
+    return `<tr>${name}<td class="mono">${escapeHTML(c.accountEmail)}</td><td>${status}${isDefault}</td><td class="right">${actions}</td></tr>`;
+  }).join('');
+}
+
+// Google's pages send Cross-Origin-Opener-Policy, which can cut the popup off from this window on its
+// way back; the popup then answers over this same-origin channel. The key marks a popup being open.
+const GOOGLE_OAUTH_CHANNEL = 'google-oauth';
+const GOOGLE_POPUP_KEY = 'googleOAuthPopup';
+let googleChannel = null;
+
+// `account` reconnects that account: Google's screen opens on it.
+async function connectGoogle(account) {
+  // Opened before any await: browsers only allow a popup straight from the click.
+  const popup = window.open('', 'google-oauth', 'width=520,height=680');
+  let res;
+  try { res = await api(`/app/api/integrations/google/connect${account ? `?account=${encodeURIComponent(account)}` : ''}`); }
+  catch (e) {
+    popup?.close();
+    if (e.message !== 'unauthorized') toast(googleTextOr(`connectErrors.${e.code || ''}`, GOOGLE.connectFailed));
+    return;
+  }
+  // A blocked popup: the whole page goes to Google and comes back to /app/?google=… (takeGoogleRedirect).
+  if (!popup) {
+    try { localStorage.removeItem(GOOGLE_POPUP_KEY); } catch (_) {}
+    window.location.assign(res.authorizeUrl);
+    return;
+  }
+  try { localStorage.setItem(GOOGLE_POPUP_KEY, String(Date.now())); } catch (_) {}
+  popup.location.href = res.authorizeUrl;
+  listenForGoogle();
+}
+
+function listenForGoogle() {
+  stopListeningForGoogle();
+  window.addEventListener('message', onGoogleMessage);
+  if ('BroadcastChannel' in window) {
+    googleChannel = new BroadcastChannel(GOOGLE_OAUTH_CHANNEL);
+    googleChannel.onmessage = ev => onGoogleResult(ev.data);
+  }
+}
+
+function stopListeningForGoogle() {
+  window.removeEventListener('message', onGoogleMessage);
+  googleChannel?.close();
+  googleChannel = null;
+}
+
+function onGoogleMessage(ev) {
+  if (ev.origin === window.location.origin) onGoogleResult(ev.data);
+}
+
+function onGoogleResult(data) {
+  if (data?.type !== 'google-oauth') return;
+  stopListeningForGoogle();
+  googleOutcome(data.status, data.reason);
+}
+
+// Whether this window is the consent popup a dashboard opened (set by connectGoogle), read once.
+function takeGooglePopupMark() {
+  try {
+    const at = Number(localStorage.getItem(GOOGLE_POPUP_KEY));
+    localStorage.removeItem(GOOGLE_POPUP_KEY);
+    return at > 0 && Date.now() - at < 30 * 60 * 1000;
+  } catch (_) { return false; }
+}
+
+async function googleOutcome(status, reason) {
+  if (status !== 'connected') { toast(googleTextOr(`reasons.${reason || ''}`, GOOGLE.connectFailed)); return; }
+  toast(GOOGLE.connected);
+  await refreshGoogle();
+  if (state.active === 'settings') render();
+}
+
+// Google sent the whole page back (no popup): read the outcome once and drop it from the address.
+function takeGoogleRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('google');
+  if (!status) return null;
+  const reason = params.get('reason');
+  params.delete('google');
+  params.delete('reason');
+  const query = params.toString();
+  history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}#settings`);
+  return { status, reason };
+}
+
+function openEmailAccount(id) {
+  const account = googleAccounts().find(c => c.id === id);
+  if (!account) return;
+  const accounts = googleAccounts();
+  const canConnect = !!state.integrations?.google?.canConnect;
+  const company = state.documentTemplate?.companyName || state.me?.tenant?.name || '';
+  const revoked = account.status === 'REVOKED';
+  const optional = `<span class="opt">${escapeHTML(STR.optional)}</span>`;
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${account.status !== 'ACTIVE' ? `<div class="notice notice--warn">
+      <div class="notice__text"><strong>${escapeHTML(revoked ? GOOGLE.revokedTitle : GOOGLE.reconnectTitle)}</strong><span>${escapeHTML(revoked ? GOOGLE.revokedDesc : GOOGLE.reconnectDesc)}</span></div>
+      ${canConnect ? `<div class="notice__actions"><button class="btn btn--sm btn--primary" type="button" data-ga-reconnect>${escapeHTML(GOOGLE.reconnect)}</button></div>` : ''}
+    </div>` : ''}
+    <dl class="dash-facts">
+      <div><dt>${escapeHTML(GOOGLE.factAccount)}</dt><dd>${escapeHTML(account.accountEmail)}</dd></div>
+      ${account.connectedBy ? `<div><dt>${escapeHTML(GOOGLE.factConnectedBy)}</dt><dd>${escapeHTML(account.connectedBy)}</dd></div>` : ''}
+      ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-ga-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
+    </dl>
+    <div class="form__row"><label class="lbl" for="ga-name">${escapeHTML(GOOGLE.senderName)} ${optional}</label>
+      <input class="inp" id="ga-name" maxlength="80" autocomplete="off" placeholder="${escapeHTML(company)}" value="${escapeHTML(account.senderName || '')}" />
+      <p class="hint">${escapeHTML(googleText('senderNameHint', { company }))}</p></div>
+    <div class="form__row"><label class="lbl" for="ga-reply">${escapeHTML(GOOGLE.replyTo)} ${optional}</label>
+      <input class="inp" id="ga-reply" type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(account.accountEmail)}" value="${escapeHTML(account.replyTo || '')}" />
+      <p class="hint">${escapeHTML(GOOGLE.replyToHint)}</p></div>
+    <div class="form__row"><label class="lbl" for="ga-signature">${escapeHTML(GOOGLE.signature)} ${optional}</label>
+      <textarea class="txt" id="ga-signature" rows="4" maxlength="2000">${escapeHTML(account.signature || '')}</textarea>
+      <p class="hint">${escapeHTML(GOOGLE.signatureHint)}</p></div>
+    ${accounts.length > 1 ? (account.isDefault
+      ? `<p class="hint">${escapeHTML(GOOGLE.defaultHint)}</p>`
+      : `<label class="form__check"><input type="checkbox" id="ga-default" /> ${escapeHTML(GOOGLE.makeDefault)}</label>`) : ''}
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(GOOGLE.save)}</button>
+      ${account.canSend ? `<button class="btn btn--ghost" type="button" data-ga-test>${escapeHTML(GOOGLE.test)}</button>` : ''}
+      <button class="btn btn--ghost" type="button" data-ga-disconnect>${escapeHTML(GOOGLE.disconnect)}</button>
+    </div>`;
+  const path = `/app/api/integrations/${encodeURIComponent(account.id)}`;
+  $('[data-ga-reconnect]', form)?.addEventListener('click', () => {
+    closeDrawer({ dismissed: true });
+    connectGoogle(account.accountEmail);
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    const payload = { senderName: $('#ga-name', form).value.trim(), replyTo: $('#ga-reply', form).value.trim(), signature: $('#ga-signature', form).value.trim() };
+    if ($('#ga-default', form)?.checked) payload.isDefault = true;
+    try {
+      await api(path, { method: 'PATCH', body: JSON.stringify(payload) });
+      await refreshGoogle();
+      closeDrawer();
+      toast(GOOGLE.saved);
+      if (state.active === 'settings') render();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`errors.${err.code || ''}`, GOOGLE.saveFailed));
+    }
+  });
+  $('[data-ga-test]', form)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const sent = await api(`${path}/test-email`, { method: 'POST' });
+      toast(googleText('testSent', { to: sent.to }));
+      await refreshGoogle();
+      const fresh = googleAccounts().find(c => c.id === account.id);
+      const counter = $('[data-ga-sent]', form);
+      if (fresh?.dailyLimit && counter) counter.textContent = googleText('sentToday', { sent: fresh.sentToday || 0, limit: fresh.dailyLimit });
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.testFailed));
+      // A refused grant flips the account to needing a reconnect on the server.
+      await refreshGoogle();
+      if (state.active === 'settings') render();
+      const fresh = googleAccounts().find(c => c.id === account.id);
+      if (fresh && fresh.status !== account.status && form.isConnected) openEmailAccount(fresh.id);
+    } finally { btn.disabled = false; }
+  });
+  $('[data-ga-disconnect]', form).addEventListener('click', () => disconnectGoogle(account));
+  openDrawer(account.accountEmail, form, false, { eyebrow: GOOGLE.eyebrow });
+}
+
+async function disconnectGoogle(account) {
+  const ok = await confirmDialog({
+    title: googleText('disconnectTitle', { account: account.accountEmail }),
+    body: GOOGLE.disconnectBody,
+    okLabel: GOOGLE.disconnect,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/integrations/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
+    await refreshGoogle();
+    closeDrawer({ dismissed: true });
+    toast(GOOGLE.disconnected);
+    if (state.active === 'settings') render();
+  } catch (err) {
+    if (err.message !== 'unauthorized') toast(GOOGLE.disconnectFailed);
+  }
+}
+
 function loadFacebookSdk(appId, graphVersion) {
   if (window.FB) {
     window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
@@ -6292,14 +6675,29 @@ async function connectWhatsApp() {
   }
 }
 
-// When the OAuth popup lands back on /app/?ig=..., relay the outcome to the opener and close.
-// Returns true if this load was an OAuth popup (so the normal app boot is skipped).
+// When the OAuth popup lands back on /app/?ig=... or /app/?google=..., relay the outcome to the
+// opener (or, for Google, over GOOGLE_OAUTH_CHANNEL) and close. Returns true if this load was an
+// OAuth popup (so the normal app boot is skipped).
 function handleOAuthPopup() {
   const params = new URLSearchParams(window.location.search);
   const ig = params.get('ig');
-  if (!ig || !window.opener) return false;
-  window.opener.postMessage({ type: 'ig-oauth', status: ig, reason: params.get('reason'), tenant: params.get('tenant') }, window.location.origin);
+  const google = params.get('google');
+  if (!ig && !google) return false;
+  const message = ig
+    ? { type: 'ig-oauth', status: ig, reason: params.get('reason'), tenant: params.get('tenant') }
+    : { type: 'google-oauth', status: google, reason: params.get('reason') };
+  if (window.opener) {
+    window.opener.postMessage(message, window.location.origin);
+    window.close();
+    return true;
+  }
+  if (!google || !('BroadcastChannel' in window) || !takeGooglePopupMark()) return false;
+  const channel = new BroadcastChannel(GOOGLE_OAUTH_CHANNEL);
+  channel.postMessage(message);
+  channel.close();
   window.close();
+  // Cut off from its opener, the popup may no longer count as opened by a script and stay open: it shows the app.
+  setTimeout(() => { if (!window.closed) init(true); }, 500);
   return true;
 }
 
@@ -7150,8 +7548,9 @@ function openBookingAvailabilityForm() {
   openDrawer(STR.bookingsManageAvailability, form, true);
 }
 
-async function init() {
-  if (handleOAuthPopup()) return;
+// `relayed`: this is a consent popup that already passed its outcome on and couldn't close.
+async function init(relayed = false) {
+  if (!relayed && handleOAuthPopup()) return;
   window.AgentsUI?.init(agentsDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
@@ -7194,8 +7593,11 @@ async function init() {
     refreshInboxList(root).catch(() => {});
     if (state.inbox.threadFor) refreshThread(root).catch(() => {});
   });
+  const google = takeGoogleRedirect();
   if (!token) return renderLogin();
   state.active = (location.hash || '').replace('#', '') || 'overview';
-  try { await bootAuthed(); } catch { renderLogin(); }
+  if (google) state.settingsSection = 'channels';
+  try { await bootAuthed(); } catch { renderLogin(); return; }
+  if (google) googleOutcome(google.status, google.reason);
 }
 init();
