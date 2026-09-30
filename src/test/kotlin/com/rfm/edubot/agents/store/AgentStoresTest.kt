@@ -1,0 +1,195 @@
+package com.rfm.edubot.agents.store
+
+import com.rfm.edubot.agents.model.ActionPreview
+import com.rfm.edubot.agents.model.Agent
+import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentDefinition
+import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.AgentStatus
+import com.rfm.edubot.agents.model.OutboundLogEntry
+import com.rfm.edubot.agents.model.OutboundStatus
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.model.TriggerSpec
+import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.notifications.NotificationAudience
+import com.rfm.edubot.notifications.NotificationRepository
+import com.rfm.edubot.persistence.MongoModule
+import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Clock
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.bson.types.ObjectId
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import org.testcontainers.containers.MongoDBContainer
+import org.testcontainers.junit.jupiter.Container
+import org.testcontainers.junit.jupiter.Testcontainers
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
+import kotlin.time.Duration.Companion.minutes
+
+@Testcontainers
+class AgentStoresTest {
+
+    companion object {
+        @Container
+        @JvmStatic
+        val mongo = MongoDBContainer("mongo:7")
+
+        private lateinit var mongoModule: MongoModule
+
+        @BeforeAll
+        @JvmStatic
+        fun setUp() {
+            mongo.start()
+            mongoModule = MongoModule(AppConfig.MongoConfig(uri = mongo.replicaSetUrl, database = "agent_stores"))
+            mongoModule.initialize()
+        }
+
+        @AfterAll
+        @JvmStatic
+        fun tearDown() {
+            mongoModule.shutdown()
+            mongo.stop()
+        }
+    }
+
+    private val now: Instant = Instant.fromEpochMilliseconds(Clock.System.now().toEpochMilliseconds())
+
+    private fun agent(tenantId: ObjectId) = Agent(
+        tenantId = tenantId,
+        name = "Invoice reminders",
+        status = AgentStatus.ACTIVE,
+        definition = AgentDefinition(triggers = listOf(TriggerSpec("t1", "event", buildJsonObject { put("event", "invoice.created") }))),
+        createdAt = now,
+        updatedAt = now,
+    )
+
+    private fun run(tenantId: ObjectId, agentId: ObjectId, key: String) = AgentRun(
+        tenantId = tenantId,
+        agentId = agentId,
+        agentName = "Invoice reminders",
+        agentVersion = 1,
+        definition = AgentDefinition(),
+        trigger = RunTrigger(type = "event", firedAt = now),
+        subject = SubjectRef(SubjectTypes.INVOICE, "inv-1"),
+        dedupeKey = key,
+        createdAt = now,
+        updatedAt = now,
+    )
+
+    @Test
+    fun `agents round-trip and editing bumps the version`() = runBlocking {
+        val repo = AgentRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val stored = repo.insert(agent(tenantId))
+
+        assertEquals(stored, repo.findById(tenantId, stored.id))
+        assertNull(repo.findById(ObjectId(), stored.id), "another company never sees it")
+        val edited = repo.update(tenantId, stored.id, "Renamed", null, null, stored.kind, stored.definition, null)!!
+        assertEquals(2, edited.version)
+        assertEquals(listOf(stored.id), repo.activeFor(tenantId).map { it.id })
+    }
+
+    @Test
+    fun `only one tick advances a schedule from the same due time`() = runBlocking {
+        val repo = AgentRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val stored = repo.insert(agent(tenantId))
+        repo.setSchedule(tenantId, stored.id, mapOf("t1" to now - 1.minutes))
+
+        assertEquals(listOf(stored.id), repo.dueSchedules(now).filter { it.tenantId == tenantId }.map { it.id })
+        assertTrue(repo.advanceSchedule(tenantId, stored.id, now - 1.minutes, mapOf("t1" to now + 1.days)))
+        assertFalse(repo.advanceSchedule(tenantId, stored.id, now - 1.minutes, mapOf("t1" to now + 2.days)))
+    }
+
+    @Test
+    fun `a trigger fires once per dedupe key and a run is claimed once`() = runBlocking {
+        val runs = AgentRunRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val agentId = ObjectId()
+        val first = runs.insertIfAbsent(run(tenantId, agentId, "event:e1:t1"))
+
+        assertNotNull(first)
+        assertNull(runs.insertIfAbsent(run(tenantId, agentId, "event:e1:t1")))
+        assertNotNull(runs.claim(first.id, setOf(RunStatus.QUEUED)))
+        assertNull(runs.claim(first.id, setOf(RunStatus.QUEUED)))
+
+        runs.save(runs.load(first.id)!!.copy(status = RunStatus.WAITING, resumeAt = now - 1.hours))
+        assertEquals(listOf(first.id), runs.dueWaiting(now).filter { it.tenantId == tenantId }.map { it.id })
+        assertEquals(listOf(first.id), runs.openForSubject(tenantId, SubjectRef(SubjectTypes.INVOICE, "inv-1")).map { it.id })
+        assertEquals(RunStatus.CANCELLED, runs.cancelIfOpen(first.id, "exit_rule")?.status)
+        assertNull(runs.cancelIfOpen(first.id, "exit_rule"))
+    }
+
+    @Test
+    fun `an approval is decided once and can carry the person's edits`() = runBlocking {
+        val approvals = AgentApprovalRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val approval = approvals.insert(
+            AgentApproval(
+                tenantId = tenantId, agentId = ObjectId(), agentName = "Reminders", runId = ObjectId(), stepId = "s1",
+                action = "whatsapp.send", input = buildJsonObject { put("text", "Olá") },
+                preview = ActionPreview(kind = "message", body = "Olá"), createdAt = now, expiresAt = now + 3.days,
+            ),
+        )
+
+        val approved = approvals.approve(tenantId, approval.id, "u1", "Ana", buildJsonObject { put("text", "Olá Rui") })
+        assertEquals("Olá Rui", approved?.input?.get("text")?.let { (it as kotlinx.serialization.json.JsonPrimitive).content })
+        assertTrue(approved!!.edited)
+        assertNull(approvals.approve(tenantId, approval.id, "u2", "Rui", null))
+        assertNull(approvals.reject(tenantId, approval.id, "u2", "Rui", "late"))
+        assertEquals(0, approvals.countPending(tenantId))
+    }
+
+    @Test
+    fun `a send is attempted once per run step and counts towards the recipient cap`() = runBlocking {
+        val log = OutboundLogRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        val entry = OutboundLogEntry(tenantId = tenantId, idempotencyKey = "run1:s1", channel = "whatsapp", recipient = "351911000111", status = OutboundStatus.SENDING, at = now)
+
+        assertTrue(log.begin(entry))
+        assertFalse(log.begin(entry.copy(id = ObjectId())))
+        log.markSent("run1:s1", "wamid.1")
+        assertEquals(OutboundStatus.SENT, log.find("run1:s1")?.status)
+        assertEquals(1, log.countForRecipient(tenantId, "351911000111", now - 1.days))
+    }
+
+    @Test
+    fun `notifications reach their audience and track who read them`() = runBlocking {
+        val notifications = NotificationRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+        notifications.notify(tenantId, "agent_failed")
+        notifications.notify(tenantId, "agent_task", audience = NotificationAudience.USER, userId = "member-1")
+
+        assertEquals(1, notifications.listFor(tenantId, "admin-1", isAdmin = true).size)
+        assertEquals(1, notifications.listFor(tenantId, "member-1", isAdmin = false).size)
+        assertEquals(1, notifications.unreadCount(tenantId, "admin-1", isAdmin = true))
+        notifications.markAllRead(tenantId, "admin-1", isAdmin = true)
+        assertEquals(0, notifications.unreadCount(tenantId, "admin-1", isAdmin = true))
+        assertEquals(1, notifications.unreadCount(tenantId, "member-1", isAdmin = false))
+    }
+
+    @Test
+    fun `settings default until the company or the backoffice saves them`() = runBlocking {
+        val settings = AgentSettingsRepository(mongoModule) { now }
+        val tenantId = ObjectId()
+
+        assertEquals(2, settings.get(tenantId).company.perRecipientDailyCap)
+        settings.saveCompany(tenantId, settings.get(tenantId).company.copy(paused = true))
+        settings.savePlatform(tenantId, settings.get(tenantId).platform.copy(maxActiveAgents = 3))
+        val saved = settings.get(tenantId)
+        assertTrue(saved.company.paused)
+        assertEquals(3, saved.platform.maxActiveAgents)
+    }
+}
