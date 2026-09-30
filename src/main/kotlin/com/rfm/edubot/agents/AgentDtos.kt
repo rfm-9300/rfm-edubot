@@ -227,6 +227,10 @@ import kotlinx.serialization.json.jsonObject
 @Serializable data class CompanySettingsRequest(val settings: CompanyAgentSettings)
 @Serializable data class AutomationPauseRequest(val paused: Boolean)
 @Serializable data class AutomationPauseDto(val automationPaused: Boolean)
+@Serializable data class DraftRequest(val request: String? = null)
+
+/** An agent drafted from a description, with what the model couldn't express ([note], in the person's words). */
+@Serializable data class DraftedAgentDto(val agent: AgentDto, val note: String? = null)
 
 internal fun SubjectRef.dto() = SubjectDto(type, id)
 

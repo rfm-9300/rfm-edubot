@@ -1,5 +1,7 @@
 package com.rfm.edubot.agents
 
+import com.rfm.edubot.agents.actions.AiSteps
+import com.rfm.edubot.agents.ai.AgentDrafter
 import com.rfm.edubot.agents.model.Agent
 import com.rfm.edubot.agents.model.AgentDefinition
 import com.rfm.edubot.agents.model.AgentKind
@@ -56,6 +58,7 @@ import kotlin.time.Duration.Companion.days
 fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: TenantRepository) {
     val events = DomainEventLog(agents.mongo)
     val clock = agents.services.clock
+    val drafter = AgentDrafter(agents)
 
     authenticate("dashboard") {
         route("/app/api/agents") {
@@ -154,6 +157,24 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 }
                 val saved = agents.agents.insert(agent)
                 call.respond(HttpStatusCode.Created, saved.dto(agents.validator.validate(saved.definition, agents.availability(ctx.tenant), saved.templateParams)))
+            }
+
+            post("/draft") {
+                val ctx = call.agentsContext() ?: return@post
+                if (!ctx.canManageAgents()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                val request = runCatching { call.receive<DraftRequest>() }.getOrNull()?.request?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_REQUEST }
+                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_request"))
+                when (val outcome = drafter.draft(ctx.tenant, request, ctx.actorId())) {
+                    is AgentDrafter.Outcome.Drafted -> call.respond(HttpStatusCode.Created, DraftedAgentDto(outcome.agent.dto(outcome.problems), outcome.note))
+                    is AgentDrafter.Outcome.Failed -> call.respond(
+                        when (outcome.reason) {
+                            AiSteps.UNAVAILABLE -> HttpStatusCode.ServiceUnavailable
+                            AiSteps.TOKEN_BUDGET -> HttpStatusCode.TooManyRequests
+                            else -> HttpStatusCode.UnprocessableEntity
+                        },
+                        mapOf("error" to outcome.reason),
+                    )
+                }
             }
 
             get("/{id}") {
@@ -487,6 +508,7 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
 
 private const val MAX_NAME = 80
 private const val MAX_DESCRIPTION = 500
+internal const val MAX_REQUEST = 2_000
 
 private suspend fun settingsDto(agents: AgentsModule, ctx: DashboardContext): AgentSettingsDto {
     val tenantId = ctx.tenant.id
