@@ -90,6 +90,9 @@ class OAuthState(
         const val ORIGIN_BACKOFFICE = "backoffice"
         const val ORIGIN_DASHBOARD = "app"
         const val PURPOSE_GOOGLE = "google"
+
+        /** Consent to read the inbox too; the callback then turns inbox sync on. */
+        const val PURPOSE_GOOGLE_INBOX = "google_inbox"
     }
 
     private fun sign(body: String): String {

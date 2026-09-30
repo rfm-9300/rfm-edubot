@@ -13,6 +13,9 @@ object GoogleScopes {
     /** What connecting asks for: who the account is, and sending as it (a *sensitive* scope). */
     val send = listOf(OPENID, EMAIL, GMAIL_SEND)
 
+    /** Turning on "Use my inbox in automations" adds reading the mailbox (*restricted* scopes), on top of what was granted. */
+    val inbox = send + listOf(GMAIL_READONLY, GMAIL_MODIFY)
+
     /** Google's `scope` answer is space-separated. */
     fun parse(scope: String?): List<String> =
         scope.orEmpty().split(' ').map { it.trim() }.filter { it.isNotEmpty() }.distinct()
@@ -20,4 +23,8 @@ object GoogleScopes {
     /** Any of these lets `users.messages.send` work, so a grant from an earlier, wider consent counts too. */
     fun canSend(granted: Collection<String>): Boolean =
         granted.any { it == GMAIL_SEND || it == GMAIL_COMPOSE || it == GMAIL_MODIFY || it == GMAIL_FULL }
+
+    /** Any of these lets `users.history.list` and `users.messages.get` read the inbox. */
+    fun canRead(granted: Collection<String>): Boolean =
+        granted.any { it == GMAIL_READONLY || it == GMAIL_MODIFY || it == GMAIL_FULL }
 }

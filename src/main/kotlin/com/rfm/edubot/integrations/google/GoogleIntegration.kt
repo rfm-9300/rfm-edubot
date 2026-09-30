@@ -21,6 +21,9 @@ class GoogleIntegration(
     /** Connecting needs the OAuth client and the key that seals its tokens. */
     val configured: Boolean get() = config.oauthEnabled && cipher != null
 
+    /** Companies may turn on "Use my inbox in automations". */
+    val inboxAvailable: Boolean get() = configured && config.inboxEnabled
+
     companion object {
         fun create(
             mongo: MongoModule,

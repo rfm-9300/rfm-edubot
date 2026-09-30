@@ -95,4 +95,68 @@ class GmailClientTest {
         assertEquals("${GmailClient.BASE_URL}/users/me/profile", requests.single().url.toString())
         assertNull(gmail { json(googleError(401, "authError"), HttpStatusCode.Unauthorized) }.profile("expired"))
     }
+
+    @Test
+    fun `history lists the inbox messages each change added`(): Unit = runBlocking {
+        val body = """{"history":[
+            {"id":"601","messages":[{"id":"m1"}],"messagesAdded":[{"message":{"id":"m1","threadId":"t1","labelIds":["INBOX","UNREAD"]}}]},
+            {"id":"602","labelsAdded":[{"message":{"id":"m1"},"labelIds":["STARRED"]}]},
+            {"id":"603","messagesAdded":[{"message":{"id":"m2","labelIds":["SENT"]}},{"message":{"id":"m3","labelIds":["INBOX"]}},{"message":{"id":"m3","labelIds":["INBOX"]}}]}
+        ],"nextPageToken":"page-2","historyId":"610"}"""
+
+        val history = gmail { json(body) }.history("access-1", "600", pageToken = "page-1") as GmailClient.Read.Ok
+
+        assertEquals(
+            GmailClient.History(
+                listOf(GmailClient.HistoryRecord("601", listOf("m1")), GmailClient.HistoryRecord("602", emptyList()), GmailClient.HistoryRecord("603", listOf("m3"))),
+                historyId = "610",
+                nextPageToken = "page-2",
+            ),
+            history.value,
+        )
+        val url = requests.single().url
+        assertEquals("${GmailClient.BASE_URL}/users/me/history", url.toString().substringBefore('?'))
+        assertEquals("600", url.parameters["startHistoryId"])
+        assertEquals("messageAdded", url.parameters["historyTypes"])
+        assertEquals("INBOX", url.parameters["labelId"])
+        assertEquals("page-1", url.parameters["pageToken"])
+        assertEquals("Bearer access-1", requests.single().headers[HttpHeaders.Authorization])
+    }
+
+    @Test
+    fun `reading refusals say whether to renew the token, reconnect, start over or retry`(): Unit = runBlocking {
+        suspend fun failure(status: HttpStatusCode, body: String) = gmail { json(body, status) }.history("t", "1") as GmailClient.Read.Failed
+
+        assertEquals(GmailClient.Read.Failed("unauthorized", true, 401), failure(HttpStatusCode.Unauthorized, googleError(401, "authError")))
+        assertEquals(GmailClient.Read.Failed("needs_reconnect", false, 403), failure(HttpStatusCode.Forbidden, googleError(403, "insufficientPermissions")))
+        assertEquals(GmailClient.Read.Failed("not_found", false, 404), failure(HttpStatusCode.NotFound, googleError(404, "notFound")))
+        assertEquals(GmailClient.Read.Failed("rate_limited", true, 429), failure(HttpStatusCode.TooManyRequests, googleError(429, "rateLimitExceeded")))
+        assertEquals("rate_limited", failure(HttpStatusCode.Forbidden, googleError(403, "userRateLimitExceeded")).key)
+        assertEquals(GmailClient.Read.Failed("read_failed", true, 503), failure(HttpStatusCode.ServiceUnavailable, "<html>down</html>"))
+        assertEquals(GmailClient.Read.Failed("read_failed", false, 400), failure(HttpStatusCode.BadRequest, googleError(400, "failedPrecondition")))
+        assertEquals(GmailClient.Read.Failed("read_failed", false, 200), failure(HttpStatusCode.OK, "not json"))
+        assertEquals(GmailClient.Read.Failed("read_failed", true), gmail { throw IOException("reset") }.history("t", "1"))
+    }
+
+    @Test
+    fun `the inbox is listed after a moment and a message is read in full`(): Unit = runBlocking {
+        val since = kotlinx.datetime.Instant.parse("2026-09-30T08:00:00Z")
+        val page = gmail { json("""{"messages":[{"id":"m9","threadId":"t9"},{"id":"m8","threadId":"t8"}],"nextPageToken":"n2","resultSizeEstimate":2}""") }
+            .inbox("access-1", since) as GmailClient.Read.Ok
+        assertEquals(GmailClient.MessagePage(listOf("m9", "m8"), "n2"), page.value)
+        assertEquals("in:inbox after:${since.epochSeconds}", requests.single().url.parameters["q"])
+        assertEquals("${GmailClient.BASE_URL}/users/me/messages", requests.single().url.toString().substringBefore('?'))
+
+        requests.clear()
+        val message = gmail { json(GmailFixtures.message("m9")) }.message("access-1", "m9") as GmailClient.Read.Ok
+        assertEquals("m9", message.value.id)
+        assertEquals("maria@cliente.pt", message.value.from?.email)
+        assertEquals("${GmailClient.BASE_URL}/users/me/messages/m9", requests.single().url.toString().substringBefore('?'))
+        assertEquals("full", requests.single().url.parameters["format"])
+
+        requests.clear()
+        assertEquals(GmailClient.Read.Failed("not_found", false), gmail { error("not called") }.message("t", "../profile"))
+        assertTrue(requests.isEmpty())
+        assertEquals("read_failed", (gmail { json("""{"id":"m1"}""") }.message("t", "m1") as GmailClient.Read.Failed).key, "no payload")
+    }
 }

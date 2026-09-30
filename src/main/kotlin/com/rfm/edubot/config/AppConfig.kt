@@ -35,6 +35,13 @@ data class AppConfig(
         val redirectUri: String = "",
         /** Pub/Sub topic for Gmail push notifications; blank keeps polling. */
         val pubsubTopic: String = "",
+        /**
+         * Companies may turn on "Use my inbox in automations", which asks for Gmail's *restricted* read
+         * scopes. Off until the OAuth client passed Google's verification and CASA assessment for them.
+         */
+        val inboxEnabled: Boolean = false,
+        /** How often connected inboxes are polled for new mail. */
+        val syncSeconds: Int = 60,
     ) {
         val oauthEnabled: Boolean get() = clientId.isNotBlank() && clientSecret.isNotBlank() && redirectUri.isNotBlank()
     }
@@ -215,6 +222,8 @@ data class AppConfig(
                     clientSecret = getOptional(config, "app.google.oauth.clientSecret").trim(),
                     redirectUri = getOptional(config, "app.google.oauth.redirectUri").trim(),
                     pubsubTopic = getOptional(config, "app.google.gmail.pubsubTopic").trim(),
+                    inboxEnabled = getOptional(config, "app.google.gmail.inboxEnabled").trim().lowercase() in setOf("true", "1", "yes"),
+                    syncSeconds = getOptional(config, "app.google.gmail.syncSeconds").trim().toIntOrNull()?.coerceIn(15, 3600) ?: 60,
                 ),
                 integrations = IntegrationsConfig(encryptionKey = getOptional(config, "app.integrations.encryptionKey").trim()),
             )

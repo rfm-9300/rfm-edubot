@@ -17,6 +17,8 @@ data class GoogleAvailabilityDto(
     val configured: Boolean,
     /** Only a company admin signed in as themselves may consent; operators opening the dashboard can't. */
     val canConnect: Boolean,
+    /** The platform lets companies use their inbox in automations (Gmail's restricted scopes). */
+    val inbox: Boolean = false,
 )
 
 /** A connected account as the dashboard sees it; the tokens never leave the server. */
@@ -36,6 +38,11 @@ data class IntegrationConnectionDto(
     /** Emails sent from the account on the company's current day, against [dailyLimit]. */
     val sentToday: Int = 0,
     val dailyLimit: Int? = null,
+    /** Google let the app read this inbox; turning inbox sync on without it asks for consent first. */
+    val canRead: Boolean = false,
+    val inboxSync: Boolean = false,
+    val inboxSyncedAt: String? = null,
+    val inboxError: String? = null,
     val connectedAt: String,
     val updatedAt: String,
 )
@@ -50,6 +57,8 @@ data class UpdateConnectionRequest(
     val replyTo: String? = null,
     val signature: String? = null,
     val isDefault: Boolean? = null,
+    /** Turning it on needs the read scopes: without them the answer is 409 `needs_consent`. */
+    val inboxSync: Boolean? = null,
 )
 
 internal fun IntegrationConnection.dto(today: String? = null, dailyLimit: Int? = null) = IntegrationConnectionDto(
@@ -66,6 +75,10 @@ internal fun IntegrationConnection.dto(today: String? = null, dailyLimit: Int? =
     lastError = lastError,
     sentToday = today?.let(::sentOn) ?: 0,
     dailyLimit = dailyLimit,
+    canRead = provider == IntegrationProviders.GOOGLE && GoogleScopes.canRead(scopes),
+    inboxSync = settings.inboxSync,
+    inboxSyncedAt = inbox.lastSyncedAt?.toString(),
+    inboxError = inbox.lastError,
     connectedAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
 )

@@ -150,4 +150,47 @@ class IntegrationConnectionRepositoryTest {
         connections.markNeedsReconnect(connect(withoutSettings.id, "obras@example.pt").id, "invalid_grant")
         assertTrue(OverviewService(mongo).build(withoutSettings).attention.none { it.kind == OverviewMath.KIND_INTEGRATION_RECONNECT })
     }
+
+    @Test
+    fun `inbox sync starts reading from when it was turned on and survives settings and reconnects`(): Unit = runBlocking {
+        val clock = now
+        val repository = IntegrationConnectionRepository(mongo) { clock }
+        val tenantId = ObjectId()
+        val connection = connect(tenantId, "caixa-${ObjectId().toHexString()}@example.pt")
+        assertFalse(connection.settings.inboxSync)
+        assertNull(connection.inbox.enabledAt)
+
+        val on = repository.setInboxSync(tenantId, connection.id, on = true)!!
+        assertTrue(on.settings.inboxSync)
+        assertEquals(clock, on.inbox.enabledAt)
+        assertNull(on.inbox.historyId)
+        assertTrue(repository.inboxesToSync().any { it.id == connection.id })
+
+        repository.inboxFailed(connection.id, "rate_limited")
+        assertEquals("rate_limited", repository.findById(connection.id)!!.inbox.lastError)
+        repository.inboxSynced(connection.id, "7001")
+        val synced = repository.findById(connection.id)!!
+        assertEquals("7001", synced.inbox.historyId)
+        assertEquals(clock, synced.inbox.lastSyncedAt)
+        assertNull(synced.inbox.lastError)
+
+        val edited = repository.updateSettings(tenantId, connection.id, EmailSettings(senderName = "Obras", inboxSync = false))!!
+        assertTrue(edited.settings.inboxSync, "the sender settings don't turn the inbox off")
+        assertEquals("Obras", edited.settings.senderName)
+        val reconnected = connect(tenantId, connection.accountEmail)
+        assertTrue(reconnected.settings.inboxSync)
+        assertEquals("7001", reconnected.inbox.historyId, "a reconnect carries on where reading got to")
+
+        repository.markNeedsReconnect(connection.id, "invalid_grant")
+        assertTrue(repository.inboxesToSync().none { it.id == connection.id }, "only working accounts are read")
+        connect(tenantId, connection.accountEmail)
+
+        val off = repository.setInboxSync(tenantId, connection.id, on = false)!!
+        assertFalse(off.settings.inboxSync)
+        assertEquals(InboxState(), off.inbox, "turning it off forgets the cursor")
+        assertTrue(repository.inboxesToSync().none { it.id == connection.id })
+        repository.inboxSynced(connection.id, "7002")
+        assertNull(repository.findById(connection.id)!!.inbox.historyId, "a sync that finishes after it was turned off leaves no cursor")
+        assertNull(repository.setInboxSync(ObjectId(), connection.id, on = true), "another company can't turn it on")
+    }
 }

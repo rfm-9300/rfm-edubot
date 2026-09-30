@@ -85,12 +85,53 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
         collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("status", ConnectionStatus.NEEDS_RECONNECT.name)))
             .sort(Document("createdAt", 1)).toList().map { it.toConnection() }
 
+    /** The sender name, reply-to and signature; inbox sync has [setInboxSync]. */
     suspend fun updateSettings(tenantId: ObjectId, id: ObjectId, settings: EmailSettings): IntegrationConnection? {
         collection.updateOne(
             Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("_id", id)),
-            Updates.combine(Updates.set("settings", settings.toDocument()), Updates.set("updatedAt", clock().toDate())),
+            Updates.combine(
+                Updates.set("settings.senderName", settings.senderName),
+                Updates.set("settings.replyTo", settings.replyTo),
+                Updates.set("settings.signature", settings.signature),
+                Updates.set("updatedAt", clock().toDate()),
+            ),
         )
         return find(tenantId, id)
+    }
+
+    /** Turning it on starts reading from now; turning it off forgets where reading got to. */
+    suspend fun setInboxSync(tenantId: ObjectId, id: ObjectId, on: Boolean): IntegrationConnection? {
+        val now = clock().toDate()
+        collection.updateOne(
+            Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("_id", id)),
+            Updates.combine(
+                Updates.set("settings.inboxSync", on),
+                if (on) Updates.set("inbox", Document("enabledAt", now)) else Updates.unset("inbox"),
+                Updates.set("updatedAt", now),
+            ),
+        )
+        return find(tenantId, id)
+    }
+
+    /** Every company's working accounts whose inbox is used in automations. */
+    suspend fun inboxesToSync(provider: String = IntegrationProviders.GOOGLE): List<IntegrationConnection> =
+        collection.find(
+            Filters.and(Filters.eq("provider", provider), Filters.eq("status", ConnectionStatus.ACTIVE.name), Filters.eq("settings.inboxSync", true)),
+        ).sort(Document("createdAt", 1)).toList().map { it.toConnection() }
+
+    /** Reading the inbox reached [historyId]. */
+    suspend fun inboxSynced(id: ObjectId, historyId: String) {
+        collection.updateOne(
+            Filters.and(Filters.eq("_id", id), Filters.eq("settings.inboxSync", true)),
+            Updates.combine(Updates.set("inbox.historyId", historyId), Updates.set("inbox.lastSyncedAt", clock().toDate()), Updates.unset("inbox.lastError")),
+        )
+    }
+
+    suspend fun inboxFailed(id: ObjectId, error: String) {
+        collection.updateOne(
+            Filters.and(Filters.eq("_id", id), Filters.eq("settings.inboxSync", true)),
+            Updates.set("inbox.lastError", error.take(200)),
+        )
     }
 
     suspend fun makeDefault(tenantId: ObjectId, id: ObjectId): IntegrationConnection? {
@@ -172,14 +213,10 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
     private fun scope(tenantId: ObjectId, provider: String?): Bson =
         if (provider == null) Filters.eq("tenantId", tenantId) else Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("provider", provider))
 
-    private fun EmailSettings.toDocument() = Document()
-        .append("senderName", senderName)
-        .append("replyTo", replyTo)
-        .append("signature", signature)
-
     private fun Document.toConnection(): IntegrationConnection {
         val settings = get("settings", Document::class.java)
         val sends = get("dailySends", Document::class.java)
+        val inbox = get("inbox", Document::class.java)
         return IntegrationConnection(
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
@@ -196,10 +233,17 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
                 senderName = settings?.getString("senderName"),
                 replyTo = settings?.getString("replyTo"),
                 signature = settings?.getString("signature"),
+                inboxSync = settings?.getBoolean("inboxSync", false) ?: false,
             ),
             isDefault = getBoolean("isDefault", false),
             lastError = getString("lastError"),
             dailySends = sends?.getString("day")?.let { DailySends(it, sends.getInteger("count") ?: 0) },
+            inbox = InboxState(
+                historyId = inbox?.getString("historyId"),
+                enabledAt = inbox?.instant("enabledAt"),
+                lastSyncedAt = inbox?.instant("lastSyncedAt"),
+                lastError = inbox?.getString("lastError"),
+            ),
             createdAt = instant("createdAt") ?: Instant.fromEpochMilliseconds(0),
             updatedAt = instant("updatedAt") ?: Instant.fromEpochMilliseconds(0),
         )
