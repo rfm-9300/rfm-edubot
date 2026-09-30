@@ -2,6 +2,8 @@
 
 Multi-channel AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling. A tenant can bind WhatsApp and Instagram DM accounts to the same agent; the pipeline stays shared and channel-specific behavior is isolated at ingress and egress.
 
+Automations ("Agents") and the Google/Gmail integration are planned in [plan-agents-automations.md](plan-agents-automations.md) and described under [Agents and automations](#agents-and-automations) below.
+
 ## Request Flow
 
 ```mermaid
@@ -436,6 +438,13 @@ atomically claims the action before execution, preventing duplicate writes from 
 Threads and messages are scoped by both `tenantId` and an owner key derived from the dashboard user,
 so users cannot open or confirm another user's assistant actions. Every assistant endpoint is also
 protected by dashboard JWT authentication and the normal server-side module gate.
+
+## Agents and automations
+
+The opt-in `agents` module runs company-owned automations on one engine: domain events, schedules,
+date offsets and inactivity wake agents up, and their steps run CRM, messaging, email, flow and AI
+actions under approvals and guardrails. The design, data model and phases are in
+[plan-agents-automations.md](plan-agents-automations.md).
 
 ## Context Building
 
