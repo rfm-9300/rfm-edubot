@@ -16,6 +16,7 @@ import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.StartResult
 import com.rfm.edubot.agents.store.AgentJson
 import com.rfm.edubot.agents.templates.AgentTemplates
+import com.rfm.edubot.agents.templates.TemplateBuild
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.DashboardAccessPolicy
 import com.rfm.edubot.dashboard.DashboardContext
@@ -56,7 +57,8 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
         route("/app/api/agents") {
             get("/catalog") {
                 val ctx = call.agentsContext() ?: return@get
-                call.respond(AgentCatalog.build(agents.registry, agents.availability(ctx.tenant), AgentTemplates.catalog(ctx.tenant.locale)))
+                val availability = agents.availability(ctx.tenant)
+                call.respond(AgentCatalog.build(agents.registry, availability, AgentTemplates.catalog(ctx.tenant.locale, availability, agents.validator)))
             }
 
             get("/overview") {
@@ -103,8 +105,14 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val company = agents.settings.get(ctx.tenant.id).company
                 val now = clock()
                 val agent = if (request.templateKey != null) {
-                    val templated = AgentTemplates.build(request.templateKey, request.params, ctx.tenant.locale, company)
-                        ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "template_not_found"))
+                    val templated = when (val built = AgentTemplates.build(request.templateKey, request.params, ctx.tenant.locale, company)) {
+                        is TemplateBuild.Built -> built.agent
+                        TemplateBuild.UnknownTemplate -> return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "template_not_found"))
+                        is TemplateBuild.InvalidParams -> return@post call.respond(
+                            HttpStatusCode.BadRequest,
+                            mapOf("error" to "invalid_params", "fields" to built.problems.joinToString(",") { "${it.path}:${it.code}" }),
+                        )
+                    }
                     Agent(
                         tenantId = ctx.tenant.id,
                         name = request.name?.trim()?.takeIf { it.isNotEmpty() }?.take(MAX_NAME) ?: templated.name,

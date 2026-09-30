@@ -231,7 +231,7 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
                     put("id", user.id.toHexString())
                     put("channel", user.channel.name)
                     put("waId", user.waId)
-                    put("displayName", user.displayName.orEmpty())
+                    put("displayName", user.displayName?.takeIf { it.isNotBlank() } ?: user.waId)
                 }
                 Loaded(withClient("contact", variables, tenant, client, today, formatter), user.displayName ?: user.waId, client?.id, client?.automationPaused ?: false)
             }

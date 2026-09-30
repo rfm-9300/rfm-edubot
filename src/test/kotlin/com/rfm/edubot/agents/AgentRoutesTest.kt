@@ -207,6 +207,38 @@ class AgentRoutesTest {
     }
 
     @Test
+    fun `a template becomes a draft in the company's language, and bad answers are refused`() = routes { http ->
+        val company = company()
+        val created = http.send(
+            "POST", "/app/api/agents", company.adminToken,
+            buildJsonObject {
+                put("templateKey", "weekly_cash_briefing")
+                put("params", buildJsonObject { put("weekday", 1); put("time", "18:00") })
+            },
+        )
+        assertEquals(HttpStatusCode.Created, created.status)
+        val agent = created.obj()
+        assertEquals("Resumo semanal de tesouraria", agent["name"]!!.jsonPrimitive.content)
+        assertEquals("weekly_cash_briefing", agent["templateKey"]!!.jsonPrimitive.content)
+        assertEquals(0, agent["problems"]!!.jsonArray.size)
+        val id = agent["id"]!!.jsonPrimitive.content
+        assertEquals("ACTIVE", http.send("POST", "/app/api/agents/$id/activate", company.adminToken).obj()["status"]!!.jsonPrimitive.content)
+
+        val refused = http.send(
+            "POST", "/app/api/agents", company.adminToken,
+            buildJsonObject { put("templateKey", "weekly_cash_briefing"); put("params", buildJsonObject { put("time", "7pm") }) },
+        )
+        assertEquals(HttpStatusCode.BadRequest, refused.status)
+        assertEquals("invalid_params", refused.obj()["error"]!!.jsonPrimitive.content)
+        assertEquals(HttpStatusCode.NotFound, http.send("POST", "/app/api/agents", company.adminToken, buildJsonObject { put("templateKey", "nope") }).status)
+
+        val templates = http.send("GET", "/app/api/agents/catalog", company.adminToken).obj()["templates"]!!.jsonArray.map { it.jsonObject }
+        fun available(key: String) = templates.single { it["key"]!!.jsonPrimitive.content == key }["available"]!!.jsonPrimitive.content.toBoolean()
+        assertTrue(available("weekly_cash_briefing"))
+        assertTrue(!available("invoice_due_reminder"), "no WhatsApp connected")
+    }
+
+    @Test
     fun `the catalog says what a company can't use yet and why`() = routes { http ->
         val company = company()
         val catalog = http.send("GET", "/app/api/agents/catalog", company.adminToken).obj()
