@@ -865,6 +865,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         weekday: 'Dia', time: 'Hora', audience: 'Quem é notificado', skipWhenEmpty: 'Não enviar quando não houver nada a reportar', dueInDays: 'A fatura vence em (dias)', notify: 'Notificar a equipa',
         depositPercent: 'Parte do orçamento a faturar (%)', createTask: 'Criar também uma tarefa', hoursBefore: 'Horas antes', afterHours: 'Horas depois', afterDays: 'Dias depois',
         reviewUrl: 'Link para avaliação', weekdaysOnly: 'Só dias úteis', minutes: 'Minutos sem resposta', days: 'Dias sem atividade', maxPerDay: 'No máximo por dia',
+        newContactsOnly: 'Só quem ainda não é cliente',
       },
       templates: {
         invoice_due_reminder: { name: 'Lembrete de fatura a vencer', desc: 'Um lembrete simpático por WhatsApp alguns dias antes do vencimento de uma fatura, com o PDF. Para quando é paga.' },

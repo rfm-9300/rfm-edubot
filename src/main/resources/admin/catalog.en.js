@@ -865,6 +865,7 @@ window.__I18N_CATALOGS['en'] = {
         weekday: 'Day', time: 'Time', audience: 'Who is notified', skipWhenEmpty: 'Skip it when there’s nothing to report', dueInDays: 'Invoice due in (days)', notify: 'Notify the team',
         depositPercent: 'Share of the quote to invoice (%)', createTask: 'Also create a task', hoursBefore: 'Hours before', afterHours: 'Hours after', afterDays: 'Days after',
         reviewUrl: 'Review link', weekdaysOnly: 'Weekdays only', minutes: 'Minutes without an answer', days: 'Days without activity', maxPerDay: 'At most per day',
+        newContactsOnly: 'Only people who aren’t clients yet',
       },
       templates: {
         invoice_due_reminder: { name: 'Invoice due reminder', desc: 'A friendly WhatsApp reminder a few days before an invoice is due, with the PDF. Stops when it’s paid.' },

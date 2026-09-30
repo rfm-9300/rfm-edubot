@@ -213,6 +213,33 @@ object AgentTemplates {
                 policy = policy(),
             )
         },
+        AgentTemplate(
+            key = "lead_qualifier", category = SALES, kind = AgentKind.AI_WORKER, icon = "sparkle",
+            params = Schema.obj("newContactsOnly" to Schema.boolean(default = true), audienceParam, "createTask" to Schema.boolean(default = false)),
+        ) {
+            val other = copy("intent_other")
+            val worthIt = whenAll(cond("steps.s1.output.intent", "neq", other))
+            AgentDefinition(
+                triggers = listOf(onEvent(DomainEventTypes.MESSAGE_RECEIVED)),
+                conditions = if (flag("newContactsOnly")) {
+                    whenAll(cond("event.text", "not_empty"), cond("client.id", "not_exists"))
+                } else {
+                    whenAll(cond("event.text", "not_empty"))
+                },
+                steps = listOfNotNull(
+                    ai(
+                        "s1",
+                        copy("instructions"),
+                        choice("intent", copy("intent_new"), copy("intent_question"), copy("intent_complaint"), other),
+                        output("summary"),
+                    ),
+                    notify("s2", copy("notify"), guard = worthIt),
+                    task("s3", copy("task"), guard = worthIt).takeIf { flag("createTask") },
+                ),
+                // A chat is sorted once a day, however many messages the customer sends.
+                policy = policy().copy(cooldownHours = 24),
+            )
+        },
 
         // Bookings
         AgentTemplate(
@@ -485,6 +512,14 @@ private class TemplateScope(private val key: String, val params: JsonObject, pri
 
     fun task(id: String, title: String, guard: ConditionGroup? = null) =
         StepSpec(id, "team.task.create", json("title" to title, "dueInDays" to 0), guard = guard)
+
+    /** An AI step that only reads what the run already knows (no tools), which keeps it to one model call. */
+    fun ai(id: String, instructions: String, vararg outputs: JsonObject) =
+        StepSpec(id, "ai.task", json("instructions" to instructions, "outputs" to outputs.toList(), "readData" to false, "actions" to emptyList<String>()))
+
+    fun output(name: String, type: String = "text") = json("name" to name, "type" to type)
+
+    fun choice(name: String, vararg options: String) = json("name" to name, "type" to "choice", "options" to options.toList())
 
     /** A summary for the team, skipped when there is nothing to report if [skipWhenEmpty]. */
     fun digest(kind: String, trigger: TriggerSpec, skipWhenEmpty: Boolean = flag("skipWhenEmpty")) = AgentDefinition(

@@ -62,8 +62,13 @@ internal object TemplateCopy {
         "supplier_bill_intake.instructions" to "The email comes from a supplier. Read it and any invoice text, then find the amount to pay in euros, the due date and a short description.",
         "supplier_bill_intake.notify" to "Supplier bill from {{email.fromName}}: {{steps.s1.output.description}} · {{steps.s1.output.amountEur}} € · due {{steps.s1.output.dueDate}}.",
         "lead_qualifier.name" to "Qualify new chats",
-        "lead_qualifier.instructions" to "Read the customer's message and classify it: new_request, question, complaint or other. Write a one-line summary for the team.",
+        "lead_qualifier.instructions" to "Read the customer's latest message and sort it by what they want: a new request for work, a question, a complaint or other (greetings, spam, anything else). Write a one-line summary for the team.",
+        "lead_qualifier.intent_new" to "new request",
+        "lead_qualifier.intent_question" to "question",
+        "lead_qualifier.intent_complaint" to "complaint",
+        "lead_qualifier.intent_other" to "other",
         "lead_qualifier.notify" to "{{conversation.contactName}} ({{steps.s1.output.intent}}): {{steps.s1.output.summary}}",
+        "lead_qualifier.task" to "Reply to {{conversation.contactName}}: {{steps.s1.output.summary}}",
     )
 
     private val pt = mapOf(
@@ -121,8 +126,13 @@ internal object TemplateCopy {
         "supplier_bill_intake.instructions" to "O email vem de um fornecedor. Leia-o e o texto da fatura, e encontre o valor a pagar em euros, a data de vencimento e uma descrição curta.",
         "supplier_bill_intake.notify" to "Fatura de fornecedor de {{email.fromName}}: {{steps.s1.output.description}} · {{steps.s1.output.amountEur}} € · vence {{steps.s1.output.dueDate}}.",
         "lead_qualifier.name" to "Qualificar novas conversas",
-        "lead_qualifier.instructions" to "Leia a mensagem do cliente e classifique-a: new_request, question, complaint ou other. Escreva um resumo de uma linha para a equipa.",
+        "lead_qualifier.instructions" to "Leia a última mensagem do cliente e classifique-a pelo que pretende: um novo pedido de trabalho, uma pergunta, uma reclamação ou outro (cumprimentos, spam, qualquer outra coisa). Escreva um resumo de uma linha para a equipa.",
+        "lead_qualifier.intent_new" to "novo pedido",
+        "lead_qualifier.intent_question" to "pergunta",
+        "lead_qualifier.intent_complaint" to "reclamação",
+        "lead_qualifier.intent_other" to "outro",
         "lead_qualifier.notify" to "{{conversation.contactName}} ({{steps.s1.output.intent}}): {{steps.s1.output.summary}}",
+        "lead_qualifier.task" to "Responder a {{conversation.contactName}}: {{steps.s1.output.summary}}",
     )
 
     private val es = mapOf(
@@ -180,8 +190,13 @@ internal object TemplateCopy {
         "supplier_bill_intake.instructions" to "El email viene de un proveedor. Léelo junto con el texto de la factura y encuentra el importe a pagar en euros, la fecha de vencimiento y una descripción breve.",
         "supplier_bill_intake.notify" to "Factura de proveedor de {{email.fromName}}: {{steps.s1.output.description}} · {{steps.s1.output.amountEur}} € · vence {{steps.s1.output.dueDate}}.",
         "lead_qualifier.name" to "Calificar nuevas conversaciones",
-        "lead_qualifier.instructions" to "Lee el mensaje del cliente y clasifícalo: new_request, question, complaint u other. Escribe un resumen de una línea para el equipo.",
+        "lead_qualifier.instructions" to "Lee el último mensaje del cliente y clasifícalo según lo que quiere: una nueva solicitud de trabajo, una pregunta, una queja u otro (saludos, spam, cualquier otra cosa). Escribe un resumen de una línea para el equipo.",
+        "lead_qualifier.intent_new" to "nueva solicitud",
+        "lead_qualifier.intent_question" to "pregunta",
+        "lead_qualifier.intent_complaint" to "queja",
+        "lead_qualifier.intent_other" to "otro",
         "lead_qualifier.notify" to "{{conversation.contactName}} ({{steps.s1.output.intent}}): {{steps.s1.output.summary}}",
+        "lead_qualifier.task" to "Responder a {{conversation.contactName}}: {{steps.s1.output.summary}}",
     )
 
     /** [values] fill single-brace `{name}` placeholders at build time; `{{…}}` variables stay for the run. */

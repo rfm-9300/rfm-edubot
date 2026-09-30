@@ -864,6 +864,7 @@ window.__I18N_CATALOGS['es'] = {
         weekday: 'Día', time: 'Hora', audience: 'A quién se avisa', skipWhenEmpty: 'No enviarlo cuando no haya nada que contar', dueInDays: 'La factura vence en (días)', notify: 'Avisar al equipo',
         depositPercent: 'Parte del presupuesto a facturar (%)', createTask: 'Crear también una tarea', hoursBefore: 'Horas antes', afterHours: 'Horas después', afterDays: 'Días después',
         reviewUrl: 'Enlace para reseñas', weekdaysOnly: 'Solo días laborables', minutes: 'Minutos sin respuesta', days: 'Días sin actividad', maxPerDay: 'Como máximo al día',
+        newContactsOnly: 'Solo quien aún no es cliente',
       },
       templates: {
         invoice_due_reminder: { name: 'Recordatorio de factura por vencer', desc: 'Un recordatorio amable por WhatsApp unos días antes del vencimiento de una factura, con el PDF. Se detiene cuando se paga.' },

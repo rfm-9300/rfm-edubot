@@ -10,9 +10,11 @@ import com.rfm.edubot.agents.registry.IntegrationKind
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.dashboard.DashboardModules
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import kotlin.test.Test
@@ -90,6 +92,23 @@ class AgentTemplatesTest {
         assertEquals(listOf("whatsapp.send"), built("no_show_recovery", buildJsonObject { put("afterHours", 0) }).definition.steps.map { it.action })
         assertEquals((1..5).toList(), built("daily_agenda").definition.triggers.single().config["weekdays"]!!.jsonArray.map { it.jsonPrimitive.int })
         assertEquals(null, built("daily_agenda", buildJsonObject { put("weekdaysOnly", false) }).definition.triggers.single().config["weekdays"])
+    }
+
+    @Test
+    fun `the chat qualifier sorts messages in one AI call, in the company's words, and only tells the team about real ones`() {
+        val agent = built("lead_qualifier", locale = "pt-PT")
+        val (classify, notify) = agent.definition.steps
+        assertEquals("ai.task", classify.action)
+        assertEquals(false, classify.input["readData"]!!.jsonPrimitive.boolean)
+        val intent = classify.input["outputs"]!!.jsonArray.first().jsonObject
+        assertEquals(listOf("novo pedido", "pergunta", "reclamação", "outro"), intent["options"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals("outro", notify.guard!!.conditions.single().value!!.jsonPrimitive.content)
+        assertEquals(24, agent.definition.policy.cooldownHours)
+        assertEquals(listOf("event.text", "client.id"), agent.definition.conditions!!.conditions.map { it.field })
+
+        val everyone = built("lead_qualifier", buildJsonObject { put("newContactsOnly", false); put("createTask", true) })
+        assertEquals(listOf("event.text"), everyone.definition.conditions!!.conditions.map { it.field })
+        assertEquals(listOf("ai.task", "team.notify", "team.task.create"), everyone.definition.steps.map { it.action })
     }
 
     @Test
