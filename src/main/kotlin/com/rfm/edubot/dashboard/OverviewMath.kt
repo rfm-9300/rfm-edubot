@@ -27,6 +27,7 @@ object OverviewMath {
     const val KIND_AGENT_APPROVAL = "agent_approval"
     const val KIND_AGENT_TASK_DUE = "agent_task_due"
     const val KIND_AGENT_FAILED = "agent_failed"
+    const val KIND_INTEGRATION_RECONNECT = "integration_reconnect"
 
     const val HIGHLIGHT_COLLECTED = "collected_month"
     const val HIGHLIGHT_OUTSTANDING = "outstanding"
@@ -114,9 +115,10 @@ object OverviewMath {
         expiringQuotes: Int,
         pendingAssistant: Int,
         agentAttention: Int = 0,
+        reconnects: Int = 0,
     ): String {
         if (overdueCount > 0) return HEALTH_URGENT
-        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant + agentAttention
+        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant + agentAttention + reconnects
         return if (watch > 0) HEALTH_WATCH else HEALTH_OK
     }
 

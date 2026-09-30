@@ -240,6 +240,7 @@ window.__I18N_CATALOGS['es'] = {
     waitingChat: 'Esperando respuesta', overdueInvoice: 'Factura vencida', pendingBooking: 'Reserva pendiente', instagramWaitingComment: 'Comentario de Instagram',
     dueSoonInvoice: 'Factura a punto de vencer', overduePayment: 'Pago vencido', dueSoonPayment: 'Pago a vencer', quoteExpiring: 'Presupuesto por caducar', assistantAction: p => `${p.n} ${p.n === 1 ? 'acción' : 'acciones'} del asistente pendientes de aprobación`,
     agentApproval: 'Agente pendiente de aprobación', agentTaskDue: 'Tarea para hoy', agentTaskOverdue: 'Tarea atrasada', agentFailed: 'Ejecución de agente fallida',
+    integrationReconnect: 'Vuelve a conectar tu cuenta de Gmail',
     overdueInvoiceN: p => `${p.n} ${p.n === 1 ? 'factura vencida' : 'facturas vencidas'}`, overduePaymentN: p => `${p.n} ${p.n === 1 ? 'pago vencido' : 'pagos vencidos'}`,
     teachBot: 'Enseñar al bot', setupWidget: 'Añadir el widget web',
     openModule: 'Abrir',
@@ -1231,8 +1232,8 @@ window.__I18N_CATALOGS['es'] = {
       categories: {
         whatsapp: 'WhatsApp',
         instagram: 'Instagram',
-        openrouter: 'OpenRouter',
         google: 'Google (Gmail)',
+        openrouter: 'OpenRouter',
         ratelimit: 'Límites de uso',
         pdf: 'Almacenamiento PDF',
         admin: 'Auth admin',

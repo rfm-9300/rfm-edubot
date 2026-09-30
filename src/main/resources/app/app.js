@@ -614,7 +614,7 @@ function notificationText(n) {
     case 'integration_reconnect': {
       const key = `app.agents.integrations.${p.integration}`;
       const name = I18N.t(key) === key ? p.integration || '' : I18N.t(key);
-      return { title: I18N.t('app.notifications.kinds.integration_reconnect', { name }), detail: NOTIFY.reconnectDetail };
+      return { title: I18N.t('app.notifications.kinds.integration_reconnect', { name }), detail: line(p.account, NOTIFY.reconnectDetail) };
     }
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
@@ -711,6 +711,7 @@ function openNotification(n) {
   if (canOpenAgentSubject(n.subject)) return openAgentSubject(n.subject, back);
   if (n.link && hasModule(n.link)) {
     closeDrawer({ dismissed: true });
+    if (n.kind === 'integration_reconnect') state.settingsSection = 'channels';
     return setActive(n.link);
   }
   refreshNotificationsDrawer();
@@ -1241,9 +1242,12 @@ function attentionTitle(item) {
     quote_expiring: STR.quoteExpiring,
     agent_approval: STR.agentApproval,
     agent_failed: STR.agentFailed,
+    integration_reconnect: STR.integrationReconnect,
   };
   return map[item.kind] || item.kind;
 }
+// Home rows that open a particular Settings section.
+const ATTENTION_SETTINGS = { integration_reconnect: 'channels' };
 // Agent tasks come in when due by the end of today; one from an earlier day is late.
 const agentTaskLate = item => !!item.at && localDay(item.at) < localDay(new Date().toISOString());
 // Home rows about agents open the approval, task or run itself (see AgentsUI.openRef).
@@ -1254,6 +1258,7 @@ function attentionPill(kind) {
     overdue_payment: 'pill--bad', due_soon_payment: 'pill--warn',
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
     assistant_action: 'pill--info', agent_approval: 'pill--warn', agent_task_due: 'pill--info', agent_failed: 'pill--bad',
+    integration_reconnect: 'pill--bad',
   };
   return map[kind] || '';
 }
@@ -1278,6 +1283,7 @@ function attentionIcon(kind) {
     overdue_payment: '💸', due_soon_payment: '⏰',
     pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
     assistant_action: '✨', agent_approval: '🤖', agent_task_due: '📋', agent_failed: '⚠️',
+    integration_reconnect: '✉️',
   };
   return map[kind] || '•';
 }
@@ -1372,7 +1378,7 @@ function renderOverview(root) {
       const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
         : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
       const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"${ATTENTION_SETTINGS[n.kind] ? ` data-settings="${ATTENTION_SETTINGS[n.kind]}"` : ''}><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
     }).join('')}</div></div>`
     : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
@@ -1585,8 +1591,8 @@ function dashFacts(rows, inline = false) {
   if (!items.length) return '';
   return `<dl class="dash-facts${inline ? ' dash-facts--row' : ''}">${items.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(String(value))}</dd></div>`).join('')}</dl>`;
 }
-function worklistRow({ tone = 'neutral', title, detail = '', meta = '', when = '', amount = false, go, open = '', conversation = '' }) {
-  const attrs = `data-go="${escapeHTML(go)}"${open ? ` data-open="${escapeHTML(open)}"` : ''}${conversation ? ` data-conversation="${escapeHTML(conversation)}"` : ''}`;
+function worklistRow({ tone = 'neutral', title, detail = '', meta = '', when = '', amount = false, go, open = '', conversation = '', settings = '' }) {
+  const attrs = `data-go="${escapeHTML(go)}"${open ? ` data-open="${escapeHTML(open)}"` : ''}${conversation ? ` data-conversation="${escapeHTML(conversation)}"` : ''}${settings ? ` data-settings="${escapeHTML(settings)}"` : ''}`;
   const side = meta || when
     ? `<span class="worklist__side">${meta ? `<span class="worklist__meta${amount ? ' worklist__meta--amount' : ''}">${escapeHTML(meta)}</span>` : ''}${when ? `<span class="worklist__when">${escapeHTML(when)}</span>` : ''}</span>`
     : '';
@@ -1870,6 +1876,7 @@ function renderOverviewMinimal(root) {
       return worklistRow({
         tone: n.kind === 'agent_task_due' && agentTaskLate(n) ? 'late' : attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
         open: agentRef || (!n.aggregate && opens ? n.id || '' : ''), conversation: n.kind === 'waiting_chat' ? n.id || '' : '',
+        settings: ATTENTION_SETTINGS[n.kind] || '',
       });
     }).join('');
     const body = rows

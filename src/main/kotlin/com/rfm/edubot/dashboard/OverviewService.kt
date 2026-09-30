@@ -18,6 +18,8 @@ import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.instagram.InstagramCommentRepository
+import com.rfm.edubot.integrations.IntegrationConnection
+import com.rfm.edubot.integrations.IntegrationConnectionRepository
 import com.rfm.edubot.oauth.InstagramOAuthScopes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaRepository
@@ -92,6 +94,9 @@ class OverviewService(private val mongo: MongoModule) {
             }
         }
         val agents = async { if (DashboardModules.AGENTS in modules) agents(tenant.id, window) else null }
+        val reconnects = async {
+            if (DashboardModules.SETTINGS in modules) IntegrationConnectionRepository(mongo).needingReconnect(tenant.id) else emptyList()
+        }
         val personaEmpty = async {
             if (DashboardModules.PERSONA in modules) {
                 val persona = PersonaRepository(mongo).findByTenant(tenant.id)
@@ -135,7 +140,8 @@ class OverviewService(private val mongo: MongoModule) {
         val agentsBlock = agents.await()
 
         val waiting = waitingList.await()
-        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting)
+        val reconnectList = reconnects.await()
+        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList)
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -152,6 +158,7 @@ class OverviewService(private val mongo: MongoModule) {
             expiringQuotes = pipelineDto?.expiringSoonCount ?: 0,
             pendingAssistant = assistantDto?.pendingActions ?: 0,
             agentAttention = agentsBlock?.let { (it.dto.pendingApprovals + it.dto.tasksDue).toInt() + it.failed.size } ?: 0,
+            reconnects = reconnectList.size,
         )
         OverviewHomeLayout.apply(
             OverviewDto(
@@ -644,6 +651,7 @@ class OverviewService(private val mongo: MongoModule) {
         payments: OverviewPaymentsDto?,
         agents: AgentsBlock?,
         waiting: List<WaitingConversation>,
+        reconnects: List<IntegrationConnection>,
     ): List<OverviewAttentionItemDto> {
         val items = mutableListOf<OverviewAttentionItemDto>()
         if (DashboardModules.INVOICES in modules && cash != null) {
@@ -812,6 +820,15 @@ class OverviewService(private val mongo: MongoModule) {
                 )
             }
         }
+        reconnects.forEach {
+            items += OverviewAttentionItemDto(
+                kind = OverviewMath.KIND_INTEGRATION_RECONNECT,
+                tab = DashboardModules.SETTINGS,
+                id = it.id.toHexString(),
+                detail = it.accountEmail,
+                at = it.updatedAt.toString(),
+            )
+        }
         return rankAttention(items)
     }
 
@@ -820,6 +837,7 @@ class OverviewService(private val mongo: MongoModule) {
             OverviewMath.KIND_OVERDUE_INVOICE,
             OverviewMath.KIND_OVERDUE_PAYMENT,
             OverviewMath.KIND_WAITING_CHAT,
+            OverviewMath.KIND_INTEGRATION_RECONNECT,
             OverviewMath.KIND_AGENT_APPROVAL,
             OverviewMath.KIND_PENDING_BOOKING,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
