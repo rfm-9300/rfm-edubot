@@ -2,15 +2,17 @@ package com.rfm.edubot.agents.actions
 
 import com.rfm.edubot.agents.registry.ActionResult
 import com.rfm.edubot.agents.registry.string
-import com.rfm.edubot.agents.registry.strings
 import com.rfm.edubot.agents.runtime.RunContext
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.whatsapp.WhatsAppClient
 import com.rfm.edubot.whatsapp.WhatsAppTemplate
 import kotlinx.datetime.Instant
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import java.util.concurrent.ConcurrentHashMap
@@ -23,12 +25,20 @@ import kotlin.time.Duration.Companion.minutes
 internal object WhatsAppTemplateSending {
     data class Mapping(val name: String, val language: String, val params: List<String>)
 
+    /** The approved template with the step's values in place; [complete] once every variable has one Meta accepts. */
+    data class Prepared(val template: WhatsAppTemplate, val values: Map<String, String>, val body: String) {
+        val complete: Boolean get() = values.values.none { it.isEmpty() || it.length > MAX_VALUE }
+    }
+
+    private const val MAX_VALUE = 1024
     private val cache = ConcurrentHashMap<ObjectId, Pair<Instant, List<WhatsAppTemplate>>>()
     private val cacheFor = 5.minutes
 
     fun mapping(input: JsonObject): Mapping? {
         val name = input.string("template") ?: return null
-        return Mapping(name, input.string("templateLanguage") ?: "pt_PT", input.strings("templateParams"))
+        // By position: the builder keeps a variable left empty in its place, so the next one mustn't move into it.
+        val params = (input["templateParams"] as? JsonArray)?.map { (it as? JsonPrimitive)?.contentOrNull.orEmpty() }.orEmpty()
+        return Mapping(name, input.string("templateLanguage") ?: "pt_PT", params)
     }
 
     private suspend fun approved(ctx: RunContext, client: WhatsAppClient, mapping: Mapping): WhatsAppTemplate? {
@@ -42,20 +52,22 @@ internal object WhatsAppTemplateSending {
         return templates.firstOrNull { it.name == mapping.name && it.language == mapping.language && it.approved && it.sendable }
     }
 
-    private fun values(template: WhatsAppTemplate, mapping: Mapping): Map<String, String> =
-        template.params.mapIndexed { index, key -> key to mapping.params.getOrNull(index).orEmpty().trim() }.toMap()
-
-    suspend fun previewText(ctx: RunContext, mapping: Mapping): String? {
-        val client = ctx.services.whatsApp(ctx.tenant) ?: return null
+    private suspend fun prepare(ctx: RunContext, client: WhatsAppClient, mapping: Mapping): Prepared? {
         val template = approved(ctx, client, mapping) ?: return null
-        return template.render(values(template, mapping))
+        val values = template.params.mapIndexed { index, key -> key to mapping.params.getOrNull(index).orEmpty().trim() }.toMap()
+        return Prepared(template, values, template.render(values))
+    }
+
+    /** What would go for [mapping]; null when there's no approved template to send. */
+    suspend fun preview(ctx: RunContext, mapping: Mapping): Prepared? {
+        val client = ctx.services.whatsApp(ctx.tenant) ?: return null
+        return prepare(ctx, client, mapping)
     }
 
     suspend fun send(ctx: RunContext, client: WhatsAppClient, phone: String, mapping: Mapping): ActionResult {
-        val template = approved(ctx, client, mapping) ?: return ActionResult.Failed("template_not_found")
-        val values = values(template, mapping)
-        if (values.values.any { it.isEmpty() || it.length > 1024 }) return ActionResult.Failed("template_params")
-        val body = template.render(values)
+        val prepared = prepare(ctx, client, mapping) ?: return ActionResult.Failed("template_not_found")
+        if (!prepared.complete) return ActionResult.Failed("template_params")
+        val (template, values, body) = prepared
         return when (val sent = AgentMessaging.deliver(ctx, "whatsapp", phone) { client.sendTemplate(phone, template.name, template.language, template.bodyParameters(values)).id }) {
             is Delivery.Sent -> {
                 AgentMessaging.storeOutbound(ctx, Platform.WHATSAPP, phone, MessageContent.Template(template.name, template.language, body), sent.providerMessageId)

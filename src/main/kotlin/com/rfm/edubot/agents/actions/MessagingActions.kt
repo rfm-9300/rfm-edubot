@@ -50,17 +50,25 @@ object WhatsAppSendAction : AgentAction {
     override suspend fun preview(input: JsonObject, ctx: RunContext): ActionPreview {
         val phone = recipient(input, ctx)
         val open = phone != null && AgentMessaging.whatsAppWindowOpen(ctx, phone)
-        val template = WhatsAppTemplateSending.mapping(input)
+        // Without a number the fallback gets the text, so the template only goes to a known number outside the window.
+        val template = WhatsAppTemplateSending.mapping(input)?.takeIf { phone != null && !open }
+        val prepared = template?.let { WhatsAppTemplateSending.preview(ctx, it) }
         return ActionPreview(
             kind = "message",
             channel = "whatsapp",
             recipients = listOfNotNull(phone),
-            body = if (!open && template != null) WhatsAppTemplateSending.previewText(ctx, template) ?: input.string("text") else input.string("text"),
-            attachments = listOfNotNull(input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it)?.filename }),
-            editable = if (!open && template != null) emptyList() else listOf("text"),
+            body = prepared?.body ?: input.string("text"),
+            attachments = if (template != null) emptyList() else listOfNotNull(input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it)?.filename }),
+            editable = if (template != null) emptyList() else listOf("text"),
             warnings = buildList {
-                if (phone == null) add("no_phone")
-                else if (!open) add(if (template != null) "template_outside_window" else "window_closed")
+                when {
+                    phone == null -> add("no_phone")
+                    open -> Unit
+                    template == null -> add("window_closed")
+                    prepared == null -> add("template_not_found")
+                    !prepared.complete -> add("template_params")
+                    else -> add("template_outside_window")
+                }
             },
         )
     }
