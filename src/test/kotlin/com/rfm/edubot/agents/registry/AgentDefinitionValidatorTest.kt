@@ -1,5 +1,6 @@
 package com.rfm.edubot.agents.registry
 
+import com.rfm.edubot.agents.actions.AiTaskAction
 import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.model.AgentDefinition
 import com.rfm.edubot.agents.model.AgentPolicy
@@ -9,8 +10,11 @@ import com.rfm.edubot.agents.model.TriggerSpec
 import com.rfm.edubot.agents.runtime.RunContext
 import com.rfm.edubot.dashboard.DashboardModules
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -121,6 +125,54 @@ class AgentDefinitionValidatorTest {
         assertTrue("unsafe_ai_recipient" in codes(definition))
         val approved = definition.copy(policy = AgentPolicy(autonomy = Autonomy.APPROVE))
         assertTrue("unsafe_ai_recipient" !in codes(approved))
+    }
+
+    @Test
+    fun `an AI task needs usable field names and may only take actions that change something`() {
+        val registry = AgentRegistry(
+            actions = listOf(
+                AiTaskAction,
+                FakeAction("send", SideEffect.EXTERNAL_MESSAGE, IntegrationKind.WHATSAPP, recipientFields = setOf("to")),
+                FakeAction("note", SideEffect.INTERNAL_WRITE),
+                FakeAction("look", SideEffect.NONE),
+            ),
+            triggers = TriggerTypes.all,
+        )
+        val definition = AgentDefinition(
+            triggers = listOf(invoiceCreated),
+            steps = listOf(
+                StepSpec(
+                    "s1",
+                    "ai.task",
+                    buildJsonObject {
+                        put("instructions", "Classify invoice {{invoice.number}}")
+                        putJsonArray("outputs") {
+                            addJsonObject { put("name", "intent"); put("type", "choice") }
+                            addJsonObject { put("name", "intent") }
+                            addJsonObject { put("name", "2nd") }
+                            addJsonObject { put("name", "actions") }
+                        }
+                        putJsonArray("actions") { listOf("note", "look", "teleport", "send").forEach { add(JsonPrimitive(it)) } }
+                    },
+                ),
+            ),
+        )
+        val noWhatsApp = Availability(DashboardModules.catalog.toSet(), emptySet())
+
+        val problems = AgentDefinitionValidator(registry).validate(definition, noWhatsApp).map { it.path to it.code }
+
+        assertEquals(
+            listOf(
+                "steps[0].input.outputs[0].options" to "no_options",
+                "steps[0].input.outputs[1].name" to "duplicate_name",
+                "steps[0].input.outputs[2].name" to "invalid_name",
+                "steps[0].input.outputs[3].name" to "invalid_name",
+                "steps[0].input.actions[1]" to "not_ai_callable",
+                "steps[0].input.actions[2]" to "unknown_action",
+                "steps[0].input.actions[3]" to "needs_integration",
+            ),
+            problems,
+        )
     }
 
     @Test

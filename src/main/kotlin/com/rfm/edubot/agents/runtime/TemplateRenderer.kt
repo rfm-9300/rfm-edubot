@@ -37,10 +37,12 @@ object TemplateRenderer {
         else -> emptyList()
     }
 
-    fun render(template: String, variables: JsonObject, formatter: ValueFormatter): String =
+    /** [wrap] gets each variable's path and rendered text, and returns what goes into the result. */
+    fun render(template: String, variables: JsonObject, formatter: ValueFormatter, wrap: ((String, String) -> String)? = null): String =
         token.replace(template) { match ->
-            val value = lookup(variables, match.groupValues[1])
-            formatter.format(value, match.groupValues[2].ifBlank { null }, match.groupValues[3].ifBlank { null })
+            val path = match.groupValues[1]
+            val text = formatter.format(lookup(variables, path), match.groupValues[2].ifBlank { null }, match.groupValues[3].ifBlank { null })
+            wrap?.invoke(path, text) ?: text
         }
 
     /**

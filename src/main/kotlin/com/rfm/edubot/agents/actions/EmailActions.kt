@@ -10,6 +10,7 @@ import com.rfm.edubot.agents.registry.Schema
 import com.rfm.edubot.agents.registry.SideEffect
 import com.rfm.edubot.agents.registry.string
 import com.rfm.edubot.agents.runtime.RunContext
+import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.integrations.email.EmailAttachment
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailSendResult
@@ -137,6 +138,27 @@ object EmailSendAction : AgentAction {
         "email" -> input.string("email")
         else -> AgentMessaging.variable(ctx, "client.email")
     }?.trim()?.takeIf { it.isNotEmpty() }
+
+    /**
+     * The record's client and team members are on file; typed addresses, copies and the reply-to must be
+     * a client's, a team member's or the company's own.
+     */
+    override suspend fun reachesOnlyKnownContacts(input: JsonObject, ctx: RunContext): Boolean {
+        val typed = buildList {
+            if ((input.string("to") ?: "client") == "email") input.string("email")?.let(::add)
+            addAll(addresses(input.string("cc")))
+            addAll(addresses(input.string("bcc")))
+            input.string("replyTo")?.let(::add)
+        }
+        if (typed.isEmpty()) return true
+        val clients = ClientRepository(ctx.services.mongo, ctx.tenant.id)
+        val company = AgentMessaging.variable(ctx, "company.email")
+        return typed.all { address ->
+            address.equals(company, ignoreCase = true) ||
+                clients.findByEmail(address) != null ||
+                ctx.services.dashboardUsers.findByEmail(address)?.tenantId == ctx.tenant.primaryTenantId
+        }
+    }
 
     private fun addresses(raw: String?): List<String> =
         raw.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }

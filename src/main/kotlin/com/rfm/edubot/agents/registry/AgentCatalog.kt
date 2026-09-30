@@ -28,6 +28,8 @@ data class CatalogActionDto(
     val subjectTypes: List<String>,
     val available: Boolean,
     val reason: String? = null,
+    /** An `ai.task` step may offer it to the model. */
+    val aiCallable: Boolean = false,
 )
 
 @Serializable
@@ -106,6 +108,7 @@ object AgentCatalog {
                     subjectTypes = action.subjectTypes.toList(),
                     available = reason == null,
                     reason = reason,
+                    aiCallable = action.aiCallable,
                 )
             },
             entities = TriggerTypes.moduleOfEntity.map { (type, module) ->

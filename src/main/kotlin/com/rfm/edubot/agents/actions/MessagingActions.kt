@@ -11,7 +11,9 @@ import com.rfm.edubot.agents.registry.string
 import com.rfm.edubot.agents.runtime.RunContext
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
+import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.MessageContent
+import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.InboxService
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.tenant.model.Platform
@@ -101,6 +103,15 @@ object WhatsAppSendAction : AgentAction {
         put("channel", "whatsapp")
         put("to", phone)
         (sent as? Delivery.Sent)?.providerMessageId?.let { put("messageId", it) }
+    }
+
+    /** The record's client or contact is on file; a typed number must be a client's or someone who wrote to the company. */
+    override suspend fun reachesOnlyKnownContacts(input: JsonObject, ctx: RunContext): Boolean {
+        if ((input.string("to") ?: "client") != "phone") return true
+        val phone = input.string("phone") ?: return true
+        if (ClientRepository(ctx.services.mongo, ctx.tenant.id).findByPhone(phone) != null) return true
+        val waId = AgentMessaging.normalizePhone(phone, ctx.tenant.locale) ?: return false
+        return UserRepository(ctx.services.mongo, ctx.tenant.id).findByWaId(waId, Platform.WHATSAPP) != null
     }
 
     /** The WhatsApp number to write to, with its country code. */

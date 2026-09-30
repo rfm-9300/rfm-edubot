@@ -58,7 +58,7 @@ class AgentDefinitionValidator(private val registry: AgentRegistry) {
                 problems += DefinitionProblem(path, "unknown_action", step.action)
                 return@forEachIndexed
             }
-            SchemaValidator.validate(action.inputSchema, step.input, "", lenientTemplates = true)
+            (SchemaValidator.validate(action.inputSchema, step.input, "", lenientTemplates = true) + action.inputProblems(step.input, registry, availability, subjectType))
                 .forEach { problems += DefinitionProblem("$path.input.${it.path}", it.code, it.detail) }
             availability.missingModules(action.requiredModules).forEach { problems += DefinitionProblem(path, "needs_module", it) }
             if (!availability.has(action.requiredIntegration)) problems += DefinitionProblem(path, "needs_integration", action.requiredIntegration?.name)

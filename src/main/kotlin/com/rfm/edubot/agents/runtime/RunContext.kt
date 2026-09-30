@@ -4,10 +4,13 @@ import com.rfm.edubot.agents.model.AgentRun
 import com.rfm.edubot.agents.model.AgentSettings
 import com.rfm.edubot.agents.model.Autonomy
 import com.rfm.edubot.agents.model.StepSpec
+import com.rfm.edubot.agents.registry.AgentRegistry
+import com.rfm.edubot.agents.registry.Availability
 import com.rfm.edubot.agents.store.AgentTaskRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.tools.TokenCount
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.dashboard.DashboardUserRepository
@@ -56,6 +59,10 @@ class RunContext(
     val services: AgentServices,
     val now: Instant,
     val autonomy: Autonomy,
+    /** The actions an AI step may call; the executor passes its registry. */
+    val registry: AgentRegistry? = null,
+    /** The company's modules and integrations, looked up only when an AI step needs them. */
+    val availability: (suspend () -> Availability)? = null,
 ) {
     val dryRun: Boolean get() = run.dryRun
     val zone: TimeZone = TimeZone.of(TenantTimeZones.normalize(tenant.timezone))
@@ -67,4 +74,16 @@ class RunContext(
     val idempotencyKey: String get() = "${run.id.toHexString()}:${step.id}"
 
     val actor: Actor get() = Actor.agent(run.agentId, run.id, run.agentName)
+
+    /** AI tokens this step spent; the executor adds them to the run. */
+    var tokens: TokenCount = TokenCount()
+        private set
+
+    fun addTokens(usage: TokenCount) {
+        tokens += usage
+    }
+
+    /** The context of an action an AI step calls, under its own step id so its send has its own key. */
+    fun forCall(stepId: String): RunContext =
+        RunContext(tenant, run, step.copy(id = stepId), variables, settings, services, now, Autonomy.AUTO, registry, availability)
 }

@@ -23,6 +23,8 @@ object AgentActions {
         CreateBookingAction,
         GeneratePdfAction,
         SummaryAction,
+        AiTaskAction,
+        AiComposeAction,
         WaitAction,
         BranchAction,
         StopAction,

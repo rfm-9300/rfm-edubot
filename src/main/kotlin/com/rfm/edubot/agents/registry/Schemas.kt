@@ -67,12 +67,13 @@ object Schema {
         description?.let { put("description", it) }
     }
 
-    fun array(items: JsonObject, widget: String? = null, maxItems: Int? = null, description: String? = null): JsonObject = buildJsonObject {
+    fun array(items: JsonObject, widget: String? = null, maxItems: Int? = null, description: String? = null, default: JsonArray? = null): JsonObject = buildJsonObject {
         put("type", "array")
         put("items", items)
         widget?.let { put("x-widget", it) }
         maxItems?.let { put("maxItems", it) }
         description?.let { put("description", it) }
+        default?.let { put("default", it) }
     }
 
     fun isTemplate(value: JsonElement?): Boolean = (value as? JsonPrimitive)?.takeIf { it.isString }?.content?.contains("{{") == true

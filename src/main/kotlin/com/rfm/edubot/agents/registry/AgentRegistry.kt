@@ -37,6 +37,15 @@ interface AgentAction {
     suspend fun preview(input: JsonObject, ctx: RunContext): ActionPreview
 
     suspend fun execute(input: JsonObject, ctx: RunContext): ActionResult
+
+    /**
+     * Whether everyone [input] reaches is already on file: the record's own client or contact, a known
+     * client or a team member. An AI step on Auto asks a person before reaching anyone else.
+     */
+    suspend fun reachesOnlyKnownContacts(input: JsonObject, ctx: RunContext): Boolean = recipientFields.isEmpty()
+
+    /** Checks the schema can't express, reported like schema problems at paths inside the input. */
+    fun inputProblems(input: JsonObject, registry: AgentRegistry, availability: Availability, subjectType: String?): List<SchemaProblem> = emptyList()
 }
 
 sealed class ActionResult {

@@ -139,7 +139,7 @@ class AgentRunExecutor(
                 ?: return finish(record(run, StepResult(step.id, step.action, StepStatus.FAILED, error = "unknown_action")), RunStatus.FAILED, error = "unknown_action")
             val autonomy = step.autonomy ?: run.definition.policy.autonomy
             val input = SchemaValidator.coerce(action.inputSchema, TemplateRenderer.renderJson(Schema.withDefaults(action.inputSchema, step.input), variables, formatter))
-            val ctx = RunContext(tenant, run, step, variables, settings, module.services, clock(), autonomy)
+            val ctx = RunContext(tenant, run, step, variables, settings, module.services, clock(), autonomy, module.registry, availability = { module.availability(tenant) })
             val decisions = if (run.dryRun) emptyList() else module.approvals.forRun(run.id).filter { it.stepId == step.id }
 
             val result: ActionResult = when {
@@ -183,6 +183,9 @@ class AgentRunExecutor(
                     runAction(action, input, ctx)
                 }
             }
+            if (ctx.tokens.total > 0) {
+                run = run.copy(promptTokens = run.promptTokens + ctx.tokens.prompt, completionTokens = run.completionTokens + ctx.tokens.completion)
+            }
 
             val previous = run.steps.firstOrNull { it.stepId == step.id }
             when (result) {
@@ -219,7 +222,7 @@ class AgentRunExecutor(
                     }
                 }
                 is ActionResult.Propose -> {
-                    if (run.dryRun) {
+                    if (run.dryRun || (autonomy == Autonomy.DRAFT && result.proposals.isNotEmpty())) {
                         val drafted = buildJsonObject {
                             put("proposals", JsonArray(result.proposals.map { buildJsonObject { put("action", it.action); put("preview", previewJson(it.preview)) } }))
                             result.output.forEach { (key, value) -> put(key, value) }
