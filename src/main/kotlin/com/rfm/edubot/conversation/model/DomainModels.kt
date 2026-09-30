@@ -12,7 +12,7 @@ enum class UserRole {
 /**
  * Inbound messages stay RECEIVED. Outbound messages whose WhatsApp id we keep move
  * SENT → DELIVERED → READ, or to FAILED, as Meta's status webhooks arrive. Outbound rows without
- * a WhatsApp id (AI replies, Instagram) are stored as DELIVERED once the send call succeeds.
+ * a WhatsApp id (AI replies, Instagram) are DELIVERED, or FAILED when the send call itself fails.
  */
 enum class MessageStatus {
     RECEIVED, PROCESSING, SENT, DELIVERED, READ, FAILED

@@ -352,7 +352,8 @@ website chat is read-only). `InboxService` (`dashboard/`) holds the rules; the r
   status webhooks (`delivered`, `read`, `failed` + error code) update the row through
   `DeliveryStatusRecorder`; a status only moves forward and `FAILED` sticks, because webhooks arrive late,
   twice or out of order. Meta often accepts an out-of-window text and fails it later with `131047`, so
-  the tick, not the send call, is the truth. AI replies keep no id and show no ticks.
+  the tick, not the send call, is the truth. AI replies keep no id and show no ticks, except that a
+  reply the send call refuses is stored as `FAILED` with Meta's error and shows as not delivered.
 - **Errors.** Meta's error codes map to dashboard keys in `WhatsAppErrors.key` (`inboxErr_<key>` in the
   catalogs); the API answers `{ error, detail }`, where `detail` is Meta's own text for unknown codes.
 - **Template management.** Settings → WhatsApp templates lists every template with Meta's review status

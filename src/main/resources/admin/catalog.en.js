@@ -456,6 +456,7 @@ window.__I18N_CATALOGS['en'] = {
     inboxTemplatesFailedTitle: 'Templates could not be loaded', inboxTemplateSent: 'Template sent',
     inboxErr_window_closed: 'The 24-hour reply window is closed. Send an approved template instead.',
     inboxErr_recipient_not_allowed: 'This test number can only message numbers on its recipient list in Meta’s App Dashboard.',
+    inboxErr_display_name_unapproved: 'Meta hasn’t approved this number’s display name yet, so it can’t send messages. Submit the name for review in WhatsApp Manager.',
     inboxErr_undeliverable: 'WhatsApp could not deliver this message. The number may not be on WhatsApp.',
     inboxErr_marketing_limited: 'Meta held this marketing message back to protect the customer’s experience.',
     inboxErr_rate_limited: 'Too many messages too quickly. Wait a moment and try again.',

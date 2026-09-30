@@ -455,6 +455,7 @@ window.__I18N_CATALOGS['es'] = {
     inboxTemplatesFailedTitle: 'No se pudieron cargar las plantillas', inboxTemplateSent: 'Plantilla enviada',
     inboxErr_window_closed: 'La ventana de respuesta de 24 horas está cerrada. Envía una plantilla aprobada.',
     inboxErr_recipient_not_allowed: 'Este número de prueba solo puede escribir a los números de su lista de destinatarios en el App Dashboard de Meta.',
+    inboxErr_display_name_unapproved: 'Meta aún no ha aprobado el nombre visible de este número, así que no puede enviar mensajes. Envía el nombre a revisión en WhatsApp Manager.',
     inboxErr_undeliverable: 'WhatsApp no pudo entregar este mensaje. Puede que el número no use WhatsApp.',
     inboxErr_marketing_limited: 'Meta retuvo este mensaje de marketing para proteger la experiencia del cliente.',
     inboxErr_rate_limited: 'Demasiados mensajes en poco tiempo. Espera un momento y vuelve a intentarlo.',

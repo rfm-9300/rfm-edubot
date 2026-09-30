@@ -1877,11 +1877,11 @@ function loadInboxMedia(root) {
 function inboxTick(m) {
   const tick = (icon, label, tone) => `<span class="tick tick--${tone}" role="img" aria-label="${escapeHTML(label)}" title="${escapeHTML(label)}">${INBOX_ICONS[icon]}</span>`;
   if (m.pending) return tick('clock', STR.inboxStatusSending, 'pending');
+  if (m.status === 'FAILED') return tick('alert', STR.inboxStatusFailed, 'failed');
   if (!m.tracked) return '';
   if (m.status === 'SENT') return tick('check', STR.inboxStatusSent, 'sent');
   if (m.status === 'DELIVERED') return tick('checks', STR.inboxStatusDelivered, 'delivered');
   if (m.status === 'READ') return tick('checks', STR.inboxStatusRead, 'read');
-  if (m.status === 'FAILED') return tick('alert', STR.inboxStatusFailed, 'failed');
   return '';
 }
 function inboxSelectedAsset() {

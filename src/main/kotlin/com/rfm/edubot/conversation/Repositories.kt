@@ -394,6 +394,19 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         )?.toMessage()
     }
 
+    /** A stored reply whose send call failed; it has no WhatsApp id, so no status webhook will change it. */
+    suspend fun markSendFailed(id: ObjectId, errorCode: Int?, errorText: String?): Message? =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(
+                Updates.set("status", MessageStatus.FAILED.name),
+                Updates.set("statusAt", SystemClock.now().toDate()),
+                Updates.set("errorCode", errorCode),
+                Updates.set("errorText", errorText),
+            ),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toMessage()
+
     /**
      * A failed message sent again: it takes the new WhatsApp id and starts over as SENT. Without an id
      * no status webhook can follow, so it is marked DELIVERED like other untracked outbound messages.

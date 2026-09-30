@@ -77,6 +77,7 @@ class WhatsAppClientTest {
     @Test
     fun `unknown Meta codes fall back to a generic key`() {
         assertEquals("window_closed", WhatsAppErrors.key(131047))
+        assertEquals("display_name_unapproved", WhatsAppErrors.key(131037))
         assertEquals("send_failed", WhatsAppErrors.key(999999))
         assertEquals("send_failed", WhatsAppErrors.key(null))
     }

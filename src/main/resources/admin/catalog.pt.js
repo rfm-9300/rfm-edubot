@@ -456,6 +456,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     inboxTemplatesFailedTitle: 'Não foi possível carregar os modelos', inboxTemplateSent: 'Modelo enviado',
     inboxErr_window_closed: 'A janela de resposta de 24 horas está fechada. Envie um modelo aprovado.',
     inboxErr_recipient_not_allowed: 'Este número de teste só envia mensagens para os números da lista de destinatários no App Dashboard da Meta.',
+    inboxErr_display_name_unapproved: 'A Meta ainda não aprovou o nome de exibição deste número, por isso ele não pode enviar mensagens. Submeta o nome para revisão no WhatsApp Manager.',
     inboxErr_undeliverable: 'O WhatsApp não conseguiu entregar esta mensagem. O número pode não usar WhatsApp.',
     inboxErr_marketing_limited: 'A Meta reteve esta mensagem de marketing para proteger a experiência do cliente.',
     inboxErr_rate_limited: 'Demasiadas mensagens em pouco tempo. Aguarde um momento e tente novamente.',

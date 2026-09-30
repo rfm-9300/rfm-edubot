@@ -134,6 +134,26 @@ class MessageRepositoryTest {
     }
 
     @Test
+    fun `a reply whose send failed turns FAILED with Meta's error and shows up in the inbox updates`() = runBlocking {
+        val tenantId = ObjectId()
+        val conversationId = ObjectId()
+        val repository = MessageRepository(mongoModule, tenantId)
+        val reply = repository.insert(
+            agentMessage(tenantId, conversationId, null, createdAt = Clock.System.now() - 1.hours)
+                .copy(status = MessageStatus.DELIVERED, author = MessageAuthor.AI, agentUserId = null, agentName = null),
+        )
+        val cursor = Clock.System.now() - 1.seconds
+
+        val failed = repository.markSendFailed(reply.id, 131037, "WhatsApp provided number needs display name approval")!!
+
+        assertEquals(MessageStatus.FAILED, failed.status)
+        assertEquals(131037, failed.errorCode)
+        assertEquals("WhatsApp provided number needs display name approval", failed.errorText)
+        assertEquals(listOf(reply.id), repository.changedSince(conversationId, cursor).map { it.id })
+        assertNull(MessageRepository(mongoModule, ObjectId()).markSendFailed(reply.id, null, null))
+    }
+
+    @Test
     fun `changes since a cursor include new messages and status updates`() = runBlocking {
         val tenantId = ObjectId()
         val conversationId = ObjectId()
