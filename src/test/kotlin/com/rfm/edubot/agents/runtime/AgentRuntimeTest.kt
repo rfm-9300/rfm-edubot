@@ -250,7 +250,10 @@ class AgentRuntimeTest {
         awaitRun(agent) { it.status == RunStatus.AWAITING_APPROVAL }
         val approval = module.approvals.list(tenant.id).single { it.agentId == agent.id }
         assertEquals("Olá Ana", approval.preview.body)
-        assertTrue(module.notifications.listFor(tenant.id, "admin", isAdmin = true).any { it.kind == NotificationKinds.AGENT_APPROVAL })
+        assertTrue(
+            module.notifications.listFor(tenant.id, "admin", isAdmin = true).any { it.kind == NotificationKinds.AGENT_APPROVAL && it.ref == "approval:${approval.id.toHexString()}" },
+            "one proposal opens straight from the bell",
+        )
 
         runtime.approve(tenant, approval.id, "u1", "Rui", buildJsonObject { put("text", "Olá Ana, tudo bem?") })
         awaitRun(agent) { it.status == RunStatus.SUCCEEDED }
@@ -301,7 +304,7 @@ class AgentRuntimeTest {
         }
         val failed = awaitRun(agent) { it.status == RunStatus.FAILED }
         assertEquals(3, failed.steps.single().attempts)
-        assertTrue(module.notifications.listFor(tenant.id, "admin", isAdmin = true).any { it.kind == NotificationKinds.AGENT_FAILED })
+        assertTrue(module.notifications.listFor(tenant.id, "admin", isAdmin = true).any { it.kind == NotificationKinds.AGENT_FAILED && it.ref == "run:${failed.id.toHexString()}" })
 
         val fragile = agent(AgentDefinition(listOf(onInvoice), steps = listOf(step("s1", "test.fail")), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
         repeat(AgentRunExecutor.CIRCUIT_BREAKER) { invoice() }
@@ -310,6 +313,7 @@ class AgentRuntimeTest {
         val paused = module.agents.findById(tenant.id, fragile.id)!!
         assertEquals(AgentStatus.PAUSED, paused.status)
         assertEquals("too_many_failures", paused.pausedReason)
+        eventually { module.notifications.listFor(tenant.id, "admin", isAdmin = true).any { it.kind == NotificationKinds.AGENT_PAUSED && it.ref == "agent:${fragile.id.toHexString()}" } }
     }
 
     @Test

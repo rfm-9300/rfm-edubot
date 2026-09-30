@@ -320,6 +320,14 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 call.respond(approvals.map { it.dto(canDecide = ctx.canDecide(it.approvers)) })
             }
 
+            get("/approvals/{id}") {
+                val ctx = call.agentsContext() ?: return@get
+                val id = call.parameters["id"].toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+                val approval = agents.approvals.findById(ctx.tenant.id, id) ?: return@get call.respond(HttpStatusCode.NotFound)
+                val open = approval.status == ApprovalStatus.PENDING
+                call.respond(approval.dto(canDecide = open && ctx.canDecide(approval.approvers)))
+            }
+
             post("/approvals/{id}/approve") {
                 val ctx = call.agentsContext() ?: return@post
                 val id = call.parameters["id"].toObjectIdOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -357,6 +365,13 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val assignee = if (query["mine"] == "1") ctx.actorId() else null
                 val subject = query["subjectType"]?.let { type -> query["subjectId"]?.let { SubjectRef(type, it) } }
                 call.respond(agents.tasks.list(ctx.tenant.id, status, assignee, subject).map { it.dto() })
+            }
+
+            get("/tasks/{id}") {
+                val ctx = call.agentsContext() ?: return@get
+                val id = call.parameters["id"].toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+                val task = agents.tasks.findById(ctx.tenant.id, id) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respond(task.dto())
             }
 
             post("/tasks") {
@@ -411,7 +426,7 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val tenantId = ctx.tenant.id
                 val runs = agents.runs.list(tenantId, subject = subject, limit = 30).filter { !it.dryRun }
                 val activity = events.timeline(tenantId, subject, limit = 50).filter { it.actor.type == ActorType.AGENT }.map {
-                    ActivityDto(it.type, it.actor.name, it.occurredAt.toString(), it.payload)
+                    ActivityDto(it.type, it.actor.name, it.occurredAt.toString(), it.payload, it.actor.runId)
                 }
                 val manual = agents.agents.activeFor(tenantId).filter { agent ->
                     agent.definition.triggers.any { it.type == TriggerTypes.MANUAL && (it.config.string("subjectType") ?: SubjectTypes.NONE) == subject.type }
@@ -431,6 +446,16 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                         automationPaused = paused,
                     ),
                 )
+            }
+
+            // Any member may pause: it's the brake for a client who asked not to be contacted.
+            put("/subjects/client/{id}/automation") {
+                val ctx = call.agentsContext() ?: return@put
+                if (!ctx.requireModule(DashboardModules.CLIENTS)) return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "module_disabled"))
+                val id = call.parameters["id"].toObjectIdOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
+                val request = runCatching { call.receive<AutomationPauseRequest>() }.getOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                val client = ClientRepository(agents.mongo, ctx.tenant.id).setAutomationPaused(id, request.paused) ?: return@put call.respond(HttpStatusCode.NotFound)
+                call.respond(AutomationPauseDto(client.automationPaused))
             }
 
             get("/settings") {

@@ -132,6 +132,7 @@ object CreateTaskAction : AgentAction {
             params = mapOf("agent" to ctx.run.agentName, "title" to title, "subject" to ctx.run.subjectLabel.orEmpty()),
             link = "agents",
             subject = ctx.run.subject,
+            ref = "task:${task.id.toHexString()}",
         )
         return ActionResult.Done(buildJsonObject { put("taskId", task.id.toHexString()) })
     }

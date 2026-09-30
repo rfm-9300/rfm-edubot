@@ -291,7 +291,7 @@ class AgentRunExecutor(
     private suspend fun requestApprovals(run: AgentRun, step: StepSpec, proposals: List<ProposedAction>, output: JsonObject) {
         val now = clock()
         val expiry = module.settings.get(run.tenantId).company.approvalExpiryDays.coerceIn(1, 30)
-        proposals.forEachIndexed { seq, proposal ->
+        val approvals = proposals.mapIndexed { seq, proposal ->
             module.approvals.insert(
                 AgentApproval(
                     tenantId = run.tenantId,
@@ -320,6 +320,7 @@ class AgentRunExecutor(
             params = mapOf("agent" to run.agentName, "subject" to run.subjectLabel.orEmpty(), "count" to proposals.size.toString()),
             link = "agents",
             subject = run.subject,
+            ref = approvals.singleOrNull()?.let { "approval:${it.id.toHexString()}" } ?: "inbox",
         )
     }
 
@@ -341,17 +342,18 @@ class AgentRunExecutor(
         val policy = run.definition.policy
         if (policy.notifyOnFailure) {
             val params = mapOf("agent" to run.agentName, "subject" to run.subjectLabel.orEmpty(), "error" to (error ?: outcome).orEmpty().take(200))
+            val ref = "run:${run.id.toHexString()}"
             if (policy.notifyUserIds.isEmpty()) {
-                module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, NotificationAudience.ADMINS, params = params, link = "agents", subject = run.subject)
+                module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, NotificationAudience.ADMINS, params = params, link = "agents", subject = run.subject, ref = ref)
             } else {
                 policy.notifyUserIds.forEach { userId ->
-                    module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, NotificationAudience.USER, userId = userId, params = params, link = "agents", subject = run.subject)
+                    module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, NotificationAudience.USER, userId = userId, params = params, link = "agents", subject = run.subject, ref = ref)
                 }
             }
         }
         if (agent.stats.consecutiveFailures >= CIRCUIT_BREAKER && agent.status == AgentStatus.ACTIVE) {
             module.agents.setStatus(run.tenantId, run.agentId, AgentStatus.PAUSED, pausedReason = "too_many_failures")
-            module.notifications.notify(run.tenantId, NotificationKinds.AGENT_PAUSED, params = mapOf("agent" to run.agentName), link = "agents")
+            module.notifications.notify(run.tenantId, NotificationKinds.AGENT_PAUSED, params = mapOf("agent" to run.agentName), link = "agents", ref = "agent:${run.agentId.toHexString()}")
             log.warn("Agent {} paused after {} failed runs in a row", run.agentId, agent.stats.consecutiveFailures)
         }
     }

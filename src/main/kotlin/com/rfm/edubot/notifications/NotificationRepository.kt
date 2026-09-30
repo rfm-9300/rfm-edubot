@@ -30,6 +30,8 @@ data class Notification(
     /** Dashboard view to open, e.g. `agents` or `invoices`. */
     val link: String? = null,
     val subject: SubjectRef? = null,
+    /** The item to open inside [link]: `approval:ID`, `run:ID`, `task:ID`, `agent:ID` or `inbox`. */
+    val ref: String? = null,
     val readBy: List<String> = emptyList(),
     val createdAt: Instant,
 )
@@ -60,6 +62,7 @@ class NotificationRepository(mongo: MongoModule, private val clock: () -> Instan
         body: String? = null,
         link: String? = null,
         subject: SubjectRef? = null,
+        ref: String? = null,
     ): Notification = insert(
         Notification(
             tenantId = tenantId,
@@ -70,6 +73,7 @@ class NotificationRepository(mongo: MongoModule, private val clock: () -> Instan
             body = body?.take(MAX_BODY),
             link = link,
             subject = subject,
+            ref = ref,
             createdAt = clock(),
         ),
     )
@@ -110,6 +114,7 @@ class NotificationRepository(mongo: MongoModule, private val clock: () -> Instan
         .append("body", body)
         .append("link", link)
         .append("subject", subject?.let { Document("type", it.type).append("id", it.id) })
+        .append("ref", ref)
         .append("readBy", readBy)
         .append("createdAt", Date(createdAt.toEpochMilliseconds()))
 
@@ -123,6 +128,7 @@ class NotificationRepository(mongo: MongoModule, private val clock: () -> Instan
         body = getString("body"),
         link = getString("link"),
         subject = get("subject", Document::class.java)?.let { SubjectRef(it.getString("type").orEmpty(), it.getString("id").orEmpty()) },
+        ref = getString("ref"),
         readBy = getList("readBy", String::class.java).orEmpty(),
         createdAt = Instant.fromEpochMilliseconds(getDate("createdAt").time),
     )

@@ -210,7 +210,7 @@ class AgentScheduler(
             }
             module.runs.save(recovered)
             if (recovered.status == RunStatus.NEEDS_REVIEW) {
-                module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, params = mapOf("agent" to run.agentName, "subject" to run.subjectLabel.orEmpty(), "error" to (recovered.outcome ?: "")), link = "agents", subject = run.subject)
+                module.notifications.notify(run.tenantId, NotificationKinds.AGENT_FAILED, params = mapOf("agent" to run.agentName, "subject" to run.subjectLabel.orEmpty(), "error" to (recovered.outcome ?: "")), link = "agents", subject = run.subject, ref = "run:${run.id.toHexString()}")
             }
             log.warn("Recovered interrupted agent run {} as {}", run.id, recovered.status)
         }

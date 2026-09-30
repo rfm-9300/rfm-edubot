@@ -139,6 +139,7 @@ import kotlinx.serialization.json.jsonObject
     val body: String? = null,
     val link: String? = null,
     val subject: SubjectDto? = null,
+    val ref: String? = null,
     val read: Boolean,
     val createdAt: String,
 )
@@ -176,7 +177,7 @@ import kotlinx.serialization.json.jsonObject
     val canManage: Boolean,
 )
 
-@Serializable data class ActivityDto(val type: String, val agentName: String? = null, val occurredAt: String, val payload: JsonObject)
+@Serializable data class ActivityDto(val type: String, val agentName: String? = null, val occurredAt: String, val payload: JsonObject, val runId: String? = null)
 
 @Serializable data class AgentOptionDto(val id: String, val name: String)
 
@@ -219,6 +220,8 @@ import kotlinx.serialization.json.jsonObject
     val clearDue: Boolean = false,
 )
 @Serializable data class CompanySettingsRequest(val settings: CompanyAgentSettings)
+@Serializable data class AutomationPauseRequest(val paused: Boolean)
+@Serializable data class AutomationPauseDto(val automationPaused: Boolean)
 
 internal fun SubjectRef.dto() = SubjectDto(type, id)
 
@@ -319,6 +322,7 @@ internal fun Notification.dto(reader: String) = NotificationDto(
     body = body,
     link = link,
     subject = subject?.dto(),
+    ref = ref,
     read = reader in readBy,
     createdAt = createdAt.toString(),
 )

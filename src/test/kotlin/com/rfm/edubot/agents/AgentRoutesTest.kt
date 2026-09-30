@@ -11,11 +11,18 @@ import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.AgentServices
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
+import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardToken
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorContext
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.plugins.configureSerialization
@@ -39,6 +46,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -206,6 +214,68 @@ class AgentRoutesTest {
         assertEquals(0L, http.send("GET", "/app/api/notifications", company.memberToken).obj()["unread"]!!.jsonPrimitive.content.toLong(), "admin notices stay with admins")
         http.send("POST", "/app/api/notifications/read-all", company.adminToken)
         assertEquals(0L, http.send("GET", "/app/api/notifications", company.adminToken).obj()["unread"]!!.jsonPrimitive.content.toLong())
+    }
+
+    @Test
+    fun `approvals and tasks open by id, and notifications and record activity say what to open`() = routes { http ->
+        val company = company()
+        val other = company()
+        val approval = runBlocking {
+            module.approvals.insert(
+                AgentApproval(
+                    tenantId = company.tenant.id, agentId = ObjectId(), agentName = "Lembretes", runId = ObjectId(), stepId = "s1",
+                    action = "team.notify", input = buildJsonObject { put("message", "Olá") },
+                    preview = ActionPreview(kind = "notify", body = "Olá"),
+                    approvers = Approvers.ANY_MEMBER, createdAt = now, expiresAt = now + 3.days,
+                ),
+            )
+        }
+        val path = "/app/api/agents/approvals/${approval.id}"
+        assertEquals(true, http.send("GET", path, company.memberToken).obj()["canDecide"]!!.jsonPrimitive.boolean)
+        assertEquals(HttpStatusCode.NotFound, http.send("GET", path, other.adminToken).status)
+        assertEquals(HttpStatusCode.BadRequest, http.send("GET", "/app/api/agents/approvals/nope", company.adminToken).status)
+        http.send("POST", "$path/reject", company.adminToken)
+        val decided = http.send("GET", path, company.adminToken).obj()
+        assertEquals("REJECTED", decided["status"]!!.jsonPrimitive.content)
+        assertEquals(false, decided["canDecide"]!!.jsonPrimitive.boolean, "a decided approval is read-only")
+
+        val task = http.send("POST", "/app/api/agents/tasks", company.memberToken, buildJsonObject { put("title", "Ligar à Ana") }).obj()
+        val taskId = task["id"]!!.jsonPrimitive.content
+        assertEquals("Ligar à Ana", http.send("GET", "/app/api/agents/tasks/$taskId", company.memberToken).obj()["title"]!!.jsonPrimitive.content)
+        assertEquals(HttpStatusCode.NotFound, http.send("GET", "/app/api/agents/tasks/$taskId", other.adminToken).status)
+
+        runBlocking { module.notifications.notify(company.tenant.id, "agent_task", params = mapOf("title" to "Ligar à Ana"), link = "agents", ref = "task:$taskId") }
+        val notice = http.send("GET", "/app/api/notifications", company.adminToken).obj()["items"]!!.jsonArray.first().jsonObject
+        assertEquals("task:$taskId", notice["ref"]!!.jsonPrimitive.content)
+
+        val clientId = ObjectId().toHexString()
+        val runId = ObjectId()
+        runBlocking {
+            withContext(ActorContext(Actor.agent(ObjectId(), runId, "Lembretes"))) {
+                DomainEventLog(mongo).append(company.tenant.id, DomainEventTypes.CLIENT_UPDATED, SubjectRef(SubjectTypes.CLIENT, clientId))
+            }
+        }
+        val activity = http.send("GET", "/app/api/agents/subjects/client/$clientId", company.adminToken).obj()["activity"]!!.jsonArray.single().jsonObject
+        assertEquals(runId.toHexString(), activity["runId"]!!.jsonPrimitive.content, "the record's timeline links each agent change to its run")
+        assertEquals("Lembretes", activity["agentName"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `any member can pause automations for a client, and the record says so`() = routes { http ->
+        val company = company()
+        val client = runBlocking { ClientRepository(mongo, company.tenant.id).create("Ana Silva", "+351910000001") }
+        val path = "/app/api/agents/subjects/client/${client.id}/automation"
+        val paused = http.send("PUT", path, company.memberToken, buildJsonObject { put("paused", true) })
+        assertEquals(HttpStatusCode.OK, paused.status)
+        assertEquals(true, paused.obj()["automationPaused"]!!.jsonPrimitive.boolean)
+        assertEquals(true, runBlocking { ClientRepository(mongo, company.tenant.id).findById(client.id)!!.automationPaused })
+        assertEquals(true, http.send("GET", "/app/api/agents/subjects/client/${client.id}", company.memberToken).obj()["automationPaused"]!!.jsonPrimitive.boolean)
+
+        assertEquals(false, http.send("PUT", path, company.adminToken, buildJsonObject { put("paused", false) }).obj()["automationPaused"]!!.jsonPrimitive.boolean)
+        assertEquals(HttpStatusCode.BadRequest, http.send("PUT", path, company.adminToken, buildJsonObject { put("paused", "maybe") }).status)
+        assertEquals(HttpStatusCode.NotFound, http.send("PUT", "/app/api/agents/subjects/client/${client.id}/automation", company().adminToken, buildJsonObject { put("paused", true) }).status, "another company's client")
+        val noClients = company(listOf(DashboardModules.INVOICES, DashboardModules.AGENTS))
+        assertEquals(HttpStatusCode.Forbidden, http.send("PUT", path, noClients.adminToken, buildJsonObject { put("paused", true) }).status)
     }
 
     @Test
