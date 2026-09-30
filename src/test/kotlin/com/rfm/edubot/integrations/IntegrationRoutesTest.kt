@@ -2,7 +2,11 @@ package com.rfm.edubot.integrations
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.mongodb.client.model.Filters
 import com.rfm.edubot.admin.configureAdminAuth
+import com.rfm.edubot.agents.model.PlatformAgentLimits
+import com.rfm.edubot.agents.store.AgentSettingsRepository
+import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardAccessPolicy
@@ -12,6 +16,10 @@ import com.rfm.edubot.dashboard.dashboardToken
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.integrations.email.EmailCopy
+import com.rfm.edubot.integrations.email.EmailMessageRepository
+import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.google.FakeGoogle
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
@@ -30,6 +38,7 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
+import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
@@ -43,15 +52,19 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
 import io.mockk.mockk
+import jakarta.mail.Message
+import jakarta.mail.internet.InternetAddress
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.bson.Document
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -102,6 +115,7 @@ class IntegrationRoutesTest {
     )
     private val cipher = TokenCipher.fromConfig(Base64.getEncoder().encodeToString(Random(11).nextBytes(32)))!!
     private val oauthState = OAuthState("state-secret")
+    private val settings = AgentSettingsRepository(mongo)
     private val json = Json { ignoreUnknownKeys = true }
 
     private fun integration(google: FakeGoogle, configured: Boolean = true, cipher: TokenCipher? = this.cipher): GoogleIntegration {
@@ -128,14 +142,20 @@ class IntegrationRoutesTest {
         return Company(tenant, adminUser, dashboardToken(admin, adminUser, "tenant", 1), dashboardToken(admin, memberUser, "tenant", 1), operator)
     }
 
+    private fun emailFor(google: GoogleIntegration) =
+        EmailService(google, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), settings)
+
     private fun routes(google: GoogleIntegration, block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
         application {
             configureSerialization()
             configureAdminAuth(runtimeConfig, tenants, users)
-            routing { integrationRoutes(google, oauthState, tenants, users) }
+            routing { integrationRoutes(google, emailFor(google), oauthState, tenants, users) }
         }
         block(createClient { followRedirects = false })
     }
+
+    private suspend fun keptMail(connection: IntegrationConnection): Long =
+        mongo.database.getCollection<Document>(EmailMessageRepository.COLLECTION).countDocuments(Filters.eq("connectionId", connection.id))
 
     private suspend fun HttpResponse.obj(): JsonObject = json.parseToJsonElement(bodyAsText()).jsonObject
 
@@ -323,7 +343,7 @@ class IntegrationRoutesTest {
     }
 
     @Test
-    fun `disconnecting deletes the tokens and revokes the grant once no company uses the account`() {
+    fun `disconnecting deletes the tokens and the kept mail, and revokes the grant once no company uses the account`() {
         val google = FakeGoogle()
         val integration = integration(google)
         routes(integration) { http ->
@@ -331,16 +351,56 @@ class IntegrationRoutesTest {
             val b = company()
             val inA = integration.connected(a, "partilhada@example.pt")
             val inB = integration.connected(b, "partilhada@example.pt")
+            assertEquals(HttpStatusCode.OK, http.post("/app/api/integrations/${inA.id.toHexString()}/test-email") { bearerAuth(a.adminToken) }.status)
+            assertEquals(HttpStatusCode.OK, http.post("/app/api/integrations/${inB.id.toHexString()}/test-email") { bearerAuth(b.adminToken) }.status)
+            assertEquals(1, keptMail(inA))
 
             assertEquals(HttpStatusCode.Forbidden, http.delete("/app/api/integrations/${inA.id.toHexString()}") { bearerAuth(a.memberToken) }.status)
             assertEquals(HttpStatusCode.NotFound, http.delete("/app/api/integrations/${inA.id.toHexString()}") { bearerAuth(b.adminToken) }.status)
 
             assertEquals(HttpStatusCode.NoContent, http.delete("/app/api/integrations/${inA.id.toHexString()}") { bearerAuth(a.adminToken) }.status)
             assertNull(integration.connections.findById(inA.id))
+            assertEquals(0, keptMail(inA))
+            assertEquals(1, keptMail(inB), "company B's mail stays")
             assertEquals(emptyList(), google.revoked, "company B still sends from it")
 
             assertEquals(HttpStatusCode.NoContent, http.delete("/app/api/integrations/${inB.id.toHexString()}") { bearerAuth(b.operatorToken) }.status)
             assertEquals(listOf("refresh-1"), google.revoked)
+        }
+    }
+
+    @Test
+    fun `a test email goes to the admin asking, or to the account for an operator, and counts toward the day`() {
+        val google = FakeGoogle()
+        val integration = integration(google)
+        routes(integration) { http ->
+            val company = company()
+            val account = integration.connected(company, "geral@example.pt")
+            val path = "/app/api/integrations/${account.id.toHexString()}/test-email"
+
+            val byAdmin = http.post(path) { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.OK, byAdmin.status)
+            assertEquals(company.admin.email, byAdmin.obj()["to"]!!.jsonPrimitive.content)
+            val message = google.sends.single().parsed()
+            assertEquals(listOf(company.admin.email), message.getRecipients(Message.RecipientType.TO).map { (it as InternetAddress).address })
+            assertEquals(EmailCopy.t(company.tenant.locale, "test.subject", "company" to "Obras"), message.subject)
+            assertEquals("geral@example.pt", http.post(path) { bearerAuth(company.operatorToken) }.obj()["to"]!!.jsonPrimitive.content)
+            assertEquals(HttpStatusCode.Forbidden, http.post(path) { bearerAuth(company.memberToken) }.status)
+            assertEquals(HttpStatusCode.NotFound, http.post(path) { bearerAuth(company().adminToken) }.status)
+
+            val listed = http.list(company.memberToken)["connections"]!!.jsonArray.single().jsonObject
+            assertEquals(2, listed["sentToday"]!!.jsonPrimitive.int)
+            assertEquals(300, listed["dailyLimit"]!!.jsonPrimitive.int)
+
+            settings.savePlatform(company.tenant.id, PlatformAgentLimits(emailSendsPerDay = 2))
+            val spent = http.post(path) { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.TooManyRequests, spent.status)
+            assertEquals("daily_send_limit", spent.obj()["error"]!!.jsonPrimitive.content)
+            integration.connections.markNeedsReconnect(account.id, "invalid_grant")
+            val stale = http.post(path) { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.Conflict, stale.status)
+            assertEquals("needs_reconnect", stale.obj()["error"]!!.jsonPrimitive.content)
+            assertEquals(2, google.sends.size)
         }
     }
 

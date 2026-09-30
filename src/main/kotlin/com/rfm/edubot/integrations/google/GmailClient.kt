@@ -95,7 +95,7 @@ class GmailClient(private val httpClient: HttpClient, private val baseUrl: Strin
         return when {
             status == HttpStatusCode.Unauthorized -> "unauthorized" to true
             reason == "dailyLimitExceeded" || SENDING_LIMIT.containsMatchIn(message) -> "daily_send_limit" to false
-            status == HttpStatusCode.TooManyRequests || reason in RATE_LIMIT_REASONS -> "rate_limited" to true
+            status == HttpStatusCode.TooManyRequests || reason in RATE_LIMIT_REASONS -> RATE_LIMITED to true
             status == HttpStatusCode.Forbidden && reason == "insufficientPermissions" -> "needs_reconnect" to false
             status == HttpStatusCode.PayloadTooLarge -> "message_too_large" to false
             status == HttpStatusCode.BadRequest && INVALID_RECIPIENT.containsMatchIn(message) -> "invalid_recipient" to false
@@ -120,6 +120,8 @@ class GmailClient(private val httpClient: HttpClient, private val baseUrl: Strin
 
         /** Gmail's JSON send takes messages of a few megabytes; quotes and invoices stay far below. */
         const val MAX_RAW_BYTES = 4_500_000
+
+        const val RATE_LIMITED = "rate_limited"
 
         private val RATE_LIMIT_REASONS = setOf("rateLimitExceeded", "userRateLimitExceeded", "RESOURCE_EXHAUSTED")
         private val SENDING_LIMIT = Regex("sending limit|daily user sending", RegexOption.IGNORE_CASE)

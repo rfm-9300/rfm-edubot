@@ -33,9 +33,15 @@ data class IntegrationConnectionDto(
     val signature: String? = null,
     val connectedBy: String? = null,
     val lastError: String? = null,
+    /** Emails sent from the account on the company's current day, against [dailyLimit]. */
+    val sentToday: Int = 0,
+    val dailyLimit: Int? = null,
     val connectedAt: String,
     val updatedAt: String,
 )
+
+@Serializable
+data class TestEmailDto(val to: String, val messageId: String)
 
 /** Null leaves a field as it is; a blank string clears it. */
 @Serializable
@@ -46,7 +52,7 @@ data class UpdateConnectionRequest(
     val isDefault: Boolean? = null,
 )
 
-internal fun IntegrationConnection.dto() = IntegrationConnectionDto(
+internal fun IntegrationConnection.dto(today: String? = null, dailyLimit: Int? = null) = IntegrationConnectionDto(
     id = id.toHexString(),
     provider = provider,
     accountEmail = accountEmail,
@@ -58,6 +64,8 @@ internal fun IntegrationConnection.dto() = IntegrationConnectionDto(
     signature = settings.signature,
     connectedBy = connectedByEmail,
     lastError = lastError,
+    sentToday = today?.let(::sentOn) ?: 0,
+    dailyLimit = dailyLimit,
     connectedAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
 )

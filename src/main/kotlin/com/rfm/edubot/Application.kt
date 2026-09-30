@@ -366,6 +366,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         )
         integrationRoutes(
             google = google,
+            email = emailService,
             oauthState = oauthState,
             tenants = tenantRepository,
             users = dashboardUserRepository,

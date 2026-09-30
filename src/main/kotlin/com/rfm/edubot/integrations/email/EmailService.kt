@@ -76,6 +76,20 @@ class EmailService(
         return sendFrom(tenant, connection, email, idempotencyKey)
     }
 
+    /** A short email from [connection] to [to] in the company's language, to check how its clients see it. */
+    suspend fun sendTest(tenant: Tenant, connection: IntegrationConnection, to: String): EmailSendResult {
+        val company = tenant.documentTemplate.withCompanyFallback(tenant.name).companyName
+        val test = OutgoingEmail(
+            to = listOf(to),
+            subject = EmailCopy.t(tenant.locale, "test.subject", "company" to company),
+            text = EmailCopy.t(tenant.locale, "test.body", "company" to company, "account" to connection.accountEmail),
+        )
+        return sendFrom(tenant, connection, test)
+    }
+
+    /** Disconnecting an account forgets the mail kept from it. */
+    suspend fun forget(connection: IntegrationConnection): Long = messages.deleteForConnection(connection.tenantId, connection.id)
+
     /** Sends from [connection], one of [tenant]'s accounts. Without [idempotencyKey] every call is a new email. */
     suspend fun sendFrom(tenant: Tenant, connection: IntegrationConnection, email: OutgoingEmail, idempotencyKey: String? = null): EmailSendResult {
         if (!google.configured || connection.tenantId != tenant.id) return EmailSendResult.Failed(NO_ACCOUNT)

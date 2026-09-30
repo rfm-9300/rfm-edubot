@@ -9,6 +9,9 @@ import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.requireModule
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.integrations.email.EmailAddresses
+import com.rfm.edubot.integrations.email.EmailSendResult
+import com.rfm.edubot.integrations.email.EmailService
+import com.rfm.edubot.integrations.google.GmailClient
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
 import com.rfm.edubot.oauth.OAuthState
@@ -26,6 +29,7 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
+import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import kotlinx.datetime.Instant
 import org.slf4j.LoggerFactory
@@ -39,11 +43,13 @@ private val log = LoggerFactory.getLogger("IntegrationRoutes")
  *  - GET    /app/api/integrations                 the connections, and whether Google can be connected
  *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves
  *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender
- *  - DELETE /app/api/integrations/{id}            delete the tokens, revoking the grant when no company still uses it
+ *  - POST   /app/api/integrations/{id}/test-email a test email to the admin asking (an operator: to the account itself)
+ *  - DELETE /app/api/integrations/{id}            delete the tokens and the kept mail, revoking the grant when no company still uses it
  *  - GET    /integrations/google/callback         public: Google redirects the browser here; the signed state is the auth
  */
 fun Route.integrationRoutes(
     google: GoogleIntegration,
+    email: EmailService,
     oauthState: OAuthState,
     tenants: TenantRepository,
     users: DashboardUserRepository,
@@ -55,10 +61,12 @@ fun Route.integrationRoutes(
         route("/app/api/integrations") {
             get {
                 val ctx = call.integrationsContext() ?: return@get
+                val today = email.today(ctx.tenant)
+                val limit = email.dailyLimit(ctx.tenant)
                 call.respond(
                     IntegrationsDto(
                         google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect()),
-                        connections = connections.list(ctx.tenant.id).map { it.dto() },
+                        connections = connections.list(ctx.tenant.id).map { it.dto(today, limit) },
                         canManage = ctx.canManageIntegrations(),
                     ),
                 )
@@ -98,7 +106,19 @@ fun Route.integrationRoutes(
                 var updated: IntegrationConnection? = connection
                 if (settings != connection.settings) updated = connections.updateSettings(ctx.tenant.id, connection.id, settings)
                 if (request.isDefault == true && !connection.isDefault) updated = connections.makeDefault(ctx.tenant.id, connection.id)
-                updated?.let { call.respond(it.dto()) } ?: call.respond(HttpStatusCode.NotFound)
+                updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant))) } ?: call.respond(HttpStatusCode.NotFound)
+            }
+
+            post("/{id}/test-email") {
+                val ctx = call.integrationsContext() ?: return@post
+                if (!ctx.canManageIntegrations()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                val connection = call.connectionParam(connections, ctx) ?: return@post
+                // Never a third party: the button can't be used to write to anyone else.
+                val to = ctx.user?.email ?: connection.accountEmail
+                when (val sent = email.sendTest(ctx.tenant, connection, to)) {
+                    is EmailSendResult.Sent -> call.respond(TestEmailDto(to = to, messageId = sent.messageId))
+                    is EmailSendResult.Failed -> call.respond(sent.httpStatus(), mapOf("error" to sent.key))
+                }
             }
 
             delete("/{id}") {
@@ -106,6 +126,7 @@ fun Route.integrationRoutes(
                 if (!ctx.canManageIntegrations()) return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
                 val connection = call.connectionParam(connections, ctx) ?: return@delete
                 connections.delete(ctx.tenant.id, connection.id) ?: return@delete call.respond(HttpStatusCode.NotFound)
+                email.forget(connection)
                 if (connections.countForAccount(connection.provider, connection.accountEmail) == 0L) {
                     val token = (connection.refreshToken ?: connection.accessToken)?.let { google.cipher?.open(it) }
                     val revoked = token != null && google.oauth.revoke(token)
@@ -180,6 +201,13 @@ private const val MAX_SIGNATURE = 2000
 private fun googleResult(status: String, reason: String? = null): String = buildString {
     append("/app/?google=").append(status.encodeURLParameter())
     if (reason != null) append("&reason=").append(reason.encodeURLParameter())
+}
+
+private fun EmailSendResult.Failed.httpStatus(): HttpStatusCode = when (key) {
+    EmailService.DAILY_LIMIT, GmailClient.RATE_LIMITED -> HttpStatusCode.TooManyRequests
+    EmailService.NO_ACCOUNT, EmailService.NEEDS_RECONNECT -> HttpStatusCode.Conflict
+    EmailService.INVALID_RECIPIENT, EmailService.TOO_MANY_RECIPIENTS, EmailService.INVALID_MESSAGE, EmailService.TOO_LARGE -> HttpStatusCode.BadRequest
+    else -> HttpStatusCode.BadGateway
 }
 
 private sealed interface SettingsUpdate {
