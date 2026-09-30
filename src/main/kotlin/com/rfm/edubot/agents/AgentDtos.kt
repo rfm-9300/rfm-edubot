@@ -8,7 +8,6 @@ import com.rfm.edubot.agents.model.AgentRun
 import com.rfm.edubot.agents.model.AgentTask
 import com.rfm.edubot.agents.model.Autonomy
 import com.rfm.edubot.agents.model.CompanyAgentSettings
-import com.rfm.edubot.agents.model.PlatformAgentLimits
 import com.rfm.edubot.agents.model.StepResult
 import com.rfm.edubot.agents.registry.DefinitionProblem
 import com.rfm.edubot.agents.store.AgentJson
@@ -65,6 +64,9 @@ import kotlinx.serialization.json.jsonObject
     val note: String? = null,
 )
 
+/** A step as the run's definition snapshot has it, so a run shows the steps it hasn't reached yet. */
+@Serializable data class PlannedStepDto(val id: String, val action: String, val label: String? = null, val input: JsonObject? = null)
+
 @Serializable data class RunTriggerDto(val type: String, val eventType: String? = null, val firedAt: String, val byUserId: String? = null)
 
 @Serializable data class RunDto(
@@ -86,6 +88,7 @@ import kotlinx.serialization.json.jsonObject
     val dryRun: Boolean,
     val tokens: Int,
     val steps: List<StepDto>? = null,
+    val plan: List<PlannedStepDto>? = null,
 )
 
 @Serializable data class ApprovalDto(
@@ -97,7 +100,8 @@ import kotlinx.serialization.json.jsonObject
     val seq: Int,
     val action: String,
     val input: JsonObject,
-    val preview: ActionPreview,
+    /** Every [ActionPreview] field, defaults included. */
+    val preview: JsonObject,
     val subject: SubjectDto? = null,
     val subjectLabel: String? = null,
     val status: String,
@@ -150,9 +154,10 @@ import kotlinx.serialization.json.jsonObject
     val tokenBudget: Long,
 )
 
+/** [company] and [platform] carry every field, defaults included; an absent `quietHours` means none. */
 @Serializable data class AgentSettingsDto(
-    val company: CompanyAgentSettings,
-    val platform: PlatformAgentLimits,
+    val company: JsonObject,
+    val platform: JsonObject,
     val usage: AgentUsageDto,
     val canManage: Boolean,
 )
@@ -166,6 +171,8 @@ import kotlinx.serialization.json.jsonObject
     val failedThisWeek: Long,
     val waitingRuns: Long,
     val paused: Boolean,
+    /** `platform` when the backoffice paused them (only support can resume), else `company`. */
+    val pausedBy: String? = null,
     val canManage: Boolean,
 )
 
@@ -262,6 +269,7 @@ internal fun AgentRun.dto(withSteps: Boolean = false) = RunDto(
     dryRun = dryRun,
     tokens = promptTokens + completionTokens,
     steps = if (withSteps) steps.map { it.dto() } else null,
+    plan = if (withSteps) definition.steps.map { PlannedStepDto(it.id, it.action, it.label, it.input) } else null,
 )
 
 internal fun AgentApproval.dto(canDecide: Boolean) = ApprovalDto(
@@ -273,7 +281,7 @@ internal fun AgentApproval.dto(canDecide: Boolean) = ApprovalDto(
     seq = seq,
     action = action,
     input = input,
-    preview = preview,
+    preview = AgentJson.json.encodeToJsonElement(ActionPreview.serializer(), preview).jsonObject,
     subject = subject?.dto(),
     subjectLabel = subjectLabel,
     status = status.name,

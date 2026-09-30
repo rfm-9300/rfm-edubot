@@ -42,7 +42,9 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.int
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -247,5 +249,51 @@ class AgentRoutesTest {
         assertEquals("needs_integration:WHATSAPP", whatsapp["reason"]!!.jsonPrimitive.content)
         val bookingEvent = catalog["events"]!!.jsonArray.map { it.jsonObject }.single { it["type"]!!.jsonPrimitive.content == "booking.created" }
         assertEquals("needs_module:bookings", bookingEvent["reason"]!!.jsonPrimitive.content)
+    }
+
+    @Test
+    fun `settings, test runs and approvals carry every field the dashboard reads, defaults included`() = routes { http ->
+        val company = company()
+        val id = http.send("POST", "/app/api/agents", company.adminToken, buildJsonObject { put("name", "Faturas"); put("definition", validDefinition) }).obj()["id"]!!.jsonPrimitive.content
+        val test = http.send("POST", "/app/api/agents/$id/test", company.adminToken)
+        assertEquals(HttpStatusCode.OK, test.status)
+        val planned = test.obj()["plan"]!!.jsonArray.single().jsonObject
+        assertEquals("s1", planned["id"]!!.jsonPrimitive.content)
+        assertEquals("team.notify", planned["action"]!!.jsonPrimitive.content)
+        val listed = json.parseToJsonElement(http.send("GET", "/app/api/agents/runs?tests=1&agentId=$id", company.adminToken).bodyAsText()).jsonArray.single().jsonObject
+        assertEquals(null, listed["plan"], "run lists leave the plan out")
+
+        runBlocking {
+            module.approvals.insert(
+                AgentApproval(
+                    tenantId = company.tenant.id, agentId = ObjectId(), agentName = "Lembretes", runId = ObjectId(), stepId = "s1",
+                    action = "team.notify", input = buildJsonObject { put("message", "Olá") },
+                    preview = ActionPreview(kind = "notify", body = "Olá"),
+                    approvers = Approvers.ANY_MEMBER, createdAt = now, expiresAt = now + 3.days,
+                ),
+            )
+        }
+        val preview = json.parseToJsonElement(http.send("GET", "/app/api/agents/approvals", company.adminToken).bodyAsText()).jsonArray.single().jsonObject["preview"]!!.jsonObject
+        assertEquals(setOf("kind", "recipients", "body", "attachments", "fields", "editable", "warnings"), preview.keys)
+
+        val settings = http.send("GET", "/app/api/agents/settings", company.memberToken).obj()
+        val defaults = settings["company"]!!.jsonObject
+        assertEquals(false, defaults["paused"]!!.jsonPrimitive.boolean)
+        assertEquals("APPROVE", defaults["defaultAutonomy"]!!.jsonPrimitive.content)
+        assertEquals(2, defaults["perRecipientDailyCap"]!!.jsonPrimitive.int)
+        assertEquals(3, defaults["approvalExpiryDays"]!!.jsonPrimitive.int)
+        assertEquals(25, settings["platform"]!!.jsonObject["maxActiveAgents"]!!.jsonPrimitive.int)
+        assertEquals(false, settings["canManage"]!!.jsonPrimitive.boolean)
+
+        val pause = buildJsonObject { put("settings", buildJsonObject { put("paused", true); put("perRecipientDailyCap", 99) }) }
+        assertEquals(HttpStatusCode.Forbidden, http.send("PUT", "/app/api/agents/settings", company.memberToken, pause).status)
+        val saved = http.send("PUT", "/app/api/agents/settings", company.adminToken, pause).obj()
+        assertEquals(20, saved["company"]!!.jsonObject["perRecipientDailyCap"]!!.jsonPrimitive.int, "caps stay in range")
+        val companyPaused = http.send("GET", "/app/api/agents/overview", company.memberToken).obj()
+        assertEquals(true, companyPaused["paused"]!!.jsonPrimitive.boolean)
+        assertEquals("company", companyPaused["pausedBy"]!!.jsonPrimitive.content)
+
+        module.settings.savePlatform(company.tenant.id, module.settings.get(company.tenant.id).platform.copy(agentsPaused = true))
+        assertEquals("platform", http.send("GET", "/app/api/agents/overview", company.memberToken).obj()["pausedBy"]!!.jsonPrimitive.content, "the backoffice pause wins")
     }
 }

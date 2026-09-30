@@ -53,6 +53,7 @@ object GeneratePdfAction : AgentAction {
     override val subjectTypes = setOf(SubjectTypes.QUOTE, SubjectTypes.INVOICE)
     override val aiCallable = false
     override val toolDescription = "Generate the PDF of the quote or invoice the agent works on."
+    override val outputSchema = Schema.obj("filename" to Schema.string())
     override val inputSchema = Schema.obj("document" to Schema.string(enum = listOf("auto", "quote", "invoice"), default = "auto"))
 
     override suspend fun preview(input: JsonObject, ctx: RunContext) = ActionPreview(

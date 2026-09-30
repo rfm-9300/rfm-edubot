@@ -52,6 +52,7 @@ object CreateClientAction : AgentAction {
     override val sideEffect = SideEffect.INTERNAL_WRITE
     override val requiredModules = setOf(DashboardModules.CLIENTS)
     override val toolDescription = "Create a client in the CRM from a name and phone; returns the existing client when the phone is already known."
+    override val outputSchema = Schema.obj("clientId" to Schema.string(), "number" to Schema.string(), "existing" to Schema.boolean())
     override val inputSchema = Schema.obj(
         "name" to Schema.string(widget = "template", maxLength = 200),
         "phone" to Schema.string(widget = "template", maxLength = 40),
@@ -155,6 +156,7 @@ object InvoiceFromQuoteAction : AgentAction {
     override val requiredModules = setOf(DashboardModules.QUOTES, DashboardModules.INVOICES)
     override val subjectTypes = setOf(SubjectTypes.QUOTE)
     override val toolDescription = "Create an invoice from the quote the agent works on, optionally for a deposit percentage, and mark the quote accepted."
+    override val outputSchema = Schema.obj("invoiceId" to Schema.string(), "number" to Schema.string(), "totalCents" to Schema.integer())
     override val inputSchema = Schema.obj(
         "dueInDays" to Schema.integer(min = 0, max = 180, default = 30),
         "depositPercent" to Schema.integer(min = 1, max = 100, default = 100),
@@ -200,6 +202,7 @@ object InvoiceOpenServicesAction : AgentAction {
     override val sideEffect = SideEffect.INTERNAL_WRITE
     override val requiredModules = setOf(DashboardModules.SERVICES, DashboardModules.INVOICES)
     override val toolDescription = "Invoice every open service row of the client the agent works on in one invoice."
+    override val outputSchema = Schema.obj("invoiceId" to Schema.string(), "number" to Schema.string(), "rows" to Schema.integer())
     override val inputSchema = Schema.obj("dueInDays" to Schema.integer(min = 0, max = 180, default = 30))
 
     override suspend fun preview(input: JsonObject, ctx: RunContext) = ActionPreview(
@@ -235,6 +238,7 @@ object CreatePaymentAction : AgentAction {
     override val sideEffect = SideEffect.INTERNAL_WRITE
     override val requiredModules = setOf(DashboardModules.PAYMENTS)
     override val toolDescription = "Record a bill to pay to a supplier or employee, with a description, amount in euros and due date."
+    override val outputSchema = Schema.obj("paymentId" to Schema.string(), "number" to Schema.string())
     override val inputSchema = Schema.obj(
         "payeeType" to Schema.string(enum = listOf("supplier", "employee"), default = "supplier"),
         "payeeId" to Schema.string(widget = "payee"),
@@ -274,6 +278,7 @@ object CreateServiceAction : AgentAction {
     override val sideEffect = SideEffect.INTERNAL_WRITE
     override val requiredModules = setOf(DashboardModules.SERVICES)
     override val toolDescription = "Record work done for the client the agent works on, with a price in euros, ready to be invoiced."
+    override val outputSchema = Schema.obj("serviceId" to Schema.string())
     override val inputSchema = Schema.obj(
         "name" to Schema.string(widget = "template", maxLength = 200),
         "amountEur" to Schema.number(min = 0.0, max = 10_000_000.0),
@@ -339,6 +344,7 @@ object CreateBookingAction : AgentAction {
     override val sideEffect = SideEffect.INTERNAL_WRITE
     override val requiredModules = setOf(DashboardModules.BOOKINGS)
     override val toolDescription = "Book a service (catalog id) at an ISO date-time for the client the agent works on, or for a given name and phone."
+    override val outputSchema = Schema.obj("bookingId" to Schema.string(), "status" to Schema.string())
     override val inputSchema = Schema.obj(
         "serviceId" to Schema.string(widget = "bookable-service"),
         "startAt" to Schema.string(widget = "template", description = "ISO-8601 instant"),

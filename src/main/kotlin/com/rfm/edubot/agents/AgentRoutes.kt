@@ -7,6 +7,8 @@ import com.rfm.edubot.agents.model.AgentStatus
 import com.rfm.edubot.agents.model.AgentTask
 import com.rfm.edubot.agents.model.ApprovalStatus
 import com.rfm.edubot.agents.model.Approvers
+import com.rfm.edubot.agents.model.CompanyAgentSettings
+import com.rfm.edubot.agents.model.PlatformAgentLimits
 import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.TaskStatus
 import com.rfm.edubot.agents.registry.AgentCatalog
@@ -45,6 +47,7 @@ import io.ktor.server.routing.route
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonObject
 import org.bson.types.ObjectId
 import kotlin.time.Duration.Companion.days
 
@@ -76,6 +79,11 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                         failedThisWeek = agents.runs.countByStatus(tenantId, listOf(RunStatus.FAILED, RunStatus.NEEDS_REVIEW), now - 7.days),
                         waitingRuns = agents.runs.countByStatus(tenantId, listOf(RunStatus.WAITING, RunStatus.AWAITING_APPROVAL)),
                         paused = settings.company.paused || settings.platform.agentsPaused,
+                        pausedBy = when {
+                            settings.platform.agentsPaused -> "platform"
+                            settings.company.paused -> "company"
+                            else -> null
+                        },
                         canManage = ctx.canManageAgents(),
                     ),
                 )
@@ -454,8 +462,8 @@ private suspend fun settingsDto(agents: AgentsModule, ctx: DashboardContext): Ag
     val settings = agents.settings.get(tenantId)
     val now = agents.services.clock()
     return AgentSettingsDto(
-        company = settings.company,
-        platform = settings.platform,
+        company = AgentJson.json.encodeToJsonElement(CompanyAgentSettings.serializer(), settings.company).jsonObject,
+        platform = AgentJson.json.encodeToJsonElement(PlatformAgentLimits.serializer(), settings.platform).jsonObject,
         usage = AgentUsageDto(
             runsToday = agents.runs.countSince(tenantId, now - 1.days),
             activeAgents = agents.agents.countActive(tenantId),
