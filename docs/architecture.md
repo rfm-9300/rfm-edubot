@@ -212,6 +212,14 @@ is the first company's id for all of them.
   so nothing the previous company loaded stays in memory.
 - **Lifecycle.** Suspending, activating or deleting the first company in the backoffice does the
   same to its other (non-deleted) companies; changing an extra company changes only that one.
+  Deleting any tenant is a soft delete that stamps `deletedAt`, one instant for a first company and
+  the companies deleted with it (deleting again changes nothing). `POST /admin/api/tenants/{slug}/restore`
+  brings a deleted tenant back as active, and a first company brings back only the companies that
+  share its `deletedAt`, so one deleted on its own earlier stays deleted. A company can't come back
+  while its first company is deleted (`409 parent_deleted`) or has no free slot (`409 company_limit`).
+  Suspend and activate refuse deleted tenants (`409 tenant_deleted`), and creating a tenant with a
+  slug another tenant holds, deleted ones included, answers `409 slug_taken` with that tenant's
+  status. The backoffice lists deleted tenants only under its Deleted chip.
 
 ```mermaid
 sequenceDiagram

@@ -74,6 +74,8 @@ Success and recoverable errors: `toast(translatedString)`. Do not use `alert()`.
 
 Chip group in `.panel__tools`. Selected chip gets `.is-on`. Filtering is client-side unless the module already hits an API query param. When the filter is a long entity list (clients on Serviços, suppliers on Pagamentos), use a compact `.sel` beside the chips instead of one chip per row.
 
+Archived or deleted records (the `/app` directories' Archived chip, the backoffice's Deleted tenants) stay out of the default list, its counts and "All". Their own chip swaps them in with Restore as the only row action and the date they left in place of last activity. Status chips carry a `.chip__count`. When a search finds nothing under the current chip but matches under another, the empty state says so and offers a `Show N in …` button to that chip.
+
 ## Home (tenant snapshot)
 
 `/app` overview is a manager snapshot of **enabled modules**, not a KPI wall of raw counts. It should read as graphical — big tinted numbers and module color, not a stack of label/value form rows:

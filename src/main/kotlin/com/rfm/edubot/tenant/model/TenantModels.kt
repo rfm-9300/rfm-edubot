@@ -27,6 +27,12 @@ data class Tenant(
     val monthlyTokenBudget: Long = 2_000_000L,
     val status: TenantStatus = TenantStatus.ACTIVE,
     /**
+     * When the tenant was deleted; null unless [status] is DELETED. Companies deleted together with their
+     * first company share its instant, which is how a restore tells them from ones deleted on their own.
+     * Tenants deleted before this field existed have none.
+     */
+    val deletedAt: Instant? = null,
+    /**
      * A tenant can hold several companies, each one a [Tenant] with its own data. The extra companies
      * point at the tenant's first company here; the first company has none.
      */

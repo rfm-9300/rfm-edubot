@@ -2,7 +2,7 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 
 let token = localStorage.getItem('adminToken') || '';
-let state = { tenants: [], stats: {}, search: '', whatsAppSignup: { enabled: false } };
+let state = { tenants: [], stats: {}, search: '', filter: 'all', whatsAppSignup: { enabled: false } };
 let currentView = 'tenants';
 let platformSettings = { settings: [], drafts: {}, revealed: {}, clear: new Set(), updatedAt: null };
 let fbSdkPromise;
@@ -42,14 +42,21 @@ async function api(path, options = {}) {
     renderLogin();
     throw new Error('unauthorized');
   }
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(`HTTP ${res.status}`);
+    err.status = res.status;
+    const body = await res.json().catch(() => null);
+    err.code = body && typeof body.error === 'string' ? body.error : '';
+    err.detail = body && typeof body.detail === 'string' ? body.detail : '';
+    throw err;
+  }
   if (res.status === 204) return null;
   return res.json();
 }
 
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const slugify = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
-const fmtDate = iso => iso ? new Date(iso).toLocaleString('pt-PT', { dateStyle: 'short', timeStyle: 'short' }) : '—';
+const fmtDate = iso => iso ? new Date(iso).toLocaleString(I18N.locale(), { dateStyle: 'short', timeStyle: 'short' }) : '—';
 
 let toastTimer;
 function toast(msg) {
@@ -190,8 +197,20 @@ async function loadAll() {
   ]);
   state.tenants = tenants;
   state.whatsAppSignup = whatsAppSignup;
-  const stats = await Promise.all(state.tenants.map(t => api(`/admin/api/tenants/${encodeURIComponent(t.slug)}/stats`).catch(() => null)));
-  state.stats = Object.fromEntries(state.tenants.map((t, i) => [t.slug, stats[i] || {}]));
+  state.stats = await statsFor(state.tenants.filter(t => t.status !== 'DELETED' || state.filter === 'DELETED'));
+}
+
+async function statsFor(tenants) {
+  const stats = await Promise.all(tenants.map(t => api(`/admin/api/tenants/${encodeURIComponent(t.slug)}/stats`).catch(() => null)));
+  return Object.fromEntries(tenants.map((t, i) => [t.slug, stats[i] || {}]));
+}
+
+// Deleted tenants' stats are only fetched once their list is opened. Returns whether anything loaded.
+async function loadDeletedStats() {
+  const missing = state.tenants.filter(t => t.status === 'DELETED' && !state.stats[t.slug]);
+  if (!missing.length) return false;
+  Object.assign(state.stats, await statsFor(missing));
+  return true;
 }
 
 function applyPlatformSettingsPayload(payload) {
@@ -360,54 +379,114 @@ function bindPlatformSettings() {
 // A tenant's extra companies are tenants too; they list right under the tenant's first company.
 const companiesOf = primaryId => state.tenants.filter(t => t.parentTenantId === primaryId && t.status !== 'DELETED');
 
+// Deleted companies a deleted first company brings back when restored: they share its deletedAt.
+const companiesDeletedWith = primary => state.tenants.filter(c =>
+  c.parentTenantId === primary.id && c.status === 'DELETED' && (c.deletedAt || null) === (primary.deletedAt || null));
+
 function tenantCompanyLine(t) {
   if (t.parentTenantId) {
     const primary = state.tenants.find(p => p.id === t.parentTenantId);
     return `<div class="muted">${escapeHTML(T.companyOf({ name: primary?.name || t.parentTenantId }))}</div>`;
   }
+  if (t.status === 'DELETED') {
+    const n = companiesDeletedWith(t).length;
+    return n ? `<div class="muted">${escapeHTML(T.deletedWith({ n }))}</div>` : '';
+  }
   const used = 1 + companiesOf(t.id).length;
   return used > 1 || t.maxCompanies > 1 ? `<div class="muted">${escapeHTML(T.companiesTag({ used, limit: t.maxCompanies }))}</div>` : '';
 }
 
+const STATUS_FILTERS = ['all', 'ACTIVE', 'SUSPENDED', 'DELETED'];
+const STATUS_PILLS = { ACTIVE: 'pill--ok', SUSPENDED: 'pill--warn', DELETED: 'pill--bad' };
+// "All" leaves deleted tenants out: they only show under their own chip, ready to restore.
+const inStatusFilter = (t, filter) => (filter === 'all' ? t.status !== 'DELETED' : t.status === filter);
+const tenantSearchText = t => `${t.name} ${t.slug} ${t.phoneNumberId} ${(t.channels || []).map(c => `${c.platform} ${c.externalId}`).join(' ')}`.toLowerCase();
+
 function renderTenants() {
-  const q = state.search.toLowerCase();
+  const q = state.search.trim().toLowerCase();
+  const matching = state.tenants.filter(t => !q || tenantSearchText(t).includes(q));
+  const counts = Object.fromEntries(STATUS_FILTERS.map(f => [f, matching.filter(t => inStatusFilter(t, f)).length]));
   const order = new Map(state.tenants.map((t, i) => [t.id, i]));
   const group = t => order.get(t.parentTenantId) ?? order.get(t.id);
-  const rows = state.tenants
-    .filter(t => !q || `${t.name} ${t.slug} ${t.phoneNumberId} ${(t.channels || []).map(c => `${c.platform} ${c.externalId}`).join(' ')}`.toLowerCase().includes(q))
+  const rows = matching
+    .filter(t => inStatusFilter(t, state.filter))
     .sort((a, b) => (group(a) - group(b)) || (Boolean(a.parentTenantId) - Boolean(b.parentTenantId)) || (order.get(a.id) - order.get(b.id)));
-  $('#tenant-count').textContent = state.tenants.length;
+  const live = state.tenants.filter(t => t.status !== 'DELETED');
+  $('#tenant-count').textContent = live.length;
   $('#kpi-active').textContent = state.tenants.filter(t => t.status === 'ACTIVE').length;
-  $('#kpi-messages').textContent = Object.values(state.stats).reduce((sum, s) => sum + Number(s.messages || 0), 0);
-  $('#meta-clock').textContent = new Date().toLocaleString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+  $('#kpi-messages').textContent = live.reduce((sum, t) => sum + Number(state.stats[t.slug]?.messages || 0), 0);
+  $('#meta-clock').textContent = new Date().toLocaleString(I18N.locale(), { hour: '2-digit', minute: '2-digit' });
   $('#view').innerHTML = `
     <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
-    <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2></div>
+    <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2>
+      <div class="panel__tools" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
+        ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
+      </div></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
+        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(state.filter === 'DELETED' ? T.thDeletedAt : T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
-      ${rows.length === 0 ? `<tr><td colspan="7"><div class="empty"><p class="empty__title">${escapeHTML(T.emptyTenants)}</p></div></td></tr>` : rows.map(t => {
-        const s = state.stats[t.slug] || {};
-        const pillClass = t.status === 'ACTIVE' ? 'pill--ok' : t.status === 'SUSPENDED' ? 'pill--warn' : 'pill--bad';
-        return `<tr>
-          <td class="name">${escapeHTML(t.name)}${tenantCompanyLine(t)}</td>
-          <td class="id">${escapeHTML(t.slug)}</td>
-          <td>${channelBadges(t.channels)}</td>
-          <td><span class="pill ${pillClass}">${escapeHTML(t.status)}</span></td>
-          <td class="num">${s.messages || 0}</td>
-          <td class="mono muted">${fmtDate(s.lastMessageAt)}</td>
-          <td class="right"><div class="actions">
-            <button class="btn btn--sm" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>
-            ${t.parentTenantId ? '' : `<button class="btn btn--sm btn--ghost" data-users="${escapeHTML(t.slug)}">${escapeHTML(T.users)}</button>`}
-            <button class="btn btn--sm btn--ghost" data-edit="${escapeHTML(t.slug)}">${escapeHTML(T.edit)}</button>
-            ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${escapeHTML(t.slug)}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${escapeHTML(t.slug)}">${escapeHTML(T.activate)}</button>`}
-            <button class="btn btn--sm btn--ghost" data-reload="${escapeHTML(t.slug)}">${escapeHTML(T.reload)}</button>
-            <button class="iconbtn iconbtn--danger" data-delete="${escapeHTML(t.slug)}">×</button>
-          </div></td>
-        </tr>`;
-      }).join('')}
+      ${rows.length === 0 ? `<tr><td colspan="7">${tenantsEmptyHtml(q, counts)}</td></tr>` : rows.map(tenantRowHtml).join('')}
       </tbody></table></div></div>`;
   bindTenantActions();
+}
+
+function tenantRowHtml(t) {
+  const s = state.stats[t.slug] || {};
+  const deleted = t.status === 'DELETED';
+  return `<tr>
+    <td class="name">${escapeHTML(t.name)}${tenantCompanyLine(t)}</td>
+    <td class="id">${escapeHTML(t.slug)}</td>
+    <td>${channelBadges(t.channels)}</td>
+    <td><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></td>
+    <td class="num">${s.messages ?? '—'}</td>
+    <td class="mono muted">${fmtDate(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
+    <td class="right"><div class="actions">${deleted ? deletedTenantActions(t) : liveTenantActions(t)}</div></td>
+  </tr>`;
+}
+
+function liveTenantActions(t) {
+  const slug = escapeHTML(t.slug);
+  return `
+    <button class="btn btn--sm" data-open-dashboard="${slug}">${escapeHTML(T.openDashboard)}</button>
+    ${t.parentTenantId ? '' : `<button class="btn btn--sm btn--ghost" data-users="${slug}">${escapeHTML(T.users)}</button>`}
+    <button class="btn btn--sm btn--ghost" data-edit="${slug}">${escapeHTML(T.edit)}</button>
+    ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${slug}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${slug}">${escapeHTML(T.activate)}</button>`}
+    <button class="btn btn--sm btn--ghost" data-reload="${slug}">${escapeHTML(T.reload)}</button>
+    <button class="iconbtn iconbtn--danger" data-delete="${slug}" aria-label="${escapeHTML(T.delete)}" title="${escapeHTML(T.delete)}">×</button>`;
+}
+
+// A deleted company can't come back while its first company is deleted: it either returns with it or waits for it.
+function deletedTenantActions(t) {
+  const primary = t.parentTenantId ? state.tenants.find(p => p.id === t.parentTenantId) : null;
+  if (primary?.status === 'DELETED') {
+    const withIt = (t.deletedAt || null) === (primary.deletedAt || null);
+    return `<span class="muted">${escapeHTML(withIt ? T.comesBackWith({ name: primary.name }) : T.restoreParentFirst({ name: primary.name }))}</span>`;
+  }
+  return `<button class="btn btn--sm btn--accent" data-restore="${escapeHTML(t.slug)}">${escapeHTML(T.restore)}</button>`;
+}
+
+function tenantsEmptyHtml(q, counts) {
+  const titles = { all: T.emptyTenants, ACTIVE: T.emptyActive, SUSPENDED: T.emptySuspended, DELETED: T.emptyDeleted };
+  const title = q ? T.emptySearch({ q: state.search.trim() }) : titles[state.filter];
+  const desc = !q && state.filter === 'DELETED' ? `<p class="empty__desc">${escapeHTML(T.emptyDeletedDesc)}</p>` : '';
+  const elsewhere = q ? ['all', 'DELETED'].find(f => f !== state.filter && counts[f] > 0) : null;
+  const jump = elsewhere
+    ? `<button class="btn btn--sm" type="button" data-status-filter="${elsewhere}">${escapeHTML(T.showMatches({ n: counts[elsewhere], label: T.filters[elsewhere] }))}</button>`
+    : '';
+  return `<div class="empty"><p class="empty__title">${escapeHTML(title)}</p>${desc}${jump}</div>`;
+}
+
+async function setTenantFilter(filter) {
+  state.filter = STATUS_FILTERS.includes(filter) ? filter : 'all';
+  // Re-rendering replaces the chips; keep keyboard focus on the chip row, but never pull it from elsewhere.
+  const rerender = () => {
+    const active = document.activeElement;
+    const onChips = !active || active === document.body || active.matches('[data-status-filter]');
+    renderTenants();
+    if (onChips) $(`.panel__tools [data-status-filter="${state.filter}"]`)?.focus();
+  };
+  rerender();
+  if (state.filter === 'DELETED' && await loadDeletedStats() && state.filter === 'DELETED' && currentView === 'tenants') rerender();
 }
 
 function channelBadges(channels = []) {
@@ -428,6 +507,8 @@ function bindTenantActions() {
   $$('[data-activate]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.activate, 'activate', T.activateTitle, T.activate, false)));
   $$('[data-reload]').forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(b.dataset.reload)}/reload`, { method: 'POST' }); toast(T.pipelineReloaded); }));
   $$('[data-delete]').forEach(b => b.addEventListener('click', () => deleteTenant(b.dataset.delete)));
+  $$('[data-restore]').forEach(b => b.addEventListener('click', () => restoreTenant(b.dataset.restore)));
+  $$('[data-status-filter]').forEach(b => b.addEventListener('click', () => setTenantFilter(b.dataset.statusFilter)));
 }
 
 async function openDashboard(slug) {
@@ -556,7 +637,12 @@ function tenantForm(editing) {
         }
         await loadAll();
         renderTenants();
-      } catch (e) { toast(T.error({ msg: e.message })); return false; }
+      } catch (e) {
+        const slug = $('#t-slug', wrap).value.trim();
+        if (e.code === 'slug_taken') toast(e.detail === 'DELETED' ? T.slugTakenDeleted({ slug }) : T.slugTaken({ slug }));
+        else toast(T.error({ msg: e.message }));
+        return false;
+      }
     },
   });
 }
@@ -761,14 +847,46 @@ function otherCompaniesNote(slug) {
 
 async function lifecycle(slug, action, title, okLabel, danger = true) {
   if (!await confirmDialog({ title, body: T.tenantLine({ slug }) + otherCompaniesNote(slug), okLabel, danger })) return;
-  await api(`/admin/api/tenants/${encodeURIComponent(slug)}/${action}`, { method: 'POST' });
+  try {
+    await api(`/admin/api/tenants/${encodeURIComponent(slug)}/${action}`, { method: 'POST' });
+  } catch (e) {
+    toast(e.code === 'tenant_deleted' ? T.tenantDeleted : T.error({ msg: e.message }));
+  }
   await loadAll();
   renderTenants();
 }
 
 async function deleteTenant(slug) {
-  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ slug }) + otherCompaniesNote(slug), okLabel: T.delete })) return;
-  await api(`/admin/api/tenants/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  const name = state.tenants.find(t => t.slug === slug)?.name || slug;
+  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ name, slug }) + otherCompaniesNote(slug), okLabel: T.delete })) return;
+  try {
+    await api(`/admin/api/tenants/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+    toast(T.deleted({ name }));
+  } catch (e) {
+    toast(T.error({ msg: e.message }));
+  }
+  await loadAll();
+  renderTenants();
+}
+
+async function restoreTenant(slug) {
+  const tenant = state.tenants.find(t => t.slug === slug);
+  if (!tenant) return;
+  const n = tenant.parentTenantId ? 0 : companiesDeletedWith(tenant).length;
+  const body = T.restoreBody({ name: tenant.name, slug }) + (n ? ` ${T.restoreCompaniesNote({ n })}` : '');
+  if (!await confirmDialog({ title: T.restoreTitle, body, okLabel: T.restore, danger: false })) return;
+  try {
+    await api(`/admin/api/tenants/${encodeURIComponent(slug)}/restore`, { method: 'POST' });
+    toast(T.restored({ name: tenant.name }));
+  } catch (e) {
+    const primary = state.tenants.find(p => p.id === tenant.parentTenantId);
+    const messages = {
+      parent_deleted: () => T.restoreParentFirst({ name: primary?.name || '' }),
+      company_limit: () => T.restoreCompanyLimit({ name: primary?.name || '', limit: primary?.maxCompanies ?? '' }),
+      not_deleted: () => T.notDeleted({ name: tenant.name }),
+    };
+    toast(messages[e.code]?.() || T.error({ msg: e.message }));
+  }
   await loadAll();
   renderTenants();
 }

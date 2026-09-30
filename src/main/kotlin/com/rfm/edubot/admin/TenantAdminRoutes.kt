@@ -66,6 +66,11 @@ fun Route.tenantAdminRoutes(
                     call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and slug are required"))
                     return@post
                 }
+                // Deleted tenants keep their slug, and the backoffice hides them, so say who holds it.
+                tenantRepository.findBySlug(request.slug.trim())?.let { holder ->
+                    call.respond(HttpStatusCode.Conflict, mapOf("error" to "slug_taken", "detail" to holder.status.name))
+                    return@post
+                }
                 val bindings = request.channels.toBindings().ifEmpty {
                     request.phoneNumberId?.trim()?.takeIf { it.isNotBlank() }
                         ?.let { listOf(ChannelBinding(Platform.WHATSAPP, it, runtimeConfig.get().whatsapp.accessToken)) }
@@ -142,22 +147,47 @@ fun Route.tenantAdminRoutes(
             }
 
             post("/tenants/{slug}/suspend") {
-                val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, call.parameters["slug"], TenantStatus.SUSPENDED)
+                val tenant = call.liveTenant(tenantRepository) ?: return@post
+                val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, tenant.slug, TenantStatus.SUSPENDED)
                     ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(updated.dto())
             }
 
             post("/tenants/{slug}/activate") {
-                val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, call.parameters["slug"], TenantStatus.ACTIVE)
+                val tenant = call.liveTenant(tenantRepository) ?: return@post
+                val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, tenant.slug, TenantStatus.ACTIVE)
                     ?: return@post call.respond(HttpStatusCode.NotFound)
                 call.respond(updated.dto())
             }
 
             delete("/tenants/{slug}") {
-                val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, call.parameters["slug"], TenantStatus.DELETED)
-                    ?: return@delete call.respond(HttpStatusCode.NotFound)
-                tenantRegistry.remove(updated)
+                val tenant = call.resolveTenant(tenantRepository) ?: return@delete
+                // Deleting again must not move deletedAt, or its companies would stop matching it on restore.
+                if (tenant.status != TenantStatus.DELETED) {
+                    val updated = setStatus(tenantRepository, tenantRegistry, pipelineFactory, tenant.slug, TenantStatus.DELETED)
+                        ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    tenantRegistry.remove(updated)
+                }
                 call.respond(mapOf("deleted" to true))
+            }
+
+            post("/tenants/{slug}/restore") {
+                val tenant = call.resolveTenant(tenantRepository) ?: return@post
+                if (tenant.status != TenantStatus.DELETED) {
+                    return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "not_deleted"))
+                }
+                tenant.parentTenantId?.let { parentId ->
+                    val parent = tenantRepository.findById(parentId)
+                    if (parent == null || parent.status == TenantStatus.DELETED) {
+                        return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "parent_deleted"))
+                    }
+                    if (tenantRepository.findCompanies(parentId).size >= parent.maxCompanies) {
+                        return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "company_limit"))
+                    }
+                }
+                val restored = restore(tenantRepository, tenantRegistry, pipelineFactory, tenant)
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                call.respond(restored.dto())
             }
 
             post("/tenants/{slug}/reload") {
@@ -344,6 +374,29 @@ private suspend fun setStatus(repo: TenantRepository, registry: TenantRegistry, 
     return updated
 }
 
+/** Brings a deleted tenant back as active; a first company brings back the companies deleted with it. */
+private suspend fun restore(repo: TenantRepository, registry: TenantRegistry, factory: TenantPipelineFactory, tenant: Tenant): Tenant? {
+    val now = SystemClock.now()
+    val companies = if (tenant.parentTenantId == null) repo.findCompaniesDeletedWith(tenant) else emptyList()
+    val restored = repo.setStatus(tenant.slug, TenantStatus.ACTIVE, now) ?: return null
+    val changed = listOf(restored) + companies.mapNotNull { repo.setStatus(it.slug, TenantStatus.ACTIVE, now) }
+    for (each in changed) {
+        registry.put(each)
+        factory.evict(each.id)
+    }
+    return restored
+}
+
+/** Like [resolveTenant], but a deleted tenant answers 409 `tenant_deleted`: it has to be restored instead. */
+private suspend fun ApplicationCall.liveTenant(repo: TenantRepository): Tenant? {
+    val tenant = resolveTenant(repo) ?: return null
+    if (tenant.status == TenantStatus.DELETED) {
+        respond(HttpStatusCode.Conflict, mapOf("error" to "tenant_deleted"))
+        return null
+    }
+    return tenant
+}
+
 private suspend fun ApplicationCall.resolveTenant(repo: TenantRepository): Tenant? {
     val slug = parameters["slug"] ?: run {
         respond(HttpStatusCode.BadRequest)
@@ -460,6 +513,7 @@ private data class TenantDto(
     val rateLimitPerDay: Int,
     val monthlyTokenBudget: Long,
     val status: String,
+    val deletedAt: String?,
     val channels: List<ChannelBindingDto>,
     /** Set on a tenant's extra companies: the id of its first company. */
     val parentTenantId: String?,
@@ -503,6 +557,7 @@ private fun Tenant.dto() = TenantDto(
     rateLimitPerDay = rateLimitPerDay,
     monthlyTokenBudget = monthlyTokenBudget,
     status = status.name,
+    deletedAt = deletedAt?.toString(),
     channels = channels.map { ChannelBindingDto(it.platform.name, it.externalId, it.accessToken.isNotBlank(), it.displayName, it.wabaId, it.source) },
     parentTenantId = parentTenantId?.toHexString(),
     maxCompanies = maxCompanies,

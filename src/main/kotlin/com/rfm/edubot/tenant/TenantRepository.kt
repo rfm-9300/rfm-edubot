@@ -64,7 +64,27 @@ class TenantRepository(mongoModule: MongoModule) {
         )?.toTenant()
 
     suspend fun setStatus(slug: String, status: TenantStatus, updatedAt: Instant): Tenant? =
-        update(slug, Updates.combine(Updates.set("status", status.name), Updates.set("updatedAt", updatedAt.toDate())))
+        update(
+            slug,
+            Updates.combine(
+                Updates.set("status", status.name),
+                Updates.set("updatedAt", updatedAt.toDate()),
+                if (status == TenantStatus.DELETED) Updates.set("deletedAt", updatedAt.toDate()) else Updates.unset("deletedAt"),
+            ),
+        )
+
+    /**
+     * The deleted companies of [primary] that were deleted together with it. When [primary] has no
+     * `deletedAt` (deleted before it was recorded), that is every deleted company without one either.
+     */
+    suspend fun findCompaniesDeletedWith(primary: Tenant): List<Tenant> =
+        collection.find(
+            Filters.and(
+                Filters.eq("parentTenantId", primary.id),
+                Filters.eq("status", TenantStatus.DELETED.name),
+                primary.deletedAt?.let { Filters.eq("deletedAt", it.toDate()) } ?: Filters.exists("deletedAt", false),
+            )
+        ).toList().map { it.toTenant() }
 
     suspend fun setLocale(slug: String, locale: String, updatedAt: Instant): Tenant? =
         update(slug, Updates.combine(Updates.set("locale", locale), Updates.set("updatedAt", updatedAt.toDate())))
@@ -119,6 +139,7 @@ class TenantRepository(mongoModule: MongoModule) {
         rateLimitPerDay = getInteger("rateLimitPerDay") ?: 200,
         monthlyTokenBudget = getLong("monthlyTokenBudget") ?: 2_000_000L,
         status = TenantStatus.valueOf(getString("status") ?: TenantStatus.ACTIVE.name),
+        deletedAt = getDate("deletedAt")?.let { Instant.fromEpochMilliseconds(it.time) },
         parentTenantId = getObjectId("parentTenantId"),
         maxCompanies = (get("maxCompanies") as? Number)?.toInt() ?: 1,
         documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
@@ -148,6 +169,7 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("createdAt", createdAt.toDate())
             .append("updatedAt", updatedAt.toDate())
             .appendIfNotNull("parentTenantId", parentTenantId)
+            .appendIfNotNull("deletedAt", deletedAt?.toDate())
         if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
         return doc
     }
