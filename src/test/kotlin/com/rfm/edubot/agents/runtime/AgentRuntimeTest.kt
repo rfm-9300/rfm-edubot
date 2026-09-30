@@ -1,5 +1,7 @@
 package com.rfm.edubot.agents.runtime
 
+import com.mongodb.client.model.Filters
+import com.mongodb.client.model.Updates
 import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.model.Agent
@@ -30,9 +32,17 @@ import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.registry.bool
 import com.rfm.edubot.agents.registry.int
 import com.rfm.edubot.agents.registry.string
+import com.rfm.edubot.conversation.ConversationRepository
+import com.rfm.edubot.conversation.MessageRepository
+import com.rfm.edubot.conversation.UserRepository
+import com.rfm.edubot.conversation.model.Message
+import com.rfm.edubot.conversation.model.MessageContent
+import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.lineItem
+import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.DomainEventTypes
@@ -43,6 +53,7 @@ import com.rfm.edubot.integrations.email.EmailMessage
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.notifications.NotificationKinds
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.testing.TestMongo
 import kotlinx.coroutines.CoroutineScope
@@ -60,12 +71,14 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import org.bson.Document
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeAll
 import org.junit.jupiter.api.BeforeEach
 import java.util.Collections
+import java.util.Date
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -398,5 +411,108 @@ class AgentRuntimeTest {
         assertEquals(listOf("Agenda de Obras Silva"), noted)
         val next = module.agents.findById(tenant.id, agent.id)!!.scheduleState["d1"]
         assertEquals(Instant.parse("2026-10-03T08:00:00Z"), next)
+    }
+
+    private suspend fun backdate(collection: String, id: ObjectId, field: String, at: Instant) {
+        mongo.database.getCollection<Document>(collection).updateOne(Filters.eq("_id", id), Updates.set(field, Date(at.toEpochMilliseconds())))
+    }
+
+    private suspend fun conversation(waId: String, lastFrom: UserRole): ObjectId {
+        val user = UserRepository(mongo, tenant.id).findOrCreate(waId, "Rui", Platform.WHATSAPP)
+        val conversations = ConversationRepository(mongo, tenant.id)
+        val conversation = conversations.findOrCreate(user.id, waId, Platform.WHATSAPP)
+        conversations.recordInbound(conversation.id, now - 2.hours)
+        val messages = MessageRepository(mongo, tenant.id)
+        messages.insert(Message(tenantId = tenant.id, conversationId = conversation.id, waId = waId, role = UserRole.USER, content = MessageContent.Text("Têm disponibilidade amanhã?"), createdAt = now - 2.hours))
+        if (lastFrom != UserRole.USER) {
+            messages.insert(Message(tenantId = tenant.id, conversationId = conversation.id, waId = waId, role = lastFrom, content = MessageContent.Text("Sim, às 10h."), createdAt = now - 90.minutes))
+        }
+        return conversation.id
+    }
+
+    @Test
+    fun `an invoice due in three days is reminded once however often the sweep runs, and the next one the day after`() = runBlocking {
+        val dueSoon = TriggerSpec("r1", TriggerTypes.DATE_OFFSET, buildJsonObject { put("entity", "invoice"); put("offsetDays", -3) })
+        val agent = agent(AgentDefinition(listOf(dueSoon), steps = listOf(step("s1", "test.note", text("Lembrete {{invoice.number}}"))), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
+        val client = ClientRepository(mongo, tenant.id).create("Ana Ribeiro", "+351 912 000 001")
+        val invoices = InvoiceRepository(mongo, tenant.id)
+        val due = invoices.create(client.id, null, listOf(lineItem("Obra", unitPriceEur = 100.0)), LocalDate(2026, 10, 4))
+        val dayAfter = invoices.create(client.id, null, listOf(lineItem("Pintura", unitPriceEur = 60.0)), LocalDate(2026, 10, 5))
+        val paid = invoices.create(client.id, null, listOf(lineItem("Paga", unitPriceEur = 80.0)), LocalDate(2026, 10, 4))
+        invoices.markPaid(paid.id)
+
+        runtime.scheduler.tick()
+        val run = awaitRun(agent) { it.status == RunStatus.SUCCEEDED }
+        assertEquals(SubjectRef.of(SubjectTypes.INVOICE, due.id), run.subject)
+        assertEquals(TriggerTypes.DATE_OFFSET, run.trigger.type)
+        now += 3.minutes
+        runtime.scheduler.tick()
+        now += 4.hours
+        runtime.scheduler.tick()
+        assertEquals(1, runsFor(agent).size, "a due date is reminded once, and a paid invoice not at all")
+
+        now = Instant.parse("2026-10-02T10:00:00Z")
+        runtime.scheduler.tick()
+        eventually { runsFor(agent).count { it.status == RunStatus.SUCCEEDED } == 2 }
+        assertEquals(setOf(due.id, dayAfter.id).map { SubjectRef.of(SubjectTypes.INVOICE, it) }.toSet(), runsFor(agent).mapNotNull { it.subject }.toSet())
+        assertEquals(listOf("Lembrete ${due.number}", "Lembrete ${dayAfter.number}"), noted)
+    }
+
+    @Test
+    fun `a quote left unanswered and a customer left waiting each get one follow-up`() = runBlocking {
+        val quoteIdle = TriggerSpec("q1", TriggerTypes.INACTIVITY, buildJsonObject { put("entity", "quote"); put("days", 3) })
+        val chatIdle = TriggerSpec("c1", TriggerTypes.INACTIVITY, buildJsonObject { put("entity", "conversation"); put("minutes", 30) })
+        val agent = agent(AgentDefinition(listOf(quoteIdle, chatIdle), steps = listOf(step("s1", "test.note", text("Seguimento"))), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
+        val client = ClientRepository(mongo, tenant.id).create("Rui Costa", "+351 916 000 006")
+        val quotes = QuoteRepository(mongo, tenant.id)
+        val stale = quotes.create(client.id, listOf(lineItem("Pintura", unitPriceEur = 400.0)), null, null)
+        val recent = quotes.create(client.id, listOf(lineItem("Telhado", unitPriceEur = 900.0)), null, null)
+        val draft = quotes.create(client.id, listOf(lineItem("Muro", unitPriceEur = 300.0)), null, null)
+        listOf(stale to 4.days, recent to 1.days).forEach { (quote, age) ->
+            quotes.update(quote.id, null, null, null, QuoteStatus.SENT)
+            backdate("crm.quotes", quote.id, "sentAt", now - age)
+        }
+        backdate("crm.quotes", draft.id, "updatedAt", now - 10.days)
+        val waiting = conversation("351917000007", lastFrom = UserRole.USER)
+        conversation("351918000008", lastFrom = UserRole.ASSISTANT)
+
+        runtime.scheduler.tick()
+        eventually { runsFor(agent).count { it.status == RunStatus.SUCCEEDED } == 2 }
+        assertEquals(
+            setOf(SubjectRef.of(SubjectTypes.QUOTE, stale.id), SubjectRef.of(SubjectTypes.CONVERSATION, waiting)),
+            runsFor(agent).mapNotNull { it.subject }.toSet(),
+            "not the quote sent yesterday, the one never sent, or the chat already answered",
+        )
+        now += 3.minutes
+        runtime.scheduler.tick()
+        assertEquals(2, runsFor(agent).size)
+    }
+
+    @Test
+    fun `quiet clients are looked for every six hours and followed up once`() = runBlocking {
+        val quiet = TriggerSpec("k1", TriggerTypes.INACTIVITY, buildJsonObject { put("entity", "client"); put("days", 30) })
+        val agent = agent(AgentDefinition(listOf(quiet), steps = listOf(step("s1", "test.note", text("Contactar {{client.firstName}}"))), policy = AgentPolicy(autonomy = Autonomy.AUTO)))
+        val clients = ClientRepository(mongo, tenant.id)
+        val gone = clients.create("Carla Dias", "+351 913 000 003")
+        val busy = clients.create("Bruno Reis", "+351 914 000 004")
+        val later = clients.create("Sara Nunes", "+351 915 000 005")
+        val invoice = InvoiceRepository(mongo, tenant.id).create(busy.id, null, listOf(lineItem("Obra", unitPriceEur = 90.0)), LocalDate(2026, 10, 20))
+        listOf(gone.id, busy.id).forEach { backdate("crm.clients", it, "createdAt", now - 60.days) }
+        backdate("crm.invoices", invoice.id, "createdAt", now - 5.days)
+        backdate("crm.clients", later.id, "createdAt", now - 2.days)
+
+        runtime.scheduler.tick()
+        awaitRun(agent) { it.status == RunStatus.SUCCEEDED }
+        assertEquals(listOf(SubjectRef.of(SubjectTypes.CLIENT, gone.id)), runsFor(agent).map { it.subject })
+        assertEquals(listOf("Contactar Carla"), noted)
+
+        backdate("crm.clients", later.id, "createdAt", now - 40.days)
+        now += 3.hours
+        runtime.scheduler.tick()
+        assertEquals(1, runsFor(agent).size, "clients are looked for at most every six hours")
+        now += 4.hours
+        runtime.scheduler.tick()
+        eventually { runsFor(agent).count { it.status == RunStatus.SUCCEEDED } == 2 }
+        assertEquals(setOf(gone.id, later.id).map { SubjectRef.of(SubjectTypes.CLIENT, it) }.toSet(), runsFor(agent).mapNotNull { it.subject }.toSet(), "Carla isn't followed up twice")
     }
 }
