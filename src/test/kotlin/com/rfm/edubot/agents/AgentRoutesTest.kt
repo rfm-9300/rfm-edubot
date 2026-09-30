@@ -16,6 +16,12 @@ import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.AgentServices
+import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.AiResponse
+import com.rfm.edubot.ai.ChatMessage
+import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.UsageInfo
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.crm.ClientRepository
@@ -51,6 +57,8 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
+import io.mockk.coEvery
+import io.mockk.mockk
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -124,13 +132,14 @@ class AgentRoutesTest {
         return Company(tenant, dashboardToken(admin, adminUser, "tenant", 1), dashboardToken(admin, memberUser, "tenant", 1))
     }
 
-    private fun routes(block: suspend (HttpClient) -> Unit) = testApplication {
+    private fun routes(agents: AgentsModule = module, block: suspend (HttpClient) -> Unit) = testApplication {
+        val agentRuntime = if (agents === module) runtime else AgentRuntime(agents, { tenants.findById(it) }, CoroutineScope(Dispatchers.Default + SupervisorJob()))
         application {
             configureSerialization()
             configureAdminAuth(runtimeConfig, tenants, users)
             routing {
-                agentRoutes(module, runtime, tenants)
-                notificationRoutes(module.notifications)
+                agentRoutes(agents, agentRuntime, tenants)
+                notificationRoutes(agents.notifications)
             }
         }
         block(client)
@@ -391,6 +400,54 @@ class AgentRoutesTest {
         fun available(key: String) = templates.single { it["key"]!!.jsonPrimitive.content == key }["available"]!!.jsonPrimitive.content.toBoolean()
         assertTrue(available("weekly_cash_briefing"))
         assertTrue(!available("invoice_due_reminder"), "no WhatsApp connected")
+    }
+
+    @Test
+    fun `a description becomes a draft for admins, and when drafting fails the answer says why`() {
+        val answer = """{"name": "Avisar faturas", "note": "Ligue o WhatsApp.", "definition": $validDefinition}"""
+        val ai = mockk<AiClient>()
+        coEvery { ai.complete(any(), any(), any(), any()) } answers {
+            val request = firstArg<List<ChatMessage>>().first { it.role == "user" }.content.orEmpty()
+            val content = if ("impossível" in request) "Não consigo fazer isso." else answer
+            AiResponse.Text(content = content, usage = UsageInfo(prompt_tokens = 900, completion_tokens = 100), responseId = "r")
+        }
+        val drafting = AgentsModule(mongo, AgentRegistry(AgentActions.builtIn, TriggerTypes.all), AgentServices(mongo, aiClient = ai))
+        val path = "/app/api/agents/draft"
+        fun ask(request: String) = buildJsonObject { put("request", request) }
+
+        routes(drafting) { http ->
+            val company = company()
+            assertEquals(HttpStatusCode.Forbidden, http.send("POST", path, company.memberToken, ask("Avisa a equipa")).status)
+            assertEquals(HttpStatusCode.BadRequest, http.send("POST", path, company.adminToken).status)
+            assertEquals(HttpStatusCode.BadRequest, http.send("POST", path, company.adminToken, ask("   ")).status)
+            assertEquals(HttpStatusCode.BadRequest, http.send("POST", path, company.adminToken, ask("x".repeat(2_001))).status)
+
+            val drafted = http.send("POST", path, company.adminToken, ask("Avisa a equipa de cada fatura nova"))
+            assertEquals(HttpStatusCode.Created, drafted.status)
+            val body = drafted.obj()
+            assertEquals("Ligue o WhatsApp.", body["note"]!!.jsonPrimitive.content)
+            val agent = body["agent"]!!.jsonObject
+            assertEquals("Avisar faturas", agent["name"]!!.jsonPrimitive.content)
+            assertEquals("DRAFT", agent["status"]!!.jsonPrimitive.content)
+            assertEquals(0, agent["problems"]!!.jsonArray.size)
+            val id = agent["id"]!!.jsonPrimitive.content
+            assertEquals("DRAFT", http.send("GET", "/app/api/agents/$id", company.memberToken).obj()["status"]!!.jsonPrimitive.content, "the team finds it with the other agents")
+
+            val refused = http.send("POST", path, company.adminToken, ask("Algo impossível"))
+            assertEquals(HttpStatusCode.UnprocessableEntity, refused.status)
+            assertEquals("no_result", refused.obj()["error"]!!.jsonPrimitive.content)
+
+            val spent = company()
+            TenantUsageRepository(mongo, spent.tenant.id).recordUsage(spent.tenant.monthlyTokenBudget, UsageSources.PIPELINE)
+            val overBudget = http.send("POST", path, spent.adminToken, ask("Avisa a equipa"))
+            assertEquals(HttpStatusCode.TooManyRequests, overBudget.status)
+            assertEquals("token_budget", overBudget.obj()["error"]!!.jsonPrimitive.content)
+        }
+        routes { http ->
+            val unavailable = http.send("POST", path, company().adminToken, ask("Avisa a equipa"))
+            assertEquals(HttpStatusCode.ServiceUnavailable, unavailable.status)
+            assertEquals("ai_unavailable", unavailable.obj()["error"]!!.jsonPrimitive.content)
+        }
     }
 
     @Test
