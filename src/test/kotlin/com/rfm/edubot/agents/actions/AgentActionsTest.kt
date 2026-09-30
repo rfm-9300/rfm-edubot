@@ -23,7 +23,9 @@ import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.ClientServiceStatus
 import com.rfm.edubot.crm.model.QuoteStatus
@@ -246,6 +248,84 @@ class AgentActionsTest {
         assertEquals(2, billed.output["rows"]?.jsonPrimitive?.content?.toInt())
         assertTrue(rows.list(client.id).all { it.status == ClientServiceStatus.INVOICED })
         assertIs<ActionResult.Skipped>(execute(InvoiceOpenServicesAction, JsonObject(emptyMap()), clientCtx))
+    }
+
+    @Test
+    fun `a new client is created once, and a known phone finds its client, even an archived one`(): Unit = runBlocking {
+        val tenant = tenant()
+        val clients = ClientRepository(mongo, tenant.id)
+        val created = execute(
+            CreateClientAction,
+            buildJsonObject { put("name", "Marta Lopes"); put("phone", "+351 944 000 444"); put("email", "marta@example.pt") },
+            context(tenant, null, StepSpec("s1", "crm.client.create")),
+        ) as ActionResult.Done
+        assertEquals("false", created.output["existing"]!!.jsonPrimitive.content)
+        val id = ObjectId(created.output["clientId"]!!.jsonPrimitive.content)
+        assertEquals("marta@example.pt", clients.findById(id)!!.email)
+
+        clients.setArchived(id, archived = true)
+        val again = execute(CreateClientAction, buildJsonObject { put("name", "Marta"); put("phone", "944000444") }, context(tenant, null, StepSpec("s2", "crm.client.create"))) as ActionResult.Done
+        assertEquals("existing_client", again.note)
+        assertEquals(id.toHexString(), again.output["clientId"]!!.jsonPrimitive.content)
+        val restored = clients.findById(id)!!
+        assertEquals(null, restored.archivedAt, "the archived client comes back instead of a duplicate")
+        assertEquals("Marta Lopes", restored.name)
+    }
+
+    @Test
+    fun `an update fills in what the step gives and keeps the rest`(): Unit = runBlocking {
+        val tenant = tenant()
+        val clients = ClientRepository(mongo, tenant.id)
+        val client = clients.create("Ana Ribeiro", "+351 955 000 555", address = "Rua A, Lisboa", email = "ana@example.pt", notes = "Prefere manhãs")
+        val ctx = context(tenant, SubjectRef.of(SubjectTypes.CLIENT, client.id), StepSpec("s1", "crm.client.update"))
+
+        execute(UpdateClientAction, buildJsonObject { put("taxId", "123456789"); put("notes", "Tem cão"); put("email", "  ") }, ctx)
+
+        val updated = clients.findById(client.id)!!
+        assertEquals("123456789", updated.taxId)
+        assertEquals("ana@example.pt", updated.email, "a blank value keeps what's stored")
+        assertEquals("Rua A, Lisboa", updated.address)
+        assertEquals("Prefere manhãs\nTem cão", updated.notes, "notes are added to, not replaced")
+        assertEquals(ActionResult.Skipped("no_client"), execute(UpdateClientAction, buildJsonObject { put("taxId", "1") }, context(tenant, null, StepSpec("s2", "crm.client.update"))))
+    }
+
+    @Test
+    fun `a quote moves to the status asked, and work done and bills to pay are recorded for the client`(): Unit = runBlocking {
+        val tenant = tenant()
+        val client = ClientRepository(mongo, tenant.id).create("Rui Costa", "+351 966 000 666")
+        val quotes = QuoteRepository(mongo, tenant.id)
+        val quote = quotes.create(client.id, listOf(lineItem("Pintura", unitPriceEur = 400.0)), null, null)
+        val quoteCtx = context(tenant, SubjectRef.of(SubjectTypes.QUOTE, quote.id), StepSpec("s1", "crm.quote.set_status"))
+
+        execute(SetQuoteStatusAction, buildJsonObject { put("status", "SENT") }, quoteCtx)
+        val sent = quotes.findById(quote.id)!!
+        assertEquals(QuoteStatus.SENT, sent.status)
+        assertTrue(sent.sentAt != null)
+        assertEquals(ActionResult.Failed("invalid_status"), execute(SetQuoteStatusAction, buildJsonObject { put("status", "LOST") }, quoteCtx))
+
+        val clientCtx = context(tenant, SubjectRef.of(SubjectTypes.CLIENT, client.id), StepSpec("s2", "crm.service.create"))
+        val service = execute(CreateServiceAction, buildJsonObject { put("name", "Reparação"); put("amountEur", "120,50"); put("quantity", 2); put("unit", "h") }, clientCtx) as ActionResult.Done
+        val row = ClientServiceRepository(mongo, tenant.id).findById(ObjectId(service.output["serviceId"]!!.jsonPrimitive.content))!!
+        assertEquals(12_050L, row.unitPriceCents)
+        assertEquals(24_100L, row.totalCents)
+        assertEquals(ClientServiceStatus.OPEN, row.status)
+        assertEquals(LocalDate(2026, 10, 1), row.performedAt, "today in the company's timezone")
+
+        val supplier = SupplierRepository(mongo, tenant.id).create("EDP Comercial", "+351 800 000 000")
+        val bill = execute(
+            CreatePaymentAction,
+            buildJsonObject { put("payeeId", supplier.id.toHexString()); put("description", "Eletricidade de setembro"); put("amountEur", 84.2); put("dueInDays", 10) },
+            clientCtx,
+        ) as ActionResult.Done
+        val payment = PaymentRepository(mongo, tenant.id).findById(ObjectId(bill.output["paymentId"]!!.jsonPrimitive.content))!!
+        assertEquals(supplier.id, payment.supplierId)
+        assertEquals(8_420L, payment.totalCents)
+        assertEquals(LocalDate(2026, 10, 11), payment.dueDate)
+        assertEquals(client.id, payment.clientId, "the bill counts as spent on the record's client")
+        assertEquals(
+            ActionResult.Failed("employees_module_off"),
+            execute(CreatePaymentAction, buildJsonObject { put("payeeType", "employee"); put("payeeId", ObjectId().toHexString()); put("description", "Horas"); put("amountEur", 50) }, clientCtx),
+        )
     }
 
     @Test
