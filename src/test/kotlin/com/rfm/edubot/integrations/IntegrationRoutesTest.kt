@@ -118,8 +118,8 @@ class IntegrationRoutesTest {
     private val settings = AgentSettingsRepository(mongo)
     private val json = Json { ignoreUnknownKeys = true }
 
-    private fun integration(google: FakeGoogle, configured: Boolean = true, cipher: TokenCipher? = this.cipher): GoogleIntegration {
-        val config = if (configured) google.config else AppConfig.GoogleConfig()
+    private fun integration(google: FakeGoogle, configured: Boolean = true, cipher: TokenCipher? = this.cipher, inbox: Boolean = false): GoogleIntegration {
+        val config = if (configured) google.config.copy(inboxEnabled = inbox) else AppConfig.GoogleConfig()
         return GoogleIntegration.create(mongo, { config }, cipher, google.http, NotificationRepository(mongo))
     }
 
@@ -161,11 +161,16 @@ class IntegrationRoutesTest {
 
     private suspend fun HttpClient.list(token: String): JsonObject = get("/app/api/integrations") { bearerAuth(token) }.obj()
 
+    /** Flags left at false aren't in the JSON. */
+    private fun JsonObject.flag(name: String): Boolean = this[name]?.jsonPrimitive?.boolean ?: false
+
     /** The state inside the consent url the admin is sent to. */
-    private suspend fun HttpClient.consent(company: Company): String {
-        val response = get("/app/api/integrations/google/connect") { bearerAuth(company.adminToken) }
+    private suspend fun HttpClient.consent(company: Company, inbox: Boolean = false): String = consentUrl(company, inbox).parameters["state"]!!
+
+    private suspend fun HttpClient.consentUrl(company: Company, inbox: Boolean = false): Url {
+        val response = get("/app/api/integrations/google/connect" + if (inbox) "?inbox=1" else "") { bearerAuth(company.adminToken) }
         assertEquals(HttpStatusCode.OK, response.status)
-        return Url(response.obj()["authorizeUrl"]!!.jsonPrimitive.content).parameters["state"]!!
+        return Url(response.obj()["authorizeUrl"]!!.jsonPrimitive.content)
     }
 
     private suspend fun HttpClient.callback(query: String): String? {
@@ -180,11 +185,11 @@ class IntegrationRoutesTest {
         setBody(body.toString())
     }
 
-    private suspend fun GoogleIntegration.connected(company: Company, email: String): IntegrationConnection = connections.connect(
+    private suspend fun GoogleIntegration.connected(company: Company, email: String, scopes: List<String> = listOf(GoogleScopes.GMAIL_SEND)): IntegrationConnection = connections.connect(
         tenantId = company.tenant.id,
         provider = IntegrationProviders.GOOGLE,
         accountEmail = email,
-        scopes = listOf(GoogleScopes.GMAIL_SEND),
+        scopes = scopes,
         accessToken = this@IntegrationRoutesTest.cipher.seal("access-1"),
         refreshToken = this@IntegrationRoutesTest.cipher.seal("refresh-1"),
         accessTokenExpiresAt = now + 1.hours,
@@ -355,6 +360,98 @@ class IntegrationRoutesTest {
             assertEquals(HttpStatusCode.Forbidden, http.patchJson(path, company.memberToken, buildJsonObject { put("senderName", "X") }).status)
             assertEquals(HttpStatusCode.NotFound, http.patchJson(path, company().adminToken, buildJsonObject { put("senderName", "X") }).status)
             assertEquals(HttpStatusCode.BadRequest, http.patchJson("/app/api/integrations/nope", company.adminToken, buildJsonObject {}).status)
+        }
+    }
+
+    @Test
+    fun `reading the inbox is offered where the platform reads inboxes, and asks google for it on top of sending`() {
+        routes(integration(FakeGoogle())) { http ->
+            val company = company()
+            assertFalse(http.list(company.adminToken)["google"]!!.jsonObject.flag("inbox"))
+            val refused = http.get("/app/api/integrations/google/connect?inbox=1") { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.ServiceUnavailable, refused.status)
+            assertEquals("inbox_not_available", refused.obj()["error"]!!.jsonPrimitive.content)
+        }
+        routes(integration(FakeGoogle(), inbox = true)) { http ->
+            val company = company()
+            assertTrue(http.list(company.adminToken)["google"]!!.jsonObject.flag("inbox"))
+            val inbox = http.consentUrl(company, inbox = true)
+            assertEquals(GoogleScopes.inbox, inbox.parameters["scope"]!!.split(' '))
+            assertEquals("true", inbox.parameters["include_granted_scopes"])
+            assertEquals(OAuthState.PURPOSE_GOOGLE_INBOX, oauthState.verify(inbox.parameters["state"]!!)!!.purpose)
+            assertEquals(GoogleScopes.send, http.consentUrl(company).parameters["scope"]!!.split(' '), "connecting alone doesn't ask to read")
+        }
+    }
+
+    @Test
+    fun `the inbox consent turns inbox sync on, unless reading was unticked on google's screen`() {
+        val google = FakeGoogle()
+        val integration = integration(google, inbox = true)
+        val reading = "openid email ${GoogleScopes.GMAIL_SEND} ${GoogleScopes.GMAIL_READONLY} ${GoogleScopes.GMAIL_MODIFY}"
+        routes(integration) { http ->
+            val company = company()
+            google.onToken = { HttpStatusCode.OK to google.grant(email = "caixa@example.pt", scope = reading) }
+            assertEquals("/app/?google=inbox", http.callback("code=c&state=${http.consent(company, inbox = true).encodeURLParameter()}"))
+            val reader = integration.connections.list(company.tenant.id).single()
+            assertTrue(reader.settings.inboxSync)
+            assertTrue(reader.inbox.enabledAt != null)
+            val listed = http.list(company.memberToken)["connections"]!!.jsonArray.single().jsonObject
+            assertEquals(true, listed["canRead"]!!.jsonPrimitive.boolean)
+            assertEquals(true, listed["inboxSync"]!!.jsonPrimitive.boolean)
+
+            assertEquals("/app/?google=connected", http.callback("code=c&state=${http.consent(company).encodeURLParameter()}"))
+            assertTrue(integration.connections.findById(reader.id)!!.settings.inboxSync, "reconnecting to send keeps the inbox read")
+
+            google.onToken = { HttpStatusCode.OK to google.grant(email = "balcao@example.pt", scope = "openid email ${GoogleScopes.GMAIL_SEND}") }
+            assertEquals("/app/?google=error&reason=missing_inbox_scope", http.callback("code=c&state=${http.consent(company, inbox = true).encodeURLParameter()}"))
+            val sender = integration.connections.list(company.tenant.id).single { it.accountEmail == "balcao@example.pt" }
+            assertFalse(sender.settings.inboxSync)
+            assertTrue(GoogleScopes.canSend(sender.scopes), "what was allowed still sends")
+            assertEquals(emptyList(), google.revoked)
+        }
+    }
+
+    @Test
+    fun `a company admin turns inbox sync on once google lets the account be read, and anyone managing can turn it off`() {
+        val integration = integration(FakeGoogle(), inbox = true)
+        routes(integration) { http ->
+            val company = company()
+            val sendOnly = integration.connected(company, "geral@example.pt")
+            val reader = integration.connected(company, "caixa@example.pt", scopes = GoogleScopes.inbox)
+            val path = "/app/api/integrations/${reader.id.toHexString()}"
+            val on = buildJsonObject { put("inboxSync", true) }
+            val off = buildJsonObject { put("inboxSync", false) }
+
+            val consent = http.patchJson("/app/api/integrations/${sendOnly.id.toHexString()}", company.adminToken, on)
+            assertEquals(HttpStatusCode.Conflict, consent.status)
+            assertEquals("needs_consent", consent.obj()["error"]!!.jsonPrimitive.content)
+            assertEquals(HttpStatusCode.Forbidden, http.patchJson(path, company.operatorToken, on).status)
+            assertEquals(HttpStatusCode.Forbidden, http.patchJson(path, company.memberToken, on).status)
+
+            val turnedOn = http.patchJson(path, company.adminToken, on)
+            assertEquals(HttpStatusCode.OK, turnedOn.status)
+            assertEquals(true, turnedOn.obj()["inboxSync"]!!.jsonPrimitive.boolean)
+            val since = integration.connections.findById(reader.id)!!.inbox.enabledAt
+            assertTrue(since != null)
+            val renamed = http.patchJson(path, company.adminToken, buildJsonObject { put("senderName", "Caixa") }).obj()
+            assertEquals(true, renamed["inboxSync"]!!.jsonPrimitive.boolean, "other settings leave the inbox alone")
+            assertEquals(since, integration.connections.findById(reader.id)!!.inbox.enabledAt)
+
+            assertFalse(http.patchJson(path, company.operatorToken, off).obj().flag("inboxSync"))
+            assertNull(integration.connections.findById(reader.id)!!.inbox.enabledAt, "turning it off forgets where reading got to")
+        }
+
+        val closed = integration(FakeGoogle())
+        routes(closed) { http ->
+            val company = company()
+            val reading = closed.connected(company, "caixa@example.pt", scopes = GoogleScopes.inbox)
+            closed.connections.setInboxSync(company.tenant.id, reading.id, true)
+            val idle = closed.connected(company, "outra@example.pt", scopes = GoogleScopes.inbox)
+            val unavailable = http.patchJson("/app/api/integrations/${idle.id.toHexString()}", company.adminToken, buildJsonObject { put("inboxSync", true) })
+            assertEquals(HttpStatusCode.ServiceUnavailable, unavailable.status)
+            assertEquals("inbox_not_available", unavailable.obj()["error"]!!.jsonPrimitive.content)
+            val stopped = http.patchJson("/app/api/integrations/${reading.id.toHexString()}", company.adminToken, buildJsonObject { put("inboxSync", false) })
+            assertFalse(stopped.obj().flag("inboxSync"), "an inbox can always stop being read")
         }
     }
 

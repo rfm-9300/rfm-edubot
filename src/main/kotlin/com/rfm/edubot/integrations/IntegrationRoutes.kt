@@ -41,8 +41,9 @@ private val log = LoggerFactory.getLogger("IntegrationRoutes")
  * A company's connected accounts (docs/plan-agents-automations.md, "Google / Gmail integration"), under the
  * settings module:
  *  - GET    /app/api/integrations                 the connections, and whether Google can be connected
- *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves; ?account= reconnects one
- *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender
+ *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves; ?account= reconnects one,
+ *                                                 ?inbox=1 also asks to read the inbox and turns inbox sync on
+ *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender, inbox sync
  *  - POST   /app/api/integrations/{id}/test-email a test email to the admin asking (an operator: to the account itself)
  *  - DELETE /app/api/integrations/{id}            delete the tokens and the kept mail, revoking the grant when no company still uses it
  *  - GET    /integrations/google/callback         public: Google redirects the browser here; the signed state is the auth
@@ -65,7 +66,7 @@ fun Route.integrationRoutes(
                 val limit = email.dailyLimit(ctx.tenant)
                 call.respond(
                     IntegrationsDto(
-                        google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect()),
+                        google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect(), inbox = google.inboxAvailable),
                         connections = connections.list(ctx.tenant.id).map { it.dto(today, limit) },
                         canManage = ctx.canManageIntegrations(),
                     ),
@@ -83,16 +84,21 @@ fun Route.integrationRoutes(
                 if (!google.configured) {
                     return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "google_not_configured"))
                 }
+                val inbox = call.request.queryParameters["inbox"] in TRUTHY
+                if (inbox && !google.inboxAvailable) {
+                    return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
+                }
                 val state = oauthState.mint(
                     ctx.tenant.slug,
                     origin = OAuthState.ORIGIN_DASHBOARD,
-                    purpose = OAuthState.PURPOSE_GOOGLE,
+                    purpose = if (inbox) OAuthState.PURPOSE_GOOGLE_INBOX else OAuthState.PURPOSE_GOOGLE,
                     tenantId = ctx.tenant.id.toHexString(),
                     userId = user.id.toHexString(),
                 )
                 val reconnecting = call.request.queryParameters["account"]?.let(EmailAddresses::normalize)
                     ?.takeIf { account -> connections.list(ctx.tenant.id).any { it.accountEmail == account } }
-                call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state, loginHint = reconnecting)))
+                val scopes = if (inbox) GoogleScopes.inbox else GoogleScopes.send
+                call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state, scopes = scopes, loginHint = reconnecting)))
             }
 
             patch("/{id}") {
@@ -105,9 +111,20 @@ fun Route.integrationRoutes(
                     is SettingsUpdate.Invalid -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to update.error))
                     is SettingsUpdate.Ok -> update.settings
                 }
+                val inboxSync = request.inboxSync?.takeIf { it != connection.settings.inboxSync }
+                if (inboxSync == true) {
+                    // Reading a company's mail is its admins' decision: an operator may turn it off, never on.
+                    if (!ctx.canConnect()) return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    if (!google.inboxAvailable) return@patch call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
+                    if (!GoogleScopes.canRead(connection.scopes)) return@patch call.respond(HttpStatusCode.Conflict, mapOf("error" to "needs_consent"))
+                }
                 var updated: IntegrationConnection? = connection
                 if (settings != connection.settings) updated = connections.updateSettings(ctx.tenant.id, connection.id, settings)
                 if (request.isDefault == true && !connection.isDefault) updated = connections.makeDefault(ctx.tenant.id, connection.id)
+                if (inboxSync != null) {
+                    updated = connections.setInboxSync(ctx.tenant.id, connection.id, inboxSync)
+                    log.info("Inbox sync {}: tenant={} connection={}", if (inboxSync) "on" else "off", ctx.tenant.slug, connection.id)
+                }
                 updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant))) } ?: call.respond(HttpStatusCode.NotFound)
             }
 
@@ -144,7 +161,7 @@ fun Route.integrationRoutes(
     get("/integrations/google/callback") {
         val params = call.request.queryParameters
         val state = params["state"]
-        val verified = state?.takeIf { it.isNotBlank() }?.let { oauthState.verify(it) }?.takeIf { it.purpose == OAuthState.PURPOSE_GOOGLE }
+        val verified = state?.takeIf { it.isNotBlank() }?.let { oauthState.verify(it) }?.takeIf { it.purpose in GOOGLE_PURPOSES }
 
         params["error"]?.let { error ->
             log.info("Google consent not given: error={}", error)
@@ -191,11 +208,20 @@ fun Route.integrationRoutes(
             connectedByEmail = user.email,
         )
         log.info("Google account connected: tenant={} connection={}", tenant.slug, connection.id)
+        if (verified.purpose == OAuthState.PURPOSE_GOOGLE_INBOX && google.inboxAvailable) {
+            // Google's consent screen lets people untick reading; sending still works with what they allowed.
+            if (!GoogleScopes.canRead(grant.scopes)) return@get call.respondRedirect(googleResult("error", "missing_inbox_scope"))
+            if (!connection.settings.inboxSync) connections.setInboxSync(tenant.id, connection.id, true)
+            log.info("Inbox sync on: tenant={} connection={}", tenant.slug, connection.id)
+            return@get call.respondRedirect(googleResult("inbox"))
+        }
         call.respondRedirect(googleResult("connected"))
     }
 }
 
 private val REASON = Regex("^[a-z_]{1,40}$")
+private val GOOGLE_PURPOSES = setOf(OAuthState.PURPOSE_GOOGLE, OAuthState.PURPOSE_GOOGLE_INBOX)
+private val TRUTHY = setOf("1", "true", "yes")
 
 private const val MAX_SENDER_NAME = 80
 private const val MAX_SIGNATURE = 2000
@@ -218,7 +244,7 @@ private fun UpdateConnectionRequest.applyTo(current: EmailSettings): SettingsUpd
     val sign = signature?.trim()
     if (sign != null && sign.length > MAX_SIGNATURE) return SettingsUpdate.Invalid("signature_too_long")
     return SettingsUpdate.Ok(
-        EmailSettings(
+        current.copy(
             senderName = if (name == null) current.senderName else name.ifEmpty { null },
             replyTo = if (reply == null) current.replyTo else replyAddress,
             signature = if (sign == null) current.signature else sign.ifEmpty { null },
