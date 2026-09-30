@@ -5,8 +5,8 @@ window.__I18N_CATALOGS['es'] = {
     nav: {
       overview: 'Inicio', conversations: 'Conversaciones', contacts: 'Contactos',
       clients: 'Clientes', services: 'Servicios', quotes: 'Presupuestos', invoices: 'Facturas', financeiro: 'Finanzas', suppliers: 'Proveedores', employees: 'Colaboradores', payments: 'Pagos', catalog: 'Catálogo',
-      persona: 'Persona', settings: 'Ajustes', 'ai-assistant': 'Asistente IA', bookings: 'Reservas', instagram: 'Instagram',
-      groupInbox: 'Bandeja', groupBusiness: 'Negocio', groupBot: 'Bot', groupSetup: 'Configuración',
+      persona: 'Persona', settings: 'Ajustes', 'ai-assistant': 'Asistente IA', bookings: 'Reservas', instagram: 'Instagram', agents: 'Agentes',
+      groupInbox: 'Bandeja', groupBusiness: 'Negocio', groupBot: 'Automatización', groupSetup: 'Configuración',
     },
     lang: {
       title: 'Idioma', desc: 'Idioma usado en este panel.', label: 'Idioma',

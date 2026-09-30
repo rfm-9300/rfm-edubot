@@ -8,8 +8,22 @@ import kotlin.test.assertNull
 
 class DashboardModulesTest {
     @Test
-    fun `null enabled modules preserves access to the full catalog`() {
-        assertEquals(DashboardModules.catalog, DashboardModules.effectiveFor(tenant(enabledModules = null)))
+    fun `null enabled modules preserves access to the full catalog except opt-in modules`() {
+        assertEquals(
+            DashboardModules.catalog - DashboardModules.optIn.toSet(),
+            DashboardModules.effectiveFor(tenant(enabledModules = null)),
+        )
+    }
+
+    @Test
+    fun `agents is opt-in so older tenants don't get it without the backoffice`() {
+        assertEquals(true, DashboardModules.AGENTS in DashboardModules.optional)
+        assertEquals(true, DashboardModules.AGENTS in DashboardModules.optIn)
+        assertEquals(false, DashboardModules.AGENTS in DashboardModules.effectiveFor(tenant(enabledModules = null)))
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.AGENTS,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.AGENTS))),
+        )
     }
 
     @Test

@@ -31,6 +31,8 @@ const MODULES = [
   { id: 'ai-assistant' },
   { id: 'bookings' },
   { id: 'instagram' },
+  // Opt-in: a new tenant starts without it, and tenants with no saved selection don't get it.
+  { id: 'agents', optIn: true },
 ];
 
 async function api(path, options = {}) {
@@ -868,7 +870,7 @@ function tenantForm(editing) {
 }
 
 function selectedModulesFor(editing) {
-  const selected = new Set(editing?.effectiveModules || MODULES.map(m => m.id));
+  const selected = new Set(editing?.effectiveModules || MODULES.filter(m => !m.optIn).map(m => m.id));
   return MODULES.filter(m => m.always || selected.has(m.id)).map(m => m.id);
 }
 
