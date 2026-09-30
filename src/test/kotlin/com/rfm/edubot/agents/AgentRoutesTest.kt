@@ -40,6 +40,9 @@ import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.DomainEventTypes
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.email.EmailDirection
+import com.rfm.edubot.integrations.email.EmailMessage
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.plugins.configureSerialization
@@ -86,6 +89,7 @@ import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
 
 class AgentRoutesTest {
 
@@ -517,6 +521,30 @@ class AgentRoutesTest {
 
         module.settings.savePlatform(company.tenant.id, module.settings.get(company.tenant.id).platform.copy(agentsPaused = true))
         assertEquals("platform", http.send("GET", "/app/api/agents/overview", company.memberToken).obj()["pausedBy"]!!.jsonPrimitive.content, "the backoffice pause wins")
+    }
+
+    @Test
+    fun `testing an email agent reads the newest email received, not one the company sent`() = routes { http ->
+        val company = company()
+        val definition = buildJsonObject {
+            put("triggers", json.parseToJsonElement("""[{"id":"t1","type":"email.received","config":{"sender":"any"}}]"""))
+            put("steps", json.parseToJsonElement("""[{"id":"s1","action":"team.notify","input":{"message":"Email de {{email.from}}: {{email.subject}}"}}]"""))
+        }
+        val id = http.send("POST", "/app/api/agents", company.adminToken, buildJsonObject { put("name", "Pedidos"); put("definition", definition) }).obj()["id"]!!.jsonPrimitive.content
+        val emails = EmailMessageRepository(mongo)
+        val account = ObjectId()
+        fun email(providerId: String, direction: EmailDirection, from: String, subject: String, at: kotlinx.datetime.Instant) = EmailMessage(
+            tenantId = company.tenant.id, connectionId = account, providerMessageId = providerId, direction = direction,
+            from = from, to = listOf("geral@obras.pt"), subject = subject, snippet = subject, date = at, createdAt = at,
+        )
+        emails.insert(email("in-old", EmailDirection.INBOUND, "rui@example.com", "Pedido antigo", now - 2.days))
+        val newest = emails.insert(email("in-new", EmailDirection.INBOUND, "sofia@example.com", "Pedido de orçamento", now - 1.hours))
+        emails.insert(email("out", EmailDirection.OUTBOUND, "geral@obras.pt", "Re: Pedido de orçamento", now))
+
+        val run = http.send("POST", "/app/api/agents/$id/test", company.adminToken).obj()
+        assertEquals("email", run["subject"]!!.jsonObject["type"]!!.jsonPrimitive.content)
+        assertEquals(newest.id.toHexString(), run["subject"]!!.jsonObject["id"]!!.jsonPrimitive.content)
+        assertEquals("Pedido de orçamento", run["subjectLabel"]!!.jsonPrimitive.content)
     }
 
     @Test

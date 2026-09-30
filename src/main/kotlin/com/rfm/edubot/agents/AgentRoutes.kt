@@ -34,6 +34,8 @@ import com.rfm.edubot.events.ActorType
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.integrations.email.EmailDirection
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
 import io.ktor.http.HttpStatusCode
@@ -529,7 +531,10 @@ private suspend fun settingsDto(agents: AgentsModule, ctx: DashboardContext): Ag
     )
 }
 
-/** A schedule test with no record picked runs on nothing; a record-based agent gets its newest record. */
+/**
+ * A schedule test with no record picked runs on nothing; a record-based agent gets its newest record,
+ * an email agent the newest email received.
+ */
 private suspend fun defaultSubject(agents: AgentsModule, tenant: Tenant, agent: Agent, definition: AgentDefinition): SubjectRef? {
     val type = definition.triggers.firstNotNullOfOrNull { trigger -> agents.registry.trigger(trigger.type)?.subjectType(trigger.config) } ?: return null
     val collection = when (type) {
@@ -539,10 +544,13 @@ private suspend fun defaultSubject(agents: AgentsModule, tenant: Tenant, agent: 
         SubjectTypes.PAYMENT -> "crm.payments"
         SubjectTypes.BOOKING -> "bookings.appointments"
         SubjectTypes.CONVERSATION -> "conversations"
+        SubjectTypes.EMAIL -> EmailMessageRepository.COLLECTION
         else -> return null
     }
+    val filter = org.bson.Document("tenantId", tenant.id)
+    if (type == SubjectTypes.EMAIL) filter.append("direction", EmailDirection.INBOUND.name)
     val latest = agents.mongo.database.getCollection<org.bson.Document>(collection)
-        .find(org.bson.Document("tenantId", tenant.id))
+        .find(filter)
         .sort(org.bson.Document("createdAt", -1)).limit(1)
     var id: ObjectId? = null
     latest.collect { id = it.getObjectId("_id") }
