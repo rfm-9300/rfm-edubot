@@ -41,7 +41,7 @@ private val log = LoggerFactory.getLogger("IntegrationRoutes")
  * A company's connected accounts (docs/plan-agents-automations.md, "Google / Gmail integration"), under the
  * settings module:
  *  - GET    /app/api/integrations                 the connections, and whether Google can be connected
- *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves
+ *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves; ?account= reconnects one
  *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender
  *  - POST   /app/api/integrations/{id}/test-email a test email to the admin asking (an operator: to the account itself)
  *  - DELETE /app/api/integrations/{id}            delete the tokens and the kept mail, revoking the grant when no company still uses it
@@ -90,7 +90,9 @@ fun Route.integrationRoutes(
                     tenantId = ctx.tenant.id.toHexString(),
                     userId = user.id.toHexString(),
                 )
-                call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state)))
+                val reconnecting = call.request.queryParameters["account"]?.let(EmailAddresses::normalize)
+                    ?.takeIf { account -> connections.list(ctx.tenant.id).any { it.accountEmail == account } }
+                call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state, loginHint = reconnecting)))
             }
 
             patch("/{id}") {

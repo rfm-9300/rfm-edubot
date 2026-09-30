@@ -61,7 +61,8 @@ class GoogleOAuthClient(
      * `access_type=offline` + `prompt=consent` make Google return a refresh token every time, including on
      * a reconnect; `include_granted_scopes` keeps scopes the account granted this app before.
      */
-    fun authorizeUrl(state: String, scopes: List<String> = GoogleScopes.send): String =
+    /** [loginHint] opens Google's screen on that account (a reconnect) instead of the account picker. */
+    fun authorizeUrl(state: String, scopes: List<String> = GoogleScopes.send, loginHint: String? = null): String =
         AUTHORIZE_URL +
             "?client_id=${config.clientId.encodeURLParameter()}" +
             "&redirect_uri=${config.redirectUri.encodeURLParameter()}" +
@@ -70,6 +71,7 @@ class GoogleOAuthClient(
             "&access_type=offline" +
             "&prompt=consent" +
             "&include_granted_scopes=true" +
+            (loginHint?.let { "&login_hint=${it.encodeURLParameter()}" } ?: "") +
             "&state=${state.encodeURLParameter()}"
 
     /** Null when Google refuses the code or can't be reached. */

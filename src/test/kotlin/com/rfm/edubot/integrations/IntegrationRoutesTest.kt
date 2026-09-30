@@ -230,6 +230,22 @@ class IntegrationRoutesTest {
     }
 
     @Test
+    fun `reconnecting opens google on that account, and only on one of the company's`() {
+        val google = integration(FakeGoogle())
+        routes(google) { http ->
+            val company = company()
+            // Not the fake's account: other tests count which companies still use that grant.
+            google.connected(company, "recepcao@example.pt")
+            suspend fun hint(account: String): String? {
+                val response = http.get("/app/api/integrations/google/connect?account=${account.encodeURLParameter()}") { bearerAuth(company.adminToken) }
+                return Url(response.obj()["authorizeUrl"]!!.jsonPrimitive.content).parameters["login_hint"]
+            }
+            assertEquals("recepcao@example.pt", hint(" Recepcao@Example.pt "))
+            assertNull(hint("someone@else.pt"))
+        }
+    }
+
+    @Test
     fun `without a google client or a token key connecting is unavailable`() {
         for (google in listOf(integration(FakeGoogle(), configured = false), integration(FakeGoogle(), cipher = null))) {
             routes(google) { http ->

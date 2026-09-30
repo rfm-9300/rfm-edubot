@@ -24,6 +24,9 @@ class GoogleOAuthClientTest {
         assertEquals("consent", url.parameters["prompt"])
         assertEquals("true", url.parameters["include_granted_scopes"])
         assertEquals("signed-state", url.parameters["state"])
+        assertNull(url.parameters["login_hint"])
+        val reconnect = Url(google.client().authorizeUrl("signed-state", loginHint = "obras@example.pt"))
+        assertEquals("obras@example.pt", reconnect.parameters["login_hint"])
     }
 
     @Test
