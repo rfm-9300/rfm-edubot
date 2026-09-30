@@ -16,6 +16,7 @@ import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.actions.AgentActions
 import com.rfm.edubot.agents.agentAdminRoutes
 import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.TriggerTypes
@@ -36,6 +37,9 @@ import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
+import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.google.GoogleIntegration
+import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
@@ -168,6 +172,20 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         aiClient = aiClient,
         scope = pipelineScope,
         onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
+    )
+
+    val tokenCipher = TokenCipher.fromConfig(appConfig.integrations.encryptionKey)
+    if (tokenCipher == null && appConfig.integrations.encryptionKey.isNotBlank()) {
+        LoggerFactory.getLogger("Application").error("INTEGRATIONS_ENCRYPTION_KEY must be base64 32-byte keys separated by commas; Google accounts can't be connected")
+    } else if (tokenCipher == null && appConfig.google.oauthEnabled) {
+        LoggerFactory.getLogger("Application").warn("Google OAuth is set but INTEGRATIONS_ENCRYPTION_KEY isn't; Google accounts can't be connected")
+    }
+    val google = GoogleIntegration.create(
+        mongo = mongoModule,
+        configProvider = { runtimeConfig.get().google },
+        cipher = tokenCipher,
+        httpClient = whatsappHttpClient,
+        notifications = NotificationRepository(mongoModule),
     )
 
     val agentServices = AgentServices(
@@ -327,6 +345,12 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             oauthClient = instagramOAuthClient,
             bindingService = channelBindingService,
             tenantRepository = tenantRepository,
+        )
+        integrationRoutes(
+            google = google,
+            oauthState = oauthState,
+            tenants = tenantRepository,
+            users = dashboardUserRepository,
         )
         whatsAppSignupRoutes(
             configProvider = { runtimeConfig.get().whatsapp },

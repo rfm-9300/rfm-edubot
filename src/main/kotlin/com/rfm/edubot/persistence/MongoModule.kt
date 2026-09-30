@@ -166,6 +166,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
             outboundLog.createIndex(Document("tenantId", 1).append("channel", 1).append("at", -1))
             outboundLog.createIndex(Document("at", 1), IndexOptions().expireAfter(30, TimeUnit.DAYS))
 
+            val integrationConnections = db.getCollection<Document>("integration_connections")
+            integrationConnections.createIndex(Document("tenantId", 1).append("provider", 1).append("accountEmail", 1), IndexOptions().unique(true))
+            integrationConnections.createIndex(Document("provider", 1).append("status", 1))
+
             val crmInvoices = db.getCollection<Document>("crm.invoices")
             crmInvoices.dropIndexIfExists("number_1")
             crmInvoices.createIndex(Document("tenantId", 1).append("clientId", 1))
