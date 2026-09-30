@@ -16,6 +16,7 @@ import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.actions.AgentActions
 import com.rfm.edubot.agents.agentAdminRoutes
 import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.agents.ai.AgentAssistant
 import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.agents.registry.AgentRegistry
@@ -334,6 +335,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             runtimeConfig = runtimeConfig,
             channelBindingService = channelBindingService,
             instagramSocial = instagramSocial,
+            assistantExtension = AgentAssistant(agentsModule, agentRuntime),
         )
         dashboardImpersonationRoute(
             tenantRepository = tenantRepository,

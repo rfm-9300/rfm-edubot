@@ -8,6 +8,7 @@ import com.rfm.edubot.agents.model.AgentRun
 import com.rfm.edubot.agents.model.AgentStatus
 import com.rfm.edubot.agents.model.RunStatus
 import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.registry.DefinitionProblem
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.SubjectRef
@@ -20,6 +21,12 @@ import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
+
+sealed class Activation {
+    data class Activated(val agent: Agent) : Activation()
+    data class Invalid(val problems: List<DefinitionProblem>) : Activation()
+    data class AtLimit(val limit: Int) : Activation()
+}
 
 data class AgentRuntimeConfig(
     val tick: Duration = 30.seconds,
@@ -67,6 +74,19 @@ class AgentRuntime(
             else -> Unit
         }
         dispatcher.refresh(tenant.id)
+    }
+
+    /** Switches [agent] on when its definition has no problems and the company has room for one more active agent; null when it's gone. */
+    suspend fun activate(tenant: Tenant, agent: Agent): Activation? {
+        val problems = module.validator.validate(agent.definition, module.availability(tenant), agent.templateParams)
+        if (problems.isNotEmpty()) return Activation.Invalid(problems)
+        val limits = module.settings.get(tenant.id).platform
+        if (agent.status != AgentStatus.ACTIVE && module.agents.countActive(tenant.id) >= limits.maxActiveAgents) {
+            return Activation.AtLimit(limits.maxActiveAgents)
+        }
+        val active = module.agents.setStatus(tenant.id, agent.id, AgentStatus.ACTIVE) ?: return null
+        onAgentChanged(tenant, active)
+        return Activation.Activated(module.agents.findById(tenant.id, agent.id) ?: active)
     }
 
     suspend fun runManually(tenant: Tenant, agent: Agent, subject: SubjectRef?, userId: String?): StartResult =

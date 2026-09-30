@@ -16,6 +16,7 @@ import com.rfm.edubot.agents.model.TaskStatus
 import com.rfm.edubot.agents.registry.AgentCatalog
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.registry.string
+import com.rfm.edubot.agents.runtime.Activation
 import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.agents.runtime.StartResult
 import com.rfm.edubot.agents.store.AgentJson
@@ -230,15 +231,12 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val ctx = call.agentsContext() ?: return@post
                 if (!ctx.canManageAgents()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
                 val agent = call.agentParam(agents, ctx) ?: return@post
-                val problems = agents.validator.validate(agent.definition, agents.availability(ctx.tenant), agent.templateParams)
-                if (problems.isNotEmpty()) return@post call.respond(HttpStatusCode.UnprocessableEntity, agent.dto(problems))
-                val limits = agents.settings.get(ctx.tenant.id).platform
-                if (agent.status != AgentStatus.ACTIVE && agents.agents.countActive(ctx.tenant.id) >= limits.maxActiveAgents) {
-                    return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "agent_limit", "limit" to limits.maxActiveAgents.toString()))
+                when (val activation = runtime.activate(ctx.tenant, agent)) {
+                    is Activation.Activated -> call.respond(activation.agent.dto())
+                    is Activation.Invalid -> call.respond(HttpStatusCode.UnprocessableEntity, agent.dto(activation.problems))
+                    is Activation.AtLimit -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "agent_limit", "limit" to activation.limit.toString()))
+                    null -> call.respond(HttpStatusCode.NotFound)
                 }
-                val active = agents.agents.setStatus(ctx.tenant.id, agent.id, AgentStatus.ACTIVE) ?: return@post call.respond(HttpStatusCode.NotFound)
-                runtime.onAgentChanged(ctx.tenant, active)
-                call.respond((agents.agents.findById(ctx.tenant.id, agent.id) ?: active).dto())
             }
 
             post("/{id}/pause") {

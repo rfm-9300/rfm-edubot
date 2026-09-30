@@ -25,6 +25,9 @@ interface ToolPack {
     fun moduleOf(name: String): String?
     suspend fun execute(call: ToolCall, context: ToolCallContext = ToolCallContext()): JsonObject
 
+    /** What a person confirming [call] should see beyond its arguments (names behind ids…); null when the arguments say it all. */
+    suspend fun describe(call: ToolCall): JsonObject? = null
+
     fun definitionsFor(modules: Collection<String>): List<ToolDefinition> =
         definitions.filter { definition -> moduleOf(definition.name)?.let { it in modules } ?: true }
 
@@ -59,4 +62,5 @@ class CompositeToolPack(private val packs: List<ToolPack>) : ToolPack {
     override fun moduleOf(name: String): String? = packFor(name)?.moduleOf(name)
     override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject =
         packFor(call.name)?.execute(call, context) ?: buildJsonObject { put("error", "Unknown tool: ${call.name}") }
+    override suspend fun describe(call: ToolCall): JsonObject? = packFor(call.name)?.describe(call)
 }

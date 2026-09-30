@@ -134,7 +134,7 @@ fun Route.dashboardStaticRoutes() {
     }
 }
 
-fun Route.dashboardRoutes(
+internal fun Route.dashboardRoutes(
     mongo: MongoModule,
     tenantRepository: TenantRepository,
     dashboardUsers: DashboardUserRepository,
@@ -144,6 +144,7 @@ fun Route.dashboardRoutes(
     runtimeConfig: RuntimeConfig,
     channelBindingService: ChannelBindingService,
     instagramSocial: InstagramSocialService,
+    assistantExtension: AssistantExtension? = null,
 ) {
     val inbox = InboxService(mongo, { pipelineFactory.whatsAppFor(it) }, { tenant, platform -> pipelineFactory.responderFor(tenant, platform) })
     authenticate("dashboard") {
@@ -574,7 +575,7 @@ fun Route.dashboardRoutes(
                 pipelineFactory.evict(updated.id)
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
-            dashboardAssistantRoutes(mongo, aiClient)
+            dashboardAssistantRoutes(mongo, aiClient, assistantExtension)
             crmRoutes(mongo, runtimeConfig)
             installBookingRoutes {
                 val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
