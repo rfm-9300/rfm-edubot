@@ -286,6 +286,7 @@
   async function refresh() {
     try { await load(); } catch { d.toast(d.STR.loadFailed); }
     if (d.state.active === 'agents') d.render();
+    else d.onChange?.();
   }
 
   async function switchTab(tab) {
@@ -1653,6 +1654,31 @@
     form.addEventListener('submit', e => { e.preventDefault(); save({}, $('button[type="submit"]', form)); });
   }
 
+  // ── refs: Home rows and notifications point at `approval:ID`, `task:ID`, `run:ID`, `agent:ID` or `inbox` ──
+  /** Sets the tab the page shows behind what [ref] opens, before the page loads. */
+  function focusRef(ref) {
+    const kind = String(ref || '').split(':')[0];
+    if (kind === 'approval' || kind === 'inbox') { ui.tab = 'inbox'; ui.inbox = 'approvals'; }
+    else if (kind === 'task') { ui.tab = 'inbox'; ui.inbox = 'tasks'; }
+    else if (kind === 'run') { ui.tab = 'activity'; ui.activity = ''; }
+    else if (kind === 'agent') ui.tab = 'agents';
+  }
+  /** Opens the approval, task, run or agent [ref] names in the drawer, with [back] as the way back. */
+  async function openRef(ref, back = null) {
+    const [kind, id] = String(ref || '').split(':');
+    if (!id) return;
+    const path = { approval: 'approvals', task: 'tasks' }[kind];
+    if (!path) {
+      if (kind === 'run') d.openFrom(back, () => openRun(id));
+      else if (kind === 'agent') d.openFrom(back, () => openAgent(id));
+      return;
+    }
+    let item;
+    try { [item] = await Promise.all([d.api(`/app/api/agents/${path}/${encodeURIComponent(id)}`), ensurePeople()]); }
+    catch { return d.toast(d.STR.loadFailed); }
+    d.openFrom(back, () => (kind === 'approval' ? openApproval(item) : openTask(item)));
+  }
+
   // ── activity ──────────────────────────────────────────────────────
   function renderActivity(pane) {
     const chips = ['', 'open', 'attention', 'done'].map(f => `<button class="chip ${ui.activity === f ? 'is-on' : ''}" type="button" data-activity="${f}">${esc(tr(`activity.${f || 'all'}`))}</button>`).join('');
@@ -1745,5 +1771,8 @@
     d = deps;
   }
 
-  window.AgentsUI = { init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon };
+  window.AgentsUI = {
+    init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon,
+    focusRef, openRef,
+  };
 })();

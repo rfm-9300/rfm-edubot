@@ -923,6 +923,11 @@ function agentsDeps() {
     statusLabel: recordStatusLabel,
     openSubject: openAgentSubject,
     canOpenSubject: canOpenAgentSubject,
+    // Something changed in Agents while another view is showing: keep Home's card and rows and the nav count in step.
+    onChange: () => {
+      if (state.active !== 'overview') return renderNav();
+      loadModule('overview').then(render).catch(() => renderNav());
+    },
   };
 }
 
@@ -1037,6 +1042,7 @@ function attentionTitle(item) {
   if (item.aggregate && item.kind === 'overdue_invoice' && typeof STR.overdueInvoiceN === 'function') return STR.overdueInvoiceN({ n: item.count });
   if (item.aggregate && item.kind === 'overdue_payment' && typeof STR.overduePaymentN === 'function') return STR.overduePaymentN({ n: item.count });
   if (item.kind === 'assistant_action' && typeof STR.assistantAction === 'function') return STR.assistantAction({ n: Number(item.detail || 0) });
+  if (item.kind === 'agent_task_due') return agentTaskLate(item) ? STR.agentTaskOverdue : STR.agentTaskDue;
   const map = {
     waiting_chat: STR.waitingChat,
     overdue_invoice: STR.overdueInvoice,
@@ -1046,15 +1052,21 @@ function attentionTitle(item) {
     pending_booking: STR.pendingBooking,
     instagram_comment: STR.instagramWaitingComment,
     quote_expiring: STR.quoteExpiring,
+    agent_approval: STR.agentApproval,
+    agent_failed: STR.agentFailed,
   };
   return map[item.kind] || item.kind;
 }
+// Agent tasks come in when due by the end of today; one from an earlier day is late.
+const agentTaskLate = item => !!item.at && localDay(item.at) < localDay(new Date().toISOString());
+// Home rows about agents open the approval, task or run itself (see AgentsUI.openRef).
+const AGENT_ATTENTION_REFS = { agent_approval: 'approval', agent_task_due: 'task', agent_failed: 'run' };
 function attentionPill(kind) {
   const map = {
     waiting_chat: 'pill--warn', overdue_invoice: 'pill--bad', due_soon_invoice: 'pill--warn',
     overdue_payment: 'pill--bad', due_soon_payment: 'pill--warn',
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
-    assistant_action: 'pill--info',
+    assistant_action: 'pill--info', agent_approval: 'pill--warn', agent_task_due: 'pill--info', agent_failed: 'pill--bad',
   };
   return map[kind] || '';
 }
@@ -1078,7 +1090,7 @@ function attentionIcon(kind) {
     waiting_chat: '💬', overdue_invoice: '💶', due_soon_invoice: '⏰',
     overdue_payment: '💸', due_soon_payment: '⏰',
     pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
-    assistant_action: '✨',
+    assistant_action: '✨', agent_approval: '🤖', agent_task_due: '📋', agent_failed: '⚠️',
   };
   return map[kind] || '•';
 }
@@ -1121,13 +1133,13 @@ function homeCardCopy(id) {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     financeiro: STR.snapFinance, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
     calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
-    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant,
+    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant, agents: STR.snapAgents,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     financeiro: STR.homeCard_financeDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
-    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc,
+    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc, agents: STR.homeCard_agentsDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -1556,6 +1568,27 @@ function dashPipelineCard(o) {
   return dashCard({ order: 5, title: STR.snapPipeline, go: 'quotes', body });
 }
 
+// [[value, label, tone]] as big numbers side by side; tone is '', 'warn' or 'bad'.
+function dashFigures(figures) {
+  return `<div class="dash-figures">${figures.map(([v, label, tone]) => `<div class="dash-figure"><span class="dash-figure__value${tone ? ` dash-figure__value--${tone}` : ''}">${escapeHTML(String(v))}</span><span class="dash-figure__label">${escapeHTML(label)}</span></div>`).join('')}</div>`;
+}
+
+function dashAgentsCard(o) {
+  const a = o.agents;
+  const paused = a.paused ? `<div class="notice notice--warn"><div class="notice__text"><span>${escapeHTML(I18N.t('app.agents.pausedTitle'))}</span></div></div>` : '';
+  const body = `${paused}${dashFigures([
+    [a.pendingApprovals || 0, STR.agentsToApprove, a.pendingApprovals ? 'warn' : ''],
+    [a.openTasks || 0, STR.agentsOpenTasks, a.tasksDue ? 'warn' : ''],
+    [a.runsToday || 0, STR.agentsRunsToday, ''],
+  ])}
+    ${dashFacts([
+      [STR.agentsActive, a.activeAgents || 0],
+      a.tasksDue ? [STR.agentsTasksDue, a.tasksDue] : null,
+      [STR.agentsFailedWeek, a.failedThisWeek || 0],
+    ])}`;
+  return dashCard({ order: 9, title: STR.snapAgents, go: 'agents', body });
+}
+
 function dashInboxCard(o) {
   const i = o.inbox;
   const convo = hasModule('conversations');
@@ -1564,7 +1597,7 @@ function dashInboxCard(o) {
     ? [[i.waiting || 0, STR.hl_waiting, i.waiting > 0 ? 'warn' : ''], [i.messagesToday || 0, STR.hl_messages_today, ''], [i.messagesThisWeek || 0, STR.inboxWeek, '']]
     : [[i.contacts || 0, STR.hl_contacts, ''], [i.newContactsThisWeek || 0, STR.inboxNewContacts, '']];
   const pct = convo ? pctChange(i.messagesThisWeek || 0, i.messagesLastWeek || 0) : null;
-  const body = `<div class="dash-figures">${figures.map(([v, label, tone]) => `<div class="dash-figure"><span class="dash-figure__value${tone ? ` dash-figure__value--${tone}` : ''}">${escapeHTML(String(v))}</span><span class="dash-figure__label">${escapeHTML(label)}</span></div>`).join('')}</div>
+  const body = `${dashFigures(figures)}
     ${activity.length > 1 ? `${sparkline(activity.map(d => d.count || 0), 'spark--tall')}<div class="dash-axis"><span>${escapeHTML(dayLabel(activity[0].day))}</span><span>${escapeHTML(STR.todayTitle)}</span></div>` : ''}
     ${dashFacts([
       pct != null ? [STR.dashWeekChange, `${pct > 0 ? '+' : ''}${pct}%`] : null,
@@ -1639,16 +1672,17 @@ function renderOverviewMinimal(root) {
       if (n.amountCents != null) {
         meta = centsEUR(n.amountCents);
         when = n.aggregate || !n.at ? '' : relDay(n.at);
-      } else if (n.kind === 'waiting_chat' || n.kind === 'instagram_comment') meta = relTime(n.at);
+      } else if (['waiting_chat', 'instagram_comment', 'agent_approval', 'agent_failed'].includes(n.kind)) meta = relTime(n.at);
       else if (n.kind === 'pending_booking') meta = fmtWhen(n.at);
       else if (n.at) meta = relDay(n.at);
       const detail = n.aggregate && n.kind === 'overdue_invoice'
         ? (o.cash?.topOverdue || []).map(t => t.name).filter(Boolean).join(', ')
         : (n.kind === 'assistant_action' ? '' : n.detail || '');
       const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking'].includes(n.kind);
+      const agentRef = AGENT_ATTENTION_REFS[n.kind] && n.id ? `${AGENT_ATTENTION_REFS[n.kind]}:${n.id}` : '';
       return worklistRow({
-        tone: attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
-        open: !n.aggregate && opens ? n.id || '' : '', conversation: n.kind === 'waiting_chat' ? n.id || '' : '',
+        tone: n.kind === 'agent_task_due' && agentTaskLate(n) ? 'late' : attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
+        open: agentRef || (!n.aggregate && opens ? n.id || '' : ''), conversation: n.kind === 'waiting_chat' ? n.id || '' : '',
       });
     }).join('');
     const body = rows
@@ -1666,6 +1700,7 @@ function renderOverviewMinimal(root) {
   if (o.customers && o.cash && !hidden.has('customers')) cards.push({ col: 'main', order: 7, html: dashTopClientsCard(o) });
   const feedSources = [['invoices', 'financeiro'], ['payments', 'financeiro'], ['quotes', 'pipeline'], ['clients', 'customers'], ['bookings', 'calendar']];
   if (feedSources.some(([m, card]) => hasModule(m) && !hidden.has(card))) cards.push({ col: 'side', order: 8, html: dashRecentCard(o) });
+  if (o.agents && !hidden.has('agents')) cards.push({ col: 'side', order: 9, html: dashAgentsCard(o) });
   const count = col => cards.filter(c => c.col === col).length;
   const column = col => cards.filter(c => c.col === col).sort((a, b) => a.order - b.order).map(c => c.html).join('');
   const single = !count('main') || !count('side');
@@ -1725,8 +1760,10 @@ async function dashGo(el) {
   const { go, open, conversation, settings } = el.dataset;
   if (conversation) state.selectedConversation = conversation;
   if (settings) state.settingsSection = settings;
+  if (go === 'agents' && open) window.AgentsUI?.focusRef(open);
   await setActive(go);
   if (!open || state.active !== go) return;
+  if (go === 'agents') return window.AgentsUI.openRef(open);
   if (go === 'invoices') return openInvoiceDetail(open);
   if (go === 'quotes') return openQuoteDetail(open);
   if (go === 'payments') return openPaymentDetail(open);
