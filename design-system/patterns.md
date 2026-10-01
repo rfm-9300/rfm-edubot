@@ -51,7 +51,7 @@ Used by clients, quotes, invoices, catalog, tenants:
 2. Body is a `.form` / `.form__grid`
 3. Footer: ghost Cancel + accent Save
 4. On save: disable button, swap label to saving, close only on success
-5. Focus first input after open
+5. Focus first input after open. A drawer that leads with status and keeps its fields further down (the backoffice agents drawer) passes `autofocus: false` and focuses its close button instead, so it opens at the top
 6. Close via `[data-close]`, scrim, and Escape; trap Tab inside the panel; restore focus on close
 7. Wide (`.drawer__panel--wide`) for line-item editors
 8. Quote / invoice rows open the drawer for status, convert, or edit; a client row opens the client record — not a new page

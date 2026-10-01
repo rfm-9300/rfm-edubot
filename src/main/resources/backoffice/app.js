@@ -92,7 +92,7 @@ function confirmDialog({ title, body, okLabel = T.confirm, danger = true }) {
   });
 }
 
-function openDrawer({ title, body, onSave, saveLabel = T.save }) {
+function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true }) {
   const root = $('#drawer');
   $('#drawer-title').textContent = title;
   const host = $('#drawer-body');
@@ -109,7 +109,7 @@ function openDrawer({ title, body, onSave, saveLabel = T.save }) {
     const ok = await onSave?.();
     if (ok !== false) close();
   });
-  setTimeout(() => host.querySelector('input,select,textarea')?.focus(), 50);
+  setTimeout(() => (autofocus ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
 }
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
@@ -839,6 +839,7 @@ async function agentsDrawer(slug) {
     title: A.title({ name }),
     body: wrap,
     saveLabel: A.saveLimits,
+    autofocus: false,
     async onSave() {
       // A cleared field keeps its limit: an empty input must not read as 0, which allows none.
       const limit = id => {
