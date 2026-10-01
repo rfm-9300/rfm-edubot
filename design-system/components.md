@@ -793,7 +793,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 
 | Block | Role |
 |---|---|
-| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view or record: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent. Not a toast, not a modal |
+| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume. Not a toast, not a modal |
 | `.agent-icon` (`--lg`) | 32px (44px) line icon on the accent tint; the SVG comes from the agent's `icon` key |
 | `.agent-cell` (`__text` `__name` `__sub`) | Agents table first column: icon, name, and a `.recipe` under it |
 | `.recipe` > `.recipe__part` (`--when`) + `.recipe__arrow` | "When → step → step" chips; the trigger part is tinted; long parts truncate |
@@ -810,6 +810,8 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 | `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
 
 Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list. An AI task's fields are named by the user: their labels come from `app.agents.outputs.<name>` when there is one (summary, intent…), else the name as typed. Field names are normalized on change (accents dropped, anything else becomes `_`) so they stay usable as `{{steps.<id>.output.<name>}}`.
+
+A `dl.dash-facts` placed straight in a `.panel__body` drops its top margin and its first row's rule, so no second line runs just under the panel head's border (Agents Settings, the backoffice agents drawer).
 
 ## Utilities
 

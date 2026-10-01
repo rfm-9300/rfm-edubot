@@ -180,6 +180,13 @@ Optional `agents` module, grouped with Persona and the AI assistant. `app/agents
 6. **Activity**: a runs table with In progress / Needs attention / Finished chips and a "Show tests" check. The run drawer shows the trigger, an outcome `.notice` and each step's result on `ol.flow`, with Retry or Cancel. An AI task's step lists its fields in `dl.dash-facts`, then each action it took on its own line, then (when drafted) what it would have done, with the same preview an approval shows. An AI text shows in a `.wa-preview` bubble.
 7. **Settings**: the company defaults form (read-only for non-admins) beside a usage `dl.dash-facts` of platform limits.
 
+The backoffice manages a company's agents from the tenants table: with Agents on, the row actions get a ghost **Agents** that opens a drawer on that company. Strings live under `backoffice.agents.*`; status labels reuse `app.agents.status.*`.
+
+1. A `.notice` on the pause state: plain while agents run, `--warn` while the platform or the company paused them. Its one action is Pause agents (`.btn--danger`, through the confirm) or, once the platform paused them, Resume agents (`.btn--accent`). A company's own pause is only described: its admins lift it in Settings, and pausing here as well keeps the agents paused.
+2. A "Last 7 days" panel: `dl.dash-facts` of runs, succeeded, failed or waiting for review, waiting or in progress, and approvals waiting now.
+3. A `.tbl` of the company's agents: name (with a muted pause reason under it), status pill, runs, failed, last run; `.empty` when there are none.
+4. A Limits panel: active agents allowed, runs per day, emails per day, saved by the drawer's Save. A cleared field keeps its limit rather than reading as 0, which allows none. The company sees these read-only in Settings, and a platform pause as a notice without Resume.
+
 The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval; there's no "Open record" when the trail already goes back to that record.
 
 Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand); the Persona page, which lists the agents with "Write with AI" steps and a "Follows it" check per row (admins only; hidden when there are none); and the top-bar notifications (see Notifications). After "Run now" there, the block looks again every 1.5 s (up to five times) until the run is no longer queued or running, so it ends on what happened.
