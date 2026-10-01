@@ -14,7 +14,41 @@ data class AppConfig(
     val admin: AdminConfig,
     val pdfStoragePath: String,
     val backups: BackupConfig = BackupConfig(),
+    val agents: AgentsConfig = AgentsConfig(),
+    val google: GoogleConfig = GoogleConfig(),
+    val integrations: IntegrationsConfig = IntegrationsConfig(),
 ) {
+    /** The agents runtime: how often the scheduler ticks and how many runs work at once. */
+    data class AgentsConfig(
+        val tickSeconds: Int = 30,
+        val lanes: Int = 4,
+        val maxConcurrentRunsPerCompany: Int = 2,
+    )
+
+    /**
+     * Google OAuth for connecting a company's Gmail account (a Web application client, separate from
+     * the Firebase sign-in). Blank values turn the integration off; the app still boots.
+     */
+    data class GoogleConfig(
+        val clientId: String = "",
+        val clientSecret: String = "",
+        val redirectUri: String = "",
+        /** Reserved for Gmail push through Pub/Sub; not used yet, connected inboxes are polled. */
+        val pubsubTopic: String = "",
+        /**
+         * Companies may turn on "Use my inbox in automations", which asks for Gmail's *restricted* read
+         * scopes. Off until the OAuth client passed Google's verification and CASA assessment for them.
+         */
+        val inboxEnabled: Boolean = false,
+        /** How often connected inboxes are polled for new mail. */
+        val syncSeconds: Int = 60,
+    ) {
+        val oauthEnabled: Boolean get() = clientId.isNotBlank() && clientSecret.isNotBlank() && redirectUri.isNotBlank()
+    }
+
+    /** Base64 key (32 bytes) that encrypts integration tokens at rest. Env-only; required once Google OAuth is on. */
+    data class IntegrationsConfig(val encryptionKey: String = "")
+
     /**
      * Where the host's backup archives and the backup runner's control files are mounted in the app
      * container (docker-compose.prod.yml). Blank = the backoffice says backups aren't set up here.
@@ -178,6 +212,20 @@ data class AppConfig(
                     archiveDir = getOptional(config, "app.backups.archiveDir").trim(),
                     controlDir = getOptional(config, "app.backups.controlDir").trim(),
                 ),
+                agents = AgentsConfig(
+                    tickSeconds = getOptional(config, "app.agents.tickSeconds").trim().toIntOrNull()?.coerceIn(5, 600) ?: 30,
+                    lanes = getOptional(config, "app.agents.lanes").trim().toIntOrNull()?.coerceIn(1, 32) ?: 4,
+                    maxConcurrentRunsPerCompany = getOptional(config, "app.agents.maxConcurrentRunsPerCompany").trim().toIntOrNull()?.coerceIn(1, 16) ?: 2,
+                ),
+                google = GoogleConfig(
+                    clientId = getOptional(config, "app.google.oauth.clientId").trim(),
+                    clientSecret = getOptional(config, "app.google.oauth.clientSecret").trim(),
+                    redirectUri = getOptional(config, "app.google.oauth.redirectUri").trim(),
+                    pubsubTopic = getOptional(config, "app.google.gmail.pubsubTopic").trim(),
+                    inboxEnabled = getOptional(config, "app.google.gmail.inboxEnabled").trim().lowercase() in setOf("true", "1", "yes"),
+                    syncSeconds = getOptional(config, "app.google.gmail.syncSeconds").trim().toIntOrNull()?.coerceIn(15, 3600) ?: 60,
+                ),
+                integrations = IntegrationsConfig(encryptionKey = getOptional(config, "app.integrations.encryptionKey").trim()),
             )
         }
 
@@ -223,6 +271,11 @@ data class AppConfig(
                 "app.admin.google.appId",
                 "app.admin.google.allowedEmails",
                 "app.pdf.storagePath",
+                "app.agents.tickSeconds",
+                "app.google.oauth.clientId",
+                "app.google.oauth.clientSecret",
+                "app.google.oauth.redirectUri",
+                "app.integrations.encryptionKey",
             )
 
             val present = keys.filter { config.hasPath(it) }

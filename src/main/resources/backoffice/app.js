@@ -31,6 +31,8 @@ const MODULES = [
   { id: 'ai-assistant' },
   { id: 'bookings' },
   { id: 'instagram' },
+  // Opt-in: a new tenant starts without it, and tenants with no saved selection don't get it.
+  { id: 'agents', optIn: true },
 ];
 
 async function api(path, options = {}) {
@@ -90,7 +92,7 @@ function confirmDialog({ title, body, okLabel = T.confirm, danger = true }) {
   });
 }
 
-function openDrawer({ title, body, onSave, saveLabel = T.save }) {
+function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true }) {
   const root = $('#drawer');
   $('#drawer-title').textContent = title;
   const host = $('#drawer-body');
@@ -107,7 +109,7 @@ function openDrawer({ title, body, onSave, saveLabel = T.save }) {
     const ok = await onSave?.();
     if (ok !== false) close();
   });
-  setTimeout(() => host.querySelector('input,select,textarea')?.focus(), 50);
+  setTimeout(() => (autofocus ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
 }
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
@@ -486,7 +488,7 @@ async function renderPlatformSettings() {
     (acc[s.category] ||= []).push(s);
     return acc;
   }, {});
-  const order = ['whatsapp', 'instagram', 'openrouter', 'ratelimit', 'pdf', 'admin'];
+  const order = ['whatsapp', 'instagram', 'google', 'openrouter', 'ratelimit', 'pdf', 'admin'];
   const categories = [...new Set([...order, ...Object.keys(groups)])].filter(c => groups[c]?.length);
   $('#view').innerHTML = `
     <div class="view__hero">
@@ -669,6 +671,7 @@ function liveTenantActions(t) {
   return `
     <button class="btn btn--sm" data-open-dashboard="${slug}">${escapeHTML(T.openDashboard)}</button>
     ${t.parentTenantId ? '' : `<button class="btn btn--sm btn--ghost" data-users="${slug}">${escapeHTML(T.users)}</button>`}
+    ${(t.enabledModules || []).includes('agents') ? `<button class="btn btn--sm btn--ghost" data-agents="${slug}">${escapeHTML(T.agents.action)}</button>` : ''}
     <button class="btn btn--sm btn--ghost" data-edit="${slug}">${escapeHTML(T.edit)}</button>
     ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${slug}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${slug}">${escapeHTML(T.activate)}</button>`}
     <button class="btn btn--sm btn--ghost" data-reload="${slug}">${escapeHTML(T.reload)}</button>
@@ -722,6 +725,7 @@ function channelBadges(channels = []) {
 function bindTenantActions() {
   $$('[data-open-dashboard]').forEach(b => b.addEventListener('click', () => openDashboard(b.dataset.openDashboard)));
   $$('[data-users]').forEach(b => b.addEventListener('click', () => usersDrawer(b.dataset.users)));
+  $$('[data-agents]').forEach(b => b.addEventListener('click', () => agentsDrawer(b.dataset.agents)));
   $$('[data-edit]').forEach(b => b.addEventListener('click', () => tenantForm(state.tenants.find(t => t.slug === b.dataset.edit))));
   $$('[data-suspend]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.suspend, 'suspend', T.suspendTitle, T.suspend)));
   $$('[data-activate]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.activate, 'activate', T.activateTitle, T.activate, false)));
@@ -773,6 +777,92 @@ async function usersDrawer(slug) {
   });
   $$('[data-disable-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.disableUser}/disable`, { method: 'POST' }); toast(T.userDisabled); usersDrawer(slug); }));
   $$('[data-activate-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.activateUser}/activate`, { method: 'POST' }); toast(T.userActivated); usersDrawer(slug); }));
+}
+
+const AGENT_PILLS = { ACTIVE: 'pill--ok', PAUSED: 'pill--warn' };
+const RUN_GROUPS = { succeeded: ['SUCCEEDED'], failed: ['FAILED', 'NEEDS_REVIEW'], open: ['QUEUED', 'RUNNING', 'WAITING', 'AWAITING_APPROVAL'] };
+
+function agentAdminRowHtml(a, num) {
+  const reason = a.status === 'PAUSED' && a.pausedReason ? T.agents.pausedReasons[a.pausedReason] || '' : '';
+  return `<tr>
+    <td class="name">${escapeHTML(a.name)}${reason ? `<div class="muted">${escapeHTML(reason)}</div>` : ''}</td>
+    <td><span class="pill ${AGENT_PILLS[a.status] || ''}">${escapeHTML(I18N.t(`app.agents.status.${a.status}`))}</span></td>
+    <td class="num">${num.format(a.stats?.runs || 0)}</td>
+    <td class="num">${num.format(a.stats?.failed || 0)}</td>
+    <td class="mono muted">${fmtDate(a.stats?.lastRunAt)}</td>
+  </tr>`;
+}
+
+async function agentsDrawer(slug) {
+  const A = T.agents;
+  const name = state.tenants.find(t => t.slug === slug)?.name || slug;
+  const base = `/admin/api/tenants/${encodeURIComponent(slug)}/agents`;
+  let data;
+  try { data = await api(base); } catch (e) { toast(T.error({ msg: e.message })); return; }
+  const s = data.settings;
+  const num = new Intl.NumberFormat(I18N.locale());
+  const runs = data.runs7d || {};
+  const count = statuses => statuses.reduce((n, status) => n + (runs[status] || 0), 0);
+  const [title, desc] = s.agentsPaused ? [A.pausedHere, A.pausedHereDesc] : s.companyPaused ? [A.pausedByCompany, A.pausedByCompanyDesc] : [A.running, A.runningDesc];
+  const wrap = document.createElement('div');
+  wrap.className = 'form';
+  wrap.innerHTML = `
+    <div class="notice ${s.agentsPaused || s.companyPaused ? 'notice--warn' : ''}" role="status">
+      <div class="notice__text"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(desc)}</span></div>
+      <div class="notice__actions"><button class="btn btn--sm ${s.agentsPaused ? 'btn--accent' : 'btn--danger'}" type="button" data-agents-pause>${escapeHTML(s.agentsPaused ? A.resume : A.pause)}</button></div>
+    </div>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(A.weekTitle)}</h2></header>
+      <div class="panel__body"><dl class="dash-facts">
+        <div><dt>${escapeHTML(A.runs)}</dt><dd>${num.format(Object.values(runs).reduce((n, v) => n + v, 0))}</dd></div>
+        <div><dt>${escapeHTML(A.succeeded)}</dt><dd>${num.format(count(RUN_GROUPS.succeeded))}</dd></div>
+        <div><dt>${escapeHTML(A.failed)}</dt><dd>${num.format(count(RUN_GROUPS.failed))}</dd></div>
+        <div><dt>${escapeHTML(A.open)}</dt><dd>${num.format(count(RUN_GROUPS.open))}</dd></div>
+        <div><dt>${escapeHTML(A.pendingApprovals)}</dt><dd>${num.format(data.pendingApprovals || 0)}</dd></div>
+      </dl></div>
+    </section>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <th>${escapeHTML(A.thAgent)}</th><th>${escapeHTML(A.thStatus)}</th><th class="right">${escapeHTML(A.thRuns)}</th><th class="right">${escapeHTML(A.thFailed)}</th><th>${escapeHTML(A.thLastRun)}</th>
+    </tr></thead><tbody>
+      ${data.agents.length === 0 ? `<tr><td colspan="5"><div class="empty"><p class="empty__title">${escapeHTML(A.noAgents)}</p></div></td></tr>` : data.agents.map(a => agentAdminRowHtml(a, num)).join('')}
+    </tbody></table></div></div>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(A.limitsTitle)}</h2></header>
+      <div class="panel__body">
+        <div class="form__grid">
+          <div class="form__row"><label class="lbl" for="ag-max">${escapeHTML(A.maxActive)}</label><input class="inp inp--mono" id="ag-max" type="number" min="0" max="500" value="${s.maxActiveAgents}" /></div>
+          <div class="form__row"><label class="lbl" for="ag-runs">${escapeHTML(A.runsPerDay)}</label><input class="inp inp--mono" id="ag-runs" type="number" min="0" max="100000" value="${s.runsPerDay}" /></div>
+          <div class="form__row"><label class="lbl" for="ag-emails">${escapeHTML(A.emailsPerDay)}</label><input class="inp inp--mono" id="ag-emails" type="number" min="0" max="2000" value="${s.emailSendsPerDay}" /></div>
+        </div>
+        <p class="hint">${escapeHTML(A.limitsHint)}</p>
+      </div>
+    </section>`;
+  openDrawer({
+    title: A.title({ name }),
+    body: wrap,
+    saveLabel: A.saveLimits,
+    autofocus: false,
+    async onSave() {
+      // A cleared field keeps its limit: an empty input must not read as 0, which allows none.
+      const limit = id => {
+        const raw = $(id, wrap).value.trim();
+        const value = Number(raw);
+        return raw === '' || !Number.isFinite(value) || value < 0 ? null : Math.floor(value);
+      };
+      const body = { maxActiveAgents: limit('#ag-max'), runsPerDay: limit('#ag-runs'), emailSendsPerDay: limit('#ag-emails') };
+      try {
+        await api(`${base}/limits`, { method: 'PUT', body: JSON.stringify(body) });
+        toast(A.limitsSaved);
+      } catch (e) { toast(T.error({ msg: e.message })); return false; }
+    },
+  });
+  $('[data-agents-pause]', wrap).addEventListener('click', async () => {
+    const pausing = !s.agentsPaused;
+    if (pausing && !await confirmDialog({ title: A.pauseTitle, body: A.pauseBody({ name }), okLabel: A.pause })) return;
+    try {
+      await api(`${base}/${pausing ? 'pause' : 'resume'}`, { method: 'POST' });
+      toast(pausing ? A.pausedToast({ name }) : A.resumedToast({ name }));
+      agentsDrawer(slug);
+    } catch (e) { toast(T.error({ msg: e.message })); }
+  });
 }
 
 function tenantForm(editing) {
@@ -868,7 +958,7 @@ function tenantForm(editing) {
 }
 
 function selectedModulesFor(editing) {
-  const selected = new Set(editing?.effectiveModules || MODULES.map(m => m.id));
+  const selected = new Set(editing?.effectiveModules || MODULES.filter(m => !m.optIn).map(m => m.id));
   return MODULES.filter(m => m.always || selected.has(m.id)).map(m => m.id);
 }
 

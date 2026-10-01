@@ -5,11 +5,17 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.ai.AiClient
-import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
+import com.rfm.edubot.ai.tools.BookingToolPack
+import com.rfm.edubot.ai.tools.CompositeToolPack
+import com.rfm.edubot.ai.tools.CrmToolPack
+import com.rfm.edubot.ai.tools.TokenCount
+import com.rfm.edubot.ai.tools.ToolLoop
+import com.rfm.edubot.ai.tools.ToolPack
+import com.rfm.edubot.ai.tools.WriteDecision
 import com.rfm.edubot.bookings.BookingTools
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
@@ -48,6 +54,8 @@ internal data class AssistantAction(
     val arguments: JsonObject,
     val status: String,
     val result: JsonObject? = null,
+    /** What the confirmation card shows beyond the arguments, captured when the write was proposed. */
+    val preview: JsonObject? = null,
 )
 
 internal data class AssistantMessage(
@@ -177,6 +185,7 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
         .append("arguments", json.encodeToString(arguments))
         .append("status", status)
         .append("result", result?.let { json.encodeToString(it) })
+        .append("preview", preview?.let { json.encodeToString(it) })
 
     private fun Document.toAction() = AssistantAction(
         id = getString("id"),
@@ -184,7 +193,14 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
         arguments = json.decodeFromString(getString("arguments")),
         status = getString("status"),
         result = getString("result")?.let { json.decodeFromString(it) },
+        preview = getString("preview")?.let { json.decodeFromString(it) },
     )
+}
+
+/** Tools and instructions another module adds to the assistant for one dashboard session; its writes are confirmed like the rest. */
+internal interface AssistantExtension {
+    fun tools(ctx: DashboardContext): ToolPack?
+    fun prompts(ctx: DashboardContext, enabledModules: List<String>): List<String>
 }
 
 internal object DashboardAssistantToolPolicy {
@@ -192,29 +208,38 @@ internal object DashboardAssistantToolPolicy {
 
     private val readOnlyToolNames = CrmTools.READ_ONLY_TOOL_NAMES + BookingTools.READ_ONLY_TOOL_NAMES
 
-    fun filterDefinitions(definitions: List<ToolDefinition>, enabledModules: Collection<String>): List<ToolDefinition> =
-        definitions.filter { moduleByTool[it.name] in enabledModules }
+    /** [extra] is an [AssistantExtension]'s pack: its tools follow the module and read-only flag it declares. */
+    fun filterDefinitions(definitions: List<ToolDefinition>, enabledModules: Collection<String>, extra: ToolPack? = null): List<ToolDefinition> =
+        definitions.filter { moduleOf(it.name, extra) in enabledModules }
 
-    fun canExecuteWrite(toolName: String, enabledModules: Collection<String>): Boolean =
-        toolName !in readOnlyToolNames && moduleByTool[toolName] in enabledModules
+    fun canExecuteWrite(toolName: String, enabledModules: Collection<String>, extra: ToolPack? = null): Boolean =
+        !isReadOnly(toolName, extra) && moduleOf(toolName, extra) in enabledModules
 
-    fun isReadOnly(toolName: String): Boolean = toolName in readOnlyToolNames
+    fun isReadOnly(toolName: String, extra: ToolPack? = null): Boolean =
+        toolName in readOnlyToolNames || (toolName !in moduleByTool && extra?.knows(toolName) == true && extra.isReadOnly(toolName))
+
+    private fun moduleOf(toolName: String, extra: ToolPack?): String? =
+        moduleByTool[toolName] ?: extra?.takeIf { it.knows(toolName) }?.moduleOf(toolName)
 }
 
 internal class DashboardAssistantService(
     private val mongo: MongoModule,
     private val aiClient: AiClient,
     val repository: DashboardAssistantRepository = DashboardAssistantRepository(mongo),
+    /** More tools for the session (the agents pack when that module is on). */
+    private val extension: AssistantExtension? = null,
+    private val onUsage: suspend (Tenant, TokenCount) -> Unit = { _, _ -> },
 ) {
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("DashboardAssistantService")
 
-    suspend fun reply(tenant: Tenant, ownerKey: String, threadId: ObjectId, enabledModules: List<String>, content: String) {
+    suspend fun reply(ctx: DashboardContext, ownerKey: String, threadId: ObjectId, enabledModules: List<String>, content: String) {
+        val tenant = ctx.tenant
         val existing = repository.listMessages(tenant.id, ownerKey, threadId)
         if (existing.isEmpty()) repository.updateThreadTitle(tenant.id, ownerKey, threadId, content)
         repository.addMessage(tenant.id, ownerKey, threadId, "user", content)
         completeTurn(
-            tenant,
+            ctx,
             ownerKey,
             threadId,
             enabledModules,
@@ -222,11 +247,13 @@ internal class DashboardAssistantService(
         )
     }
 
-    suspend fun confirm(tenant: Tenant, ownerKey: String, threadId: ObjectId, enabledModules: List<String>, actionId: String): Boolean {
+    suspend fun confirm(ctx: DashboardContext, ownerKey: String, threadId: ObjectId, enabledModules: List<String>, actionId: String): Boolean {
+        val tenant = ctx.tenant
         val claimed = repository.claimAction(tenant.id, ownerKey, threadId, actionId) ?: return false
         val (messageId, action) = claimed
-        val tools = assistantTools(tenant)
-        val result = if (!DashboardAssistantToolPolicy.canExecuteWrite(action.toolName, enabledModules)) {
+        val extra = extension?.tools(ctx)
+        val tools = assistantTools(tenant, extra)
+        val result = if (!DashboardAssistantToolPolicy.canExecuteWrite(action.toolName, enabledModules, extra)) {
             buildJsonObject { put("error", "action_not_allowed") }
         } else {
             runCatching { tools.execute(ToolCall(action.id, action.toolName, action.arguments)) }
@@ -239,7 +266,7 @@ internal class DashboardAssistantService(
             content = "The dashboard user explicitly confirmed ${action.toolName}. The execution result is ${json.encodeToString(result)}. Explain the result clearly. If another write is required, call its tool so the UI can request a separate confirmation.",
         )
         try {
-            completeTurn(tenant, ownerKey, threadId, enabledModules, history, note)
+            completeTurn(ctx, ownerKey, threadId, enabledModules, history, note)
         } catch (e: Exception) {
             // The CRM result is already persisted. Do not turn a successful confirmed write into an ambiguous HTTP failure.
             log.warn("Could not generate follow-up for confirmed dashboard action {}: {}", action.id, e.message)
@@ -248,16 +275,17 @@ internal class DashboardAssistantService(
     }
 
     private suspend fun completeTurn(
-        tenant: Tenant,
+        ctx: DashboardContext,
         ownerKey: String,
         threadId: ObjectId,
         enabledModules: List<String>,
         history: List<AssistantMessage>,
         extra: ChatMessage? = null,
     ) {
-        val tools = assistantTools(tenant)
-        val definitions = DashboardAssistantToolPolicy.filterDefinitions(tools.definitions, enabledModules)
-        val allowed = definitions.map { it.name }.toSet()
+        val tenant = ctx.tenant
+        val extraTools = extension?.tools(ctx)
+        val tools = assistantTools(tenant, extraTools)
+        val definitions = DashboardAssistantToolPolicy.filterDefinitions(tools.definitions, enabledModules, extraTools)
         val context = mutableListOf(ChatMessage(role = "system", content = ASSISTANT_PROMPT))
         context.add(ChatMessage(role = "system", content = SystemPrompts.currentDateTimeContext(tenant.timezone)))
         SystemPrompts.crmPromptFor(enabledModules.toSet())?.let { crmPrompt ->
@@ -266,70 +294,50 @@ internal class DashboardAssistantService(
         if (DashboardModules.BOOKINGS in enabledModules) {
             context.add(ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE))
         }
+        extension?.prompts(ctx, enabledModules)?.forEach { context.add(ChatMessage(role = "system", content = it)) }
         history.takeLast(30).forEach { context.add(ChatMessage(role = it.role, content = it.content)) }
         extra?.let(context::add)
 
-        repeat(4) {
-            when (val response = aiClient.complete(context, definitions, modelOverride = tenant.openrouterModel)) {
-                is AiResponse.Text -> {
-                    repository.addMessage(tenant.id, ownerKey, threadId, "assistant", response.content)
-                    return
-                }
-                is AiResponse.ToolUse -> {
-                    context.add(response.message)
-                    var hasPendingWrite = false
-                    response.calls.forEach { call ->
-                        when {
-                            call.name !in allowed -> context.add(toolResult(call, buildJsonObject { put("error", "tool_not_allowed") }))
-                            DashboardAssistantToolPolicy.isReadOnly(call.name) -> {
-                                val result = runCatching { tools.execute(call) }
-                                    .getOrElse { buildJsonObject { put("error", "tool_failed"); put("message", it.message ?: "tool failure") } }
-                                context.add(toolResult(call, result))
-                            }
-                            else -> {
-                                hasPendingWrite = true
-                                repository.addMessage(
-                                    tenant.id,
-                                    ownerKey,
-                                    threadId,
-                                    "assistant",
-                                    "",
-                                    AssistantAction(call.id, call.name, call.arguments, "PENDING"),
-                                )
-                            }
-                        }
-                    }
-                    if (hasPendingWrite) return
-                }
-            }
-        }
-        val fallback = aiClient.complete(
-            context + ChatMessage(role = "system", content = "Answer the user now without calling tools."),
-            emptyList(),
+        // Every write waits for the user's confirmation in the dashboard.
+        val result = ToolLoop(aiClient).run(
+            messages = context,
+            tools = tools,
+            definitions = definitions,
+            maxIterations = 4,
             modelOverride = tenant.openrouterModel,
+            decide = { WriteDecision.PROPOSE },
         )
-        val content = (fallback as? AiResponse.Text)?.content ?: "Unable to complete this request."
-        repository.addMessage(tenant.id, ownerKey, threadId, "assistant", content)
+        onUsage(tenant, result.usage)
+        if (result.proposals.isNotEmpty()) {
+            result.proposals.forEach { call ->
+                val preview = runCatching { tools.describe(call) }.getOrNull()
+                repository.addMessage(
+                    tenant.id,
+                    ownerKey,
+                    threadId,
+                    "assistant",
+                    "",
+                    AssistantAction(call.id, call.name, call.arguments, "PENDING", preview = preview),
+                )
+            }
+            return
+        }
+        repository.addMessage(tenant.id, ownerKey, threadId, "assistant", result.text ?: "Unable to complete this request.")
     }
 
-    private fun assistantTools(tenant: Tenant): AssistantToolFacade {
+    private fun assistantTools(tenant: Tenant, extra: ToolPack?): ToolPack {
         val crm = CrmTools(
             ClientRepository(mongo, tenant.id),
             QuoteRepository(mongo, tenant.id),
             InvoiceRepository(mongo, tenant.id),
             StandardItemRepository(mongo, tenant.id),
         )
-        return AssistantToolFacade(crm, bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools())
+        return CompositeToolPack(
+            CrmToolPack(crm),
+            BookingToolPack(bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools()),
+            extra,
+        )
     }
-
-    private class AssistantToolFacade(private val crm: CrmTools, private val booking: BookingTools) {
-        val definitions: List<ToolDefinition> = crm.definitions + booking.definitions
-        suspend fun execute(call: ToolCall): JsonObject =
-            if (booking.knows(call.name)) booking.execute(call) else crm.execute(call)
-    }
-
-    private fun toolResult(call: ToolCall, result: JsonObject) =
-        ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id)
 
     companion object {
         private val ASSISTANT_PROMPT = """

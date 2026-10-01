@@ -51,7 +51,7 @@ Used by clients, quotes, invoices, catalog, tenants:
 2. Body is a `.form` / `.form__grid`
 3. Footer: ghost Cancel + accent Save
 4. On save: disable button, swap label to saving, close only on success
-5. Focus first input after open
+5. Focus first input after open. A drawer that leads with status and keeps its fields further down (the backoffice agents drawer) passes `autofocus: false` and focuses its close button instead, so it opens at the top
 6. Close via `[data-close]`, scrim, and Escape; trap Tab inside the panel; restore focus on close
 7. Wide (`.drawer__panel--wide`) for line-item editors
 8. Quote / invoice rows open the drawer for status, convert, or edit; a client row opens the client record — not a new page
@@ -95,10 +95,10 @@ Home has a **Choose cards** control in `.home-title-row` next to the page title 
 1. `.dash__head`: tenant-local date, time-of-day greeting, health line (`pulse`), then **Choose cards** and up to three quick-create buttons (first one primary). Quick create switches to the module, then opens its existing drawer form.
 2. `.dash-kpis` (`highlights`): up to five processed numbers — received (with vs-last-month delta and a 6-month spark), to collect (overdue in red), net (received − spent, when payments exist), open pipeline, waiting chats (14-day spark), then bookings today / clients. Each respects its module card being hidden.
 3. Setup row (`setup`) as a `.panel--card` of `.btn--sm` actions, only when unfinished.
-4. `.dash-grid`, priority order via `data-order`: 1 Needs you (`attention`, main) · 2 Today (`calendar`, side) · 3 Cash flow (`financeiro`, main) · 4 Receivables & payables (`financeiro`, side) · 5 Pipeline (`pipeline`) · 6 Inbox (`inbox`) · 7 Top clients (`customers`, needs invoices) · 8 Recent activity (visible while one of its source cards is). After render, `balanceDashColumns` may move one of cards 4–8 to even out column heights; 1–3 never move.
+4. `.dash-grid`, priority order via `data-order`: 1 Needs you (`attention`, main) · 2 Today (`calendar`, side) · 3 Cash flow (`financeiro`, main) · 4 Receivables & payables (`financeiro`, side) · 5 Pipeline (`pipeline`) · 6 Inbox (`inbox`) · 7 Top clients (`customers`, needs invoices) · 8 Recent activity (visible while one of its source cards is) · 9 Agents (`agents`, side: to approve / open tasks / runs today as `.dash-figures`, then active agents, tasks due and failed this week; a `.notice--warn` when agents are paused). After render, `balanceDashColumns` may move one of cards 4–9 to even out column heights; 1–3 never move.
 5. `.dash-tiles` for services, suppliers, employees, catalog, Instagram, assistant (and clients when not already a KPI).
 
-Rows deep-link: `data-go` switches module and `data-open` opens that invoice / quote / payment / client / booking. A single overdue invoice or payment keeps its own row; two or more collapse into one count row. Money aggregates use whole euros; per-document amounts keep cents. Relative times and dates come from `Intl.RelativeTimeFormat`, never catalog strings.
+Rows deep-link: `data-go` switches module and `data-open` opens that invoice / quote / payment / client / booking. Agent rows (an approval waiting, a task due by the end of today, a run that failed) carry a ref — `approval:ID`, `task:ID` or `run:ID` — and open that approval, task or run over the Agents inbox or activity tab (`AgentsUI.focusRef` picks the tab, `AgentsUI.openRef` the drawer). A task from an earlier day reads "Overdue task" with the `late` tone. A connected Gmail account that Google stopped honouring (`integration_reconnect`, `bad` tone, the account address as detail) carries `data-settings="channels"` and opens Settings → Channels, where an admin reconnects it; the same notice reaches admins in the bell. A single overdue invoice or payment keeps its own row; two or more collapse into one count row. Money aggregates use whole euros; per-document amounts keep cents. Relative times and dates come from `Intl.RelativeTimeFormat`, never catalog strings.
 
 ## Services (client work)
 
@@ -124,10 +124,12 @@ Rows deep-link: `data-go` switches module and `data-open` opens that invoice / q
 1. Profile card: initials, contact lines (email opens mail, address opens Maps), NIF, "client since · visits · no-shows · last activity", Edit. Then Call, WhatsApp (`wa.me`; a number typed without a country code is Portuguese) and Open chat when a WhatsApp conversation matches the phone (last 9 digits, like bookings), and the staff notes.
 2. Money strip, up to four cells, each only with its module on, in this order: outstanding (a pending invoice past its due date counts as overdue, as on Home), next booking, to invoice (open Serviços), billed. In proposal (open quotes) only fills a free cell.
 3. Needs attention, only when something does: overdue invoices, past bookings never marked done or no-show (so never billed), bookings to confirm, open work to invoice (one click to an "Invoice open work" form with the rows ticked), quotes awaiting a reply or not sent yet, invoices due within 7 days.
-4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices. Every row opens its own drawer.
+4. Chip tabs: Activity (upcoming bookings, then the history of bookings, services, quotes, invoices, payments received and the WhatsApp chat) · Bookings · Services · Quotes · Invoices · Emails (while the company has a Gmail account: what went to or came from the client, see [Email (Google)](#email-google)) · Automations (with Agents on: runs in progress, open tasks and recent runs on the client and its documents, each saying what the agent did; "run an agent" for agents run by hand on clients; Pause automations). Every row opens its own drawer.
 5. A sticky create bar: New booking, Add service, New quote, New invoice, each prefilled with the client.
 
 Drawers opened from the record show `← client` and return to it (same tab, fresh data) once they save; ×, scrim and Escape leave it. Edit holds name, NIF, phone, email, address and notes ("only your team sees these"). The phone field warns as soon as another client has the number, whatever the formatting, and links to them. Phone is unique per tenant for clients, suppliers and employees, so saving the exact same number is refused with a clear message (`409 phone_taken`) instead of a generic failure; the warning is what catches the same number typed differently. A new client opens its record after saving. Staff notes never reach the bot's CRM tools. The NIF prints on quotes and invoices on the client-number line.
+
+Pausing a client's automations is any member's brake for a client who asked not to be contacted: agents neither start nor carry on anything on the client or its documents until someone resumes (runs already waiting end as cancelled). The card says so, and the Automations tab shows a `.notice--warn` with Resume in place of the pause button and the run row.
 
 ## Invoices
 
@@ -151,6 +153,8 @@ Quote, invoice, payment and booking details share these rules: the name in the h
 
 Two-column `.assistant` on desktop; stacks at `760px`. Transcript uses `.chat__*`. Tool-call confirmation uses `.assistant__action` (accent border, confirm + cancel). Do not auto-execute. After a confirmed `create_invoice` / `create_quote`, reuse `.pdf` in `.assistant__action-buttons` so the user can download the generated document.
 
+With the agents module the assistant can also list agents and their approvals, run an agent on a record, pause or activate one, approve or reject an item and draft a new agent. These writes use the same card. Its title names the agent and the record from the action's `preview`, which the server fills in when it proposes the action, so the card never shows ids. Its details list what an approval would send, or the request for a draft. Members aren't offered pause, activate or draft. After a confirmed draft or run, a button in `.assistant__action-buttons` opens the draft in the builder or the run in Activity.
+
 `/app` Conversations is this same split inbox (thread list + live reply), not a table that opens a drawer.
 
 ## Instagram (comments inbox)
@@ -163,9 +167,45 @@ Optional `instagram` module. Work queue first, not an Insights wall:
 4. Drawer lists `.ig-comment` items and a reply form; do not auto-send
 5. Empty / not-connected / reconnect copy goes through i18n. Reconnect is Settings → Channels.
 
+## Agents (automations)
+
+Optional `agents` module, grouped with Persona and the AI assistant. `app/agents.js` is mounted by `app.js` (`AgentsUI.init(deps)`), which passes its drawer, table and formatting helpers; the page reuses them instead of copying them. Chip tabs (`.settings-tabs`): Agents · Templates · Inbox · Activity · Settings.
+
+1. `.view__hero` with active agents, runs today, waiting for you, failed this week; a `.notice--warn` below it while agents are paused (by the company, with Resume, or by the platform, without).
+2. **Agents**: `crmPanel` table (`.agent-cell` + `.recipe`, status pill, last run, runs) with Active / Drafts / Paused chips. A row opens the agent record drawer: `.record-card`, `.notice` for problems, KPIs, Overview (`ol.flow` + stop rules + rules) and Runs chips, and Test · Run now · Activate/Pause in the foot. Empty state: templates first, then "Describe it" and "Start from scratch".
+3. **Templates**: `.gallery` with category chips. A card opens a guided setup drawer (schema-driven questions) that creates a **draft**; activating is always a separate step. The gallery starts with two `--blank` cards, "Describe it" and "Start from scratch". "Describe it" (admins) opens a form drawer: a textarea for the request in the user's words, example chips that fill it in, and a hint that the result is a draft to review. While the model drafts it (`POST /app/api/agents/draft`, several seconds) the textarea is read-only and the submit button says so. The builder then opens on the draft with a `.notice--info` on top: what to check before activating, plus the model's note on what it left out. If the user closed the drawer meanwhile, a toast says the draft is ready instead of reopening it. Failures (AI unavailable, token budget spent, no usable answer) are toasts; the request stays in the textarea.
+4. **Builder** (Edit): a wide drawer of `.builder__section`s drawn from the catalog's JSON schemas (`x-widget` picks the control). "Test changes" dry-runs the unsaved draft. Saving keeps a draft with problems; an active agent must stay valid. A WhatsApp message step's template picker (`wa-template`) lists the approved templates that can be sent (not media headers or one-time codes) as name · language, shows the one picked in a `.wa-preview` bubble and adds one field per variable, in the template's order, each with the variable tools. Variables are kept by position, so one left empty stays in its place. The template only goes to a known number outside the 24-hour window: inside it the step's text goes, and without a number the fallback gets the text. An approval warns when the template was deleted or is no longer approved (`warnings.template_not_found`) or a variable came out empty (`warnings.template_params`), since the step would fail.
+   AI steps use the same card. "Ask AI to do a task" has its instructions (a template field), the fields to return (`.ai-outputs`, where a choice lists its options) and a "look up" check. Its actions are `.chip-picks`, none picked by default so it only reads. "Before acting" shows up once an action is picked. Later steps offer the fields as `{{steps.<id>.output.<name>}}` and in "Only if" rows, where a choice's options fill a select. "Write with AI" has a brief, a channel and a length, and the Voice section decides whether it follows the Persona.
+5. **Inbox**: a `.worklist` of approvals (agent · action, record, excerpt, expiry pill) or tasks, with Approvals / Tasks / My tasks chips. The approval drawer shows the draft (editable fields as `.txt`), Approve and Reject (confirmed), and links to the record and the run.
+6. **Activity**: a runs table with In progress / Needs attention / Finished chips and a "Show tests" check. The run drawer shows the trigger, an outcome `.notice` and each step's result on `ol.flow`, with Retry or Cancel. An AI task's step lists its fields in `dl.dash-facts`, then each action it took on its own line, then (when drafted) what it would have done, with the same preview an approval shows. An AI text shows in a `.wa-preview` bubble.
+7. **Settings**: the company defaults form (read-only for non-admins) beside a usage `dl.dash-facts` of platform limits.
+
+The backoffice manages a company's agents from the tenants table: with Agents on, the row actions get a ghost **Agents** that opens a drawer on that company. Strings live under `backoffice.agents.*`; status labels reuse `app.agents.status.*`.
+
+1. A `.notice` on the pause state: plain while agents run, `--warn` while the platform or the company paused them. Its one action is Pause agents (`.btn--danger`, through the confirm) or, once the platform paused them, Resume agents (`.btn--accent`). A company's own pause is only described: its admins lift it in Settings, and pausing here as well keeps the agents paused.
+2. A "Last 7 days" panel: `dl.dash-facts` of runs, succeeded, failed or waiting for review, waiting or in progress, and approvals waiting now.
+3. A `.tbl` of the company's agents: name (with a muted pause reason under it), status pill, runs, failed, last run; `.empty` when there are none.
+4. A Limits panel: active agents allowed, runs per day, emails per day, saved by the drawer's Save. A cleared field keeps its limit rather than reading as 0, which allows none. The company sees these read-only in Settings, and a platform pause as a notice without Resume.
+
+The nav badge counts pending approvals plus open tasks. Record links (client, quote, invoice, payment, booking, service, chat) go through `app.js`'s `openAgentSubject` with a drawer-trail back link to the run or approval; there's no "Open record" when the trail already goes back to that record.
+
+Agents also show up where the work is: Home's Agents card and Needs-you rows (see Home (minimal layout)); the client record's Automations tab; the same block under quote, invoice and booking details (only when an agent has run there, is waiting there, or can be run there by hand); the Persona page, which lists the agents with "Write with AI" steps and a "Follows it" check per row (admins only; hidden when there are none); and the top-bar notifications (see Notifications). After "Run now" there, the block looks again every 1.5 s (up to five times) until the run is no longer queued or running, so it ends on what happened.
+
 ## Settings (tenant)
 
-Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Theme (light / dark), a browser preference (localStorage) applied through `UIPrefs.setTheme`, not a tenant setting. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
+Chip tabs (`.settings-tabs`): Home · Appearance · Channels · Website · Language · Documents. Home is a `.choice-list` of `.queue__item.choice` toggles (visible cards get `.is-on`). Appearance is the same list for Theme (light / dark), a browser preference (localStorage) applied through `UIPrefs.setTheme`, not a tenant setting. Channels lists WhatsApp, Instagram, Email (Google) and the website widget in one table. Website includes snippet, allowed origins, and a `.widget-preview`. Documents mounts the template studio. Do not dump every settings panel into one scroll.
+
+## Email (Google)
+
+A company emails from its own Gmail or Workspace account ([components.md](components.md#email-google)):
+
+1. **Connect** (Settings → Channels): only a company admin signed in as themselves connects (an operator would consent with their own Google account; they can still change the settings, send a test and disconnect). The click opens the popup before any `await` (browsers only allow a popup straight from the click), then points it at the authorize URL; a blocked popup sends the whole page to Google instead. Google comes back to `/app/?google=connected` or `?google=error&reason=…`: in the popup, `handleOAuthPopup` posts the outcome to the opener and closes. Google's pages send `Cross-Origin-Opener-Policy`, which can leave the popup without `window.opener`, so a window marked in `localStorage` as the consent popup answers over the `google-oauth` `BroadcastChannel` instead (and boots the app itself if the browser won't close it). In the page, `takeGoogleRedirect` reads the outcome once, drops it from the address and opens Channels. Outcomes toast from `app.integrations.google.reasons.*`. Reconnect passes `?account=` so Google opens on that account.
+2. **Account drawer**: sender name, reply-to and signature shape every email from the account; a test email goes to the person asking (an operator: the account itself); Disconnect confirms and deletes the tokens and the mail kept from the account.
+3. **Send by email** on quote and invoice details opens a draft in the company's language (server copy), addressed to the client, with the PDF. The drawer picks one request id when it opens, so pressing Send twice sends once. Sending a pending quote marks it sent. Errors toast from `app.integrations.google.sendErrors.*` (daily limit, reconnect, invalid address…).
+4. **Emails** on the client record lists that client's mail; there's no Emails tab while the company has no account (disconnecting deletes the kept mail).
+5. **Inbox reading** (only while the platform allows it, `google.inbox` true): the account drawer's Inbox panel turns it on and off with `PATCH {inboxSync}`, no Save. An account that can only send asks Google first: the click opens the consent popup with `?inbox=1&account=…`, which adds the read scopes to what the account already granted, and Google comes back with `?google=inbox`. `?google=error&reason=missing_inbox_scope` means the reading boxes were left unticked: the account did connect for sending, so the page still refreshes Settings. Reconnecting an account that reads its inbox asks for reading again, so it doesn't stay paused. A refused change toasts from `app.integrations.google.inbox.patchErrors.*` and redraws the panel from what the server knows (Google may have taken reading back meanwhile). Only mail that arrives after reading is turned on gets read, from the first check a few minutes later.
+
+Nothing here shows while the platform has no Google OAuth client (`configured` false).
 
 ## Account (tenant user)
 
@@ -175,6 +215,12 @@ The top-bar avatar (`#btn-account`) opens the signed-in user's account as a `.re
 - Password on: change form (current, new, repeat), and below it a `.panel` "Sign in with Google only" whose button confirms with a Google popup (not the password, so the Google account is proven to work before it becomes the only way in).
 - Google only: set a password (new, repeat), confirmed with a Google popup; the Google drawer explains it's the only way in and offers "Set a password" instead of unlink.
 - Errors go through `app.accountErr_<code>` in the catalogs, falling back to `app.accountFailed`.
+
+## Notifications
+
+The top-bar bell (`#btn-notifications`) is there for every signed-in user, whatever modules the company has. It polls `GET /app/api/notifications` every minute while the tab is visible (and at once when the tab comes back after that). The server stores the kind and its params; `app.js` writes the sentence from `app.notifications.kinds.*`, so the list reads in the reader's language. Only a message someone or an agent wrote (`team.notify`) arrives as text, and it becomes the row's title.
+
+The bell opens a `.record` drawer (eyebrow: the company). A "New" `.panel` (`.tag` count, ghost "Mark all as read" in `.panel__tools`) lists unread rows, and an "Earlier" `.panel` lists read ones. Both are `.worklist.worklist--wrap`. Unread dots follow the kind (approval and paused agent `warn`, failed run and reconnect `bad`, task `info`, message `accent`); read ones are `muted`. With nothing at all, it shows an `.empty` state. A row marks itself read and opens what it's about, with the back link "Notifications": the approval, task, run or agent its `ref` names (`AgentsUI.openRef`; `inbox` goes to the Agents inbox), else its record (`openAgentSubject`), else its page (`link`). An open list redraws in place when a poll changes it.
 
 ## Document template studio
 

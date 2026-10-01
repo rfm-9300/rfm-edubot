@@ -1,7 +1,11 @@
 package com.rfm.edubot.dashboard
 
+import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
+import com.rfm.edubot.ai.tools.ToolCallContext
+import com.rfm.edubot.ai.tools.ToolPack
 import com.rfm.edubot.crm.CrmTools
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.buildJsonObject
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -58,5 +62,45 @@ class DashboardAssistantToolPolicyTest {
         assertTrue(DashboardAssistantToolPolicy.isReadOnly("list_available_slots"))
         assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("reschedule_booking", listOf(DashboardModules.BOOKINGS)))
         assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("reschedule_booking", listOf(DashboardModules.CLIENTS)))
+    }
+
+    /** An extension's pack: tool name → whether it only reads. */
+    private class ExtraPack(private val tools: Map<String, Boolean>, private val module: String = DashboardModules.AGENTS) : ToolPack {
+        override val definitions = tools.keys.map { ToolDefinition(it, it, buildJsonObject {}) }
+        override fun knows(name: String) = name in tools
+        override fun isReadOnly(name: String) = tools[name] == true
+        override fun moduleOf(name: String) = module.takeIf { name in tools }
+        override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject = buildJsonObject {}
+    }
+
+    @Test
+    fun `an extension's tools follow the module and read-only flag its pack declares`() {
+        val agents = ExtraPack(mapOf("list_agents" to true, "pause_agent" to false))
+        val definitions = listOf("search_clients", "list_agents", "pause_agent").map { ToolDefinition(it, it, buildJsonObject {}) }
+        val both = listOf(DashboardModules.CLIENTS, DashboardModules.AGENTS)
+
+        assertEquals(listOf("search_clients", "list_agents", "pause_agent"), DashboardAssistantToolPolicy.filterDefinitions(definitions, both, agents).map { it.name })
+        assertEquals(listOf("search_clients"), DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(DashboardModules.CLIENTS), agents).map { it.name })
+        assertEquals(listOf("search_clients"), DashboardAssistantToolPolicy.filterDefinitions(definitions, both).map { it.name }, "without the pack its tools are unknown")
+
+        assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("pause_agent", both, agents))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("pause_agent", listOf(DashboardModules.CLIENTS), agents))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("pause_agent", both))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("list_agents", both, agents), "reads never run as confirmed actions")
+        assertTrue(DashboardAssistantToolPolicy.isReadOnly("list_agents", agents))
+        assertFalse(DashboardAssistantToolPolicy.isReadOnly("pause_agent", agents))
+        assertFalse(DashboardAssistantToolPolicy.isReadOnly("list_agents"))
+    }
+
+    @Test
+    fun `an extension can't take over a CRM or booking tool`() {
+        val rogue = ExtraPack(mapOf("create_invoice" to true, "list_bookings" to false))
+
+        assertFalse(DashboardAssistantToolPolicy.isReadOnly("create_invoice", rogue), "a CRM write stays a write")
+        assertTrue(DashboardAssistantToolPolicy.isReadOnly("list_bookings", rogue))
+        assertTrue(DashboardAssistantToolPolicy.canExecuteWrite("create_invoice", listOf(DashboardModules.INVOICES), rogue))
+        assertFalse(DashboardAssistantToolPolicy.canExecuteWrite("create_invoice", listOf(DashboardModules.AGENTS), rogue), "and keeps its own module")
+        val definitions = listOf(ToolDefinition("create_invoice", "create_invoice", buildJsonObject {}))
+        assertEquals(0, DashboardAssistantToolPolicy.filterDefinitions(definitions, listOf(DashboardModules.AGENTS), rogue).size)
     }
 }

@@ -22,6 +22,10 @@ enum class PlatformSettingKey(
     IG_OAUTH_REDIRECT("IG_OAUTH_REDIRECT", "instagram"),
     IG_GRAPH_VERSION("IG_GRAPH_VERSION", "instagram"),
 
+    GOOGLE_OAUTH_CLIENT_ID("GOOGLE_OAUTH_CLIENT_ID", "google"),
+    GOOGLE_OAUTH_CLIENT_SECRET("GOOGLE_OAUTH_CLIENT_SECRET", "google", secret = true),
+    GOOGLE_OAUTH_REDIRECT("GOOGLE_OAUTH_REDIRECT", "google"),
+
     OPENROUTER_API_KEY("OPENROUTER_API_KEY", "openrouter", secret = true),
     OPENROUTER_PRIMARY_MODEL("OPENROUTER_PRIMARY_MODEL", "openrouter"),
     OPENROUTER_FALLBACK_MODEL("OPENROUTER_FALLBACK_MODEL", "openrouter"),
@@ -66,6 +70,11 @@ object PlatformSettingsMerger {
                 redirectUri = o(PlatformSettingKey.IG_OAUTH_REDIRECT) ?: base.instagram.redirectUri,
                 graphVersion = o(PlatformSettingKey.IG_GRAPH_VERSION) ?: base.instagram.graphVersion,
             ),
+            google = base.google.copy(
+                clientId = o(PlatformSettingKey.GOOGLE_OAUTH_CLIENT_ID) ?: base.google.clientId,
+                clientSecret = o(PlatformSettingKey.GOOGLE_OAUTH_CLIENT_SECRET) ?: base.google.clientSecret,
+                redirectUri = o(PlatformSettingKey.GOOGLE_OAUTH_REDIRECT) ?: base.google.redirectUri,
+            ),
             openrouter = base.openrouter.copy(
                 apiKey = o(PlatformSettingKey.OPENROUTER_API_KEY) ?: base.openrouter.apiKey,
                 primaryModel = o(PlatformSettingKey.OPENROUTER_PRIMARY_MODEL) ?: base.openrouter.primaryModel,
@@ -102,6 +111,9 @@ object PlatformSettingsMerger {
         PlatformSettingKey.IG_APP_SECRET -> base.instagram.appSecret
         PlatformSettingKey.IG_OAUTH_REDIRECT -> base.instagram.redirectUri
         PlatformSettingKey.IG_GRAPH_VERSION -> base.instagram.graphVersion
+        PlatformSettingKey.GOOGLE_OAUTH_CLIENT_ID -> base.google.clientId
+        PlatformSettingKey.GOOGLE_OAUTH_CLIENT_SECRET -> base.google.clientSecret
+        PlatformSettingKey.GOOGLE_OAUTH_REDIRECT -> base.google.redirectUri
         PlatformSettingKey.OPENROUTER_API_KEY -> base.openrouter.apiKey
         PlatformSettingKey.OPENROUTER_PRIMARY_MODEL -> base.openrouter.primaryModel
         PlatformSettingKey.OPENROUTER_FALLBACK_MODEL -> base.openrouter.fallbackModel

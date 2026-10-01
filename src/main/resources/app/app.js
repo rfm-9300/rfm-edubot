@@ -20,6 +20,8 @@ let state = {
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
   settingsSection: 'channels', personaAdvanced: false, overviewLayout: null, overviewExtended: false,
   whatsAppSignup: { enabled: false },
+  // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
+  integrations: null, email: null,
   fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false },
 };
 let personaChatBusy = false;
@@ -31,6 +33,13 @@ let fbSdkPromise = null;
 const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
+const GOOGLE = I18N.section('app.integrations.google');
+const googleText = (key, params) => I18N.t(`app.integrations.google.${key}`, params);
+// Server error keys the catalog doesn't know read as the fallback.
+const googleTextOr = (key, fallback) => {
+  const text = googleText(key);
+  return typeof text === 'string' && text !== `app.integrations.google.${key}` ? text : fallback;
+};
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 // AI chat bubbles render as plain pre-wrapped text (see .chat__msg in style.css), but the model
 // writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
@@ -328,6 +337,7 @@ async function startDashboardSession(newToken) {
 
 async function renderLogin() {
   stopInboxPolling();
+  stopNotifications();
   $('#nav').innerHTML = '';
   $('#btn-account').hidden = true;
   renderCompanySwitch();
@@ -540,6 +550,181 @@ function openAccountPassword() {
   openDrawer(STR.accountPassword, body);
 }
 
+// ── Notifications: the top-bar bell ─────────────────────────────────────────────
+// Every signed-in user has one, whatever modules the company has. The server keeps the sentence's
+// parts (kind + params); the text is written here in the reader's language.
+const NOTIFY = I18N.section('app.notifications');
+const NOTIFICATIONS_POLL_MS = 60000;
+const NOTIFICATION_TONES = { agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad' };
+let notifications = { items: [], unread: 0 };
+let notificationsAt = 0;
+let notificationsTimer = null;
+// Bumped on sign-out so a poll that was in flight doesn't bring the last user's list back.
+let notificationsGen = 0;
+const notificationsShown = { drawer: -1, key: '' };
+
+function renderBell() {
+  const btn = $('#btn-notifications');
+  if (!btn) return;
+  const n = notifications.unread;
+  const label = n ? I18N.t('app.notifications.ariaUnread', { n }) : NOTIFY.aria;
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+  const count = $('.iconbtn__count', btn);
+  count.hidden = !n;
+  count.textContent = n > 9 ? '9+' : String(n);
+}
+
+async function loadNotifications() {
+  const gen = notificationsGen;
+  const data = await api('/app/api/notifications');
+  if (gen !== notificationsGen) return;
+  notifications = { items: data.items || [], unread: Number(data.unread) || 0 };
+  notificationsAt = Date.now();
+  renderBell();
+  refreshNotificationsDrawer();
+}
+
+function startNotifications() {
+  stopNotifications();
+  const gen = notificationsGen;
+  $('#btn-notifications').hidden = false;
+  renderBell();
+  const tick = async () => {
+    if (gen !== notificationsGen) return;
+    if (document.visibilityState === 'visible') await loadNotifications().catch(() => {});
+    if (gen === notificationsGen) notificationsTimer = setTimeout(tick, NOTIFICATIONS_POLL_MS);
+  };
+  tick();
+}
+
+function stopNotifications() {
+  notificationsGen += 1;
+  clearTimeout(notificationsTimer);
+  notificationsTimer = null;
+  notifications = { items: [], unread: 0 };
+  notificationsAt = 0;
+  $('#btn-notifications').hidden = true;
+  renderBell();
+}
+
+function notificationText(n) {
+  const p = n.params || {};
+  const kind = key => I18N.t(`app.notifications.kinds.${key}`, p);
+  const from = p.agent ? I18N.t('app.notifications.fromAgent', { agent: p.agent }) : '';
+  const line = (...parts) => parts.filter(Boolean).join(' · ');
+  switch (n.kind) {
+    case 'agent_approval': return { title: kind(Number(p.count) > 1 ? 'agent_approvalMany' : 'agent_approval'), detail: p.subject };
+    case 'agent_failed': return { title: kind('agent_failed'), detail: line(p.subject, p.error ? window.AgentsUI?.reasonText(p.error) : '') };
+    case 'agent_paused': return { title: kind('agent_paused'), detail: NOTIFY.pausedDetail };
+    case 'agent_task': return { title: kind('agent_task'), detail: line(p.subject, from) };
+    case 'agent_notice': return { title: n.body || kind('agent_notice'), detail: line(from, p.subject) };
+    case 'integration_reconnect': {
+      const key = `app.agents.integrations.${p.integration}`;
+      const name = I18N.t(key) === key ? p.integration || '' : I18N.t(key);
+      return { title: I18N.t('app.notifications.kinds.integration_reconnect', { name }), detail: line(p.account, NOTIFY.reconnectDetail) };
+    }
+    default: return { title: n.body || NOTIFY.title, detail: '' };
+  }
+}
+
+function notificationRow(n) {
+  const { title, detail } = notificationText(n);
+  return `<li><button class="worklist__item" type="button" data-notification="${escapeHTML(n.id)}" data-tone="${n.read ? 'muted' : NOTIFICATION_TONES[n.kind] || 'neutral'}">
+    <span class="worklist__dot" aria-hidden="true"></span>
+    <span class="worklist__main"><span class="worklist__title">${escapeHTML(title)}</span>${detail ? `<span class="worklist__detail">${escapeHTML(detail)}</span>` : ''}</span>
+    <span class="worklist__side"><span class="worklist__when">${escapeHTML(relTime(n.createdAt))}</span></span>
+  </button></li>`;
+}
+
+function notificationsHtml() {
+  const { items, unread } = notifications;
+  if (!items.length) return `<div class="empty"><p class="empty__title">${escapeHTML(NOTIFY.empty)}</p><p class="empty__desc">${escapeHTML(NOTIFY.emptyDesc)}</p></div>`;
+  const fresh = items.filter(n => !n.read);
+  const earlier = items.filter(n => n.read);
+  const panel = (title, rows, tools = '') => `<section class="panel"><header class="panel__head"><h2 class="panel__title">${title}</h2>${tools}</header>
+    <ul class="worklist worklist--wrap">${rows.map(notificationRow).join('')}</ul></section>`;
+  return [
+    fresh.length ? panel(`${escapeHTML(NOTIFY.unreadGroup)} <span class="tag">${Math.max(unread, fresh.length)}</span>`, fresh,
+      `<div class="panel__tools"><button class="btn btn--ghost btn--sm" type="button" data-notifications-read-all>${escapeHTML(NOTIFY.markAllRead)}</button></div>`) : '',
+    earlier.length ? panel(escapeHTML(NOTIFY.earlierGroup), earlier) : '',
+  ].join('');
+}
+
+const notificationsKey = () => `${notifications.unread}|${notifications.items.map(n => `${n.id}:${n.read ? 1 : 0}`).join(',')}`;
+
+function fillNotifications(body) {
+  const focused = document.activeElement?.closest?.('[data-notification]')?.dataset.notification;
+  notificationsShown.key = notificationsKey();
+  body.innerHTML = notificationsHtml();
+  $$('[data-notification]', body).forEach(b => b.addEventListener('click', () => {
+    const n = notifications.items.find(x => x.id === b.dataset.notification);
+    if (n) openNotification(n);
+  }));
+  $('[data-notifications-read-all]', body)?.addEventListener('click', e => markAllNotificationsRead(e.currentTarget));
+  if (focused) $(`[data-notification="${CSS.escape(focused)}"]`, body)?.focus();
+}
+
+// Redraws the list in place when a poll or a click changed it and it's still the open drawer.
+function refreshNotificationsDrawer() {
+  if ($('#drawer').hidden || drawerGen !== notificationsShown.drawer || notificationsKey() === notificationsShown.key) return;
+  const body = $('#drawer-body > .record');
+  if (body) fillNotifications(body);
+}
+
+async function openNotifications() {
+  if (!notificationsAt) {
+    try { await loadNotifications(); }
+    catch (err) { if (err.message !== 'unauthorized') toast(NOTIFY.loadFailed); return; }
+  } else loadNotifications().catch(() => {});
+  const body = document.createElement('div');
+  body.className = 'record';
+  fillNotifications(body);
+  notificationsShown.drawer = openDrawer(NOTIFY.title, body, false, { eyebrow: state.me?.tenant?.name });
+}
+
+function markNotificationRead(n) {
+  if (n.read) return;
+  n.read = true;
+  notifications.unread = Math.max(0, notifications.unread - 1);
+  renderBell();
+  api(`/app/api/notifications/${encodeURIComponent(n.id)}/read`, { method: 'POST' }).catch(() => {});
+}
+
+async function markAllNotificationsRead(btn) {
+  btn.disabled = true;
+  try {
+    await api('/app/api/notifications/read-all', { method: 'POST' });
+    notifications.items.forEach(n => { n.read = true; });
+    notifications.unread = 0;
+    renderBell();
+    refreshNotificationsDrawer();
+  } catch (err) {
+    btn.disabled = false;
+    if (err.message !== 'unauthorized') toast(NOTIFY.markAllFailed);
+  }
+}
+
+// Opens what the notification is about, with the way back to the list: the approval, task, run or
+// agent it points at, else its record, else its page.
+function openNotification(n) {
+  markNotificationRead(n);
+  const back = { key: 'notifications', label: NOTIFY.title, open: () => openNotifications() };
+  if (n.ref && hasModule('agents') && window.AgentsUI) {
+    if (n.ref !== 'inbox') return window.AgentsUI.openRef(n.ref, back);
+    closeDrawer({ dismissed: true });
+    window.AgentsUI.focusRef(n.ref);
+    return setActive('agents');
+  }
+  if (canOpenAgentSubject(n.subject)) return openAgentSubject(n.subject, back);
+  if (n.link && hasModule(n.link)) {
+    closeDrawer({ dismissed: true });
+    if (n.kind === 'integration_reconnect') state.settingsSection = 'channels';
+    return setActive(n.link);
+  }
+  refreshNotificationsDrawer();
+}
+
 // ── Companies: a tenant can hold several, each with its own data ─────────────────
 // Switching swaps the session token for one scoped to the other company and reloads, so nothing
 // the previous company loaded survives in `state`.
@@ -644,6 +829,8 @@ function wireCompaniesPanel(root) {
 }
 
 async function bootAuthed() {
+  state.email = null;
+  state.integrations = null;
   state.me = await api('/app/api/me');
   // Adopt the tenant's language (unless the user picked an explicit override this session), then
   // refresh the static chrome that was rendered before /me resolved.
@@ -659,6 +846,7 @@ async function bootAuthed() {
   const accountBtn = $('#btn-account');
   accountBtn.hidden = !(state.me.user && state.me.principalType === 'tenant');
   accountBtn.textContent = accountInitials(state.me.user?.email);
+  startNotifications();
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
   renderNav();
   if (state.active !== 'overview') {
@@ -699,12 +887,14 @@ function renderNav() {
     bookings: pendingBookings || (state.fetched.bookings ? weekBookings().filter(b => b.status !== 'CANCELLED').length : o.calendar?.thisWeek) || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
   };
-  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0 };
+  const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
+  if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
+  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
   const groups = [
     { id: 'home', items: ['overview'] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
-    { id: 'groupBot', items: ['persona', 'ai-assistant'] },
+    { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
   const enabled = new Set(state.me.modules);
@@ -818,6 +1008,7 @@ async function loadModule(tab) {
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
+    await refreshGoogle();
     state.documentTemplate = await api('/app/api/settings/document-template').catch(() => null);
     state.overviewLayout = await api('/app/api/settings/overview').catch(() => ({ hidden: [], available: [] }));
     state.companies = companiesEnabled() ? await api('/app/api/companies').catch(() => null) : null;
@@ -838,6 +1029,7 @@ async function loadModule(tab) {
     state.bookingAvailability = availability;
     state.fetched.bookings = true;
   }
+  if (tab === 'agents') await window.AgentsUI.load();
   if (tab === 'instagram') {
     try { state.instagram = await api('/app/api/instagram?refresh=1'); }
     catch { toast(STR.instagramSyncFailed); state.instagram = await api('/app/api/instagram').catch(() => state.instagram); }
@@ -848,15 +1040,18 @@ async function loadModule(tab) {
 function render() {
   renderNav();
   renderCompanySwitch();
+  renderBell();
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'].includes(state.active);
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings', 'agents'].includes(state.active)
+    || (state.active === 'agents' && !window.AgentsUI?.canManage());
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
+    agents: I18N.t('app.agents.newAgent'),
   };
-  $('#btn-new').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
+  $('#btn-new .btn__label').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
   if (state.active === 'overview') return renderOverview(root);
   if (state.active === 'contacts') return renderContacts(root);
@@ -874,7 +1069,66 @@ function render() {
   if (state.active === 'ai-assistant') return renderAssistant(root);
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
+  if (state.active === 'agents') return window.AgentsUI.render(root);
   renderSettings(root);
+}
+
+// ── Agents module glue: agents.js draws the module; these open the records its runs are about. ──
+function recordStatusLabel(entity, status) {
+  if (!status) return '';
+  if (entity === 'quote') return quoteStatusLabel(status);
+  if (entity === 'invoice') return invoiceStatusLabel(status);
+  if (entity === 'payment') return paymentStatusLabel(status);
+  if (entity === 'booking') return bookingStatusLabel(status);
+  return status;
+}
+const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations' };
+const AGENT_SUBJECT_OPENERS = {
+  client: id => openClientDrawer(id),
+  quote: id => openQuoteDetail(id),
+  invoice: id => openInvoiceDetail(id),
+  payment: id => openPaymentDetail(id),
+  booking: id => openBookingById(id),
+  service: id => openServiceDetail(id),
+};
+// Trail keys are `${type}:${id}` like subjects, so a run opened from its own record doesn't link back to it.
+const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) && !linksBackTo(`${subject.type}:${subject.id}`);
+async function openAgentSubject(subject, back) {
+  if (!canOpenAgentSubject(subject)) return;
+  if (subject.type === 'conversation') {
+    closeDrawer({ dismissed: true });
+    state.selectedConversation = subject.id;
+    await setActive('conversations');
+    return;
+  }
+  openFrom(back, () => AGENT_SUBJECT_OPENERS[subject.type](subject.id));
+}
+function agentsDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, openFrom, bindDrawerClose,
+    drawerGen: () => drawerGen,
+    hero, statCards, crmPanel, recordKpisHtml, detailMeta,
+    fmtDate, fmtDay, fmtWhen, fmtEUR, relTime, localDay, uiLocale,
+    render, hasModule, labels, STR, CRM,
+    get state() { return state; },
+    statusLabel: recordStatusLabel,
+    openSubject: openAgentSubject,
+    canOpenSubject: canOpenAgentSubject,
+    // Something changed in Agents while another view is showing: keep Home's card and rows and the nav count in step.
+    onChange: () => {
+      if (state.active !== 'overview') return renderNav();
+      loadModule('overview').then(render).catch(() => renderNav());
+    },
+  };
+}
+// Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
+// of the way (hidden) when there's none of that.
+function mountRecordAutomations(parent, subject, back) {
+  if (!hasModule('agents') || !window.AgentsUI) return;
+  const el = document.createElement('div');
+  el.hidden = true;
+  parent.appendChild(el);
+  window.AgentsUI.mountAutomations(el, subject, { back, hideEmpty: true }).then(() => { el.hidden = !el.childElementCount; });
 }
 
 function hero(title, desc, stats = '', nav = '') {
@@ -988,6 +1242,7 @@ function attentionTitle(item) {
   if (item.aggregate && item.kind === 'overdue_invoice' && typeof STR.overdueInvoiceN === 'function') return STR.overdueInvoiceN({ n: item.count });
   if (item.aggregate && item.kind === 'overdue_payment' && typeof STR.overduePaymentN === 'function') return STR.overduePaymentN({ n: item.count });
   if (item.kind === 'assistant_action' && typeof STR.assistantAction === 'function') return STR.assistantAction({ n: Number(item.detail || 0) });
+  if (item.kind === 'agent_task_due') return agentTaskLate(item) ? STR.agentTaskOverdue : STR.agentTaskDue;
   const map = {
     waiting_chat: STR.waitingChat,
     overdue_invoice: STR.overdueInvoice,
@@ -997,15 +1252,25 @@ function attentionTitle(item) {
     pending_booking: STR.pendingBooking,
     instagram_comment: STR.instagramWaitingComment,
     quote_expiring: STR.quoteExpiring,
+    agent_approval: STR.agentApproval,
+    agent_failed: STR.agentFailed,
+    integration_reconnect: STR.integrationReconnect,
   };
   return map[item.kind] || item.kind;
 }
+// Home rows that open a particular Settings section.
+const ATTENTION_SETTINGS = { integration_reconnect: 'channels' };
+// Agent tasks come in when due by the end of today; one from an earlier day is late.
+const agentTaskLate = item => !!item.at && localDay(item.at) < localDay(new Date().toISOString());
+// Home rows about agents open the approval, task or run itself (see AgentsUI.openRef).
+const AGENT_ATTENTION_REFS = { agent_approval: 'approval', agent_task_due: 'task', agent_failed: 'run' };
 function attentionPill(kind) {
   const map = {
     waiting_chat: 'pill--warn', overdue_invoice: 'pill--bad', due_soon_invoice: 'pill--warn',
     overdue_payment: 'pill--bad', due_soon_payment: 'pill--warn',
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
-    assistant_action: 'pill--info',
+    assistant_action: 'pill--info', agent_approval: 'pill--warn', agent_task_due: 'pill--info', agent_failed: 'pill--bad',
+    integration_reconnect: 'pill--bad',
   };
   return map[kind] || '';
 }
@@ -1029,7 +1294,8 @@ function attentionIcon(kind) {
     waiting_chat: '💬', overdue_invoice: '💶', due_soon_invoice: '⏰',
     overdue_payment: '💸', due_soon_payment: '⏰',
     pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
-    assistant_action: '✨',
+    assistant_action: '✨', agent_approval: '🤖', agent_task_due: '📋', agent_failed: '⚠️',
+    integration_reconnect: '✉️',
   };
   return map[kind] || '•';
 }
@@ -1072,13 +1338,13 @@ function homeCardCopy(id) {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     financeiro: STR.snapFinance, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
     calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
-    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant,
+    suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant, agents: STR.snapAgents,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     financeiro: STR.homeCard_financeDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
-    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc,
+    suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc, agents: STR.homeCard_agentsDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -1124,7 +1390,7 @@ function renderOverview(root) {
       const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
         : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
       const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
+      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"${ATTENTION_SETTINGS[n.kind] ? ` data-settings="${ATTENTION_SETTINGS[n.kind]}"` : ''}><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
     }).join('')}</div></div>`
     : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
   const snapshots = [];
@@ -1337,8 +1603,8 @@ function dashFacts(rows, inline = false) {
   if (!items.length) return '';
   return `<dl class="dash-facts${inline ? ' dash-facts--row' : ''}">${items.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(String(value))}</dd></div>`).join('')}</dl>`;
 }
-function worklistRow({ tone = 'neutral', title, detail = '', meta = '', when = '', amount = false, go, open = '', conversation = '' }) {
-  const attrs = `data-go="${escapeHTML(go)}"${open ? ` data-open="${escapeHTML(open)}"` : ''}${conversation ? ` data-conversation="${escapeHTML(conversation)}"` : ''}`;
+function worklistRow({ tone = 'neutral', title, detail = '', meta = '', when = '', amount = false, go, open = '', conversation = '', settings = '' }) {
+  const attrs = `data-go="${escapeHTML(go)}"${open ? ` data-open="${escapeHTML(open)}"` : ''}${conversation ? ` data-conversation="${escapeHTML(conversation)}"` : ''}${settings ? ` data-settings="${escapeHTML(settings)}"` : ''}`;
   const side = meta || when
     ? `<span class="worklist__side">${meta ? `<span class="worklist__meta${amount ? ' worklist__meta--amount' : ''}">${escapeHTML(meta)}</span>` : ''}${when ? `<span class="worklist__when">${escapeHTML(when)}</span>` : ''}</span>`
     : '';
@@ -1507,6 +1773,27 @@ function dashPipelineCard(o) {
   return dashCard({ order: 5, title: STR.snapPipeline, go: 'quotes', body });
 }
 
+// [[value, label, tone]] as big numbers side by side; tone is '', 'warn' or 'bad'.
+function dashFigures(figures) {
+  return `<div class="dash-figures">${figures.map(([v, label, tone]) => `<div class="dash-figure"><span class="dash-figure__value${tone ? ` dash-figure__value--${tone}` : ''}">${escapeHTML(String(v))}</span><span class="dash-figure__label">${escapeHTML(label)}</span></div>`).join('')}</div>`;
+}
+
+function dashAgentsCard(o) {
+  const a = o.agents;
+  const paused = a.paused ? `<div class="notice notice--warn"><div class="notice__text"><span>${escapeHTML(I18N.t('app.agents.pausedTitle'))}</span></div></div>` : '';
+  const body = `${paused}${dashFigures([
+    [a.pendingApprovals || 0, STR.agentsToApprove, a.pendingApprovals ? 'warn' : ''],
+    [a.openTasks || 0, STR.agentsOpenTasks, a.tasksDue ? 'warn' : ''],
+    [a.runsToday || 0, STR.agentsRunsToday, ''],
+  ])}
+    ${dashFacts([
+      [STR.agentsActive, a.activeAgents || 0],
+      a.tasksDue ? [STR.agentsTasksDue, a.tasksDue] : null,
+      [STR.agentsFailedWeek, a.failedThisWeek || 0],
+    ])}`;
+  return dashCard({ order: 9, title: STR.snapAgents, go: 'agents', body });
+}
+
 function dashInboxCard(o) {
   const i = o.inbox;
   const convo = hasModule('conversations');
@@ -1515,7 +1802,7 @@ function dashInboxCard(o) {
     ? [[i.waiting || 0, STR.hl_waiting, i.waiting > 0 ? 'warn' : ''], [i.messagesToday || 0, STR.hl_messages_today, ''], [i.messagesThisWeek || 0, STR.inboxWeek, '']]
     : [[i.contacts || 0, STR.hl_contacts, ''], [i.newContactsThisWeek || 0, STR.inboxNewContacts, '']];
   const pct = convo ? pctChange(i.messagesThisWeek || 0, i.messagesLastWeek || 0) : null;
-  const body = `<div class="dash-figures">${figures.map(([v, label, tone]) => `<div class="dash-figure"><span class="dash-figure__value${tone ? ` dash-figure__value--${tone}` : ''}">${escapeHTML(String(v))}</span><span class="dash-figure__label">${escapeHTML(label)}</span></div>`).join('')}</div>
+  const body = `${dashFigures(figures)}
     ${activity.length > 1 ? `${sparkline(activity.map(d => d.count || 0), 'spark--tall')}<div class="dash-axis"><span>${escapeHTML(dayLabel(activity[0].day))}</span><span>${escapeHTML(STR.todayTitle)}</span></div>` : ''}
     ${dashFacts([
       pct != null ? [STR.dashWeekChange, `${pct > 0 ? '+' : ''}${pct}%`] : null,
@@ -1590,16 +1877,18 @@ function renderOverviewMinimal(root) {
       if (n.amountCents != null) {
         meta = centsEUR(n.amountCents);
         when = n.aggregate || !n.at ? '' : relDay(n.at);
-      } else if (n.kind === 'waiting_chat' || n.kind === 'instagram_comment') meta = relTime(n.at);
+      } else if (['waiting_chat', 'instagram_comment', 'agent_approval', 'agent_failed'].includes(n.kind)) meta = relTime(n.at);
       else if (n.kind === 'pending_booking') meta = fmtWhen(n.at);
       else if (n.at) meta = relDay(n.at);
       const detail = n.aggregate && n.kind === 'overdue_invoice'
         ? (o.cash?.topOverdue || []).map(t => t.name).filter(Boolean).join(', ')
         : (n.kind === 'assistant_action' ? '' : n.detail || '');
       const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking'].includes(n.kind);
+      const agentRef = AGENT_ATTENTION_REFS[n.kind] && n.id ? `${AGENT_ATTENTION_REFS[n.kind]}:${n.id}` : '';
       return worklistRow({
-        tone: attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
-        open: !n.aggregate && opens ? n.id || '' : '', conversation: n.kind === 'waiting_chat' ? n.id || '' : '',
+        tone: n.kind === 'agent_task_due' && agentTaskLate(n) ? 'late' : attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
+        open: agentRef || (!n.aggregate && opens ? n.id || '' : ''), conversation: n.kind === 'waiting_chat' ? n.id || '' : '',
+        settings: ATTENTION_SETTINGS[n.kind] || '',
       });
     }).join('');
     const body = rows
@@ -1617,6 +1906,7 @@ function renderOverviewMinimal(root) {
   if (o.customers && o.cash && !hidden.has('customers')) cards.push({ col: 'main', order: 7, html: dashTopClientsCard(o) });
   const feedSources = [['invoices', 'financeiro'], ['payments', 'financeiro'], ['quotes', 'pipeline'], ['clients', 'customers'], ['bookings', 'calendar']];
   if (feedSources.some(([m, card]) => hasModule(m) && !hidden.has(card))) cards.push({ col: 'side', order: 8, html: dashRecentCard(o) });
+  if (o.agents && !hidden.has('agents')) cards.push({ col: 'side', order: 9, html: dashAgentsCard(o) });
   const count = col => cards.filter(c => c.col === col).length;
   const column = col => cards.filter(c => c.col === col).sort((a, b) => a.order - b.order).map(c => c.html).join('');
   const single = !count('main') || !count('side');
@@ -1676,8 +1966,10 @@ async function dashGo(el) {
   const { go, open, conversation, settings } = el.dataset;
   if (conversation) state.selectedConversation = conversation;
   if (settings) state.settingsSection = settings;
+  if (go === 'agents' && open) window.AgentsUI?.focusRef(open);
   await setActive(go);
   if (!open || state.active !== go) return;
+  if (go === 'agents') return window.AgentsUI.openRef(open);
   if (go === 'invoices') return openInvoiceDetail(open);
   if (go === 'quotes') return openQuoteDetail(open);
   if (go === 'payments') return openPaymentDetail(open);
@@ -1981,7 +2273,8 @@ function inboxRow(c) {
   const unread = c.unreadCount || 0;
   const active = state.selectedConversation === c.id;
   const tick = author && author !== 'customer' && c.lastTracked ? inboxTick({ status: c.lastStatus, tracked: true }) : '';
-  const who = author === 'ai' ? `<span class="inbox-row__who">${escapeHTML(STR.inboxAiPrefix)}</span>` : '';
+  const prefix = { ai: STR.inboxAiPrefix, automation: STR.inboxAutomationPrefix }[author];
+  const who = prefix ? `<span class="inbox-row__who">${escapeHTML(prefix)}</span>` : '';
   const flags = `${c.autoReplyEnabled === false ? `<span class="inbox-row__flag" title="${escapeHTML(STR.inboxAiPaused)}">${escapeHTML(STR.inboxAiOffShort)}</span>` : ''}${unread ? `<span class="inbox-row__badge">${unread > 99 ? '99+' : unread}</span>` : ''}`;
   const label = [inboxName(c), unread ? tApp('inboxUnreadAria', { n: unread }) : '', c.waiting ? STR.inboxFilter_needs : '', c.autoReplyEnabled === false ? STR.inboxAiPaused : '', preview].filter(Boolean).join(' · ');
   return `<li><button type="button" class="inbox-row${active ? ' is-active' : ''}${unread ? ' is-unread' : ''}${c.waiting ? ' is-waiting' : ''}" data-conversation="${escapeHTML(c.id)}" aria-current="${active ? 'true' : 'false'}" aria-label="${escapeHTML(label)}">
@@ -2229,15 +2522,19 @@ function inboxDayLabel(day) {
 function inboxBubble(m) {
   const author = inboxAuthor(m);
   const out = author !== 'customer';
-  const who = author === 'ai' ? STR.inboxAuthorAi : author === 'agent' ? inboxAgentLabel(m.agentUserId, m.agentName) : '';
-  const label = m.kind === 'template' ? `${who} · ${tApp('inboxTemplateLabel', { name: m.templateName || '' })}` : who;
+  const who = author === 'ai' ? STR.inboxAuthorAi
+    : author === 'agent' ? inboxAgentLabel(m.agentUserId, m.agentName)
+    : author === 'automation' ? m.agentName || '' : '';
+  const label = [who, m.kind === 'template' ? tApp('inboxTemplateLabel', { name: m.templateName || '' }) : ''].filter(Boolean).join(' · ');
+  // An agent from the Agents module sent it, not a person or the receptionist AI.
+  const tag = author === 'automation' ? `<span class="bubble__tag">${escapeHTML(STR.inboxAutomation)}</span>` : '';
   const media = INBOX_MEDIA_KINDS.includes(m.kind) && !m.pending
     ? `<div class="bubble__media-box" data-media="${escapeHTML(m.id)}" data-kind="${escapeHTML(m.kind)}">${mediaBoxHtml(m)}</div>` : '';
   const text = m.text ? `<div class="bubble__text">${renderWhatsAppText(m.text)}</div>` : '';
   const failed = m.status === 'FAILED';
   const retry = failed && author === 'agent' && m.kind === 'text' ? `<button type="button" class="btn btn--sm btn--ghost" data-retry="${escapeHTML(m.id)}">${escapeHTML(STR.inboxRetry)}</button>` : '';
   return `<article class="bubble ${out ? 'bubble--out' : 'bubble--in'} bubble--${author}${failed ? ' is-failed' : ''}${m.pending ? ' is-pending' : ''}" data-message="${escapeHTML(m.id)}">
-    ${out ? `<div class="bubble__author">${escapeHTML(label)}</div>` : ''}${media}${text}
+    ${out ? `<div class="bubble__author">${tag}${escapeHTML(label)}</div>` : ''}${media}${text}
     <div class="bubble__meta"><time datetime="${escapeHTML(m.createdAt)}" title="${escapeHTML(fmtDate(m.createdAt))}">${escapeHTML(fmtTime(m.createdAt))}</time>${out ? inboxTick(m) : ''}</div>
     ${failed ? `<div class="bubble__error"><span>${escapeHTML(inboxErrorText(m.errorKey, m.errorText))}</span>${retry}</div>` : ''}
   </article>`;
@@ -3402,7 +3699,9 @@ async function loadClientRecord(id) {
   const conversations = !hasModule('conversations') ? Promise.resolve([])
     : state.fetched.conversations ? Promise.resolve(state.conversations)
     : api('/app/api/conversations').catch(() => []);
-  const [client, quotes, invoices, services, bookings, payments, chats] = await Promise.all([
+  // Mail is kept only while an account is connected, so without one there's no Emails tab.
+  const emails = emailStatus().then(s => (s?.configured && s.from ? api(`/app/api/email/messages?clientId=${q}`).catch(() => null) : null));
+  const [client, quotes, invoices, services, bookings, payments, chats, automations, mail] = await Promise.all([
     api(`/app/api/crm/clients/${q}`).catch(() => null),
     related('quotes', `/app/api/crm/quotes?clientId=${q}`),
     related('invoices', `/app/api/crm/invoices?clientId=${q}`),
@@ -3410,6 +3709,8 @@ async function loadClientRecord(id) {
     related('bookings', `/app/api/bookings?clientId=${q}`),
     related('payments', `/app/api/crm/payments?clientId=${q}`),
     conversations,
+    hasModule('agents') ? api(`/app/api/agents/subjects/client/${q}`).catch(() => null) : null,
+    emails,
     ensureBookingData(),
   ]);
   return {
@@ -3420,6 +3721,8 @@ async function loadClientRecord(id) {
     bookings: bookings || [],
     payments: payments || [],
     conversation: client ? matchConversation(client, chats || []) : null,
+    automations,
+    emails: mail,
   };
 }
 
@@ -3494,7 +3797,8 @@ function contactButtons(phone, extra = '') {
 }
 
 // `lines` and `actions` are trusted HTML built by the caller (escaped values); everything else is escaped here.
-function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null }) {
+// `warning` is a one-line status under the head, like automations being paused for a client.
+function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null, warning = '' }) {
   return `<section class="record-card">
     <div class="record-card__head">
       <span class="record-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
@@ -3505,6 +3809,7 @@ function recordCardHtml({ name, lines, since, contact = '', notes = '', actions 
       <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${actions}</div>
     </div>
     ${archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(archivedAt) }))}</p>` : ''}
+    ${warning ? `<p class="hint hint--warn">${escapeHTML(warning)}</p>` : ''}
     ${contact ? `<div class="record-card__contact">${contact}</div>` : ''}
     ${notes ? `<div class="record-card__notes"><span class="record-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(notes)}</div>` : ''}
   </section>`;
@@ -3616,6 +3921,7 @@ function clientCardHtml(r, bk) {
   return recordCardHtml({
     name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes,
     actions: recordRemovalButton(c), archivedAt: c.archivedAt,
+    warning: c.automationPaused && hasModule('agents') ? I18N.t('app.agents.automations.pausedTitle') : '',
   });
 }
 
@@ -3807,7 +4113,12 @@ function clientFinanceHtml(r, m, act) {
 function clientPaneHtml(r, m, bk) {
   // An archived client gets no new documents until it is restored.
   const act = kind => (r.client.archivedAt ? null : kind);
+  if (r.tab === 'automations') return '<div data-client-automations></div>';
   if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
+  if (r.tab === 'emails') {
+    if (!r.emails?.length) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(GOOGLE.empty)}</p><p class="empty__desc">${escapeHTML(GOOGLE.emptyDesc)}</p></div></div>`;
+    return `<div class="panel"><ul class="worklist">${r.emails.map(emailRowHtml).join('')}</ul></div>`;
+  }
   if (r.tab === 'bookings') {
     if (!r.bookings.length) return recordEmpty(STR.clientNoBookings, act('booking'), STR.bookingsNewForClient);
     const row = b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="booking:${escapeHTML(b.id)}">
@@ -3868,6 +4179,8 @@ function clientTabs(r) {
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
+  if (r.emails) tabs.push(['emails', GOOGLE.tab, r.emails.length]);
+  if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
 }
@@ -3903,6 +4216,17 @@ function renderClientRecord(focusTab = false) {
   $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.recordTab; renderClientRecord(true); }));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.recordOpen)));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.recordAct)));
+  const automations = $('[data-client-automations]', body);
+  if (automations) {
+    window.AgentsUI.renderAutomations(automations, { type: 'client', id: r.client.id }, r.automations, {
+      back: clientTrailEntry(r.client.id, r.client.name, 'automations'),
+      onChange: view => {
+        r.automations = view;
+        r.client = { ...r.client, automationPaused: view.automationPaused === true };
+        renderClientRecord();
+      },
+    });
+  }
   if (focusTab) $('[data-record-tab].is-on', body)?.focus();
 }
 
@@ -3922,6 +4246,10 @@ function openClientItem(ref) {
   if (kind === 'invoice') return openFromClient(() => openInvoiceDetail(id));
   if (kind === 'payment') return openFromClient(() => openPaymentDetail(id));
   if (kind === 'quote') return openFromClient(() => openQuoteDetail(id));
+  if (kind === 'email') {
+    const message = r.emails?.find(e => e.id === id);
+    return message && openFromClient(() => openEmailMessage(message));
+  }
   if (kind === 'booking') {
     const booking = r.bookings.find(b => b.id === id);
     return booking && openFromClient(() => openBookingDetail(booking));
@@ -4810,9 +5138,11 @@ function itemsTable(items) {
 
 async function openQuoteDetail(id) {
   let quote = state.quotes.find(q => q.id === id);
+  const email = emailStatus();
   try { quote = await api(`/app/api/crm/quotes/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!quote) return;
+  const canEmail = !!(await email)?.configured && quote.status !== 'CANCELLED';
   // Converting marks the quote accepted; its invoice is the one that points back at it.
   const invoice = hasModule('invoices') && quote.status === 'ACEITO'
     ? (await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).catch(() => [])).find(i => i.quoteId === quote.id) || null
@@ -4841,6 +5171,7 @@ async function openQuoteDetail(id) {
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
       <input class="inp" id="q-due" type="date" value="${new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)}" /></div>` : ''}
     <div class="detail__foot">
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
       ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
       ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
@@ -4849,6 +5180,7 @@ async function openQuoteDetail(id) {
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
   $('[data-open-invoice]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
+  $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('quote', quote.id, quote.number)));
   form.querySelectorAll('[data-q-status]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
     try {
@@ -4878,6 +5210,7 @@ async function openQuoteDetail(id) {
   });
   wirePdfButtons(form);
   openDrawer(quote.number, form);
+  mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
 }
 
 function renderInvoices(root) {
@@ -5156,9 +5489,11 @@ async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id
 
 async function openInvoiceDetail(id) {
   let inv = state.invoices.find(i => i.id === id);
+  const email = emailStatus();
   try { inv = await api(`/app/api/crm/invoices/${encodeURIComponent(id)}`); }
   catch { /* keep list row */ }
   if (!inv) return;
+  const canEmail = !!(await email)?.configured && inv.status !== 'CANCELLED';
   const status = effectiveStatus(inv);
   const unpaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
   const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
@@ -5177,14 +5512,135 @@ async function openInvoiceDetail(id) {
     ${itemsTable(inv.items)}
     <div class="detail__foot">
       ${unpaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
   $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
   $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number));
+  $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
+  mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
+}
+
+const newRequestId = () => (window.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
+
+// A quote or invoice to its client, from the company's Gmail, with the PDF attached.
+async function openSendEmail(type, id, number) {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
+  const gen = openDrawer(googleText('sendTitle', { number }), form, false, { eyebrow: GOOGLE.sendByEmail });
+  let draft;
+  try { draft = await api(`/app/api/email/draft?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}`); }
+  catch (err) {
+    if (gen !== drawerGen) return;
+    closeDrawer();
+    if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+    return;
+  }
+  if (gen !== drawerGen) return;
+  // The server sends a drawer's email once, however often Send is pressed.
+  const requestId = newRequestId();
+  const admin = state.me?.principalType === 'tenant' && state.me?.user?.role === 'TENANT_ADMIN';
+  const required = ' <span class="req">●</span>';
+  // `from` without `canSend`: the company's sending account is there but Google stopped accepting it.
+  const blocked = draft.canSend ? null : draft.from
+    ? { title: googleText('sendReconnectTitle', { account: draft.from }), desc: admin ? GOOGLE.sendReconnectDesc : GOOGLE.sendReconnectMember }
+    : { title: GOOGLE.noAccountTitle, desc: admin ? GOOGLE.noAccountDesc : GOOGLE.noAccountMember };
+  form.innerHTML = `
+    ${!blocked ? '' : `<div class="notice notice--warn">
+      <div class="notice__text"><strong>${escapeHTML(blocked.title)}</strong><span>${escapeHTML(blocked.desc)}</span></div>
+      ${hasModule('settings') ? `<div class="notice__actions"><button class="btn btn--sm" type="button" data-se-settings>${escapeHTML(GOOGLE.openSettings)}</button></div>` : ''}
+    </div>`}
+    <div class="form__row"><label class="lbl" for="se-to">${escapeHTML(GOOGLE.to)}${required}</label>
+      <input class="inp" id="se-to" type="email" required maxlength="254" autocomplete="off" value="${escapeHTML(draft.to || '')}" />
+      ${draft.to ? '' : `<p class="hint hint--warn">${escapeHTML(GOOGLE.noClientEmail)}</p>`}</div>
+    <div class="form__row"><label class="lbl" for="se-cc">${escapeHTML(GOOGLE.cc)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <input class="inp" id="se-cc" maxlength="1000" autocomplete="off" />
+      <p class="hint">${escapeHTML(GOOGLE.ccHint)}</p></div>
+    <div class="form__row"><label class="lbl" for="se-subject">${escapeHTML(GOOGLE.subject)}${required}</label>
+      <input class="inp" id="se-subject" required maxlength="300" value="${escapeHTML(draft.subject)}" /></div>
+    <div class="form__row"><label class="lbl" for="se-text">${escapeHTML(GOOGLE.message)}${required}</label>
+      <textarea class="txt" id="se-text" rows="9" required maxlength="20000">${escapeHTML(draft.text)}</textarea></div>
+    <label class="form__check"><input type="checkbox" id="se-pdf" checked /> ${escapeHTML(googleText('attach', { file: draft.attachment }))}</label>
+    ${draft.from && draft.canSend ? `<p class="hint">${escapeHTML([googleText('from', { account: draft.from }), draft.marksSent ? GOOGLE.marksSent : ''].filter(Boolean).join(' '))}</p>` : ''}
+    <div class="actions"><button class="btn btn--primary" type="submit" ${draft.canSend ? '' : 'disabled'}>${escapeHTML(GOOGLE.send)}</button></div>`;
+  $('[data-se-settings]', form)?.addEventListener('click', () => {
+    closeDrawer({ dismissed: true });
+    state.settingsSection = 'channels';
+    setActive('settings');
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const payload = {
+      type, id, requestId,
+      to: $('#se-to', form).value.trim(),
+      cc: $('#se-cc', form).value.trim() || null,
+      subject: $('#se-subject', form).value.trim(),
+      text: $('#se-text', form).value.trim(),
+      attachPdf: $('#se-pdf', form).checked,
+    };
+    const missing = !payload.to ? 'no_email' : !payload.subject ? 'empty_subject' : !payload.text ? 'empty_message' : '';
+    if (missing) return toast(googleText(`sendErrors.${missing}`));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const sent = await api('/app/api/email/send', { method: 'POST', body: JSON.stringify(payload) });
+      toast(sent.alreadySent ? GOOGLE.alreadySent : googleText('sent', { to: sent.to }));
+      if (sent.markedSent && state.active === 'quotes') { await loadModule('quotes').catch(() => {}); render(); }
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+    }
+  });
+}
+
+function emailRowHtml(m) {
+  const outbound = m.direction === 'OUTBOUND';
+  return recordRowHtml({
+    tone: outbound ? 'info' : 'accent',
+    title: m.subject || '—',
+    detail: [
+      outbound ? googleText('sentTo', { to: (m.to || []).join(', ') }) : googleText('receivedFrom', { from: m.fromName || m.from }),
+      (m.attachments || []).join(', '),
+      m.snippet,
+    ].filter(Boolean).join(' · '),
+    when: relTime(m.date),
+    open: `email:${m.id}`,
+  });
+}
+
+function openEmailMessage(m) {
+  const outbound = m.direction === 'OUTBOUND';
+  const here = { key: `email:${m.id}`, label: m.subject || GOOGLE.msgEyebrow, open: () => openEmailMessage(m) };
+  const named = ['USER', 'AGENT'].includes(m.sentByType);
+  const sentBy = !m.sentByType ? '' : named ? (m.sentBy ? googleText(`by.${m.sentByType}`, { name: m.sentBy }) : '') : googleTextOr(`by.${m.sentByType}`, '');
+  const doc = m.recordType === 'quote' && hasModule('quotes') ? { key: `quote:${m.recordId}`, label: GOOGLE.openQuote, open: () => openQuoteDetail(m.recordId) }
+    : m.recordType === 'invoice' && hasModule('invoices') ? { key: `invoice:${m.recordId}`, label: GOOGLE.openInvoice, open: () => openInvoiceDetail(m.recordId) }
+      : null;
+  const fact = (label, value) => (value ? `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>` : '');
+  const attachments = m.attachments || [];
+  const form = document.createElement('div');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="detail__head"><div class="detail__client">${escapeHTML(m.fromName || m.from || '—')}</div>
+      <div class="detail__amount"><span class="pill ${outbound ? 'pill--info' : 'pill--accent'}">${escapeHTML(googleTextOr(`direction.${m.direction}`, m.direction))}</span></div></div>
+    <dl class="dash-facts">
+      ${m.fromName ? fact(GOOGLE.msgFrom, m.from) : ''}
+      ${fact(GOOGLE.msgTo, (m.to || []).join(', '))}
+      ${fact(GOOGLE.msgCc, (m.cc || []).join(', '))}
+      ${fact(GOOGLE.msgDate, fmtDate(m.date))}
+      ${fact(GOOGLE.msgSentBy, sentBy)}
+    </dl>
+    ${m.bodyPurged ? `<p class="hint">${escapeHTML(GOOGLE.purged)}</p>` : `<div class="email-body">${escapeHTML(m.body ?? m.snippet ?? '')}</div>`}
+    ${attachments.length ? `<p class="hint">${escapeHTML(googleText('attachments', { files: attachments.join(', ') }))}</p>` : ''}
+    ${doc && !linksBackTo(doc.key) ? `<div class="detail__foot"><button class="btn btn--sm btn--ghost" type="button" data-email-doc>${escapeHTML(doc.label)}</button></div>` : ''}`;
+  $('[data-email-doc]', form)?.addEventListener('click', () => openFrom(here, doc.open));
+  openDrawer(m.subject || GOOGLE.msgEyebrow, form, false, { eyebrow: GOOGLE.msgEyebrow });
 }
 
 async function markPaymentPaid(id, number = state.payments.find(p => p.id === id)?.number || '') {
@@ -5334,6 +5790,14 @@ function renderCatalog(root) {
 
 function assistantActionLabel(action) {
   const args = action.arguments || {};
+  const preview = action.preview || {};
+  const agent = preview.agent || args.agent_id || '';
+  const step = preview.action ? (window.AgentsUI?.actionLabel(preview.action) || preview.action) : '';
+  if (action.toolName === 'run_agent') return STR.assistantRunAgent({ agent, record: preview.record || '' });
+  if (action.toolName === 'pause_agent') return STR.assistantPauseAgent({ agent });
+  if (action.toolName === 'activate_agent') return STR.assistantActivateAgent({ agent });
+  if (action.toolName === 'approve_agent_item') return args.decision === 'reject' ? STR.assistantRejectAgentItem({ action: step }) : STR.assistantApproveAgentItem({ action: step });
+  if (action.toolName === 'draft_agent') return STR.assistantDraftAgent;
   if (action.toolName === 'create_client') return STR.assistantCreateClient({ name: args.name || '' });
   if (action.toolName === 'create_quote') return STR.assistantCreateQuote;
   if (action.toolName === 'update_quote') return STR.assistantUpdateQuote({ id: args.quote_id || '' });
@@ -5346,7 +5810,27 @@ function assistantActionLabel(action) {
   return STR.assistantChangeData;
 }
 
+const ASSISTANT_AGENT_TOOLS = new Set(['run_agent', 'pause_agent', 'activate_agent', 'approve_agent_item', 'draft_agent']);
+
+/** An agent action's details come from the server's preview (names behind the ids), not from the arguments. */
+function assistantAgentDetails(action) {
+  const args = action.arguments || {};
+  const p = action.preview || {};
+  const details = [];
+  if (action.toolName === 'approve_agent_item') {
+    if (p.agent) details.push(STR.assistantAgentName({ name: p.agent }));
+    if (p.record) details.push(STR.assistantAgentRecord({ record: p.record }));
+    if (p.recipients?.length) details.push(STR.assistantAgentTo({ to: p.recipients.join(', ') }));
+    if (p.subject) details.push(STR.assistantAgentSubject({ subject: p.subject }));
+    if (p.body) details.push(STR.assistantAgentMessage({ text: p.body }));
+    if (args.decision === 'reject' && args.reason) details.push(STR.assistantAgentReason({ reason: args.reason }));
+  }
+  if (action.toolName === 'draft_agent' && args.request) details.push(STR.assistantAgentRequest({ text: args.request }));
+  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
+}
+
 function assistantActionDetails(action) {
+  if (ASSISTANT_AGENT_TOOLS.has(action.toolName)) return assistantAgentDetails(action);
   const args = action.arguments || {};
   const details = [];
   if (args.name) details.push(`${STR.thName}: ${args.name}`);
@@ -5382,6 +5866,17 @@ function assistantDocumentDownload(action) {
   return `<div class="assistant__action-buttons">${pdfButton(id, type, true, STR.assistantDownloadPdf({ number }), filename)}</div>`;
 }
 
+/** After a confirmed draft or run, the way to what it made. */
+function assistantAgentLink(action) {
+  if (action.status !== 'CONFIRMED' || !hasModule('agents') || !window.AgentsUI) return '';
+  const result = action.result || {};
+  const ref = action.toolName === 'draft_agent' && result.agent_id ? `agent:${result.agent_id}`
+    : action.toolName === 'run_agent' && result.run_id ? `run:${result.run_id}` : '';
+  if (!ref) return '';
+  const label = ref.startsWith('agent:') ? STR.assistantOpenDraft : STR.assistantOpenRun;
+  return `<div class="assistant__action-buttons"><button class="btn btn--sm" type="button" data-assistant-agent-ref="${escapeHTML(ref)}">${escapeHTML(label)}</button></div>`;
+}
+
 async function openAssistantThread(id) {
   state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
   render();
@@ -5402,7 +5897,7 @@ function renderAssistant(root) {
     if (!m.action) return bubble;
     const pending = m.action.status === 'PENDING';
     const details = assistantActionDetails(m.action);
-    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}</div>`;
+    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}${assistantAgentLink(m.action)}</div>`;
   }).join('');
   root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
   $('#assistant-new').addEventListener('click', createAssistantThread);
@@ -5438,6 +5933,7 @@ function renderAssistant(root) {
   });
   $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
   $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
+  $$('[data-assistant-agent-ref]', root).forEach(b => b.addEventListener('click', () => window.AgentsUI.openRef(b.dataset.assistantAgentRef)));
   wirePdfButtons(root);
 }
 
@@ -5510,6 +6006,8 @@ function renderPersona(root) {
       <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${STR.thSource}</th><th>${STR.thState}</th><th>${STR.thCreated}</th><th class="right">${STR.thActions}</th></tr></thead><tbody>${sourceRows || `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(STR.noSourcesTitle)}</p><p class="empty__desc">${escapeHTML(STR.noSourcesDesc)}</p></div></td></tr>`}</tbody></table></div>
     </div>
 
+    <div class="persona-agents" id="persona-agents" hidden></div>
+
     <div class="panel" style="padding:18px">
       <div class="settings-tabs">
         <button type="button" class="chip ${state.personaAdvanced ? 'is-on' : ''}" id="persona-advanced-toggle">${escapeHTML(STR.personaAdvanced)}</button>
@@ -5526,6 +6024,10 @@ function renderPersona(root) {
       </form>` : ''}
     </div>`;
 
+  const personaAgents = $('#persona-agents');
+  if (personaAgents && hasModule('agents') && window.AgentsUI) {
+    window.AgentsUI.mountPersonaAgents(personaAgents, p).then(() => { personaAgents.hidden = !personaAgents.childElementCount; });
+  }
   $('#persona-advanced-toggle')?.addEventListener('click', () => {
     state.personaAdvanced = !state.personaAdvanced;
     render();
@@ -5715,11 +6217,13 @@ function renderSettings(root) {
             <td class="right">${state.whatsAppSignup?.enabled ? `<button class="btn btn--sm" id="wa-connect">${escapeHTML(wa ? STR.waReconnect : STR.waConnect)}</button>` : ''}</td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button>${ig ? ` <button class="btn btn--sm btn--ghost" id="ig-disconnect">${escapeHTML(STR.igDisconnect)}</button>` : ''}</td></tr>
+          ${googleRowsHtml()}
           <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
       </table></div>
       <div class="hint" style="margin-top:10px">${escapeHTML(ig && !ig.commentsEnabled ? STR.instagramReconnectBanner : STR.channelsHint)}</div>
+      ${state.integrations?.google?.configured && !googleAccounts().length ? `<div class="hint" style="margin-top:6px">${escapeHTML(GOOGLE.hint)}</div>` : ''}
     </div>`;
   const widgetPanel = `<div class="panel widget-customizer">
       <div class="widget-customizer__head">
@@ -5835,6 +6339,11 @@ function renderSettings(root) {
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
   $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));
+  $$('[data-google-connect]', root).forEach(b => b.addEventListener('click', () => {
+    const account = googleAccounts().find(c => c.accountEmail === b.dataset.googleConnect);
+    connectGoogle(b.dataset.googleConnect, { inbox: readsInbox(account) });
+  }));
+  $$('[data-google-account]', root).forEach(b => b.addEventListener('click', () => openEmailAccount(b.dataset.googleAccount)));
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
     const locale = localeSel.value;
@@ -5962,6 +6471,293 @@ async function disconnectInstagram(ig) {
   } catch { toast(STR.igDisconnectFailed); }
 }
 
+// ── Email (Google) ──────────────────────────────────────────────────────────────
+const googleAccounts = () => (state.integrations?.connections || []).filter(c => c.provider === 'google');
+// Reconnecting an account that reads its inbox asks for reading again, so it doesn't stay paused.
+const readsInbox = account => !!(account?.inboxSync && state.integrations?.google?.inbox);
+
+async function refreshGoogle() {
+  const [integrations, email] = await Promise.all([
+    hasModule('settings') ? api('/app/api/integrations').catch(() => state.integrations) : Promise.resolve(state.integrations),
+    api('/app/api/email').catch(() => state.email),
+  ]);
+  state.integrations = integrations;
+  state.email = email;
+}
+
+// Whether the company can email documents, and from which account; Settings refreshes it.
+async function emailStatus() {
+  if (!state.email) state.email = await api('/app/api/email').catch(() => null);
+  return state.email;
+}
+
+// Hidden while the platform has no Google OAuth client.
+function googleRowsHtml() {
+  const info = state.integrations;
+  if (!info?.google?.configured) return '';
+  const canConnect = !!info.google.canConnect;
+  const accounts = googleAccounts();
+  const name = `<td class="name">${escapeHTML(GOOGLE.rowName)}</td>`;
+  if (!accounts.length) {
+    const action = canConnect
+      ? `<button class="btn btn--sm" type="button" data-google-connect>${escapeHTML(GOOGLE.connect)}</button>`
+      : `<span class="muted">${escapeHTML(GOOGLE.adminsOnly)}</span>`;
+    return `<tr>${name}<td class="mono">—</td><td><span class="muted">${escapeHTML(STR.notConnected)}</span></td><td class="right">${action}</td></tr>`;
+  }
+  return accounts.map((c, i) => {
+    const status = c.status === 'ACTIVE'
+      ? escapeHTML(GOOGLE.status.ACTIVE)
+      : `<span class="pill pill--${c.status === 'REVOKED' ? 'bad' : 'warn'}">${escapeHTML(googleTextOr(`status.${c.status}`, c.status))}</span>`;
+    const isDefault = accounts.length > 1 && c.isDefault ? ` <span class="pill pill--info">${escapeHTML(GOOGLE.isDefault)}</span>` : '';
+    const inbox = info.google.inbox && c.inboxSync && c.status === 'ACTIVE'
+      ? ` <span class="pill ${c.inboxError ? 'pill--warn' : 'pill--accent'}">${escapeHTML(c.inboxError ? GOOGLE.inbox.rowPaused : GOOGLE.inbox.rowOn)}</span>`
+      : '';
+    const actions = [
+      canConnect && c.status !== 'ACTIVE' ? `<button class="btn btn--sm btn--primary" type="button" data-google-connect="${escapeHTML(c.accountEmail)}">${escapeHTML(GOOGLE.reconnect)}</button>` : '',
+      info.canManage ? `<button class="btn btn--sm" type="button" data-google-account="${escapeHTML(c.id)}">${escapeHTML(GOOGLE.manage)}</button>` : '',
+      canConnect && i === accounts.length - 1 ? `<button class="btn btn--sm btn--ghost" type="button" data-google-connect>${escapeHTML(GOOGLE.addAccount)}</button>` : '',
+    ].filter(Boolean).join(' ');
+    return `<tr>${name}<td class="mono">${escapeHTML(c.accountEmail)}</td><td>${status}${isDefault}${inbox}</td><td class="right">${actions}</td></tr>`;
+  }).join('');
+}
+
+// Google's pages send Cross-Origin-Opener-Policy, which can cut the popup off from this window on its
+// way back; the popup then answers over this same-origin channel. The key marks a popup being open.
+const GOOGLE_OAUTH_CHANNEL = 'google-oauth';
+const GOOGLE_POPUP_KEY = 'googleOAuthPopup';
+let googleChannel = null;
+
+// `account` reconnects that account: Google's screen opens on it. `inbox` also asks to read its mail.
+async function connectGoogle(account, { inbox = false } = {}) {
+  // Opened before any await: browsers only allow a popup straight from the click.
+  const popup = window.open('', 'google-oauth', 'width=520,height=680');
+  const query = new URLSearchParams();
+  if (account) query.set('account', account);
+  if (inbox) query.set('inbox', '1');
+  let res;
+  try { res = await api(`/app/api/integrations/google/connect${query.toString() ? `?${query}` : ''}`); }
+  catch (e) {
+    popup?.close();
+    if (e.message !== 'unauthorized') toast(googleTextOr(`connectErrors.${e.code || ''}`, GOOGLE.connectFailed));
+    return;
+  }
+  // A blocked popup: the whole page goes to Google and comes back to /app/?google=… (takeGoogleRedirect).
+  if (!popup) {
+    try { localStorage.removeItem(GOOGLE_POPUP_KEY); } catch (_) {}
+    window.location.assign(res.authorizeUrl);
+    return;
+  }
+  try { localStorage.setItem(GOOGLE_POPUP_KEY, String(Date.now())); } catch (_) {}
+  popup.location.href = res.authorizeUrl;
+  listenForGoogle();
+}
+
+function listenForGoogle() {
+  stopListeningForGoogle();
+  window.addEventListener('message', onGoogleMessage);
+  if ('BroadcastChannel' in window) {
+    googleChannel = new BroadcastChannel(GOOGLE_OAUTH_CHANNEL);
+    googleChannel.onmessage = ev => onGoogleResult(ev.data);
+  }
+}
+
+function stopListeningForGoogle() {
+  window.removeEventListener('message', onGoogleMessage);
+  googleChannel?.close();
+  googleChannel = null;
+}
+
+function onGoogleMessage(ev) {
+  if (ev.origin === window.location.origin) onGoogleResult(ev.data);
+}
+
+function onGoogleResult(data) {
+  if (data?.type !== 'google-oauth') return;
+  stopListeningForGoogle();
+  googleOutcome(data.status, data.reason);
+}
+
+// Whether this window is the consent popup a dashboard opened (set by connectGoogle), read once.
+function takeGooglePopupMark() {
+  try {
+    const at = Number(localStorage.getItem(GOOGLE_POPUP_KEY));
+    localStorage.removeItem(GOOGLE_POPUP_KEY);
+    return at > 0 && Date.now() - at < 30 * 60 * 1000;
+  } catch (_) { return false; }
+}
+
+async function googleOutcome(status, reason) {
+  if (status === 'connected' || status === 'inbox') {
+    toast(status === 'inbox' ? GOOGLE.inbox.turnedOn : GOOGLE.connected);
+  } else {
+    toast(googleTextOr(`reasons.${reason || ''}`, GOOGLE.connectFailed));
+    // Reading was refused but sending was allowed, so the account did connect.
+    if (reason !== 'missing_inbox_scope') return;
+  }
+  await refreshGoogle();
+  if (state.active === 'settings') render();
+}
+
+// Google sent the whole page back (no popup): read the outcome once and drop it from the address.
+function takeGoogleRedirect() {
+  const params = new URLSearchParams(window.location.search);
+  const status = params.get('google');
+  if (!status) return null;
+  const reason = params.get('reason');
+  params.delete('google');
+  params.delete('reason');
+  const query = params.toString();
+  history.replaceState(null, '', `${window.location.pathname}${query ? `?${query}` : ''}#settings`);
+  return { status, reason };
+}
+
+// Only while the platform lets companies read inboxes. Its buttons act at once, apart from Save: turning
+// reading on may need Google's consent, and that popup has to open straight from the click.
+function emailInboxPanelHtml(account) {
+  const google = state.integrations?.google;
+  if (!google?.inbox) return '';
+  const I = GOOGLE.inbox;
+  const on = !!account.inboxSync;
+  const active = account.status === 'ACTIVE';
+  const failing = on && active && !!account.inboxError;
+  const pill = !on ? `<span class="pill">${escapeHTML(I.off)}</span>`
+    : `<span class="pill ${active && !failing ? 'pill--ok' : 'pill--warn'}">${escapeHTML(active && !failing ? I.on : I.paused)}</span>`;
+  const detail = !on ? `<p class="view__desc">${escapeHTML(I.offDetail)}</p>`
+    : !active ? `<p class="view__desc">${escapeHTML(I.pausedReconnect)}</p>`
+      : failing ? `<p class="hint hint--warn">${escapeHTML(googleTextOr(`inbox.errors.${account.inboxError}`, I.errors.generic))}</p>`
+        : `<p class="view__desc">${escapeHTML(account.inboxSyncedAt ? googleText('inbox.syncedAt', { when: relTime(account.inboxSyncedAt) }) : I.firstSync)}</p>`;
+  const actions = !on
+    ? (google.canConnect && active ? `<button class="btn btn--sm btn--primary" type="button" data-ga-inbox="on">${escapeHTML(I.turnOn)}</button>` : google.canConnect ? '' : `<span class="muted">${escapeHTML(I.adminsOnly)}</span>`)
+    : [
+      failing && account.inboxError === 'missing_scope' && google.canConnect ? `<button class="btn btn--sm btn--primary" type="button" data-ga-inbox="consent">${escapeHTML(I.allowReading)}</button>` : '',
+      `<button class="btn btn--sm btn--ghost" type="button" data-ga-inbox="off">${escapeHTML(I.turnOff)}</button>`,
+    ].filter(Boolean).join('');
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(I.title)}</h2>${pill}</header>
+    <div class="panel__body form">${detail}<p class="hint">${escapeHTML(I.hint)}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</div></section>`;
+}
+
+function openEmailAccount(id) {
+  const account = googleAccounts().find(c => c.id === id);
+  if (!account) return;
+  const accounts = googleAccounts();
+  const canConnect = !!state.integrations?.google?.canConnect;
+  const company = state.documentTemplate?.companyName || state.me?.tenant?.name || '';
+  const revoked = account.status === 'REVOKED';
+  const optional = `<span class="opt">${escapeHTML(STR.optional)}</span>`;
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${account.status !== 'ACTIVE' ? `<div class="notice notice--warn">
+      <div class="notice__text"><strong>${escapeHTML(revoked ? GOOGLE.revokedTitle : GOOGLE.reconnectTitle)}</strong><span>${escapeHTML(revoked ? GOOGLE.revokedDesc : GOOGLE.reconnectDesc)}</span></div>
+      ${canConnect ? `<div class="notice__actions"><button class="btn btn--sm btn--primary" type="button" data-ga-reconnect>${escapeHTML(GOOGLE.reconnect)}</button></div>` : ''}
+    </div>` : ''}
+    <dl class="dash-facts">
+      <div><dt>${escapeHTML(GOOGLE.factAccount)}</dt><dd>${escapeHTML(account.accountEmail)}</dd></div>
+      ${account.connectedBy ? `<div><dt>${escapeHTML(GOOGLE.factConnectedBy)}</dt><dd>${escapeHTML(account.connectedBy)}</dd></div>` : ''}
+      ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-ga-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
+    </dl>
+    ${emailInboxPanelHtml(account)}
+    <div class="form__row"><label class="lbl" for="ga-name">${escapeHTML(GOOGLE.senderName)} ${optional}</label>
+      <input class="inp" id="ga-name" maxlength="80" autocomplete="off" placeholder="${escapeHTML(company)}" value="${escapeHTML(account.senderName || '')}" />
+      <p class="hint">${escapeHTML(googleText('senderNameHint', { company }))}</p></div>
+    <div class="form__row"><label class="lbl" for="ga-reply">${escapeHTML(GOOGLE.replyTo)} ${optional}</label>
+      <input class="inp" id="ga-reply" type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(account.accountEmail)}" value="${escapeHTML(account.replyTo || '')}" />
+      <p class="hint">${escapeHTML(GOOGLE.replyToHint)}</p></div>
+    <div class="form__row"><label class="lbl" for="ga-signature">${escapeHTML(GOOGLE.signature)} ${optional}</label>
+      <textarea class="txt" id="ga-signature" rows="4" maxlength="2000">${escapeHTML(account.signature || '')}</textarea>
+      <p class="hint">${escapeHTML(GOOGLE.signatureHint)}</p></div>
+    ${accounts.length > 1 ? (account.isDefault
+      ? `<p class="hint">${escapeHTML(GOOGLE.defaultHint)}</p>`
+      : `<label class="form__check"><input type="checkbox" id="ga-default" /> ${escapeHTML(GOOGLE.makeDefault)}</label>`) : ''}
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(GOOGLE.save)}</button>
+      ${account.canSend ? `<button class="btn btn--ghost" type="button" data-ga-test>${escapeHTML(GOOGLE.test)}</button>` : ''}
+      <button class="btn btn--ghost" type="button" data-ga-disconnect>${escapeHTML(GOOGLE.disconnect)}</button>
+    </div>`;
+  const path = `/app/api/integrations/${encodeURIComponent(account.id)}`;
+  $('[data-ga-reconnect]', form)?.addEventListener('click', () => {
+    closeDrawer({ dismissed: true });
+    connectGoogle(account.accountEmail, { inbox: readsInbox(account) });
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    const payload = { senderName: $('#ga-name', form).value.trim(), replyTo: $('#ga-reply', form).value.trim(), signature: $('#ga-signature', form).value.trim() };
+    if ($('#ga-default', form)?.checked) payload.isDefault = true;
+    try {
+      await api(path, { method: 'PATCH', body: JSON.stringify(payload) });
+      await refreshGoogle();
+      closeDrawer();
+      toast(GOOGLE.saved);
+      if (state.active === 'settings') render();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`errors.${err.code || ''}`, GOOGLE.saveFailed));
+    }
+  });
+  $('[data-ga-test]', form)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const sent = await api(`${path}/test-email`, { method: 'POST' });
+      toast(googleText('testSent', { to: sent.to }));
+      await refreshGoogle();
+      const fresh = googleAccounts().find(c => c.id === account.id);
+      const counter = $('[data-ga-sent]', form);
+      if (fresh?.dailyLimit && counter) counter.textContent = googleText('sentToday', { sent: fresh.sentToday || 0, limit: fresh.dailyLimit });
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.testFailed));
+      // A refused grant flips the account to needing a reconnect on the server.
+      await refreshGoogle();
+      if (state.active === 'settings') render();
+      const fresh = googleAccounts().find(c => c.id === account.id);
+      if (fresh && fresh.status !== account.status && form.isConnected) openEmailAccount(fresh.id);
+    } finally { btn.disabled = false; }
+  });
+  $$('[data-ga-inbox]', form).forEach(b => b.addEventListener('click', async () => {
+    const mode = b.dataset.gaInbox;
+    if (mode === 'consent' || (mode === 'on' && !account.canRead)) {
+      closeDrawer({ dismissed: true });
+      connectGoogle(account.accountEmail, { inbox: true });
+      return;
+    }
+    b.disabled = true;
+    try {
+      await api(path, { method: 'PATCH', body: JSON.stringify({ inboxSync: mode === 'on' }) });
+      toast(mode === 'on' ? GOOGLE.inbox.turnedOn : GOOGLE.inbox.turnedOff);
+    } catch (err) {
+      if (err.message === 'unauthorized') return;
+      toast(googleTextOr(`inbox.patchErrors.${err.code || ''}`, GOOGLE.inbox.failed));
+    }
+    // A refused change (Google took reading back meanwhile) redraws the panel with what the server knows.
+    await refreshGoogle();
+    if (state.active === 'settings') render();
+    if (form.isConnected && googleAccounts().some(c => c.id === account.id)) openEmailAccount(account.id);
+  }));
+  $('[data-ga-disconnect]', form).addEventListener('click', () => disconnectGoogle(account));
+  openDrawer(account.accountEmail, form, false, { eyebrow: GOOGLE.eyebrow });
+}
+
+async function disconnectGoogle(account) {
+  const ok = await confirmDialog({
+    title: googleText('disconnectTitle', { account: account.accountEmail }),
+    body: GOOGLE.disconnectBody,
+    okLabel: GOOGLE.disconnect,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/integrations/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
+    await refreshGoogle();
+    closeDrawer({ dismissed: true });
+    toast(GOOGLE.disconnected);
+    if (state.active === 'settings') render();
+  } catch (err) {
+    if (err.message !== 'unauthorized') toast(GOOGLE.disconnectFailed);
+  }
+}
+
 function loadFacebookSdk(appId, graphVersion) {
   if (window.FB) {
     window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
@@ -6057,14 +6853,29 @@ async function connectWhatsApp() {
   }
 }
 
-// When the OAuth popup lands back on /app/?ig=..., relay the outcome to the opener and close.
-// Returns true if this load was an OAuth popup (so the normal app boot is skipped).
+// When the OAuth popup lands back on /app/?ig=... or /app/?google=..., relay the outcome to the
+// opener (or, for Google, over GOOGLE_OAUTH_CHANNEL) and close. Returns true if this load was an
+// OAuth popup (so the normal app boot is skipped).
 function handleOAuthPopup() {
   const params = new URLSearchParams(window.location.search);
   const ig = params.get('ig');
-  if (!ig || !window.opener) return false;
-  window.opener.postMessage({ type: 'ig-oauth', status: ig, reason: params.get('reason'), tenant: params.get('tenant') }, window.location.origin);
+  const google = params.get('google');
+  if (!ig && !google) return false;
+  const message = ig
+    ? { type: 'ig-oauth', status: ig, reason: params.get('reason'), tenant: params.get('tenant') }
+    : { type: 'google-oauth', status: google, reason: params.get('reason') };
+  if (window.opener) {
+    window.opener.postMessage(message, window.location.origin);
+    window.close();
+    return true;
+  }
+  if (!google || !('BroadcastChannel' in window) || !takeGooglePopupMark()) return false;
+  const channel = new BroadcastChannel(GOOGLE_OAUTH_CHANNEL);
+  channel.postMessage(message);
+  channel.close();
   window.close();
+  // Cut off from its opener, the popup may no longer count as opened by a script and stay open: it shows the app.
+  setTimeout(() => { if (!window.closed) init(true); }, 500);
   return true;
 }
 
@@ -6603,6 +7414,7 @@ async function openBookingDetail(b) {
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(b.clientId)));
   $('[data-booking-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(b.clientServiceId)));
   openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
+  mountRecordAutomations(body, { type: 'booking', id: b.id }, here);
 }
 
 function invoiceBooking(b) {
@@ -6914,11 +7726,14 @@ function openBookingAvailabilityForm() {
   openDrawer(STR.bookingsManageAvailability, form, true);
 }
 
-async function init() {
-  if (handleOAuthPopup()) return;
+// `relayed`: this is a consent popup that already passed its outcome on and couldn't close.
+async function init(relayed = false) {
+  if (!relayed && handleOAuthPopup()) return;
+  window.AgentsUI?.init(agentsDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
+  $('#btn-notifications').addEventListener('click', () => { drawerTrail = []; openNotifications(); });
   $('#brand').addEventListener('click', () => { drawerTrail = []; openCompanySwitcher(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
@@ -6931,6 +7746,7 @@ async function init() {
     if (state.active === 'employees') return openEmployeeForm();
     if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
+    if (state.active === 'agents') return window.AgentsUI.newAgent();
     toast(STR.quickCreateSoon);
   });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });
@@ -6946,15 +7762,20 @@ async function init() {
   document.addEventListener('ui:theme', () => {
     if (token && state.me && state.active === 'settings' && state.settingsSection === 'appearance') render();
   });
-  // Inbox polls pause while the tab is hidden; catch up at once when it comes back.
+  // Inbox and notification polls pause while the tab is hidden; catch up at once when it comes back.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState !== 'visible' || !token || state.active !== 'conversations' || !$('.inbox')) return;
+    if (document.visibilityState !== 'visible' || !token) return;
+    if (state.me && Date.now() - notificationsAt > NOTIFICATIONS_POLL_MS) loadNotifications().catch(() => {});
+    if (state.active !== 'conversations' || !$('.inbox')) return;
     const root = $('#view');
     refreshInboxList(root).catch(() => {});
     if (state.inbox.threadFor) refreshThread(root).catch(() => {});
   });
+  const google = takeGoogleRedirect();
   if (!token) return renderLogin();
   state.active = (location.hash || '').replace('#', '') || 'overview';
-  try { await bootAuthed(); } catch { renderLogin(); }
+  if (google) state.settingsSection = 'channels';
+  try { await bootAuthed(); } catch { renderLogin(); return; }
+  if (google) googleOutcome(google.status, google.reason);
 }
 init();

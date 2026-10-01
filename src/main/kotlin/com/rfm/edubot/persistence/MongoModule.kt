@@ -110,12 +110,72 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmClients.dropIndexIfExists("phone_1")
             crmClients.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
             crmClients.createIndex(Document("name", "text"))
+            crmClients.createIndex(
+                Document("tenantId", 1).append("email", 1),
+                IndexOptions().partialFilterExpression(Document("email", Document("\$type", "string"))),
+            )
 
             val crmQuotes = db.getCollection<Document>("crm.quotes")
             crmQuotes.dropIndexIfExists("number_1")
             crmQuotes.createIndex(Document("tenantId", 1).append("clientId", 1))
             crmQuotes.createIndex(Document("tenantId", 1).append("status", 1))
             crmQuotes.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+            crmQuotes.createIndex(Document("tenantId", 1).append("status", 1).append("validUntil", 1))
+
+            val domainEvents = db.getCollection<Document>("domain_events")
+            domainEvents.createIndex(Document("dispatch.status", 1).append("occurredAt", 1))
+            domainEvents.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("tenantId", 1).append("related.type", 1).append("related.id", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("tenantId", 1).append("actor.type", 1).append("occurredAt", -1))
+            domainEvents.createIndex(Document("occurredAt", 1), IndexOptions().expireAfter(365, TimeUnit.DAYS))
+
+            val agents = db.getCollection<Document>("agents")
+            agents.createIndex(Document("tenantId", 1).append("status", 1).append("updatedAt", -1))
+            agents.createIndex(Document("tenantId", 1).append("eventTypes", 1))
+            agents.createIndex(Document("status", 1).append("triggerTypes", 1))
+            agents.createIndex(Document("status", 1).append("nextFireAt", 1))
+
+            val agentRuns = db.getCollection<Document>("agent_runs")
+            agentRuns.createIndex(Document("tenantId", 1).append("agentId", 1).append("dedupeKey", 1), IndexOptions().unique(true))
+            agentRuns.createIndex(Document("status", 1).append("resumeAt", 1))
+            agentRuns.createIndex(Document("status", 1).append("claimedAt", 1))
+            agentRuns.createIndex(Document("tenantId", 1).append("agentId", 1).append("createdAt", -1))
+            agentRuns.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
+            agentRuns.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1).append("status", 1))
+            agentRuns.createIndex(Document("tenantId", 1).append("clientId", 1).append("createdAt", -1))
+            agentRuns.createIndex(Document("finishedAt", 1), IndexOptions().expireAfter(180, TimeUnit.DAYS))
+
+            val agentApprovals = db.getCollection<Document>("agent_approvals")
+            agentApprovals.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
+            agentApprovals.createIndex(Document("runId", 1).append("stepId", 1).append("seq", 1), IndexOptions().unique(true))
+            agentApprovals.createIndex(Document("status", 1).append("expiresAt", 1))
+            agentApprovals.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1))
+
+            val agentTasks = db.getCollection<Document>("agent_tasks")
+            agentTasks.createIndex(Document("tenantId", 1).append("status", 1).append("dueAt", 1))
+            agentTasks.createIndex(Document("tenantId", 1).append("assigneeUserId", 1).append("status", 1))
+            agentTasks.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1))
+            agentTasks.createIndex(Document("tenantId", 1).append("clientId", 1).append("status", 1))
+
+            val notifications = db.getCollection<Document>("notifications")
+            notifications.createIndex(Document("tenantId", 1).append("audience", 1).append("userId", 1).append("createdAt", -1))
+            notifications.createIndex(Document("createdAt", 1), IndexOptions().expireAfter(90, TimeUnit.DAYS))
+
+            val outboundLog = db.getCollection<Document>("outbound_log")
+            outboundLog.createIndex(Document("idempotencyKey", 1), IndexOptions().unique(true))
+            outboundLog.createIndex(Document("tenantId", 1).append("recipient", 1).append("at", -1))
+            outboundLog.createIndex(Document("tenantId", 1).append("channel", 1).append("at", -1))
+            outboundLog.createIndex(Document("at", 1), IndexOptions().expireAfter(30, TimeUnit.DAYS))
+
+            val integrationConnections = db.getCollection<Document>("integration_connections")
+            integrationConnections.createIndex(Document("tenantId", 1).append("provider", 1).append("accountEmail", 1), IndexOptions().unique(true))
+            integrationConnections.createIndex(Document("provider", 1).append("status", 1))
+
+            val emailMessages = db.getCollection<Document>("email_messages")
+            emailMessages.createIndex(Document("tenantId", 1).append("connectionId", 1).append("providerMessageId", 1), IndexOptions().unique(true))
+            emailMessages.createIndex(Document("tenantId", 1).append("clientId", 1).append("date", -1))
+            emailMessages.createIndex(Document("tenantId", 1).append("threadId", 1))
+            emailMessages.createIndex(Document("bodyPurgedAt", 1).append("date", 1))
 
             val crmInvoices = db.getCollection<Document>("crm.invoices")
             crmInvoices.dropIndexIfExists("number_1")

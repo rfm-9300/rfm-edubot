@@ -19,6 +19,7 @@ object DashboardModules {
     const val AI_ASSISTANT = "ai-assistant"
     const val BOOKINGS = "bookings"
     const val INSTAGRAM = "instagram"
+    const val AGENTS = "agents"
 
     /**
      * Only the dashboard landing page is mandatory — it is the fallback view every tenant needs.
@@ -28,14 +29,20 @@ object DashboardModules {
     val alwaysOn = listOf(OVERVIEW)
     val optional = listOf(
         CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, EMPLOYEES, PAYMENTS, CATALOG,
-        AI_ASSISTANT, BOOKINGS, INSTAGRAM,
+        AI_ASSISTANT, BOOKINGS, INSTAGRAM, AGENTS,
     )
     val catalog = alwaysOn + optional
+
+    /**
+     * Modules a tenant only gets once the backoffice selects them. A null selection (tenants stored
+     * before module selection existed) means "the whole catalog" and must not pick these up.
+     */
+    val optIn = listOf(AGENTS)
 
     fun availableFor(): List<String> = catalog
 
     fun effectiveFor(tenant: Tenant): List<String> {
-        val selected = tenant.enabledModules ?: catalog
+        val selected = tenant.enabledModules ?: (catalog - optIn.toSet())
         val resolved = (alwaysOn + selected).filter { it in catalog }.toMutableList()
         if (CLIENTS in resolved && SERVICES in catalog) resolved += SERVICES
         if (PAYMENTS in resolved && SUPPLIERS in catalog) resolved += SUPPLIERS

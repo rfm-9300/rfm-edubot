@@ -38,7 +38,7 @@
         <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
       </div>
       <div class="topbar__search"><input type="text" id="search" data-i18n-placeholder="app.searchPlaceholder" data-i18n-aria-label="app.searchPlaceholder" placeholder="Search…" aria-label="Search…" autocomplete="off" /><kbd aria-hidden="true">/</kbd></div>
-      <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" data-i18n-aria-label="app.accountAria" data-i18n-title="app.accountAria" aria-label="Your account" title="Your account" hidden></button><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" data-i18n="app.newPrefix" hidden>New</button></div>
+      <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="iconbtn iconbtn--theme iconbtn--bell" id="btn-notifications" type="button" aria-haspopup="dialog" data-i18n-aria-label="app.notifications.aria" data-i18n-title="app.notifications.aria" aria-label="Notifications" title="Notifications" hidden><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3z M8 1.6V3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 13.6a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span class="iconbtn__count" aria-hidden="true" hidden></span></button><button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" data-i18n-aria-label="app.accountAria" data-i18n-title="app.accountAria" aria-label="Your account" title="Your account" hidden></button><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" hidden><span class="btn__plus" aria-hidden="true">+</span><span class="btn__label" data-i18n="app.newPrefix">New</span></button></div>
     </header>
     <section class="view" id="view"></section>
   </main>
@@ -56,6 +56,7 @@
   </div>
   <div class="toast" id="toast" hidden></div>
   <script src="/app/doc-template.js" defer></script>
+  <script src="/app/agents.js" defer></script>
   <script src="/app/app.js" defer></script>
 </body>
 </html>

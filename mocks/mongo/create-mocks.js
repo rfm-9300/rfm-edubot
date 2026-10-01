@@ -54,6 +54,52 @@ const ids = {
     b1: oid("665f70000000000000000001"),
     b2: oid("665f70000000000000000002"),
   },
+  agents: {
+    overdue: oid("665fa0000000000000000001"),
+    quotes: oid("665fa0000000000000000002"),
+    cash: oid("665fa0000000000000000003"),
+    leads: oid("665fa0000000000000000004"),
+    bills: oid("665fa0000000000000000005"),
+  },
+  agentRuns: {
+    reminder: oid("665fa1000000000000000001"),
+    waiting: oid("665fa1000000000000000002"),
+    quoteAccepted: oid("665fa1000000000000000003"),
+    requestFailed: oid("665fa1000000000000000004"),
+    lead: oid("665fa1000000000000000005"),
+    briefing: oid("665fa1000000000000000006"),
+  },
+  agentApprovals: {
+    pending: oid("665fa2000000000000000001"),
+    approved: oid("665fa2000000000000000002"),
+  },
+  agentTasks: {
+    lead: oid("665fa3000000000000000001"),
+    martins: oid("665fa3000000000000000002"),
+    call: oid("665fa3000000000000000003"),
+  },
+  notifications: {
+    approval: oid("665fa4000000000000000001"),
+    martinsTask: oid("665fa4000000000000000002"),
+    leadTask: oid("665fa4000000000000000003"),
+    failed: oid("665fa4000000000000000004"),
+    reconnect: oid("665fa4000000000000000005"),
+    briefing: oid("665fa4000000000000000006"),
+  },
+  gmail: oid("665fa5000000000000000001"),
+  emails: {
+    quoteSent: oid("665fa6000000000000000001"),
+    quoteReply: oid("665fa6000000000000000002"),
+    lead: oid("665fa6000000000000000003"),
+    supplierBill: oid("665fa6000000000000000004"),
+    request: oid("665fa6000000000000000005"),
+  },
+  // Referenced by runs as the events that woke them; the events themselves aren't seeded.
+  events: {
+    quoteSent: oid("665fa7000000000000000001"),
+    lead: oid("665fa7000000000000000002"),
+    request: oid("665fa7000000000000000003"),
+  },
 };
 
 const line = (description, quantity, unit, unitPriceEur) => {
@@ -455,6 +501,873 @@ const bookingAppointments = seedTenantId ? [
   },
 ] : [];
 
+/**
+ * Agents with their runs, approvals, tasks and notifications, a Gmail account and its emails.
+ * Unlike the records above they are dated from when the script runs: notifications expire after
+ * 90 days, email text is purged after 90, finished runs after 180, and pending approvals within days.
+ */
+function buildAgentSeed() {
+  const runAt = new Date();
+  const later = (value, seconds) => new Date(value.getTime() + seconds * 1000);
+  const hoursAgo = (hours) => later(runAt, -hours * 3600);
+  const daysAgo = (days) => hoursAgo(days * 24);
+  const iso = (value) => value.toISOString();
+  const dayOf = (value) => iso(value).slice(0, 10);
+  const daysBetween = (fromDay, toDay) => Math.round((Date.parse(`${toDay}T00:00:00Z`) - Date.parse(`${fromDay}T00:00:00Z`)) / 86400000);
+  const hex = (id) => id.toHexString();
+  const byNumber = (list, number) => list.find((item) => item.number === number);
+  const subjectOf = (type, id) => ({ type, id: hex(id) });
+  const sumCents = (list) => list.reduce((sum, item) => sum + item.totalCents, 0);
+  // flow.wait's business-day waits: the next weekday at that hour (UTC, close enough to Lisbon).
+  const weekdayAt = (value, hourUtc) => {
+    const day = new Date(value);
+    day.setUTCHours(hourUtc, 0, 0, 0);
+    while (day.getUTCDay() === 0 || day.getUTCDay() === 6) day.setUTCDate(day.getUTCDate() + 1);
+    return day;
+  };
+  // Amounts and dates as agents write them for a pt-PT company.
+  const money = (cents) => {
+    const [whole, fraction] = (cents / 100).toFixed(2).split(".");
+    return `${whole.replace(/\B(?=(\d{3})+(?!\d))/g, "\u00a0")},${fraction}\u00a0€`;
+  };
+  const ptDate = (isoDay) => isoDay.split("-").reverse().join("/");
+
+  const seedUser = target.getCollection("dashboard_users").findOne({ tenantId: seedTenantId });
+  const actorId = seedUser ? hex(seedUser._id) : "operator";
+  const actorName = seedUser ? seedUser.email : "operator";
+  const documentTemplate = seedTenant.documentTemplate || {};
+  const companyName = documentTemplate.companyName || seedTenant.name;
+  const company = {
+    name: companyName,
+    phone: documentTemplate.phone || "",
+    email: documentTemplate.email || "",
+    address: documentTemplate.address || "",
+    taxId: documentTemplate.taxId || "",
+  };
+  const signature = `Com os melhores cumprimentos,\n${companyName}`;
+  const gmailAccount = "orcamentos@example.com";
+
+  const hillsong = byNumber(clients, "CLT-001");
+  const martins = byNumber(clients, "CLT-002");
+  const oliveira = byNumber(clients, "CLT-003");
+  const quoteMartins = byNumber(quotes, "ORC-001");
+  const quoteOliveira = byNumber(quotes, "ORC-002");
+  const invoiceMartins = byNumber(invoices, "FAT-002");
+  const invoiceHillsong = byNumber(invoices, "FAT-003");
+
+  // What a run keeps of its record; email text and snippets are never stored on runs.
+  const baseContext = (at) => ({ now: iso(at), today: dayOf(at), company, event: {} });
+  const clientContext = (client) => ({
+    id: hex(client._id),
+    number: client.number,
+    name: client.name,
+    firstName: client.name.trim().split(" ")[0],
+    phone: client.phone || "",
+    email: client.email || "",
+    address: client.address || "",
+    taxId: client.taxId || "",
+    hasEmail: Boolean(client.email),
+    hasTaxId: Boolean(client.taxId),
+  });
+  const invoiceContext = (invoice, at, quoteNumber = null) => {
+    const untilDue = daysBetween(dayOf(at), invoice.dueDate);
+    const overdue = (invoice.status === "PENDING" || invoice.status === "OVERDUE") && untilDue < 0;
+    return {
+      id: hex(invoice._id),
+      number: invoice.number,
+      status: invoice.status,
+      total: money(invoice.totalCents),
+      totalCents: invoice.totalCents,
+      dueDate: invoice.dueDate,
+      daysUntilDue: untilDue,
+      daysOverdue: overdue ? -untilDue : 0,
+      isOverdue: overdue,
+      ...(quoteNumber ? { quoteNumber } : {}),
+    };
+  };
+  const hasPdf = (email) => email.attachments.some((file) => file.mimeType === "application/pdf");
+  const emailContext = (email) => ({
+    id: hex(email._id),
+    from: email.from,
+    fromName: email.fromName || email.from,
+    subject: email.subject,
+    hasAttachments: email.attachments.length > 0,
+    hasPdf: hasPdf(email),
+    knownClient: Boolean(email.clientId),
+    threadId: email.threadId,
+    automated: Boolean(email.automated),
+  });
+  const emailEvent = (email) => ({
+    type: "email.received",
+    actorType: "SYSTEM",
+    from: email.from,
+    data_fromName: email.fromName,
+    data_subject: email.subject,
+    data_hasAttachments: email.attachments.length > 0,
+    data_hasPdf: hasPdf(email),
+    data_automated: Boolean(email.automated),
+    data_connectionId: hex(email.connectionId),
+    data_threadId: email.threadId,
+  });
+
+  // ── Gmail account and emails ──
+  const snippetOf = (text) => text.replace(/\s+/g, " ").trim().slice(0, 200);
+  const emailDoc = ({ id, providerId, threadId, direction = "INBOUND", from, fromName, to = [gmailAccount], subject, bodyText, attachments = [], automated = false, clientId = null, record = null, sentByUser = false, date }) => {
+    const doc = {
+      _id: id,
+      tenantId: seedTenantId,
+      connectionId: ids.gmail,
+      providerMessageId: `mock-${providerId}`,
+      threadId: `mock-thread-${threadId}`,
+      messageIdHeader: `<mock-${providerId}@mail.example.com>`,
+      direction,
+      from,
+      fromName,
+      to,
+      cc: [],
+      bcc: [],
+      subject,
+      snippet: snippetOf(bodyText),
+      bodyText,
+      attachments,
+      clientId,
+      record,
+      sentByType: sentByUser ? "USER" : null,
+      sentById: sentByUser ? actorId : null,
+      sentByName: sentByUser ? actorName : null,
+      runId: null,
+      date,
+      createdAt: date,
+    };
+    if (automated) doc.automated = true;
+    return doc;
+  };
+  const quoteSent = emailDoc({
+    id: ids.emails.quoteSent,
+    providerId: "quote-sent",
+    threadId: "orc-001",
+    direction: "OUTBOUND",
+    from: gmailAccount,
+    fromName: companyName,
+    to: [martins.email],
+    subject: `Orçamento ${quoteMartins.number} · ${companyName}`,
+    bodyText: `Olá ${martins.name},\n\nSegue em anexo o orçamento ${quoteMartins.number}. Se tiver alguma dúvida, basta responder a este email.\n\n${signature}`,
+    attachments: [{ filename: `${quoteMartins.number}.pdf`, mimeType: "application/pdf", size: 48213 }],
+    clientId: martins._id,
+    record: subjectOf("quote", quoteMartins._id),
+    sentByUser: true,
+    date: daysAgo(3),
+  });
+  const quoteReply = emailDoc({
+    id: ids.emails.quoteReply,
+    providerId: "quote-reply",
+    threadId: "orc-001",
+    from: martins.email,
+    fromName: "Joana Martins",
+    subject: `Re: ${quoteSent.subject}`,
+    bodyText: "Olá,\n\nObrigada pelo orçamento. Podemos começar pela landing page e pelo bot de WhatsApp e deixar a manutenção para o mês seguinte?\n\nJoana Martins\nMartins Digital Lda",
+    clientId: martins._id,
+    date: daysAgo(2),
+  });
+  const request = emailDoc({
+    id: ids.emails.request,
+    providerId: "request",
+    threadId: "request",
+    from: "carlos.nunes@example.com",
+    fromName: "Carlos Nunes",
+    subject: "Infiltração na cobertura do armazém",
+    bodyText: "Bom dia,\n\nDepois das últimas chuvas apareceu uma infiltração na cobertura do nosso armazém em Leiria. Fazem impermeabilização com membrana líquida? Para quando seria possível uma visita?\n\nCumprimentos,\nCarlos Nunes",
+    date: daysAgo(2),
+  });
+  const lead = emailDoc({
+    id: ids.emails.lead,
+    providerId: "lead",
+    threadId: "lead",
+    from: "sofia.almeida@example.com",
+    fromName: "Sofia Almeida",
+    subject: "Pedido de orçamento: pintura de moradia",
+    bodyText: "Boa tarde,\n\nGostaria de pedir um orçamento para pintar o exterior de uma moradia de dois pisos em Oeiras, com cerca de 220 m² de fachada. Seria possível visitarem a obra na próxima semana?\n\nPode ligar-me para o 912 345 678.\n\nObrigada,\nSofia Almeida",
+    date: hoursAgo(6),
+  });
+  // The newest email received, so testing the supplier bill draft reads it.
+  const supplierBill = emailDoc({
+    id: ids.emails.supplierBill,
+    providerId: "supplier-bill",
+    threadId: "supplier-bill",
+    from: "faturacao@tintasnorte.pt",
+    fromName: "Tintas Norte, Lda.",
+    subject: "Fatura FT 2026/1187",
+    bodyText: "Exmos. Senhores,\n\nEnviamos em anexo a fatura FT 2026/1187, no valor de 492,00 €, com vencimento a 30 dias.\n\nCom os melhores cumprimentos,\nDepartamento de Faturação\nTintas Norte, Lda.",
+    attachments: [{ filename: "FT-2026-1187.pdf", mimeType: "application/pdf", size: 86417 }],
+    automated: true,
+    date: hoursAgo(2),
+  });
+
+  // No tokens: the account waits for a reconnect and never calls Google.
+  const gmailBrokeAt = hoursAgo(1);
+  const otherGoogleAccounts = target.getCollection("integration_connections").countDocuments({
+    tenantId: seedTenantId,
+    provider: "google",
+    _id: { $ne: ids.gmail },
+    accountEmail: { $ne: gmailAccount },
+  });
+  const gmailConnection = {
+    _id: ids.gmail,
+    tenantId: seedTenantId,
+    provider: "google",
+    accountEmail: gmailAccount,
+    scopes: [
+      "openid",
+      "email",
+      "https://www.googleapis.com/auth/gmail.send",
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.modify",
+    ],
+    status: "NEEDS_RECONNECT",
+    connectedByUserId: seedUser ? actorId : null,
+    connectedByEmail: seedUser ? actorName : null,
+    lastError: "invalid_grant",
+    isDefault: otherGoogleAccounts === 0,
+    settings: { senderName: companyName, replyTo: null, signature, inboxSync: true },
+    dailySends: { day: dayOf(quoteSent.date), count: 1 },
+    inbox: { enabledAt: daysAgo(10), lastSyncedAt: later(gmailBrokeAt, -300), lastError: null },
+    createdAt: daysAgo(14),
+    updatedAt: gmailBrokeAt,
+  };
+
+  // ── Agents: the pt definitions their templates build ──
+  const policy = { autonomy: "APPROVE", maxRunsPerDay: 200, cooldownHours: 0, approvers: "ANY_MEMBER", notifyUserIds: [], notifyOnFailure: true, maxTokensPerRun: 20000 };
+  const voice = { tone: "friendly", usePersona: false, emoji: false };
+  const invoiceOverdue = { match: "ALL", conditions: [{ field: "invoice.isOverdue", op: "eq", value: true }] };
+  const quoteStillSent = { match: "ALL", conditions: [{ field: "quote.status", op: "eq", value: "SENT" }] };
+  const firstReminder = "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.total}}) venceu a {{invoice.dueDate}}. Se já pagou, ignore esta mensagem. Obrigado! {{company.name}}";
+  const leadInstructions = "Leia o email e decida se é um novo pedido de trabalho ou de orçamento (e não uma newsletter, uma fatura, uma notificação ou uma resposta sobre um trabalho em curso). Encontre o nome de quem escreve e o telefone, se o indicar, e escreva um resumo de uma linha do que precisa.";
+  const leadTaskTitle = "Novo pedido por email de {{email.fromName}}: {{steps.s1.output.summary}}";
+  const definitions = {
+    overdue: {
+      triggers: [{ id: "t1", type: "date_offset", config: { entity: "invoice", offsetDays: 1, offsetHours: 0, at: "10:00", statuses: ["PENDING", "OVERDUE"] } }],
+      steps: [
+        { id: "s1", action: "whatsapp.send", input: { to: "client", text: firstReminder, attachPdf: "none", fallback: "email" }, autonomy: "APPROVE", onError: "RETRY_THEN_FAIL" },
+        { id: "s2", action: "flow.wait", input: { days: 7, hours: 0, minutes: 0, at: "10:00", businessDay: true }, onError: "RETRY_THEN_FAIL" },
+        {
+          id: "s3",
+          action: "whatsapp.send",
+          input: { to: "client", text: "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.total}}) está em atraso há {{invoice.daysOverdue}} dias. Pode indicar-nos quando conta pagar? Envio novamente a fatura. {{company.name}}", attachPdf: "invoice", fallback: "email" },
+          guard: invoiceOverdue,
+          autonomy: "APPROVE",
+          onError: "RETRY_THEN_FAIL",
+        },
+        { id: "s4", action: "flow.wait", input: { days: 7, hours: 0, minutes: 0, at: "09:00", businessDay: true }, onError: "RETRY_THEN_FAIL" },
+        { id: "s5", action: "team.task.create", input: { title: "Ligar a {{client.name}} sobre a fatura {{invoice.number}} ({{invoice.daysOverdue}} dias em atraso)", dueInDays: 0 }, guard: invoiceOverdue, onError: "RETRY_THEN_FAIL" },
+      ],
+      exitRules: [{ event: "invoice.paid" }],
+      policy,
+      voice,
+    },
+    quotes: {
+      triggers: [{ id: "t1", type: "event", config: { event: "quote.status_changed", toStatus: "SENT" } }],
+      steps: [
+        { id: "s1", action: "flow.wait", input: { days: 3, hours: 0, minutes: 0, at: "10:00", businessDay: true }, onError: "RETRY_THEN_FAIL" },
+        {
+          id: "s2",
+          action: "whatsapp.send",
+          input: { to: "client", text: "Olá {{client.firstName}}, já teve oportunidade de ver o orçamento {{quote.number}} ({{quote.total}})? Estou disponível para qualquer dúvida. {{company.name}}", attachPdf: "none", fallback: "email" },
+          guard: quoteStillSent,
+          autonomy: "APPROVE",
+          onError: "RETRY_THEN_FAIL",
+        },
+        { id: "s3", action: "flow.wait", input: { days: 4, hours: 0, minutes: 0, at: "09:00", businessDay: true }, onError: "RETRY_THEN_FAIL" },
+        { id: "s4", action: "team.task.create", input: { title: "Fazer seguimento com {{client.name}} do orçamento {{quote.number}}", dueInDays: 0 }, guard: quoteStillSent, onError: "RETRY_THEN_FAIL" },
+      ],
+      exitRules: [{ event: "quote.status_changed" }],
+      policy,
+      voice,
+    },
+    cash: {
+      triggers: [{ id: "t1", type: "schedule", config: { frequency: "weekly", time: "17:00", weekdays: [5] } }],
+      steps: [
+        { id: "s1", action: "data.summary", input: { kind: "cash_week" }, onError: "RETRY_THEN_FAIL" },
+        { id: "s2", action: "team.notify", input: { message: "{{steps.s1.output.text}}", audience: "admins" }, onError: "RETRY_THEN_FAIL" },
+      ],
+      exitRules: [],
+      policy,
+      voice,
+    },
+    leads: {
+      triggers: [{ id: "t1", type: "email.received", config: { sender: "unknown" } }],
+      conditions: { match: "ALL", conditions: [{ field: "email.automated", op: "eq", value: false }] },
+      steps: [
+        {
+          id: "s1",
+          action: "ai.task",
+          input: {
+            instructions: leadInstructions,
+            outputs: [{ name: "isRequest", type: "boolean" }, { name: "name", type: "text" }, { name: "phone", type: "text" }, { name: "summary", type: "text" }],
+            readData: false,
+            actions: [],
+          },
+          onError: "RETRY_THEN_FAIL",
+        },
+        {
+          id: "s2",
+          action: "team.task.create",
+          input: {
+            title: leadTaskTitle,
+            detail: "Nome: {{steps.s1.output.name | default: não indicado}}\nTelefone: {{steps.s1.output.phone | default: não indicado}}\nEmail: {{email.from}}\nAssunto: {{email.subject}}",
+            dueInDays: 0,
+          },
+          guard: { match: "ALL", conditions: [{ field: "steps.s1.output.isRequest", op: "eq", value: true }] },
+          onError: "RETRY_THEN_FAIL",
+        },
+      ],
+      exitRules: [],
+      policy,
+      voice,
+    },
+    bills: {
+      triggers: [{ id: "t1", type: "email.received", config: { sender: "any", hasPdf: true } }],
+      steps: [
+        {
+          id: "s1",
+          action: "ai.task",
+          input: {
+            instructions: "Decida se o email é uma fatura que a empresa tem de pagar (e não um orçamento, um recibo de algo já pago, um extrato ou publicidade). Se for, escreva uma descrição curta do que se trata, o valor a pagar com a moeda, tal como está escrito (por exemplo, 1234,50 €), e a data de vencimento. O PDF anexo não está incluído: deixe de fora o que o próprio email não diz.",
+            outputs: [{ name: "isBill", type: "boolean" }, { name: "description", type: "text" }, { name: "amount", type: "text" }, { name: "dueDate", type: "date" }],
+            readData: false,
+            actions: [],
+          },
+          onError: "RETRY_THEN_FAIL",
+        },
+        {
+          id: "s2",
+          action: "team.notify",
+          input: {
+            message: "Fatura de fornecedor de {{email.fromName}}: {{steps.s1.output.description}} · {{steps.s1.output.amount | default: valor não indicado no email}} · vencimento: {{steps.s1.output.dueDate | default: não indicado}}.",
+            audience: "admins",
+          },
+          guard: { match: "ALL", conditions: [{ field: "steps.s1.output.isBill", op: "eq", value: true }] },
+          onError: "RETRY_THEN_FAIL",
+        },
+      ],
+      exitRules: [],
+      policy,
+      voice,
+    },
+  };
+
+  const noRuns = { runs: 0, succeeded: 0, failed: 0, lastRunAt: null, consecutiveFailures: 0, approvalsInARow: 0 };
+  const agentDoc = ({ id, name, icon, kind, templateKey, templateParams, status, definition, createdAt, updatedAt = createdAt, stats = {} }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    name,
+    description: null,
+    icon,
+    kind,
+    templateKey,
+    templateParams,
+    status,
+    definition,
+    triggerTypes: [...new Set(definition.triggers.map((trigger) => trigger.type))],
+    eventTypes: [...new Set([
+      ...definition.triggers.filter((trigger) => trigger.type === "event").map((trigger) => trigger.config.event),
+      ...definition.exitRules.map((rule) => rule.event),
+    ])],
+    scheduleState: {},
+    nextFireAt: null,
+    version: 1,
+    createdBy: actorId,
+    createdAt,
+    updatedAt,
+    stats: { ...noRuns, ...stats },
+    pausedReason: null,
+  });
+
+  const lastBriefingAt = (() => {
+    const day = new Date(runAt);
+    day.setUTCHours(16, 0, 0, 0);
+    while (day.getUTCDay() !== 5 || day > runAt) day.setUTCDate(day.getUTCDate() - 1);
+    return day;
+  })();
+  const leadRunAt = later(lead.date, 60);
+  const leadRunDone = later(leadRunAt, 9);
+  const requestRunAt = later(request.date, 60);
+  const requestRunFailed = later(requestRunAt, 92);
+
+  const overdueAgent = agentDoc({
+    id: ids.agents.overdue,
+    name: "Seguimento de faturas em atraso",
+    icon: "alert",
+    kind: "WORKFLOW",
+    templateKey: "overdue_sequence",
+    templateParams: { firstAfterDays: 1, secondAfterDays: 7, taskAfterDays: 7, fallback: "email", autonomy: "APPROVE" },
+    status: "ACTIVE",
+    definition: definitions.overdue,
+    createdAt: daysAgo(12),
+    stats: { approvalsInARow: 1 },
+  });
+  const quotesAgent = agentDoc({
+    id: ids.agents.quotes,
+    name: "Seguimento de orçamentos",
+    icon: "quote",
+    kind: "WORKFLOW",
+    templateKey: "quote_follow_up",
+    templateParams: { firstAfterDays: 3, taskAfterDays: 4, fallback: "email", autonomy: "APPROVE" },
+    status: "ACTIVE",
+    definition: definitions.quotes,
+    createdAt: daysAgo(12),
+  });
+  const cashAgent = agentDoc({
+    id: ids.agents.cash,
+    name: "Resumo semanal de tesouraria",
+    icon: "chart",
+    kind: "DIGEST",
+    templateKey: "weekly_cash_briefing",
+    templateParams: { weekday: 5, time: "17:00", audience: "admins" },
+    status: "PAUSED",
+    definition: definitions.cash,
+    createdAt: later(lastBriefingAt, -3 * 86400),
+    updatedAt: new Date(Math.min(runAt.getTime(), later(lastBriefingAt, 3600).getTime())),
+    stats: { runs: 1, succeeded: 1, lastRunAt: later(lastBriefingAt, 3) },
+  });
+  const leadsAgent = agentDoc({
+    id: ids.agents.leads,
+    name: "Captar pedidos por email",
+    icon: "mail",
+    kind: "AI_WORKER",
+    templateKey: "email_lead_capture",
+    templateParams: { newContactsOnly: true },
+    status: "ACTIVE",
+    definition: definitions.leads,
+    createdAt: daysAgo(10),
+    stats: { runs: 2, succeeded: 1, failed: 1, lastRunAt: leadRunDone },
+  });
+  const billsAgent = agentDoc({
+    id: ids.agents.bills,
+    name: "Receção de faturas de fornecedores",
+    icon: "receipt",
+    kind: "AI_WORKER",
+    templateKey: "supplier_bill_intake",
+    templateParams: { pdfOnly: true, audience: "admins", createTask: false },
+    status: "DRAFT",
+    definition: definitions.bills,
+    createdAt: daysAgo(1),
+  });
+
+  // ── Runs ──
+  const stepResult = (stepId, action, status, startedAt, finishedAt, attempts, fields = {}) => ({
+    stepId,
+    action,
+    status,
+    ...(startedAt ? { startedAt: iso(startedAt) } : {}),
+    ...(finishedAt ? { finishedAt: iso(finishedAt) } : {}),
+    attempts,
+    ...fields,
+  });
+  const runDoc = ({ id, agent, trigger, subject = null, subjectLabel = null, clientId = null, dedupeKey, status, currentStep, context, steps, resumeAt = null, createdAt, updatedAt, finishedAt = null, error = null, outcome = null, promptTokens = 0, completionTokens = 0 }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    agentId: agent._id,
+    agentName: agent.name,
+    agentVersion: agent.version,
+    definition: agent.definition,
+    trigger,
+    subject,
+    subjectLabel,
+    clientId,
+    dedupeKey,
+    status,
+    currentStep,
+    context,
+    steps,
+    resumeAt,
+    depth: 0,
+    dryRun: false,
+    promptTokens,
+    completionTokens,
+    createdAt,
+    updatedAt,
+    startedAt: later(createdAt, 1),
+    finishedAt,
+    claimedAt: later(createdAt, 1),
+    error,
+    outcome,
+  });
+  const reminderInput = (client, invoice) => ({
+    to: "client",
+    text: `Olá ${clientContext(client).firstName}, a fatura ${invoice.number} (${money(invoice.totalCents)}) venceu a ${ptDate(invoice.dueDate)}. Se já pagou, ignore esta mensagem. Obrigado! ${companyName}`,
+    attachPdf: "none",
+    fallback: "email",
+  });
+  // Neither client has written on WhatsApp in the last 24 hours, so only a template could go.
+  const reminderPreview = (client, input) => ({
+    kind: "message",
+    channel: "whatsapp",
+    recipients: [client.phone.replace(/\D/g, "")],
+    body: input.text,
+    attachments: [],
+    fields: {},
+    editable: ["text"],
+    warnings: ["window_closed"],
+  });
+
+  const reminderAt = hoursAgo(20);
+  const reminder = reminderInput(hillsong, invoiceHillsong);
+  const reminderRun = runDoc({
+    id: ids.agentRuns.reminder,
+    agent: overdueAgent,
+    trigger: { type: "date_offset", triggerId: "t1", firedAt: iso(reminderAt) },
+    subject: subjectOf("invoice", invoiceHillsong._id),
+    subjectLabel: `${invoiceHillsong.number} · ${hillsong.name}`,
+    clientId: hillsong._id,
+    dedupeKey: `date:t1:${hex(invoiceHillsong._id)}:${invoiceHillsong.dueDate}`,
+    status: "AWAITING_APPROVAL",
+    currentStep: 0,
+    context: { ...baseContext(reminderAt), invoice: invoiceContext(invoiceHillsong, reminderAt), client: clientContext(hillsong) },
+    steps: [stepResult("s1", "whatsapp.send", "AWAITING_APPROVAL", later(reminderAt, 2), null, 0, { input: reminder, output: {} })],
+    createdAt: reminderAt,
+    updatedAt: later(reminderAt, 2),
+  });
+
+  // Approved two days ago; with the WhatsApp window closed and Gmail to reconnect, a task went to the team.
+  const waitingAt = daysAgo(3);
+  const approvedAt = daysAgo(2);
+  const resumeAt = weekdayAt(later(approvedAt, 7 * 86400), 9);
+  const martinsReminder = reminderInput(martins, invoiceMartins);
+  const waitingRun = runDoc({
+    id: ids.agentRuns.waiting,
+    agent: overdueAgent,
+    trigger: { type: "date_offset", triggerId: "t1", firedAt: iso(waitingAt) },
+    subject: subjectOf("invoice", invoiceMartins._id),
+    subjectLabel: `${invoiceMartins.number} · ${martins.name}`,
+    clientId: martins._id,
+    dedupeKey: `date:t1:${hex(invoiceMartins._id)}:${invoiceMartins.dueDate}`,
+    status: "WAITING",
+    currentStep: 2,
+    context: {
+      ...baseContext(approvedAt),
+      invoice: invoiceContext(invoiceMartins, approvedAt, quoteMartins.number),
+      client: clientContext(martins),
+      steps: { s1: { output: { taskId: hex(ids.agentTasks.martins) } } },
+    },
+    steps: [
+      stepResult("s1", "whatsapp.send", "DONE", later(waitingAt, 2), later(approvedAt, 1), 1, { input: martinsReminder, output: { taskId: hex(ids.agentTasks.martins) }, note: "approved" }),
+      stepResult("s2", "flow.wait", "DONE", later(approvedAt, 1), later(approvedAt, 1), 1, { input: definitions.overdue.steps[1].input, note: `wait_until:${iso(resumeAt)}` }),
+    ],
+    resumeAt,
+    createdAt: waitingAt,
+    updatedAt: later(approvedAt, 1),
+  });
+
+  // The quote was accepted while the agent waited to follow it up, so the exit rule ended the run.
+  const quoteSentAt = daysAgo(6);
+  const quoteAcceptedAt = daysAgo(4);
+  const quoteSentEvent = hex(ids.events.quoteSent);
+  const quoteRun = runDoc({
+    id: ids.agentRuns.quoteAccepted,
+    agent: quotesAgent,
+    trigger: { type: "event", triggerId: "t1", eventId: quoteSentEvent, eventType: "quote.status_changed", firedAt: iso(quoteSentAt) },
+    subject: subjectOf("quote", quoteOliveira._id),
+    subjectLabel: `${quoteOliveira.number} · ${oliveira.name}`,
+    clientId: oliveira._id,
+    dedupeKey: `event:${quoteSentEvent}:t1`,
+    status: "CANCELLED",
+    currentStep: 1,
+    context: {
+      ...baseContext(quoteSentAt),
+      event: {
+        type: "quote.status_changed",
+        actorType: "USER",
+        from: "PENDENTE",
+        to: "SENT",
+        data_number: quoteOliveira.number,
+        data_clientId: hex(oliveira._id),
+        data_status: "SENT",
+        data_totalCents: quoteOliveira.totalCents,
+        data_validUntil: quoteOliveira.validUntil,
+      },
+      quote: {
+        id: hex(quoteOliveira._id),
+        number: quoteOliveira.number,
+        status: "SENT",
+        total: money(quoteOliveira.totalCents),
+        totalCents: quoteOliveira.totalCents,
+        validUntil: quoteOliveira.validUntil,
+        daysUntilExpiry: daysBetween(dayOf(quoteSentAt), quoteOliveira.validUntil),
+        createdAt: iso(quoteOliveira.createdAt),
+        itemCount: quoteOliveira.items.length,
+      },
+      client: clientContext(oliveira),
+    },
+    steps: [
+      stepResult("s1", "flow.wait", "DONE", later(quoteSentAt, 1), later(quoteSentAt, 1), 1, {
+        input: definitions.quotes.steps[0].input,
+        note: `wait_until:${iso(weekdayAt(later(quoteSentAt, 3 * 86400), 9))}`,
+      }),
+    ],
+    createdAt: quoteSentAt,
+    updatedAt: quoteAcceptedAt,
+    finishedAt: quoteAcceptedAt,
+    outcome: "exit:quote.status_changed",
+  });
+
+  const requestEvent = hex(ids.events.request);
+  const requestRun = runDoc({
+    id: ids.agentRuns.requestFailed,
+    agent: leadsAgent,
+    trigger: { type: "email.received", triggerId: "t1", eventId: requestEvent, eventType: "email.received", firedAt: iso(requestRunAt) },
+    subject: subjectOf("email", request._id),
+    subjectLabel: request.subject,
+    dedupeKey: `event:${requestEvent}:t1`,
+    status: "FAILED",
+    currentStep: 0,
+    context: { ...baseContext(requestRunAt), event: emailEvent(request), email: emailContext(request) },
+    steps: [stepResult("s1", "ai.task", "FAILED", later(requestRunAt, 1), requestRunFailed, 3, { input: definitions.leads.steps[0].input, error: "ai_unavailable" })],
+    createdAt: requestRunAt,
+    updatedAt: requestRunFailed,
+    finishedAt: requestRunFailed,
+    error: "s1: ai_unavailable",
+    outcome: "step_failed",
+  });
+
+  const leadOutput = {
+    isRequest: true,
+    name: "Sofia Almeida",
+    phone: "912 345 678",
+    summary: "orçamento para pintar o exterior de uma moradia de dois pisos em Oeiras (cerca de 220 m²), com visita na próxima semana",
+  };
+  const leadTask = {
+    title: `Novo pedido por email de ${lead.fromName}: ${leadOutput.summary}`,
+    detail: `Nome: ${leadOutput.name}\nTelefone: ${leadOutput.phone}\nEmail: ${lead.from}\nAssunto: ${lead.subject}`,
+    dueInDays: 0,
+  };
+  const leadEvent = hex(ids.events.lead);
+  const leadRun = runDoc({
+    id: ids.agentRuns.lead,
+    agent: leadsAgent,
+    trigger: { type: "email.received", triggerId: "t1", eventId: leadEvent, eventType: "email.received", firedAt: iso(leadRunAt) },
+    subject: subjectOf("email", lead._id),
+    subjectLabel: lead.subject,
+    dedupeKey: `event:${leadEvent}:t1`,
+    status: "SUCCEEDED",
+    currentStep: 2,
+    context: {
+      ...baseContext(leadRunAt),
+      event: emailEvent(lead),
+      email: emailContext(lead),
+      steps: { s1: { output: leadOutput }, s2: { output: { taskId: hex(ids.agentTasks.lead) } } },
+    },
+    steps: [
+      stepResult("s1", "ai.task", "DONE", later(leadRunAt, 1), later(leadRunAt, 8), 1, { input: definitions.leads.steps[0].input, output: leadOutput }),
+      stepResult("s2", "team.task.create", "DONE", later(leadRunAt, 8), leadRunDone, 1, { input: leadTask, output: { taskId: hex(ids.agentTasks.lead) } }),
+    ],
+    createdAt: leadRunAt,
+    updatedAt: leadRunDone,
+    finishedAt: leadRunDone,
+    promptTokens: 1834,
+    completionTokens: 96,
+  });
+
+  // The week data.summary's cash_week reads from the invoices and payments above.
+  const briefingDay = dayOf(lastBriefingAt);
+  const weekStart = dayOf(later(new Date(`${briefingDay}T00:00:00Z`), -((lastBriefingAt.getUTCDay() + 6) % 7) * 86400));
+  const openInvoices = invoices.filter((invoice) => invoice.status === "PENDING" || invoice.status === "OVERDUE");
+  const overdueInvoices = openInvoices.filter((invoice) => invoice.dueDate < briefingDay);
+  const collected = invoices.filter((invoice) => invoice.status === "PAID" && invoice.paidAt && dayOf(invoice.paidAt) >= weekStart);
+  const payables = payments.filter((payment) => payment.status === "PENDING" && payment.dueDate <= dayOf(later(lastBriefingAt, 7 * 86400)));
+  const cashLines = [
+    `Recebido: ${money(sumCents(collected))}`,
+    `A receber: ${money(sumCents(openInvoices))}`,
+    `Em atraso: ${money(sumCents(overdueInvoices))} (${overdueInvoices.length})`,
+    `A pagar esta semana: ${money(sumCents(payables))}`,
+  ];
+  const cashSummary = { text: `A semana em números\n${cashLines.map((entry) => `• ${entry}`).join("\n")}`, count: 0, lines: cashLines };
+  const briefingDone = later(lastBriefingAt, 3);
+  const briefingRun = runDoc({
+    id: ids.agentRuns.briefing,
+    agent: cashAgent,
+    trigger: { type: "schedule", triggerId: "t1", firedAt: iso(lastBriefingAt) },
+    dedupeKey: `schedule:t1:${lastBriefingAt.getTime()}`,
+    status: "SUCCEEDED",
+    currentStep: 2,
+    context: {
+      ...baseContext(lastBriefingAt),
+      steps: { s1: { output: cashSummary }, s2: { output: { notificationId: hex(ids.notifications.briefing) } } },
+    },
+    steps: [
+      stepResult("s1", "data.summary", "DONE", later(lastBriefingAt, 1), later(lastBriefingAt, 2), 1, { input: { kind: "cash_week", limit: 15 }, output: cashSummary }),
+      stepResult("s2", "team.notify", "DONE", later(lastBriefingAt, 2), briefingDone, 1, { input: { message: cashSummary.text, audience: "admins" }, output: { notificationId: hex(ids.notifications.briefing) } }),
+    ],
+    createdAt: lastBriefingAt,
+    updatedAt: briefingDone,
+    finishedAt: briefingDone,
+  });
+
+  // ── Approvals ──
+  const approvalDoc = ({ id, run, input, preview, createdAt, decidedAt = null }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    agentId: run.agentId,
+    agentName: run.agentName,
+    runId: run._id,
+    stepId: "s1",
+    seq: 0,
+    action: "whatsapp.send",
+    input,
+    preview,
+    subject: run.subject,
+    subjectLabel: run.subjectLabel,
+    approvers: "ANY_MEMBER",
+    status: decidedAt ? "APPROVED" : "PENDING",
+    createdAt,
+    expiresAt: later(createdAt, 3 * 86400),
+    decidedAt,
+    decidedBy: decidedAt ? actorId : null,
+    decidedByName: decidedAt ? actorName : null,
+    edited: false,
+    reason: null,
+    dryRun: false,
+  });
+  const pendingApproval = approvalDoc({ id: ids.agentApprovals.pending, run: reminderRun, input: reminder, preview: reminderPreview(hillsong, reminder), createdAt: later(reminderAt, 2) });
+  const approvedApproval = approvalDoc({ id: ids.agentApprovals.approved, run: waitingRun, input: martinsReminder, preview: reminderPreview(martins, martinsReminder), createdAt: later(waitingAt, 2), decidedAt: approvedAt });
+
+  // ── Tasks ──
+  const taskDoc = ({ id, title, detail, subject, subjectLabel, clientId = null, run = null, dueAt, createdAt, completedAt = null }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    title,
+    detail,
+    subject,
+    subjectLabel,
+    clientId,
+    assigneeUserId: run || !seedUser ? null : actorId,
+    assigneeName: run || !seedUser ? null : actorName,
+    dueAt,
+    status: completedAt ? "DONE" : "OPEN",
+    agentId: run ? run.agentId : null,
+    agentName: run ? run.agentName : null,
+    runId: run ? run._id : null,
+    createdBy: run ? `agent:${hex(run.agentId)}` : actorId,
+    createdAt,
+    updatedAt: completedAt || createdAt,
+    completedAt,
+    completedBy: completedAt ? actorId : null,
+  });
+  const martinsTask = taskDoc({
+    id: ids.agentTasks.martins,
+    title: `Contactar ${martins.name}`,
+    detail: `O agente não conseguiu enviar esta mensagem por WhatsApp (a janela de 24 horas do WhatsApp está fechada). Envie-a manualmente:\n\n${martinsReminder.text}`,
+    subject: waitingRun.subject,
+    subjectLabel: waitingRun.subjectLabel,
+    clientId: martins._id,
+    run: waitingRun,
+    dueAt: later(approvedAt, 1),
+    createdAt: later(approvedAt, 1),
+  });
+  const leadFollowUp = taskDoc({
+    id: ids.agentTasks.lead,
+    title: leadTask.title,
+    detail: leadTask.detail,
+    subject: leadRun.subject,
+    subjectLabel: leadRun.subjectLabel,
+    run: leadRun,
+    dueAt: leadRunDone,
+    createdAt: leadRunDone,
+  });
+  const callTask = taskDoc({
+    id: ids.agentTasks.call,
+    title: `Ligar à ${hillsong.name} sobre a fatura ${invoiceHillsong.number}`,
+    detail: "Confirmar a data de pagamento com o gestor do escritório.",
+    subject: reminderRun.subject,
+    subjectLabel: reminderRun.subjectLabel,
+    clientId: hillsong._id,
+    dueAt: daysAgo(2),
+    createdAt: daysAgo(4),
+    completedAt: daysAgo(1),
+  });
+
+  // ── Notifications ──
+  const notificationDoc = ({ id, kind, audience = "ADMINS", params, body = null, link = "agents", subject = null, ref = null, read = false, createdAt }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    audience,
+    userId: null,
+    kind,
+    params,
+    body,
+    link,
+    subject,
+    ref,
+    readBy: read && seedUser ? [actorId] : [],
+    createdAt,
+  });
+  const agentNotifications = [
+    notificationDoc({
+      id: ids.notifications.approval,
+      kind: "agent_approval",
+      audience: "ALL",
+      params: { agent: overdueAgent.name, subject: reminderRun.subjectLabel, count: "1" },
+      subject: reminderRun.subject,
+      ref: `approval:${hex(pendingApproval._id)}`,
+      createdAt: pendingApproval.createdAt,
+    }),
+    notificationDoc({
+      id: ids.notifications.martinsTask,
+      kind: "agent_task",
+      params: { agent: overdueAgent.name, title: martinsTask.title, subject: waitingRun.subjectLabel },
+      subject: waitingRun.subject,
+      ref: `task:${hex(martinsTask._id)}`,
+      read: true,
+      createdAt: martinsTask.createdAt,
+    }),
+    notificationDoc({
+      id: ids.notifications.leadTask,
+      kind: "agent_task",
+      params: { agent: leadsAgent.name, title: leadFollowUp.title, subject: leadRun.subjectLabel },
+      subject: leadRun.subject,
+      ref: `task:${hex(leadFollowUp._id)}`,
+      createdAt: leadFollowUp.createdAt,
+    }),
+    notificationDoc({
+      id: ids.notifications.failed,
+      kind: "agent_failed",
+      params: { agent: leadsAgent.name, subject: requestRun.subjectLabel, error: requestRun.error },
+      subject: requestRun.subject,
+      ref: `run:${hex(requestRun._id)}`,
+      read: true,
+      createdAt: requestRunFailed,
+    }),
+    notificationDoc({
+      id: ids.notifications.reconnect,
+      kind: "integration_reconnect",
+      params: { integration: "GMAIL", account: gmailAccount },
+      link: "settings",
+      createdAt: gmailBrokeAt,
+    }),
+    notificationDoc({
+      id: ids.notifications.briefing,
+      kind: "agent_notice",
+      params: { agent: cashAgent.name, subject: "" },
+      body: cashSummary.text,
+      read: true,
+      createdAt: briefingDone,
+    }),
+  ];
+
+  return {
+    agents: [overdueAgent, quotesAgent, cashAgent, leadsAgent, billsAgent],
+    runs: [reminderRun, waitingRun, quoteRun, requestRun, leadRun, briefingRun],
+    approvals: [pendingApproval, approvedApproval],
+    tasks: [martinsTask, leadFollowUp, callTask],
+    notifications: agentNotifications,
+    connections: [gmailConnection],
+    emails: [quoteSent, quoteReply, request, lead, supplierBill],
+  };
+}
+
+const agentSeed = seedTenantId
+  ? buildAgentSeed()
+  : { agents: [], runs: [], approvals: [], tasks: [], notifications: [], connections: [], emails: [] };
+
 function removeSeedConflicts() {
   target.users.deleteMany({ $or: [{ _id: { $in: users.map((item) => item._id) } }, { waId: { $in: users.map((item) => item.waId) } }, { "metadata.mockSeed": "create-mocks" }] });
   target.conversations.deleteMany({ $or: [{ _id: { $in: conversations.map((item) => item._id) } }, { waId: { $in: conversations.map((item) => item.waId) } }] });
@@ -471,6 +1384,17 @@ function removeSeedConflicts() {
   target.getCollection("bookings.services").deleteMany({ _id: { $in: Object.values(ids.bookingServices) } });
   target.getCollection("bookings.availability").deleteMany({ _id: { $in: bookingAvailability.map((item) => item._id) } });
   target.getCollection("bookings.appointments").deleteMany({ _id: { $in: Object.values(ids.bookings) } });
+  // Runs, approvals and tasks the app made for the mock agents go with them, so dedupe keys can't clash.
+  const agentIds = Object.values(ids.agents);
+  target.agents.deleteMany({ _id: { $in: agentIds } });
+  target.getCollection("agent_runs").deleteMany({ $or: [{ _id: { $in: Object.values(ids.agentRuns) } }, { agentId: { $in: agentIds } }] });
+  target.getCollection("agent_approvals").deleteMany({ $or: [{ _id: { $in: Object.values(ids.agentApprovals) } }, { agentId: { $in: agentIds } }] });
+  target.getCollection("agent_tasks").deleteMany({ $or: [{ _id: { $in: Object.values(ids.agentTasks) } }, { agentId: { $in: agentIds } }] });
+  target.notifications.deleteMany({ _id: { $in: Object.values(ids.notifications) } });
+  target.getCollection("integration_connections").deleteMany({
+    $or: [{ _id: ids.gmail }, ...agentSeed.connections.map((item) => ({ tenantId: item.tenantId, provider: item.provider, accountEmail: item.accountEmail }))],
+  });
+  target.getCollection("email_messages").deleteMany({ $or: [{ _id: { $in: Object.values(ids.emails) } }, { connectionId: ids.gmail }] });
 }
 
 function insertMany(collectionName, docs) {
@@ -502,6 +1426,13 @@ insertMany("crm.sequences", [
 ].map((item) => seedTenantId ? { ...item, tenantId: seedTenantId } : item));
 insertMany("bookings.availability", bookingAvailability);
 insertMany("bookings.appointments", bookingAppointments);
+insertMany("agents", agentSeed.agents);
+insertMany("agent_runs", agentSeed.runs);
+insertMany("agent_approvals", agentSeed.approvals);
+insertMany("agent_tasks", agentSeed.tasks);
+insertMany("notifications", agentSeed.notifications);
+insertMany("integration_connections", agentSeed.connections);
+insertMany("email_messages", agentSeed.emails);
 
 const summary = {
   database: dbName,
@@ -520,6 +1451,13 @@ const summary = {
   bookable_services: target.getCollection("crm.standard_items").countDocuments({ id: { $in: ["srv-consultation", "srv-site-visit"] }, bookable: true }),
   booking_availability: target.getCollection("bookings.availability").countDocuments({ _id: { $in: bookingAvailability.map((item) => item._id) } }),
   booking_appointments: target.getCollection("bookings.appointments").countDocuments({ _id: { $in: Object.values(ids.bookings) } }),
+  agents: target.agents.countDocuments({ _id: { $in: Object.values(ids.agents) } }),
+  agent_runs: target.getCollection("agent_runs").countDocuments({ _id: { $in: Object.values(ids.agentRuns) } }),
+  agent_approvals: target.getCollection("agent_approvals").countDocuments({ _id: { $in: Object.values(ids.agentApprovals) } }),
+  agent_tasks: target.getCollection("agent_tasks").countDocuments({ _id: { $in: Object.values(ids.agentTasks) } }),
+  notifications: target.notifications.countDocuments({ _id: { $in: Object.values(ids.notifications) } }),
+  integration_connections: target.getCollection("integration_connections").countDocuments({ _id: ids.gmail }),
+  email_messages: target.getCollection("email_messages").countDocuments({ _id: { $in: Object.values(ids.emails) } }),
 };
 
 printjson(summary);

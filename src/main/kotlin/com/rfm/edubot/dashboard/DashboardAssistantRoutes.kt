@@ -1,6 +1,8 @@
 package com.rfm.edubot.dashboard
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.persistence.MongoModule
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.call
@@ -17,8 +19,14 @@ import org.bson.types.ObjectId
 internal fun Route.dashboardAssistantRoutes(
     mongo: MongoModule,
     aiClient: AiClient,
+    extension: AssistantExtension? = null,
 ) {
-    val service = DashboardAssistantService(mongo, aiClient)
+    val service = DashboardAssistantService(
+        mongo,
+        aiClient,
+        extension = extension,
+        onUsage = { tenant, usage -> TenantUsageRepository(mongo, tenant.id).recordUsage(usage.total.toLong(), UsageSources.ASSISTANT) },
+    )
 
     route("/assistant") {
         get("/threads") {
@@ -45,14 +53,14 @@ internal fun Route.dashboardAssistantRoutes(
             if (content.isBlank() || content.length > 4000) {
                 return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "message must contain 1 to 4000 characters"))
             }
-            service.reply(ctx.tenant, ctx.ownerKey, threadId, ctx.modules, content)
+            service.reply(ctx.context, ctx.ownerKey, threadId, ctx.modules, content)
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/confirm") {
             val ctx = call.assistantContext() ?: return@post
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            if (!service.confirm(ctx.tenant, ctx.ownerKey, threadId, ctx.modules, actionId)) {
+            if (!service.confirm(ctx.context, ctx.ownerKey, threadId, ctx.modules, actionId)) {
                 return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "action is no longer pending"))
             }
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
@@ -92,11 +100,18 @@ private suspend fun DashboardAssistantService.threadDetail(ctx: AssistantRouteCo
 @Serializable private data class CreateAssistantThreadRequest(val title: String = "")
 @Serializable private data class AssistantMessageRequest(val content: String)
 @Serializable private data class AssistantThreadDto(val id: String, val title: String, val createdAt: String, val updatedAt: String)
-@Serializable private data class AssistantActionDto(val id: String, val toolName: String, val arguments: JsonObject, val status: String, val result: JsonObject? = null)
+@Serializable private data class AssistantActionDto(
+    val id: String,
+    val toolName: String,
+    val arguments: JsonObject,
+    val status: String,
+    val result: JsonObject? = null,
+    val preview: JsonObject? = null,
+)
 @Serializable private data class AssistantMessageDto(val id: String, val role: String, val content: String, val createdAt: String, val action: AssistantActionDto? = null)
 @Serializable private data class AssistantThreadDetailDto(val thread: AssistantThreadDto, val messages: List<AssistantMessageDto>)
 
 private fun AssistantThread.dto() = AssistantThreadDto(id.toHexString(), title, createdAt.toString(), updatedAt.toString())
 private fun AssistantMessage.dto() = AssistantMessageDto(id.toHexString(), role, content, createdAt.toString(), action?.dto())
-private fun AssistantAction.dto() = AssistantActionDto(id, toolName, arguments, status, result)
+private fun AssistantAction.dto() = AssistantActionDto(id, toolName, arguments, status, result, preview)
 private fun String?.toObjectId(): ObjectId? = this?.let { runCatching { ObjectId(it) }.getOrNull() }

@@ -15,6 +15,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 <button class="btn btn--primary" type="button"><span class="btn__plus">+</span> New</button>
 <button class="iconbtn" type="button" aria-label="Close">×</button>
 <button class="iconbtn iconbtn--theme" id="btn-theme" type="button">🌙</button>
+<button class="iconbtn iconbtn--theme iconbtn--bell" id="btn-notifications" type="button" aria-label="Notifications, 3 unread"><svg>…</svg><span class="iconbtn__count" aria-hidden="true">3</span></button>
 <button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" aria-label="Your account">AR</button>
 ```
 
@@ -24,6 +25,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--sm` in table action cells and compact toolbars.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
+- `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
 - In the `/app` skin (`html[data-layout="minimal"]`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
@@ -89,7 +91,7 @@ Order: crumb · search · actions. Theme button is always in actions. Search hid
 
 `/app` has no layout switch: its skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label="app.searchPlaceholder"`.
 
-On `/app`, `#btn-account` (`.iconbtn--avatar`) sits between the theme button and Log out. It stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account).
+On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
 ## View hero + stats
 
@@ -437,13 +439,14 @@ Clients, suppliers and employees open as a record, not a form ([patterns.md](pat
 ```
 
 - `.record-kpis` holds up to four `.record-kpi`; `data-count` sets the columns (two below 560px). `data-tone="bad|warn|info"` colors the value. Values sit at the bottom of the cell so they line up when a label wraps.
-- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.record` as it does in `.dash`. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
+- The attention list and the client's Activity tab are `.worklist` rows (`.worklist__item` buttons). `data-tone` works inside `.dash`, `.record` and any `.worklist` (a drawer `.form`, the Agents panes), on the row or on its dot. `.worklist__group` is a group header row (Upcoming, History), styled like `tr.is-day`. `.worklist--wrap` lets titles and details wrap (keeping line breaks) instead of truncating, for rows that carry a sentence someone wrote (notifications); the dot stays on the first line. A `disabled` row keeps its look but loses the hover and pointer (e.g. Google in the account drawer when Google sign-in isn't configured).
 - `.chip-tabs` is a row of `.chip` buttons that switches sections inside one surface; `.chip__count` is the number inside a chip. A supplier or employee has one list (payments), so no tabs; its table panel carries a `.panel__head` title instead.
 - Tables reuse `.panel` + `.tbl` (compact cell padding inside the record) with the usual row markers, or `.empty` with a create button.
 - A pane with more than one block (the client's Financeiro tab: `.record-kpis`, a `.hint`, the movements table, a `.record__pane-foot`) wraps them in `.record__stack` for even spacing. `.record__pane-foot` holds one or more right-aligned buttons.
 - The create actions are a sticky `.drawer__foot` at the end of the record.
 - The card head's buttons sit in one `.actions` row (Edit, then Delete, or Restore on an archived record); below 560px the row drops under the name. Delete confirms through `.confirm`; when documents refer to the record, the confirm offers Archive instead (primary button, not danger).
-- An archived record shows a `.hint--warn` line in the card ("Archived on …") and no create actions (neither the foot nor the empty-pane buttons) until it is restored.
+- An archived record shows a `.hint--warn` line in the card ("Archived on …") and no create actions (neither the foot nor the empty-pane buttons) until it is restored. A client whose automations are paused gets the same kind of line ("Automations are paused for this client").
+- With Agents on, the client record ends its tabs with **Automations** (count = runs in progress + open tasks), drawn by `AgentsUI.renderAutomations`: a `.panel` whose head carries a ghost "Pause automations" in `.panel__tools`, an optional `.panel__filters` row (agent `.sel` + "Run now") for agents run by hand on clients, then one `.worklist` with In progress / Open tasks / Recent `.worklist__group` rows, or `.empty`. Paused, a `.notice--warn` with Resume sits above the panel and the run row goes away. Quote, invoice and booking details append the same block below `.detail__foot` (`mountRecordAutomations`), hidden while it has nothing to show.
 - The Clients, Suppliers and Employees lists carry an Active / Archived pair of `.chip` buttons in their `.panel__head` tools.
 - `.hint--warn` is a warning-colored hint, e.g. "another client already uses this phone" under the client form's phone field.
 - Form sections toggled with the `hidden` attribute (the payment form's supplier / employee fields, the catalog's booking fields) rely on `.form__row[hidden]` and `.form__grid[hidden]`; a class that sets `display` otherwise wins over the attribute and the section stays visible.
@@ -555,7 +558,7 @@ User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert
 | `.thread-banner` (`--warn`) `__text` `__meta` | Full-width notice under the header: read-only website chat, AI paused (with Resume) |
 | `.thread-log` / `.thread-day` / `.thread-skeleton` | Transcript on `--surface-2` (`--bg-deep` dark), day separators, loading bars |
 | `.thread-jump` | "New messages" pill floating over the log's bottom edge when messages arrive while scrolled up |
-| `.bubble` `--in` `--out` + `--customer` `--agent` `--ai`, `.is-pending` `.is-failed` | Message. Customer: surface + hairline, left. Agent (a person): `--accent-soft`, right. AI: surface + dashed hairline, right. Parts: `__author` `__text` (pre-wrap) `__media` `__meta` `__error` |
+| `.bubble` `--in` `--out` + `--customer` `--agent` `--ai` `--automation`, `.is-pending` `.is-failed` | Message. Customer: surface + hairline, left. Agent (a person): `--accent-soft`, right. AI: surface + dashed hairline, right. Automation (an agent from the Agents module): `--info-soft`, right, its `__author` in `--info-ink` led by a `__tag` pill ("Automation") and the agent's name; the list row's preview starts "Automation:" like "AI:". Parts: `__author` (`__tag`) `__text` (pre-wrap) `__media` `__meta` `__error` |
 | `.tick` `--pending` `--sent` `--delivered` `--read` `--failed` | Delivery state as an inline SVG with `role="img"` + `aria-label`; read = `--info`, failed = `--bad`. Only for messages with a WhatsApp id |
 | `.composer` `__form` `__input` `__actions` `__foot` `__counter` `__error` `__notice` `__notice-text` | Reply box: auto-growing textarea, Template + Send, hint and counter (`.hint`, toned with `--warn` / `--bad`); `__notice` replaces the form when WhatsApp's 24-hour window is closed or the channel is gone |
 | `.inbox-ico` | 16px line icon (inline SVG, `currentColor`) inside buttons |
@@ -741,6 +744,40 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 </div>
 ```
 
+## Email (Google)
+
+Gmail shows up in four places, all built from existing parts ([patterns.md](patterns.md#email-google)); strings live under `app.integrations.google.*`.
+
+- **Settings → Channels**: one "Email (Google)" row per connected account in the channels `.tbl`: the account in `.mono`, the status as text when it can send, `.pill--warn` when it needs reconnecting, `.pill--bad` when access was removed, and `.pill--info` Default once there are two accounts. While the platform lets companies read inboxes, a connected account that automations read gets `.pill--accent` "Reads the inbox" after its status, or `.pill--warn` "Inbox paused" once a check failed. Actions: Reconnect (`.btn--primary`, admins), Manage (admins and operators), and a ghost "Add account" on the last row. With no account the row offers Connect, or a muted "a company admin connects it". The row is hidden while the platform has no Google OAuth client.
+- **Account drawer** (Settings): a `.notice--warn` with Reconnect while the account can't send (a test email Google refuses reopens the drawer in that state), a `dl.dash-facts` (account, connected by, sent today of the daily limit), the Inbox panel below, then the form: sender name, reply-to, signature (`.txt`) and, with several accounts, a `.form__check` "Send from this account by default". `.actions`: Save, Send a test email (ghost), Disconnect (ghost; the confirm carries `.btn--danger`).
+- **Send by email** (quote and invoice `.detail__foot`): a drawer form with To, Cc, Subject, Message (`.txt`), a `.form__check` for the PDF (its file name in the label) and a `.hint` naming the sending account (and, for a pending quote, that sending marks it sent). A client without an email gets a `.hint--warn` under To. When nothing can send, a `.notice--warn` names the sending account that needs reconnecting (or says none is connected yet), with Open Settings, and Send stays disabled.
+- **Client record → Emails**: a `.worklist` of messages, newest first (dot `info` sent, `accent` received; title: subject; detail: recipient · attachments · snippet; when: relative date), or `.empty`. A row opens the message drawer, titled with the subject: `.detail__head` (sender name + direction pill), `dl.dash-facts` (from address, to, cc, date, sent by), the text in `.email-body` (or a `.hint` once the retention period dropped it) and "Open the quote / invoice" in `.detail__foot`.
+
+```html
+<div class="email-body">Olá Ana,
+
+Segue em anexo o orçamento ORC-001.</div>
+```
+
+`.email-body` is an email's plain text in the reading font with its line breaks kept (`--surface-2`, `--line-soft`, scrolls past 420px). Escape the text. Not for script output (`.log-tail`) or chat (`.bubble`).
+
+A `.notice` placed straight in a drawer `.form` (like in `.record` and `.builder`) drops its bottom margin; the form's gap spaces it.
+
+The account drawer's **Inbox panel** shows only while the platform lets companies read inboxes:
+
+```html
+<section class="panel">
+  <header class="panel__head"><h2 class="panel__title">Inbox</h2><span class="pill pill--ok">In use</span></header>
+  <div class="panel__body form">
+    <p class="view__desc">Automations read this inbox. Last checked 4 min. ago.</p>
+    <p class="hint">Automations read the new emails that arrive here…</p>
+    <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-ga-inbox="off">Stop using it</button></div>
+  </div>
+</section>
+```
+
+The head's pill is the state: plain Off, `.pill--ok` In use, `.pill--warn` Paused (the account needs reconnecting, or the last check failed). The status line (`.view__desc`: off, first check still to come, or last checked as a relative time) gives way to a `.hint--warn` from `inbox.errors.*` when a check failed. Then a `.hint` on what automations do with the mail and how long it's kept, and `.actions`: "Use in automations" (`.btn--primary`, admins, while the account is connected), "Allow reading" (`.btn--primary`, admins, once Google no longer lets the app read) and "Stop using it" (ghost, anyone who manages the account). An operator sees a muted "a company admin turns this on" instead of the first. These buttons act at once, not on Save, so this isn't a `.form__check`: turning reading on may need Google's consent, and that popup has to open straight from the click.
+
 ## Log tail
 
 ```html
@@ -749,6 +786,32 @@ open no-such-compose.yml: no such file or directory</pre>
 ```
 
 The end of a script's output (the backoffice's failed backup), monospace on `--surface-2`, wraps long lines and scrolls past 280px. Escape the text. Not for anything a user types.
+
+## Agents
+
+Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automations)). Script: `app/agents.js`. Tokens only, emoji-free.
+
+| Block | Role |
+|---|---|
+| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume. Not a toast, not a modal |
+| `.agent-icon` (`--lg`) | 32px (44px) line icon on the accent tint; the SVG comes from the agent's `icon` key |
+| `.agent-cell` (`__text` `__name` `__sub`) | Agents table first column: icon, name, and a `.recipe` under it |
+| `.recipe` > `.recipe__part` (`--when`) + `.recipe__arrow` | "When → step → step" chips; the trigger part is tinted; long parts truncate |
+| `ol.flow` > `li.flow__step` (`--trigger`) + `li.flow__connector` | Read-only steps (agent overview, run, test run): `.flow__index` (number, or the bolt for the trigger) · `.flow__main` (`__eyebrow` `__title` `__detail` `__detail--bad`) · `.flow__side` (pills). `data-state="done\|failed\|waiting\|skipped"` tints a run step's index |
+| `.flow--edit` > `.flow__card` (`__card-head` `__card-summary` `__card-tools`) | Builder cards, one per trigger or step: the type/action select in the head, the schema-driven `.form__grid` below, a `div.flow__connector` between steps |
+| `.builder` > `section.panel.builder__section` · `.sel--inline` | Builder drawer sections (When, Only if, Steps, Stop rules, Rules, Voice); "Add …" selects are inline, not full width |
+| `.var-tools` (`__select`) · `.var-chip` (`--static`) | Suggested `{{variables}}` as mono chips under a template field, plus a grouped select; `--static` shows a variable inside read-only text |
+| `.conds` > `.cond-row` (`--exit`) | Condition rows: field · operator · value · remove `.iconbtn`; with two or more, a `.sel--inline` match select sits on top |
+| `.chip-picks` | Multi-select chips (weekdays, statuses, an AI task's actions); picked = `.chip.is-on` + `aria-pressed`. "Describe it" reuses the row for its examples, which fill the textarea instead of staying picked |
+| `.ai-outputs` > `.ai-output` (`__desc` `__options`) | An AI task's fields to return, one row each: mono name, type select, what it should contain, remove `.iconbtn` (not on the last row), and a full-width options input under a choice. On narrow screens the description drops to its own line. A ghost "Add a field" button ends the list |
+| `.persona-agents` | Persona page panel: a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
+| `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
+| `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing. `--blank` cards ("Describe it", "Start from scratch") come first and have no recipe |
+| `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
+
+Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list. An AI task's fields are named by the user: their labels come from `app.agents.outputs.<name>` when there is one (summary, intent…), else the name as typed. Field names are normalized on change (accents dropped, anything else becomes `_`) so they stay usable as `{{steps.<id>.output.<name>}}`.
+
+A `dl.dash-facts` placed straight in a `.panel__body` drops its top margin and its first row's rule, so no second line runs just under the panel head's border (Agents Settings, the backoffice agents drawer).
 
 ## Utilities
 

@@ -12,6 +12,22 @@ import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
 import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
+import com.rfm.edubot.agents.AgentsModule
+import com.rfm.edubot.agents.actions.AgentActions
+import com.rfm.edubot.agents.agentAdminRoutes
+import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.agents.ai.AgentAssistant
+import com.rfm.edubot.notifications.NotificationRepository
+import com.rfm.edubot.notifications.notificationRoutes
+import com.rfm.edubot.agents.registry.AgentRegistry
+import com.rfm.edubot.agents.registry.TriggerTypes
+import com.rfm.edubot.agents.runtime.AgentRuntime
+import com.rfm.edubot.agents.runtime.AgentRuntimeConfig
+import com.rfm.edubot.agents.runtime.AgentServices
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
+import com.rfm.edubot.agents.store.AgentSettingsRepository
+import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
@@ -25,6 +41,17 @@ import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorContext
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.email.EmailMessageRepository
+import com.rfm.edubot.integrations.email.EmailRetention
+import com.rfm.edubot.integrations.email.EmailService
+import com.rfm.edubot.integrations.email.emailRoutes
+import com.rfm.edubot.integrations.google.GmailSyncWorker
+import com.rfm.edubot.integrations.google.GoogleIntegration
+import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
@@ -49,6 +76,7 @@ import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.TenantSeeder
+import com.rfm.edubot.shared.jobs.SchedulerLease
 import com.rfm.edubot.webhook.webhookRoutes
 import com.rfm.edubot.whatsapp.signup.WhatsAppSignupClient
 import com.rfm.edubot.whatsapp.signup.whatsAppSignupRoutes
@@ -64,10 +92,13 @@ import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration.Companion.minutes
+import kotlin.time.Duration.Companion.seconds
 
 fun main(args: Array<String>) {
     val baseConfig = AppConfig.load()
@@ -160,6 +191,64 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
     )
 
+    val tokenCipher = TokenCipher.fromConfig(appConfig.integrations.encryptionKey)
+    if (tokenCipher == null && appConfig.integrations.encryptionKey.isNotBlank()) {
+        LoggerFactory.getLogger("Application").error("INTEGRATIONS_ENCRYPTION_KEY must be base64 32-byte keys separated by commas; Google accounts can't be connected")
+    } else if (tokenCipher == null && appConfig.google.oauthEnabled) {
+        LoggerFactory.getLogger("Application").warn("Google OAuth is set but INTEGRATIONS_ENCRYPTION_KEY isn't; Google accounts can't be connected")
+    }
+    val google = GoogleIntegration.create(
+        mongo = mongoModule,
+        configProvider = { runtimeConfig.get().google },
+        cipher = tokenCipher,
+        httpClient = whatsappHttpClient,
+        notifications = NotificationRepository(mongoModule),
+    )
+    val emailService = EmailService(
+        google = google,
+        messages = EmailMessageRepository(mongoModule),
+        outboundLog = OutboundLogRepository(mongoModule),
+        events = DomainEventLog(mongoModule),
+        agentSettings = AgentSettingsRepository(mongoModule),
+        runs = AgentRunRepository(mongoModule),
+        approvals = AgentApprovalRepository(mongoModule),
+    )
+    EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
+        .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
+    if (appConfig.google.inboxEnabled) {
+        GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
+            .job(SchedulerLease(mongoModule), appConfig.google.syncSeconds.seconds)
+            .start(pipelineScope, initialDelay = 30.seconds)
+    }
+
+    val agentServices = AgentServices(
+        mongo = mongoModule,
+        aiClient = aiClient,
+        outbound = { tenant, platform -> runCatching { pipelineFactory.responderFor(tenant, platform) }.getOrNull() },
+        whatsApp = { pipelineFactory.whatsAppFor(it) },
+        instagramSocial = instagramSocial,
+        email = emailService,
+        pdfStoragePath = { runtimeConfig.get().pdfStoragePath },
+    )
+    val agentsModule = AgentsModule(
+        mongoModule,
+        AgentRegistry(AgentActions.builtIn, TriggerTypes.all),
+        agentServices,
+        emailAvailability = { emailService.availability(it) },
+    )
+    val agentRuntime = AgentRuntime(
+        module = agentsModule,
+        tenants = { id -> tenantRepository.findById(id) },
+        scope = pipelineScope,
+        lease = SchedulerLease(mongoModule),
+        config = AgentRuntimeConfig(
+            tick = appConfig.agents.tickSeconds.seconds,
+            lanes = appConfig.agents.lanes,
+            maxConcurrentPerCompany = appConfig.agents.maxConcurrentRunsPerCompany,
+        ),
+    )
+    agentRuntime.start()
+
     val conversationLanes = ConversationLanes(pipelineScope)
     pipelineScope.launch {
         for (inbound in messageQueue.receiveChannel()) {
@@ -177,7 +266,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             val pipeline = pipelineFactory.getOrCreate(tenant)
             conversationLanes.submit("${tenant.id}:${inbound.platform}:${inbound.waId}") {
                 try {
-                    pipeline.handle(inbound, responder)
+                    withContext(ActorContext(Actor.bot(inbound.platform.name))) { pipeline.handle(inbound, responder) }
                 } catch (e: Exception) {
                     LoggerFactory.getLogger("PipelineConsumer").error(
                         "Pipeline failed for tenant={} waId={}: {}",
@@ -200,6 +289,10 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         } catch (e: Exception) {
             log.error("Could not re-queue unfinished inbound messages: {}", e.message, e)
         }
+    }
+    // Background work stops before Mongo closes; unfinished messages and agent runs resume at the next boot.
+    monitor.subscribe(ApplicationStopping) {
+        pipelineScope.cancel()
     }
     monitor.subscribe(ApplicationStopped) {
         LoggerFactory.getLogger("Application").info("Shutting down...")
@@ -259,6 +352,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             runtimeConfig = runtimeConfig,
             channelBindingService = channelBindingService,
             instagramSocial = instagramSocial,
+            assistantExtension = AgentAssistant(agentsModule, agentRuntime),
         )
         dashboardImpersonationRoute(
             tenantRepository = tenantRepository,
@@ -274,6 +368,9 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,
         )
+        agentRoutes(agentsModule, agentRuntime, tenantRepository)
+        agentAdminRoutes(agentsModule, agentRuntime, tenantRepository)
+        notificationRoutes(agentServices.notifications)
         adminRoutes()
         tenantAdminRoutes(
             mongo = mongoModule,
@@ -289,6 +386,14 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             bindingService = channelBindingService,
             tenantRepository = tenantRepository,
         )
+        integrationRoutes(
+            google = google,
+            email = emailService,
+            oauthState = oauthState,
+            tenants = tenantRepository,
+            users = dashboardUserRepository,
+        )
+        emailRoutes(emailService, mongoModule)
         whatsAppSignupRoutes(
             configProvider = { runtimeConfig.get().whatsapp },
             signupClient = whatsAppSignupClient,

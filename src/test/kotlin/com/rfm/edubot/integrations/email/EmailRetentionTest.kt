@@ -1,0 +1,148 @@
+package com.rfm.edubot.integrations.email
+
+import com.rfm.edubot.agents.model.ActionPreview
+import com.rfm.edubot.agents.model.AgentApproval
+import com.rfm.edubot.agents.model.AgentDefinition
+import com.rfm.edubot.agents.model.AgentRun
+import com.rfm.edubot.agents.model.ApprovalStatus
+import com.rfm.edubot.agents.model.RunStatus
+import com.rfm.edubot.agents.model.RunTrigger
+import com.rfm.edubot.agents.model.StepResult
+import com.rfm.edubot.agents.model.StepStatus
+import com.rfm.edubot.agents.store.AgentApprovalRepository
+import com.rfm.edubot.agents.store.AgentRunRepository
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.testing.TestMongo
+import kotlinx.coroutines.runBlocking
+import kotlinx.datetime.Instant
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
+import org.bson.types.ObjectId
+import org.junit.jupiter.api.AfterAll
+import org.junit.jupiter.api.BeforeAll
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
+import kotlin.time.Duration.Companion.hours
+
+class EmailRetentionTest {
+
+    companion object {
+        private lateinit var mongo: MongoModule
+
+        @BeforeAll
+        @JvmStatic
+        fun setUp() {
+            mongo = TestMongo.module("email_retention")
+        }
+
+        @AfterAll
+        @JvmStatic
+        fun tearDown() {
+            mongo.shutdown()
+        }
+    }
+
+    private var now = Instant.parse("2026-09-30T12:00:00Z")
+    private val clock = { now }
+    private val messages = EmailMessageRepository(mongo, clock)
+    private val runs = AgentRunRepository(mongo, clock)
+    private val approvals = AgentApprovalRepository(mongo, clock)
+    private val retention = EmailRetention(messages, runs, approvals, clock = clock)
+    private val tenantId = ObjectId()
+    private val clientId = ObjectId()
+
+    private fun email(date: Instant, body: String? = "Olá Maria,\n\nSegue em anexo o orçamento ORC-001.") = EmailMessage(
+        tenantId = tenantId,
+        connectionId = ObjectId(),
+        providerMessageId = ObjectId().toHexString(),
+        direction = EmailDirection.OUTBOUND,
+        from = "obras@example.pt",
+        to = listOf("maria@example.pt"),
+        subject = "Orçamento ORC-001",
+        snippet = EmailMessage.snippetOf(body ?: "Obrigada! Podem começar na próxima semana?"),
+        bodyText = body,
+        attachments = listOf(EmailAttachmentInfo("ORC-001.pdf", "application/pdf", 1200)),
+        clientId = clientId,
+        record = SubjectRef(SubjectTypes.QUOTE, ObjectId().toHexString()),
+        date = date,
+        createdAt = date,
+    )
+
+    @Test
+    fun `an email's text goes after 90 days while its subject, recipients and attachment names stay`(): Unit = runBlocking {
+        val old = messages.insert(email(now - 91.days))
+        val recent = messages.insert(email(now - 89.days))
+        // Kept without a body, its snippet is still the start of the text.
+        val bodiless = messages.insert(email(now - 120.days, body = null))
+
+        assertEquals(2, retention.purge())
+
+        val purged = messages.find(tenantId, old.id)!!
+        assertNull(purged.bodyText)
+        assertEquals("", purged.snippet)
+        assertEquals(now, purged.bodyPurgedAt)
+        assertEquals(old.subject, purged.subject)
+        assertEquals(old.to, purged.to)
+        assertEquals(listOf("ORC-001.pdf"), purged.attachments.map { it.filename })
+        assertEquals(old.record, purged.record)
+        assertEquals("", messages.find(tenantId, bodiless.id)!!.snippet)
+
+        val kept = messages.find(tenantId, recent.id)!!
+        assertEquals(recent.bodyText, kept.bodyText)
+        assertEquals(recent.snippet, kept.snippet)
+        assertNull(kept.bodyPurgedAt)
+
+        val firstPurge = now
+        now += 1.hours
+        assertEquals(0, retention.purge())
+        assertEquals(firstPurge, messages.find(tenantId, old.id)!!.bodyPurgedAt)
+
+        now += 2.days
+        assertEquals(1, retention.purge())
+        assertNull(messages.find(tenantId, recent.id)!!.bodyText)
+    }
+
+    @Test
+    fun `what automations made of an email's text goes with it`(): Unit = runBlocking {
+        val old = messages.insert(email(now - 91.days).copy(direction = EmailDirection.INBOUND, from = "maria@example.pt", to = listOf("obras@example.pt")))
+        val recent = messages.insert(email(now - 10.days).copy(direction = EmailDirection.INBOUND, from = "maria@example.pt", to = listOf("obras@example.pt")))
+        fun run(email: EmailMessage) = AgentRun(
+            tenantId = tenantId, agentId = ObjectId(), agentName = "Pedidos", agentVersion = 1, definition = AgentDefinition(),
+            trigger = RunTrigger(type = "email_received", firedAt = email.date), subject = SubjectRef.of(SubjectTypes.EMAIL, email.id), subjectLabel = email.subject,
+            status = RunStatus.SUCCEEDED, dedupeKey = "event:${email.id}:e1", createdAt = email.date, updatedAt = email.date,
+            steps = listOf(StepResult("s1", "ai.task", StepStatus.DONE, input = buildJsonObject { put("instructions", "Resume: ${email.bodyText}") })),
+        )
+        fun approval(email: EmailMessage) = AgentApproval(
+            tenantId = tenantId, agentId = ObjectId(), agentName = "Pedidos", runId = ObjectId(), stepId = "s2", action = "email.reply",
+            input = buildJsonObject { put("text", "Sobre o ORC-001…") }, preview = ActionPreview(kind = "message", body = "Sobre o ORC-001…"),
+            subject = SubjectRef.of(SubjectTypes.EMAIL, email.id), status = ApprovalStatus.APPROVED, createdAt = email.date, expiresAt = email.date + 3.days,
+        )
+        val oldRun = runs.insertIfAbsent(run(old))!!
+        val recentRun = runs.insertIfAbsent(run(recent))!!
+        val oldApproval = approvals.insert(approval(old))
+        val recentApproval = approvals.insert(approval(recent))
+
+        assertEquals(1, retention.purge())
+
+        assertNull(runs.load(oldRun.id)!!.steps.single().input)
+        assertEquals("Orçamento ORC-001", runs.load(oldRun.id)!!.subjectLabel)
+        assertEquals(recentRun.steps, runs.load(recentRun.id)!!.steps)
+        assertTrue(approvals.findById(tenantId, oldApproval.id)!!.input.isEmpty())
+        assertEquals(recentApproval.input, approvals.findById(tenantId, recentApproval.id)!!.input)
+    }
+
+    @Test
+    fun `the retention job purges on its tick`(): Unit = runBlocking {
+        val old = messages.insert(email(now - 200.days))
+
+        assertTrue(retention.job(lease = null).runOnce())
+
+        assertNull(messages.find(tenantId, old.id)!!.bodyText)
+        assertEquals(1, messages.forClient(tenantId, clientId).count { it.bodyPurgedAt != null })
+    }
+}

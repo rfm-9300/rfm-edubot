@@ -30,6 +30,27 @@ class OAuthStateTest {
     }
 
     @Test
+    fun `mint round-trips the purpose, company and user of a google connect`() {
+        val state = OAuthState(secret)
+        val verified = state.verify(
+            state.mint("acme-bot", origin = OAuthState.ORIGIN_DASHBOARD, purpose = OAuthState.PURPOSE_GOOGLE, tenantId = "t1", userId = "u1"),
+        )
+        assertEquals(OAuthState.PURPOSE_GOOGLE, verified?.purpose)
+        assertEquals("t1", verified?.tenantId)
+        assertEquals("u1", verified?.userId)
+        assertEquals(OAuthState.ORIGIN_DASHBOARD, verified?.origin)
+    }
+
+    @Test
+    fun `an instagram state has no purpose`() {
+        val state = OAuthState(secret)
+        val verified = state.verify(state.mint("acme-bot"))
+        assertNull(verified?.purpose)
+        assertNull(verified?.tenantId)
+        assertNull(verified?.userId)
+    }
+
+    @Test
     fun `tampered payload is rejected`() {
         val state = OAuthState(secret)
         val token = state.mint("acme-bot")

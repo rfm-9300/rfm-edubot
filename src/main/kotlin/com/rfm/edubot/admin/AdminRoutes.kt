@@ -217,6 +217,7 @@ internal data class ClientDto(
     val createdAt: String,
     val updatedAt: String? = null,
     val archivedAt: String? = null,
+    val automationPaused: Boolean = false,
 )
 
 @Serializable
@@ -377,6 +378,7 @@ internal fun Client.dto() = ClientDto(
     createdAt = createdAt.toString(),
     updatedAt = updatedAt.toString(),
     archivedAt = archivedAt?.toString(),
+    automationPaused = automationPaused,
 )
 
 internal fun Quote.dto(client: Client?) = QuoteDto(

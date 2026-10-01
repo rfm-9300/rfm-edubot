@@ -8,8 +8,13 @@ import com.auth0.jwt.interfaces.JWTVerifier
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardUserRepository
+import com.rfm.edubot.dashboard.actor
 import com.rfm.edubot.dashboard.attachDashboardContext
 import com.rfm.edubot.dashboard.resolveDashboardContext
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorType
+import com.rfm.edubot.events.installActorContext
+import com.rfm.edubot.events.rememberRequestActor
 import com.rfm.edubot.tenant.TenantRepository
 import io.ktor.server.application.Application
 import io.ktor.server.application.call
@@ -35,6 +40,7 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantReposi
         override fun verify(token: String): DecodedJWT = verifierFor(runtime.get().admin).verify(token)
         override fun verify(jwt: DecodedJWT): DecodedJWT = verifierFor(runtime.get().admin).verify(jwt)
     }
+    installActorContext()
     install(Authentication) {
         jwt("admin-jwt") {
             verifier(dynamicVerifier)
@@ -44,7 +50,10 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantReposi
                 when {
                     credential.payload.subject != "admin" -> null
                     email != null && email.lowercase() !in runtime.get().admin.googleSignIn.allowedEmails -> null
-                    else -> JWTPrincipal(credential.payload)
+                    else -> {
+                        rememberRequestActor(Actor(ActorType.OPERATOR, name = email ?: "admin"))
+                        JWTPrincipal(credential.payload)
+                    }
                 }
             }
         }
@@ -53,6 +62,7 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantReposi
             validate { credential ->
                 val context = resolveDashboardContext(credential.payload, tenants, dashboardUsers) ?: return@validate null
                 attachDashboardContext(context)
+                rememberRequestActor(context.actor())
                 JWTPrincipal(credential.payload)
             }
         }
