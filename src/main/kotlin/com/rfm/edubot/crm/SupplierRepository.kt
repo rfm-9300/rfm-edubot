@@ -30,6 +30,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
                 Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("type", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
         val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
@@ -42,22 +43,28 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Supplier? = collection.setArchived(tenantId, id, archived)?.toSupplier()
 
-    suspend fun update(id: ObjectId, name: String, phone: String, address: String?): Supplier? {
+    /**
+     * [address] is replaced as given (null clears it). [type] is only written when not null, so callers
+     * that don't send it keep the stored value; a blank string clears it.
+     */
+    suspend fun update(id: ObjectId, name: String, phone: String, address: String?, type: String? = null): Supplier? {
         val now = SystemClock.now()
+        val updates = mutableListOf(
+            Updates.set("name", name.trim()),
+            Updates.set("phone", phone.trim()),
+            Updates.set("address", address.cleaned()),
+            Updates.set("updatedAt", now.toDate()),
+        )
+        type?.let { updates += Updates.set("type", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
-            Updates.combine(
-                Updates.set("name", name.trim()),
-                Updates.set("phone", phone.trim()),
-                Updates.set("address", address?.trim()?.takeIf { it.isNotBlank() }),
-                Updates.set("updatedAt", now.toDate()),
-            ),
+            Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
         return doc?.toSupplier()
     }
 
-    suspend fun create(name: String, phone: String, address: String? = null): Supplier {
+    suspend fun create(name: String, phone: String, address: String? = null, type: String? = null): Supplier {
         val now = SystemClock.now()
         val number = "FOR-${sequences.next("supplier_number").toString().padStart(3, '0')}"
         val supplier = Supplier(
@@ -65,7 +72,8 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             number = number,
             name = name.trim(),
             phone = phone.trim(),
-            address = address?.trim()?.takeIf { it.isNotBlank() },
+            address = address.cleaned(),
+            type = type.cleaned(),
             createdAt = now,
             updatedAt = now,
         )
@@ -80,10 +88,13 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         name = getString("name"),
         phone = getString("phone") ?: "",
         address = getString("address"),
+        type = getString("type"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
     )
+
+    private fun String?.cleaned(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 
     private fun Supplier.toDocument() = Document("_id", id)
         .append("tenantId", tenantId)
@@ -91,6 +102,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         .append("name", name)
         .append("phone", phone)
         .append("address", address)
+        .append("type", type)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
 

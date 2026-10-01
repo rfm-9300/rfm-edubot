@@ -28,6 +28,7 @@ import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.tenant.model.Platform
+import com.rfm.edubot.whatsapp.WhatsAppApiException
 import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
@@ -282,6 +283,72 @@ class MessagePipelineTest {
         coVerify(exactly = 0) { responder.sendText(any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markFailed("evt-1") }
         coVerify(exactly = 0) { deduplicationService.markProcessed(any()) }
+    }
+
+    @Test
+    fun `a reply Meta refuses is stored as failed with Meta's error, and the event is marked failed`() = runBlocking {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        coEvery { conversations.findByWaId(any(), any()) } returns null
+        val convo = conversation(u.id)
+        coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
+        every { rateLimiter.tryAcquire(any()) } returns RateDecision.Accept
+        coEvery { aiClient.complete(any(), any(), any(), any()) } returns
+            AiResponse.Text(content = "Olá! Como posso ajudar?", usage = null, responseId = "resp-1")
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insert(capture(stored)) } answers { firstArg() }
+        coEvery { messages.markSendFailed(any(), any(), any()) } returns null
+        coEvery { responder.sendText(u.waId, "Olá! Como posso ajudar?") } throws WhatsAppApiException(
+            httpStatus = 400,
+            code = 131037,
+            subcode = null,
+            title = "(#131037) WhatsApp provided number needs display name approval before message can be sent.",
+            details = "WhatsApp provided number needs display name approval before message can be sent.",
+            traceId = "trace-1",
+        )
+
+        pipeline.handle(inbound("oi"), responder)
+
+        coVerify(exactly = 1) {
+            messages.markSendFailed(stored.single().id, 131037, "WhatsApp provided number needs display name approval before message can be sent.")
+        }
+        coVerify(exactly = 1) { deduplicationService.markFailed("evt-1") }
+        coVerify(exactly = 0) { deduplicationService.markProcessed(any()) }
+    }
+
+    @Test
+    fun `a fixed reply that can't be sent is stored as failed too`() = runBlocking {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        coEvery { conversations.findByWaId(any(), any()) } returns null
+        val convo = conversation(u.id)
+        coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
+        every { rateLimiter.tryAcquire(any()) } returns RateDecision.Accept
+        val tenantUsage = mockk<TenantUsageRepository>()
+        coEvery { tenantUsage.tokensUsedThisMonth() } returns 2_000_000L
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insert(capture(stored)) } answers { firstArg() }
+        coEvery { messages.markSendFailed(any(), any(), any()) } returns null
+        coEvery { responder.sendText(any(), any()) } throws RuntimeException("Connection reset")
+
+        MessagePipeline(
+            users = users,
+            conversations = conversations,
+            messages = messages,
+            rateLimiter = rateLimiter,
+            aiClient = aiClient,
+            deduplicationService = deduplicationService,
+            crmTools = crmTools,
+            clientRepository = clientRepository,
+            quoteRepository = quoteRepository,
+            invoiceRepository = invoiceRepository,
+            pdfGenerator = pdfGenerator,
+            tenantUsage = tenantUsage,
+            monthlyTokenBudget = 2_000_000L,
+        ).handle(inbound("oi"), responder)
+
+        coVerify(exactly = 1) { messages.markSendFailed(stored.single().id, null, null) }
+        coVerify(exactly = 1) { deduplicationService.markFailed("evt-1") }
     }
 
     @Test

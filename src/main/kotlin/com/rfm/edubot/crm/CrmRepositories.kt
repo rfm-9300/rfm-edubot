@@ -27,6 +27,7 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
+import kotlin.math.roundToLong
 
 class ClientRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.clients")
@@ -54,6 +55,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
                     Filters.regex("name", contains, "i"),
                     Filters.regex("phone", contains, "i"),
                     Filters.regex("address", contains, "i"),
+                    Filters.regex("postalCode", contains, "i"),
+                    Filters.regex("city", contains, "i"),
+                    Filters.regex("contactPerson", contains, "i"),
                     Filters.regex("email", contains, "i"),
                     Filters.regex("taxId", contains, "i"),
                     phoneDigits,
@@ -109,8 +113,8 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
     }
 
     /**
-     * [address] is replaced as given (null clears it). [email], [taxId] and [notes] are only written when
-     * not null, so callers that don't send them keep the stored values; a blank string clears them.
+     * [address] is replaced as given (null clears it). The other details are only written when not null,
+     * so callers that don't send them keep the stored values; a blank string clears them.
      */
     suspend fun update(
         id: ObjectId,
@@ -120,6 +124,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email: String? = null,
         taxId: String? = null,
         notes: String? = null,
+        postalCode: String? = null,
+        city: String? = null,
+        contactPerson: String? = null,
     ): Client? {
         val now = SystemClock.now()
         val updates = mutableListOf(
@@ -131,6 +138,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email?.let { updates += Updates.set("email", it.cleaned()) }
         taxId?.let { updates += Updates.set("taxId", it.cleaned()) }
         notes?.let { updates += Updates.set("notes", it.cleaned()) }
+        postalCode?.let { updates += Updates.set("postalCode", it.cleaned()) }
+        city?.let { updates += Updates.set("city", it.cleaned()) }
+        contactPerson?.let { updates += Updates.set("contactPerson", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(updates),
@@ -148,6 +158,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email: String? = null,
         taxId: String? = null,
         notes: String? = null,
+        postalCode: String? = null,
+        city: String? = null,
+        contactPerson: String? = null,
     ): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"
@@ -157,6 +170,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             name = name.trim(),
             phone = phone.trim(),
             address = address.cleaned(),
+            postalCode = postalCode.cleaned(),
+            city = city.cleaned(),
+            contactPerson = contactPerson.cleaned(),
             email = email.cleaned(),
             taxId = taxId.cleaned(),
             notes = notes.cleaned(),
@@ -177,6 +193,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         name = getString("name"),
         phone = getString("phone"),
         address = getString("address"),
+        postalCode = getString("postalCode"),
+        city = getString("city"),
+        contactPerson = getString("contactPerson"),
         email = getString("email"),
         taxId = getString("taxId"),
         notes = getString("notes"),
@@ -192,6 +211,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         .append("name", name)
         .append("phone", phone)
         .append("address", address)
+        .append("postalCode", postalCode)
+        .append("city", city)
+        .append("contactPerson", contactPerson)
         .append("email", email)
         .append("taxId", taxId)
         .append("notes", notes)
@@ -472,47 +494,64 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
 class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")
+    private val sequences = SequenceRepository(mongoModule, tenantId)
 
     suspend fun search(query: String? = null, type: String? = null): List<StandardItem> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         type?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { filters.add(Filters.eq("type", it)) }
         query?.trim()?.takeIf { it.isNotBlank() }?.let { term ->
+            val contains = ".*${Regex.escape(term)}.*"
             filters.add(
                 Filters.or(
-                    Filters.regex("description", ".*${Regex.escape(term)}.*", "i"),
-                    Filters.regex("category", ".*${Regex.escape(term)}.*", "i"),
-                    Filters.regex("id", ".*${Regex.escape(term)}.*", "i"),
+                    Filters.regex("code", contains, "i"),
+                    Filters.regex("title", contains, "i"),
+                    Filters.regex("description", contains, "i"),
+                    Filters.regex("category", contains, "i"),
+                    Filters.regex("id", contains, "i"),
                 )
             )
         }
         val filter = Filters.and(filters)
-        return collection.find(filter).sort(Document("type", 1).append("category", 1).append("description", 1)).toList().map { it.toStandardItem() }
+        return collection.find(filter).sort(Document("type", 1).append("category", 1).append("title", 1)).toList().map { it.toStandardItem() }
     }
 
     suspend fun findById(id: String): StandardItem? =
         collection.find(scoped(Filters.eq("id", id))).firstOrNull()?.toStandardItem()
+
+    suspend fun findByCode(code: String): StandardItem? =
+        collection.find(scoped(Filters.eq("code", code))).firstOrNull()?.toStandardItem()
 
     suspend fun findByIds(ids: Collection<String>): List<StandardItem> {
         if (ids.isEmpty()) return emptyList()
         return collection.find(scoped(Filters.`in`("id", ids.toList()))).toList().map { it.toStandardItem() }
     }
 
+    /** Saves a new item. One without a code gets the next free code for its type; a taken code fails on the unique index. */
     suspend fun create(item: StandardItem): StandardItem {
-        collection.insertOne(item.toDocument())
-        return item
+        val saved = item.copy(
+            description = item.description.ifBlank { item.title },
+            code = item.code?.takeIf { it.isNotBlank() } ?: freeCode(catalogCodePrefix(item.type)),
+        )
+        collection.insertOne(saved.toDocument())
+        return saved
     }
 
+    /** A null code keeps the stored one. */
     suspend fun update(id: String, item: StandardItem): StandardItem? {
         val result = collection.findOneAndUpdate(
             scoped(Filters.eq("id", id)),
             Updates.combine(
-                Updates.set("type", item.type),
-                Updates.set("category", item.category),
-                Updates.set("description", item.description),
-                Updates.set("unit", item.unit),
-                Updates.set("defaultUnitPriceEur", item.defaultUnitPriceEur),
-                Updates.set("durationMinutes", item.durationMinutes),
-                Updates.set("bookable", item.bookable),
+                listOfNotNull(
+                    Updates.set("type", item.type),
+                    Updates.set("category", item.category),
+                    Updates.set("title", item.title),
+                    Updates.set("description", item.description.ifBlank { item.title }),
+                    Updates.set("unit", item.unit),
+                    Updates.set("defaultUnitPriceEur", item.defaultUnitPriceEur),
+                    Updates.set("durationMinutes", item.durationMinutes),
+                    Updates.set("bookable", item.bookable),
+                    item.code?.takeIf { it.isNotBlank() }?.let { Updates.set("code", it) },
+                )
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
@@ -521,33 +560,50 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
 
     suspend fun delete(id: String): Boolean = collection.deleteOne(scoped(Filters.eq("id", id))).deletedCount > 0
 
-    /** A `srv-<slug>` id not yet used by this tenant, matching what the dashboard catalog form generates. */
-    suspend fun freeServiceId(name: String): String {
-        val base = "srv-" + catalogSlug(name).take(40).trimEnd('-').ifBlank { "service" }
+    /** A `srv-<slug>` id (`mat-<slug>` for materials) not yet used by this tenant. */
+    suspend fun freeId(name: String, type: String = "service"): String {
+        val prefix = if (isServiceType(type)) "srv" else "mat"
+        val base = "$prefix-" + catalogSlug(name).take(40).trimEnd('-').ifBlank { "item" }
         if (findById(base) == null) return base
         for (n in 2..99) {
             val candidate = "$base-$n"
             if (findById(candidate) == null) return candidate
         }
-        return "srv-${ObjectId().toHexString()}"
+        return "$prefix-${ObjectId().toHexString()}"
     }
 
-    private fun Document.toStandardItem() = StandardItem(
-        id = getString("id"),
-        type = getString("type"),
-        category = getString("category"),
-        description = getString("description"),
-        unit = getString("unit"),
-        defaultUnitPriceEur = getDoubleValue("defaultUnitPriceEur"),
-        durationMinutes = (get("durationMinutes") as? Number)?.toInt(),
-        bookable = getBoolean("bookable") ?: false,
-    )
+    /** The next `PREFIX-nnn` code this tenant doesn't use yet; numbers someone typed by hand are skipped. */
+    suspend fun freeCode(prefix: String): String {
+        var code: String
+        do {
+            code = "$prefix-${sequences.next("catalog_${prefix.lowercase()}_code").toString().padStart(3, '0')}"
+        } while (findByCode(code) != null)
+        return code
+    }
+
+    private fun Document.toStandardItem(): StandardItem {
+        val description = getString("description").orEmpty()
+        return StandardItem(
+            id = getString("id"),
+            type = getString("type"),
+            category = getString("category"),
+            description = description,
+            unit = getString("unit"),
+            defaultUnitPriceEur = getDoubleValue("defaultUnitPriceEur"),
+            durationMinutes = (get("durationMinutes") as? Number)?.toInt(),
+            bookable = getBoolean("bookable") ?: false,
+            title = getString("title")?.takeIf { it.isNotBlank() } ?: description,
+            code = getString("code")?.takeIf { it.isNotBlank() },
+        )
+    }
 
     private fun StandardItem.toDocument() = Document("id", id)
         .append("tenantId", tenantId)
+        .append("code", code)
         .append("type", type)
         .append("category", category)
-        .append("description", description)
+        .append("title", title)
+        .append("description", description.ifBlank { title })
         .append("unit", unit)
         .append("defaultUnitPriceEur", defaultUnitPriceEur)
         .append("durationMinutes", durationMinutes)
@@ -573,8 +629,11 @@ internal class SequenceRepository(mongoModule: MongoModule, private val tenantId
     }
 }
 
+/** Rounded, not truncated: 4.35 * 100 is 434.99999999999994 in floating point. */
+fun eurToCents(eur: Double): Long = (eur * 100).roundToLong()
+
 fun lineItem(description: String, quantity: Double = 1.0, unitPriceEur: Double, unit: String = ""): LineItem {
-    val unitPriceCents = (unitPriceEur * 100).toLong()
+    val unitPriceCents = eurToCents(unitPriceEur)
     return LineItem(
         description = description,
         quantity = quantity,

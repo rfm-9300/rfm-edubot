@@ -7,6 +7,7 @@ import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.channel.OutboundClient
+import com.rfm.edubot.channel.OutboundDeliveryException
 import com.rfm.edubot.channel.ProfileLookupClient
 import com.rfm.edubot.bookings.BookingCallContext
 import com.rfm.edubot.bookings.BookingTools
@@ -33,6 +34,7 @@ import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.TenantTimeZones
+import com.rfm.edubot.whatsapp.WhatsAppApiException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -200,7 +202,7 @@ class MessagePipeline(
                     author = MessageAuthor.AI,
                 )
                 messages.insert(assistantMessage)
-                responder.sendText(user.waId, budgetReply)
+                sendReply(assistantMessage, budgetReply, responder)
                 conversations.bumpActivity(conversation.id)
                 deduplicationService.markProcessed(inbound.eventId)
                 return
@@ -245,7 +247,7 @@ class MessagePipeline(
                     author = MessageAuthor.AI,
                 )
                 messages.insert(assistantMessage)
-                responder.sendText(user.waId, pdfReply)
+                sendReply(assistantMessage, pdfReply, responder)
                 conversations.bumpActivity(conversation.id, null)
                 deduplicationService.markProcessed(inbound.eventId)
                 log.info("Pipeline completed with requested PDF: waId={}", user.waId)
@@ -413,7 +415,7 @@ class MessagePipeline(
             )
             messages.insert(assistantMessage)
 
-            responder.sendText(user.waId, replyText)
+            sendReply(assistantMessage, replyText, responder)
             sendCreatedDocuments(user.waId, createdDocuments, responder)
 
             conversations.bumpActivity(conversation.id, tokenUsage)
@@ -489,6 +491,20 @@ class MessagePipeline(
             else -> return null
         }
         return "[The customer sent a $kind you cannot open${caption?.takeIf { it.isNotBlank() }?.let { ": \"$it\"" }.orEmpty()}]"
+    }
+
+    /** Sends a stored reply. If the channel refuses it, the reply turns FAILED so the inbox doesn't show it as delivered. */
+    private suspend fun sendReply(reply: Message, text: String, responder: OutboundClient) {
+        try {
+            responder.sendText(reply.waId, text)
+        } catch (e: Exception) {
+            when (e) {
+                is WhatsAppApiException -> messages.markSendFailed(reply.id, e.code, e.detail)
+                is OutboundDeliveryException -> messages.markSendFailed(reply.id, null, e.message)
+                else -> messages.markSendFailed(reply.id, null, null)
+            }
+            throw e
+        }
     }
 
     private suspend fun sendCreatedDocuments(waId: String, createdDocuments: List<CreatedDocument>, responder: OutboundClient) {

@@ -898,6 +898,16 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 .lines__total { font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 700; }
 .lines__total .v { font-family: var(--display); font-size: 17px; font-weight: 700; color: var(--accent-deep); }
 html[data-theme="dark"] .lines__total .v { color: var(--accent); }
+/* Phones: the description takes its own row, quantity, unit and price share the next one. */
+@media (max-width: 560px) {
+  .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
+  .lines__head > span:first-child, .line input[data-k="description"] { grid-column: 1 / -1; }
+  .line input { min-width: 0; }
+  .line input[data-k="description"] { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .lines__foot { flex-wrap: wrap; }
+  .lines__pick { flex: 1 1 100%; }
+  .lines__pick .sel { min-width: 0; flex: 1; }
+}
 
 /* ============================================================
    CONFIRM DIALOG

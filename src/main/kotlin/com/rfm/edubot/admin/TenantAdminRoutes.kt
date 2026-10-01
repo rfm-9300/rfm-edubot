@@ -258,16 +258,12 @@ fun Route.tenantAdminRoutes(
                 }
                 post("/standard-items") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
-                    val request = call.receive<StandardItemRequest>()
-                    call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
+                    call.createStandardItem(deps.standardItems)
                 }
                 post("/standard-items/{id}") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
                     val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-                    val request = call.receive<StandardItemRequest>()
-                    val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
-                    val item = deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound)
-                    call.respond(item)
+                    call.updateStandardItem(deps.standardItems, id)
                 }
                 delete("/standard-items/{id}") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@delete
@@ -284,8 +280,11 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-                    request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-                    val client = deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                    (request.requiredError() ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    val client = deps.clients.create(
+                        request.name, request.phone, request.address, request.email, request.taxId, request.notes,
+                        request.postalCode, request.city, request.contactPerson,
+                    )
                     call.respond(HttpStatusCode.Created, client.dto())
                 }
                 get("/quotes") {

@@ -45,6 +45,7 @@ object WhatsAppErrors {
     fun key(code: Int?): String = when (code) {
         131047, 470 -> "window_closed"
         131030 -> "recipient_not_allowed"
+        131037 -> "display_name_unapproved"
         131026 -> "undeliverable"
         131049, 131050 -> "marketing_limited"
         4, 80007, 130429, 131048, 131056 -> "rate_limited"

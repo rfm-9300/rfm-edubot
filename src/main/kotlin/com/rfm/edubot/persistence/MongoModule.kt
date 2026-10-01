@@ -217,6 +217,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val crmStandardItems = db.getCollection<Document>("crm.standard_items")
             crmStandardItems.dropIndexIfExists("id_1")
             crmStandardItems.createIndex(Document("tenantId", 1).append("id", 1), IndexOptions().unique(true))
+            crmStandardItems.createIndex(
+                Document("tenantId", 1).append("code", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("code", Document("\$type", "string"))),
+            )
             crmStandardItems.createIndex(Document("tenantId", 1).append("type", 1).append("category", 1))
 
             val bookingServices = db.getCollection<Document>("bookings.services")

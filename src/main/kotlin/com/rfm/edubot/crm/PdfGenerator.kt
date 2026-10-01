@@ -529,7 +529,7 @@ class PdfGenerator {
         val details = buildList {
             client.phone.takeIf { it.isNotBlank() }?.let { add(it) }
             clientReference(client)?.let { add(it) }
-            client.address?.takeIf { it.isNotBlank() }?.let { addAll(wrap(it, regular, detailSize, width).take(2)) }
+            clientAddress(client)?.let { addAll(wrap(it, regular, detailSize, width).take(2)) }
         }
         for (line in details) {
             if (y < floor) break
@@ -989,6 +989,15 @@ class PdfGenerator {
         val firstPeriod = description.indexOf(". ")
         if (firstPeriod in 12..80) return description.take(firstPeriod + 1).trim() to description.drop(firstPeriod + 2).trim()
         return description to ""
+    }
+
+    /**
+     * "Rua das Flores 12, 1200-001 Lisboa" as one text: compact client blocks (68pt) only fit one address
+     * line under the phone and reference, and a separate postal code line would be cut there.
+     */
+    private fun clientAddress(client: Client): String? {
+        val locality = listOfNotNull(client.postalCode, client.city).map { it.trim() }.filter { it.isNotBlank() }.joinToString(" ")
+        return listOfNotNull(client.address?.trim(), locality).filter { it.isNotBlank() }.joinToString(", ").takeIf { it.isNotBlank() }
     }
 
     /** Client number and tax number share one line, so a NIF never makes the client block taller. */

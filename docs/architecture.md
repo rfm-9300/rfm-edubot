@@ -275,6 +275,34 @@ invoice via `POST /app/api/crm/services/invoice`. Invoiced rows stay attached to
 (client-side; `GET /app/api/crm/services?clientId=` is also available). Completing a booking adds an
 open row here (see Bookings); such rows carry `bookingId`.
 
+A row can hold several lines (`items`, picked from the catalog or typed in the `/app` form) and totals
+their sum; invoicing it puts each line on the invoice. Its own `quantity`, `unit` and `unitPriceCents`
+then summarize the lines (a single line's values, or 1 × the sum of several), so readers that predate
+lines still add up, and a `PATCH` without `items` keeps the stored lines and ignores those three fields.
+Rows without lines (older rows, bookings) are one line made of `name` and those fields. The API always
+returns `items` (an older row as its one line). The form names an unnamed service after its lines
+("Corte + Massagem").
+
+### Catalog
+
+Optional `catalog` module (`crm.standard_items`): the services and materials that quotes, invoices,
+payments, Serviços rows and bookings pick from. Each item has:
+
+- an internal `id` (`srv-<slug>` / `mat-<slug>`, generated from the title on create) that Serviços
+  rows and bookings point at; it never changes;
+- a `code` the tenant sees and may change: left empty, it is numbered per type (`SRV-nnn`,
+  `MAT-nnn`, counters in `crm.sequences`, skipping codes typed by hand); unique per tenant, a clash
+  answers `409 code_taken`;
+- a `title` (the name in lists, pickers and bookings) and an optional `description`. An item without a
+  description stores its title there, so readers that predate titles (the previous release, the mobile
+  app) still get a name; the API and the dashboard treat a description equal to the title as none.
+
+Adding an item to a document line writes the title, then the description after " - ", which the
+classic PDF prints under the title. `CatalogItemBackfill` runs at startup and gives items saved before
+titles and codes their description as title and the next free code, in creation order; it only writes
+missing fields. `POST /app/api/crm/standard-items` (and the backoffice twin) still accepts the older
+body without `title`, `code` or `id`.
+
 ### Suppliers and payments
 
 Optional `suppliers` directory (`crm.suppliers`, numbers `FOR-nnn`) and optional `payments`
@@ -282,6 +310,9 @@ module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached
 line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of client invoices, without
 PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
 `/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
+A supplier has an optional free-text `type` (materials, subcontractor…): the form suggests the types
+already in use and the directory filters by it. `PATCH` keeps the type when omitted and clears it on
+an empty string.
 
 A payment can also name the client it was spent on (`clientId`, optional): set it on
 `POST /app/api/crm/payments`, change or clear it with `PATCH /app/api/crm/payments/{id}/client`,
@@ -292,7 +323,7 @@ links them.
 
 ### Employees
 
-Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role). It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
+Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role, and an optional profile: `birthDate` as `yyyy-MM-dd`, `address`, `taxId`). `PATCH` keeps the profile fields when omitted and clears them on an empty string; a birth date in the future or before 1900 answers `400 invalid_birth_date`. No bot tool reads employees. It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
 
 ### Removing clients, suppliers and employees
 
@@ -384,7 +415,8 @@ website chat is read-only). `InboxService` (`dashboard/`) holds the rules; the r
   status webhooks (`delivered`, `read`, `failed` + error code) update the row through
   `DeliveryStatusRecorder`; a status only moves forward and `FAILED` sticks, because webhooks arrive late,
   twice or out of order. Meta often accepts an out-of-window text and fails it later with `131047`, so
-  the tick, not the send call, is the truth. AI replies keep no id and show no ticks.
+  the tick, not the send call, is the truth. AI replies keep no id and show no ticks, except that a
+  reply the send call refuses is stored as `FAILED` with Meta's error and shows as not delivered.
 - **Errors.** Meta's error codes map to dashboard keys in `WhatsAppErrors.key` (`inboxErr_<key>` in the
   catalogs); the API answers `{ error, detail }`, where `detail` is Meta's own text for unknown codes.
 - **Template management.** Settings → WhatsApp templates lists every template with Meta's review status
@@ -443,11 +475,12 @@ sequenceDiagram
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
-| `crm.client_services` | Client-attached work; open rows can be billed together; `bookingId` when made by completing a booking | `tenantId+clientId+status`; partial `tenantId+bookingId` |
-| `crm.suppliers` | Vendor directory the tenant pays | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking | `tenantId+clientId+status`; partial `tenantId+bookingId` |
+| `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
+| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores) for a later payments payee | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
-| `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering counters | unique on `name` |
+| `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
@@ -650,7 +683,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
 - **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, and i18n. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
 - **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar, while the backoffice keeps the classic look. Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. The older classic Home code in `app.js` is no longer reachable. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
-- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry optional `email`, `taxId` (NIF, printed on quotes and invoices beside the client number) and staff-only `notes`, which `CrmTools` never returns to the bot. `PATCH` keeps those three when omitted and clears them on an empty string. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
+- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs a NIF and an address (`400 tax_id_required` / `address_required`; a `PATCH` that omits the NIF keeps the stored one); bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.

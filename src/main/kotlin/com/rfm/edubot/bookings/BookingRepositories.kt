@@ -12,6 +12,7 @@ import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.crm.MIN_BOOKING_MINUTES
 import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
+import com.rfm.edubot.crm.details
 import com.rfm.edubot.crm.isBookable
 import com.rfm.edubot.crm.isService
 import com.rfm.edubot.events.DomainEventLog
@@ -47,7 +48,7 @@ class BookableServiceRepository(mongoModule: MongoModule, tenantId: ObjectId) {
 
     suspend fun create(name: String, durationMinutes: Int, priceCents: Long, category: String, unit: String): BookableService {
         val item = StandardItem(
-            id = items.freeServiceId(name),
+            id = items.freeId(name),
             type = "service",
             category = category.trim(),
             description = name.trim(),
@@ -55,16 +56,17 @@ class BookableServiceRepository(mongoModule: MongoModule, tenantId: ObjectId) {
             defaultUnitPriceEur = priceCents / 100.0,
             durationMinutes = durationMinutes.coerceAtLeast(MIN_BOOKING_MINUTES),
             bookable = true,
+            title = name.trim(),
         )
-        items.create(item)
-        return item.toBookable()
+        return items.create(item).toBookable()
     }
 
     suspend fun update(id: String, name: String?, durationMinutes: Int?, priceCents: Long?, active: Boolean?): BookableService? {
         val existing = items.findById(id)?.takeIf { it.isService() } ?: return null
         val nextDuration = durationMinutes?.coerceAtLeast(MIN_BOOKING_MINUTES) ?: existing.durationMinutes
         val next = existing.copy(
-            description = name?.trim()?.takeIf { it.isNotBlank() } ?: existing.description,
+            title = name?.trim()?.takeIf { it.isNotBlank() } ?: existing.title,
+            description = existing.details(),
             durationMinutes = if (active == true && nextDuration == null) DEFAULT_DURATION_MINUTES else nextDuration,
             defaultUnitPriceEur = priceCents?.let { it / 100.0 } ?: existing.defaultUnitPriceEur,
             bookable = active ?: existing.bookable,
@@ -74,7 +76,7 @@ class BookableServiceRepository(mongoModule: MongoModule, tenantId: ObjectId) {
 
     private fun StandardItem.toBookable() = BookableService(
         id = id,
-        name = description,
+        name = title,
         category = category,
         unit = unit,
         durationMinutes = durationMinutes,
@@ -225,7 +227,7 @@ class BookingRepository(private val mongoModule: MongoModule, val tenantId: Obje
         if (missing.isEmpty()) return rows
         val catalogNames = StandardItemRepository(mongoModule, tenantId)
             .findByIds(missing.map { it.serviceId }.filter { it.isNotBlank() }.toSet())
-            .associate { it.id to it.description }
+            .associate { it.id to it.title }
         val legacyIds = missing.mapNotNull { it.legacyServiceId }.distinct()
         val legacyNames = if (legacyIds.isEmpty()) {
             emptyMap()

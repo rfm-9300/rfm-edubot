@@ -52,13 +52,13 @@ class BookingCatalogMigration(private val mongo: MongoModule) {
             ?: BookableServiceRepository.DEFAULT_DURATION_MINUTES
         val active = doc.getBoolean("active") ?: true
         val items = StandardItemRepository(mongo, tenantId)
-        val match = items.search().firstOrNull { it.isService() && it.description.trim().equals(name, ignoreCase = true) }
+        val match = items.search().firstOrNull { it.isService() && it.title.trim().equals(name, ignoreCase = true) }
         val catalogId = if (match != null) {
             items.update(match.id, match.copy(durationMinutes = match.durationMinutes ?: duration, bookable = match.bookable || active))
             match.id
         } else {
             val item = StandardItem(
-                id = items.freeServiceId(name),
+                id = items.freeId(name),
                 type = "service",
                 category = BookingCatalogDefaults.category(locale),
                 description = name,
@@ -66,9 +66,9 @@ class BookingCatalogMigration(private val mongo: MongoModule) {
                 defaultUnitPriceEur = 0.0,
                 durationMinutes = duration,
                 bookable = active,
+                title = name,
             )
-            items.create(item)
-            item.id
+            items.create(item).id
         }
         appointments.updateMany(
             Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("serviceId", legacyId), Filters.exists("catalogItemId", false)),

@@ -18,10 +18,12 @@ import com.rfm.edubot.admin.CreateQuoteRequest
 import com.rfm.edubot.admin.CreateEmployeeRequest
 import com.rfm.edubot.admin.CreateSupplierRequest
 import com.rfm.edubot.admin.InvoiceClientServicesRequest
-import com.rfm.edubot.admin.StandardItemRequest
 import com.rfm.edubot.admin.UpdateClientServiceRequest
+import com.rfm.edubot.admin.createStandardItem
 import com.rfm.edubot.admin.dto
 import com.rfm.edubot.admin.respondGeneratedPdf
+import com.rfm.edubot.admin.serviceItemsError
+import com.rfm.edubot.admin.updateStandardItem
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
 import com.rfm.edubot.bookings.model.BookingSource
@@ -46,6 +48,7 @@ import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SupplierRepository
+import com.rfm.edubot.crm.eurToCents
 import com.rfm.edubot.crm.model.ClientServiceStatus
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.PaymentStatus
@@ -686,9 +689,12 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            (request.requiredError() ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
             val client = call.uniquePhone {
-                deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                deps.clients.create(
+                    request.name, request.phone, request.address, request.email, request.taxId, request.notes,
+                    request.postalCode, request.city, request.contactPerson,
+                )
             } ?: return@post
             call.respond(HttpStatusCode.Created, client.value.dto())
         }
@@ -698,9 +704,13 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val existing = deps.clients.findById(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            (request.requiredError(existing) ?: request.detailsError())?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
             val client = (call.uniquePhone {
-                deps.clients.update(id, request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                deps.clients.update(
+                    id, request.name, request.phone, request.address, request.email, request.taxId, request.notes,
+                    request.postalCode, request.city, request.contactPerson,
+                )
             } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(client.dto())
         }
@@ -720,17 +730,12 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
         }
         post("/standard-items") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
-            val deps = tenantDeps(ctx)
-            val request = call.receive<StandardItemRequest>()
-            call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
+            call.createStandardItem(tenantDeps(ctx).standardItems)
         }
         post("/standard-items/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
-            val deps = tenantDeps(ctx)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val request = call.receive<StandardItemRequest>()
-            val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
-            call.respond(deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound))
+            call.updateStandardItem(tenantDeps(ctx).standardItems, id)
         }
         delete("/standard-items/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
@@ -848,16 +853,18 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val clientId = runCatching { ObjectId(request.clientId) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client required"))
             val client = deps.clients.findById(clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
             if (request.name.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required"))
+            serviceItemsError(request.items)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
             val service = deps.clientServices.create(
                 clientId = clientId,
                 name = request.name,
                 notes = request.notes,
                 quantity = request.quantity,
                 unit = request.unit,
-                unitPriceCents = (request.unitPriceEur * 100).toLong(),
+                unitPriceCents = eurToCents(request.unitPriceEur),
                 bookingServiceId = request.bookingServiceId?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() },
                 catalogItemId = request.catalogItemId,
                 performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+                items = request.items.map { it.toLineItem() },
             )
             call.respond(HttpStatusCode.Created, service.dto(client))
         }
@@ -887,6 +894,7 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<UpdateClientServiceRequest>()
+            serviceItemsError(request.items)?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
             val status = request.status?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
             val service = deps.clientServices.update(
                 id = id,
@@ -894,9 +902,10 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
                 notes = request.notes,
                 quantity = request.quantity,
                 unit = request.unit,
-                unitPriceCents = request.unitPriceEur?.let { (it * 100).toLong() },
+                unitPriceCents = request.unitPriceEur?.let { eurToCents(it) },
                 performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                 status = status,
+                items = request.items?.takeIf { it.isNotEmpty() }?.map { it.toLineItem() },
             ) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(service.dto(deps.clients.findById(service.clientId)))
         }
@@ -927,7 +936,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address) } ?: return@post
+            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address, request.type) } ?: return@post
             call.respond(HttpStatusCode.Created, supplier.value.dto())
         }
         patch("/suppliers/{id}") {
@@ -936,7 +946,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address) } ?: return@patch)
+            request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address, request.type) } ?: return@patch)
                 .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(supplier.dto())
         }
@@ -960,7 +971,10 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateEmployeeRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val employee = call.uniquePhone { deps.employees.create(request.name, request.phone, request.role) } ?: return@post
+            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val employee = call.uniquePhone {
+                deps.employees.create(request.name, request.phone, request.role, request.birthDate, request.address, request.taxId)
+            } ?: return@post
             call.respond(HttpStatusCode.Created, employee.value.dto())
         }
         patch("/employees/{id}") {
@@ -969,8 +983,10 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateEmployeeRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val employee = (call.uniquePhone { deps.employees.update(id, request.name, request.phone, request.role) } ?: return@patch)
-                .value ?: return@patch call.respond(HttpStatusCode.NotFound)
+            request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val employee = (call.uniquePhone {
+                deps.employees.update(id, request.name, request.phone, request.role, request.birthDate, request.address, request.taxId)
+            } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(employee.dto())
         }
         removableDirectory("employees", DashboardModules.EMPLOYEES, { tenantDeps(it) }, { employees.delete(it) }) { id, archived ->

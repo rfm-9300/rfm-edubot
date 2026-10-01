@@ -45,6 +45,37 @@ class ClientServiceBillingTest {
         assertEquals("mo", items[1].unit)
     }
 
+    @Test
+    fun `a service with lines bills each of them`() {
+        val rows = listOf(
+            openService(clientA, name = "Website", quantity = 1.0, unitPriceCents = 150000, unit = "job"),
+            openService(clientA, name = "Limpeza completa").copy(
+                items = listOf(
+                    lineItem("Limpeza doméstica", quantity = 3.0, unitPriceEur = 12.5, unit = "h"),
+                    lineItem("Produtos", unitPriceEur = 4.35),
+                ),
+            ),
+        )
+        val items = (ClientServiceBilling.prepareInvoice(clientA, rows) as ClientServiceBilling.Outcome.Ready).items
+        assertEquals(listOf("Website", "Limpeza doméstica", "Produtos"), items.map { it.description })
+        assertEquals(listOf(150000L, 3750L, 435L), items.map { it.totalCents })
+    }
+
+    @Test
+    fun `several lines read as one unit at their sum, a single line as itself`() {
+        val lines = listOf(lineItem("A", quantity = 3.0, unitPriceEur = 12.5, unit = "h"), lineItem("B", unitPriceEur = 20.0))
+        assertEquals(ServiceSummary(1.0, "", 5750, 5750), summarize(lines))
+        assertEquals(ServiceSummary(3.0, "h", 1250, 3750), summarize(lines.take(1)))
+    }
+
+    @Test
+    fun `euro amounts round to the nearest cent`() {
+        assertEquals(435L, eurToCents(4.35))
+        assertEquals(115L, eurToCents(1.15))
+        assertEquals(29L, eurToCents(0.29))
+        assertEquals(870L, lineItem("Produtos", quantity = 2.0, unitPriceEur = 4.35).totalCents)
+    }
+
     private fun openService(
         clientId: ObjectId,
         name: String = "Work",

@@ -76,7 +76,7 @@ class BookingFlowTest {
     fun `legacy booking services move into the catalog and existing rows follow them`() = runBlocking<Unit> {
         val tenant = tenant()
         val items = StandardItemRepository(mongoModule, tenant.id)
-        items.create(StandardItem("srv-corte", "service", "Salão", "Corte de cabelo", "un", 18.0))
+        items.create(StandardItem("srv-corte", "service", "Salão", "Corte de cabelo", "un", 18.0, title = "Corte de cabelo"))
         val corte = ObjectId()
         val barba = ObjectId()
         val booking = ObjectId()
@@ -268,7 +268,7 @@ class BookingFlowTest {
 
     @Test
     fun `catalog edits that omit booking fields keep them`() {
-        val existing = StandardItem("srv-x", "service", "Cat", "Massagem", "un", 40.0, durationMinutes = 50, bookable = true)
+        val existing = StandardItem("srv-x", "service", "Cat", "Massagem", "un", 40.0, durationMinutes = 50, bookable = true, title = "Massagem")
         val request = StandardItemRequest("srv-x", "service", "Cat", "Massagem relaxante", "un", 45.0)
         val next = request.toStandardItem("srv-x", existing)
         assertEquals(50, next.durationMinutes)
@@ -291,7 +291,7 @@ class BookingFlowTest {
             updatedAt = now,
         )
         StandardItemRepository(mongoModule, tenant.id).create(
-            StandardItem("srv-consulta", "service", "Clínica", "Consulta", "sessão", 35.0, durationMinutes = 60, bookable = true)
+            StandardItem("srv-consulta", "service", "Clínica", "Consulta", "sessão", 35.0, durationMinutes = 60, bookable = true, title = "Consulta")
         )
         AvailabilityRepository(mongoModule, tenant.id).replaceAll(
             (1..5).map { AvailabilityRule(tenantId = tenant.id, dayOfWeek = it, startLocal = "09:00", endLocal = "18:00") }

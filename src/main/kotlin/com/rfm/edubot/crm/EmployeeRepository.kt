@@ -9,6 +9,7 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.LocalDate
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
@@ -30,6 +31,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
                 Filters.regex("name", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("role", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("taxId", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
         val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
@@ -42,22 +44,46 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
 
-    suspend fun update(id: ObjectId, name: String, phone: String, role: String?): Employee? {
+    /**
+     * [role] is replaced as given (null clears it). [birthDate] (`yyyy-MM-dd`), [address] and [taxId] are
+     * only written when not null, so callers that don't send them keep the stored values; a blank string
+     * clears them.
+     */
+    suspend fun update(
+        id: ObjectId,
+        name: String,
+        phone: String,
+        role: String?,
+        birthDate: String? = null,
+        address: String? = null,
+        taxId: String? = null,
+    ): Employee? {
         val now = SystemClock.now()
+        val updates = mutableListOf(
+            Updates.set("name", name.trim()),
+            Updates.set("phone", phone.trim()),
+            Updates.set("role", role.cleaned()),
+            Updates.set("updatedAt", now.toDate()),
+        )
+        birthDate?.let { updates += Updates.set("birthDate", it.isoDate()?.toString()) }
+        address?.let { updates += Updates.set("address", it.cleaned()) }
+        taxId?.let { updates += Updates.set("taxId", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
-            Updates.combine(
-                Updates.set("name", name.trim()),
-                Updates.set("phone", phone.trim()),
-                Updates.set("role", role?.trim()?.takeIf { it.isNotBlank() }),
-                Updates.set("updatedAt", now.toDate()),
-            ),
+            Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
         return doc?.toEmployee()
     }
 
-    suspend fun create(name: String, phone: String, role: String? = null): Employee {
+    suspend fun create(
+        name: String,
+        phone: String,
+        role: String? = null,
+        birthDate: String? = null,
+        address: String? = null,
+        taxId: String? = null,
+    ): Employee {
         val now = SystemClock.now()
         val number = "COL-${sequences.next("employee_number").toString().padStart(3, '0')}"
         val employee = Employee(
@@ -65,13 +91,21 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
             number = number,
             name = name.trim(),
             phone = phone.trim(),
-            role = role?.trim()?.takeIf { it.isNotBlank() },
+            role = role.cleaned(),
+            birthDate = birthDate.isoDate(),
+            address = address.cleaned(),
+            taxId = taxId.cleaned(),
             createdAt = now,
             updatedAt = now,
         )
         collection.insertOne(employee.toDocument())
         return employee
     }
+
+    private fun String?.cleaned(): String? = this?.trim()?.takeIf { it.isNotBlank() }
+
+    /** Callers validate the date first; a malformed one throws rather than being stored. */
+    private fun String?.isoDate(): LocalDate? = cleaned()?.let { LocalDate.parse(it) }
 
     private fun Document.toEmployee() = Employee(
         id = getObjectId("_id"),
@@ -80,6 +114,9 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         name = getString("name"),
         phone = getString("phone") ?: "",
         role = getString("role"),
+        birthDate = getString("birthDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
+        address = getString("address"),
+        taxId = getString("taxId"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
@@ -91,6 +128,9 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         .append("name", name)
         .append("phone", phone)
         .append("role", role)
+        .append("birthDate", birthDate?.toString())
+        .append("address", address)
+        .append("taxId", taxId)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
 

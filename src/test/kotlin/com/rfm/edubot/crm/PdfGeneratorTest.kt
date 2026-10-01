@@ -143,6 +143,31 @@ class PdfGeneratorTest {
     }
 
     @Test
+    fun `postal code and city print with the street in every design, compact client blocks included`() {
+        val located = client.copy(taxId = "123456789", address = "Rua das Flores 12", postalCode = "1200-001", city = "Lisboa")
+        val quote = quote(listOf(item("Pintura", 1000.0)))
+        val documents = listOf("historical" to generator.generateQuote(quote, located)) +
+            BuiltInDesignTemplates.ALL.map { design ->
+                design.name to generator.generateQuote(
+                    quote,
+                    located,
+                    DocumentTemplate(
+                        companyName = "RoPaint Lda",
+                        accentColor = design.accentColor,
+                        showDecor = design.showDecor,
+                        layout = design.layout,
+                        style = design.style,
+                    ),
+                )
+            }
+        documents.forEach { (name, bytes) ->
+            val text = textOf(bytes)
+            assertTrue(text.squashed().contains("RUADASFLORES12,1200-001LISBOA"), "$name misses the client's address: $text")
+            assertTrue(overlappingRuns(bytes).isEmpty(), "$name prints the address on top of other text: ${overlappingRuns(bytes)}")
+        }
+    }
+
+    @Test
     fun `invoice without its own terms prints a neutral payment line and no validity`() {
         val text = textOf(generator.generateInvoice(invoice(), client))
         assertTrue(text.contains(PdfGenerator.DEFAULT_INVOICE_PAYMENT_TERMS), text)

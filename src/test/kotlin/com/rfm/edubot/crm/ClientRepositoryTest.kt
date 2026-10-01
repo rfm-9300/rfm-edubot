@@ -68,6 +68,38 @@ class ClientRepositoryTest {
     }
 
     @Test
+    fun `postal code, city and contact person are stored, kept when omitted, cleared with a blank string and searchable`() = runBlocking {
+        val clients = repository()
+        val created = clients.create(
+            name = "Hotel Miradouro",
+            phone = "+351 213 000 111",
+            address = "Rua do Castelo 3",
+            taxId = "509876543",
+            postalCode = " 1100-129 ",
+            city = "Lisboa",
+            contactPerson = "Marta Reis",
+        )
+        assertEquals("1100-129", created.postalCode)
+
+        val kept = clients.update(created.id, "Hotel Miradouro", "+351 213 000 111", "Rua do Castelo 3")!!
+        assertEquals("1100-129", kept.postalCode)
+        assertEquals("Lisboa", kept.city)
+        assertEquals("Marta Reis", kept.contactPerson)
+        assertEquals(listOf(created.id), clients.search("marta").map { it.id })
+        assertEquals(listOf(created.id), clients.search("1100-129").map { it.id })
+        assertEquals(listOf(created.id), clients.search("lisboa").map { it.id })
+
+        val cleared = clients.update(
+            created.id, "Hotel Miradouro", "+351 213 000 111", "Rua do Castelo 3",
+            postalCode = "", city = " ", contactPerson = "",
+        )!!
+        assertNull(cleared.postalCode)
+        assertNull(cleared.city)
+        assertNull(cleared.contactPerson)
+        assertEquals(cleared, clients.findById(created.id))
+    }
+
+    @Test
     fun `search finds clients by email, tax number and phone digits typed without spaces`() = runBlocking {
         val clients = repository()
         val ana = clients.create("Ana Ribeiro", "+351 911 222 333", email = "ana@example.pt", taxId = "245678901")

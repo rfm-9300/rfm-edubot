@@ -12,6 +12,10 @@ data class Client(
     val name: String,
     val phone: String,
     val address: String? = null,
+    val postalCode: String? = null,
+    val city: String? = null,
+    /** Who to talk to when the client is a company. */
+    val contactPerson: String? = null,
     val email: String? = null,
     /** Tax number (NIF in Portugal); printed on quotes and invoices. */
     val taxId: String? = null,
@@ -49,6 +53,8 @@ data class Supplier(
     val name: String,
     val phone: String,
     val address: String? = null,
+    /** Free text the tenant chooses (materials, subcontractor…); the form suggests the types already in use. */
+    val type: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     /** Set on a supplier that has payments and was removed: hidden from lists and pickers, restorable. */
@@ -63,6 +69,10 @@ data class Employee(
     val name: String,
     val phone: String,
     val role: String? = null,
+    val birthDate: LocalDate? = null,
+    val address: String? = null,
+    /** Tax number (NIF in Portugal). Staff-only, like the rest of the directory. */
+    val taxId: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     /** Set on an employee who has payments and was removed: hidden from lists and pickers, restorable. */
@@ -88,7 +98,13 @@ data class Payment(
     val updatedAt: Instant,
 )
 
-/** Work sold or performed for a client. Open rows can be grouped into one invoice. */
+/**
+ * Work sold or performed for a client. Open rows can be grouped into one invoice.
+ *
+ * A row with [items] totals their sum, and its [quantity], [unit] and [unitPriceCents] summarize them
+ * (one line's own values, or 1 × the sum for several), so readers that predate items still add up.
+ * Rows without items (older rows, bookings) are a single line made of those fields and [name].
+ */
 data class ClientService(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
@@ -99,6 +115,7 @@ data class ClientService(
     val unit: String = "",
     val unitPriceCents: Long,
     val totalCents: Long,
+    val items: List<LineItem> = emptyList(),
     val status: ClientServiceStatus = ClientServiceStatus.OPEN,
     val invoiceId: ObjectId? = null,
     val bookingServiceId: ObjectId? = null,
