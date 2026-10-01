@@ -67,25 +67,26 @@ const line = (description, quantity, unit, unitPriceEur) => {
   };
 };
 
+// An item without its own description stores its title there, as the app does.
 const standardItems = [
-  { id: "srv-landing-page", type: "service", category: "Digital", description: "Website landing page", unit: "servico", defaultUnitPriceEur: 350 },
-  { id: "srv-business-website", type: "service", category: "Digital", description: "Business website, 5 pages", unit: "servico", defaultUnitPriceEur: 750 },
-  { id: "srv-ecommerce-setup", type: "service", category: "Digital", description: "E-commerce setup", unit: "servico", defaultUnitPriceEur: 1200 },
-  { id: "srv-whatsapp-bot", type: "service", category: "Digital", description: "WhatsApp bot setup", unit: "servico", defaultUnitPriceEur: 600 },
-  { id: "srv-ai-chatbot", type: "service", category: "Digital", description: "AI chatbot integration", unit: "servico", defaultUnitPriceEur: 900 },
-  { id: "srv-booking-system", type: "service", category: "Digital", description: "Booking system", unit: "servico", defaultUnitPriceEur: 800 },
-  { id: "srv-crm-setup", type: "service", category: "Digital", description: "CRM setup", unit: "servico", defaultUnitPriceEur: 700 },
-  { id: "srv-social-automation", type: "service", category: "Digital", description: "Social media automation", unit: "servico", defaultUnitPriceEur: 450 },
-  { id: "srv-seo-basic", type: "service", category: "Digital", description: "SEO basic setup", unit: "servico", defaultUnitPriceEur: 300 },
-  { id: "srv-monthly-maintenance", type: "service", category: "Digital", description: "Monthly maintenance", unit: "mes", defaultUnitPriceEur: 150 },
-  { id: "srv-lavagem-fachada", type: "service", category: "Fachadas", description: "Lavagem e preparacao de fachada", unit: "m2", defaultUnitPriceEur: 4.5 },
-  { id: "srv-pintura-fachada", type: "service", category: "Fachadas", description: "Pintura exterior com duas demaos", unit: "m2", defaultUnitPriceEur: 8.5 },
-  { id: "mat-tinta-acrilica", type: "material", category: "Fachadas", description: "Tinta acrilica exterior premium", unit: "l", defaultUnitPriceEur: 12 },
-  { id: "srv-membrana-liquida", type: "service", category: "Coberturas", description: "Aplicacao de membrana liquida impermeabilizante", unit: "m2", defaultUnitPriceEur: 22 },
-  { id: "mat-membrana-liquida", type: "material", category: "Coberturas", description: "Membrana liquida elastica", unit: "kg", defaultUnitPriceEur: 7.5 },
+  { id: "srv-landing-page", code: "SRV-001", type: "service", category: "Digital", title: "Website landing page", description: "Website landing page", unit: "servico", defaultUnitPriceEur: 350 },
+  { id: "srv-business-website", code: "SRV-002", type: "service", category: "Digital", title: "Business website", description: "5 pages, contact form and basic SEO", unit: "servico", defaultUnitPriceEur: 750 },
+  { id: "srv-ecommerce-setup", code: "SRV-003", type: "service", category: "Digital", title: "E-commerce setup", description: "E-commerce setup", unit: "servico", defaultUnitPriceEur: 1200 },
+  { id: "srv-whatsapp-bot", code: "SRV-004", type: "service", category: "Digital", title: "WhatsApp bot setup", description: "WhatsApp bot setup", unit: "servico", defaultUnitPriceEur: 600 },
+  { id: "srv-ai-chatbot", code: "SRV-005", type: "service", category: "Digital", title: "AI chatbot integration", description: "AI chatbot integration", unit: "servico", defaultUnitPriceEur: 900 },
+  { id: "srv-booking-system", code: "SRV-006", type: "service", category: "Digital", title: "Booking system", description: "Booking system", unit: "servico", defaultUnitPriceEur: 800 },
+  { id: "srv-crm-setup", code: "SRV-007", type: "service", category: "Digital", title: "CRM setup", description: "CRM setup", unit: "servico", defaultUnitPriceEur: 700 },
+  { id: "srv-social-automation", code: "SRV-008", type: "service", category: "Digital", title: "Social media automation", description: "Social media automation", unit: "servico", defaultUnitPriceEur: 450 },
+  { id: "srv-seo-basic", code: "SRV-009", type: "service", category: "Digital", title: "SEO basic setup", description: "SEO basic setup", unit: "servico", defaultUnitPriceEur: 300 },
+  { id: "srv-monthly-maintenance", code: "SRV-010", type: "service", category: "Digital", title: "Monthly maintenance", description: "Updates, backups and small fixes", unit: "mes", defaultUnitPriceEur: 150 },
+  { id: "srv-lavagem-fachada", code: "SRV-011", type: "service", category: "Fachadas", title: "Lavagem de fachada", description: "Lavagem e preparacao de fachada", unit: "m2", defaultUnitPriceEur: 4.5 },
+  { id: "srv-pintura-fachada", code: "SRV-012", type: "service", category: "Fachadas", title: "Pintura de fachada", description: "Pintura exterior com duas demaos", unit: "m2", defaultUnitPriceEur: 8.5 },
+  { id: "mat-tinta-acrilica", code: "MAT-001", type: "material", category: "Fachadas", title: "Tinta acrilica exterior", description: "Tinta acrilica exterior premium", unit: "l", defaultUnitPriceEur: 12 },
+  { id: "srv-membrana-liquida", code: "SRV-013", type: "service", category: "Coberturas", title: "Impermeabilizacao com membrana liquida", description: "Aplicacao de membrana liquida impermeabilizante", unit: "m2", defaultUnitPriceEur: 22 },
+  { id: "mat-membrana-liquida", code: "MAT-002", type: "material", category: "Coberturas", title: "Membrana liquida elastica", description: "Membrana liquida elastica", unit: "kg", defaultUnitPriceEur: 7.5 },
   // Bookable services: Bookings offers catalog services that have a duration and the bookable flag.
-  { id: "srv-consultation", type: "service", category: "Marcações", description: "Consultation", unit: "sessão", defaultUnitPriceEur: 60, durationMinutes: 60, bookable: true },
-  { id: "srv-site-visit", type: "service", category: "Marcações", description: "Site visit", unit: "visita", defaultUnitPriceEur: 45, durationMinutes: 90, bookable: true },
+  { id: "srv-consultation", code: "SRV-014", type: "service", category: "Marcações", title: "Consultation", description: "Consultation", unit: "sessão", defaultUnitPriceEur: 60, durationMinutes: 60, bookable: true },
+  { id: "srv-site-visit", code: "SRV-015", type: "service", category: "Marcações", title: "Site visit", description: "Site visit", unit: "visita", defaultUnitPriceEur: 45, durationMinutes: 90, bookable: true },
 ];
 
 const users = [
@@ -325,8 +326,8 @@ const invoices = [
 ];
 
 const suppliers = [
-  { _id: ids.suppliers.tintas, number: "FOR-001", name: "Tintas Norte, Lda.", phone: "+351220100001", address: "Zona Industrial, Porto", createdAt: date("2026-05-03T09:00:00.000Z"), updatedAt: now },
-  { _id: ids.suppliers.andaimes, number: "FOR-002", name: "Andaimes & Cia", phone: "+351220100002", address: "Rua do Ferro 8, 2400-100 Leiria", createdAt: date("2026-05-08T11:00:00.000Z"), updatedAt: now },
+  { _id: ids.suppliers.tintas, number: "FOR-001", name: "Tintas Norte, Lda.", phone: "+351220100001", address: "Zona Industrial, Porto", type: "Materiais", createdAt: date("2026-05-03T09:00:00.000Z"), updatedAt: now },
+  { _id: ids.suppliers.andaimes, number: "FOR-002", name: "Andaimes & Cia", phone: "+351220100002", address: "Rua do Ferro 8, 2400-100 Leiria", type: "Equipamento", createdAt: date("2026-05-08T11:00:00.000Z"), updatedAt: now },
 ];
 
 const employees = [
@@ -405,7 +406,9 @@ if (seedTenantId) {
   suppliers.forEach((item) => { item.tenantId = seedTenantId; });
   employees.forEach((item) => { item.tenantId = seedTenantId; });
   payments.forEach((item) => { item.tenantId = seedTenantId; });
+  standardItems.forEach((item) => { item.tenantId = seedTenantId; });
 }
+const sequenceNames = ["client_number", "quote_number", "invoice_number", "supplier_number", "employee_number", "payment_number", "catalog_srv_code", "catalog_mat_code"];
 
 const bookingAvailability = seedTenantId ? [
   { _id: oid("665f61000000000000000001"), tenantId: seedTenantId, dayOfWeek: 1, startLocal: "09:00", endLocal: "17:00" },
@@ -463,8 +466,8 @@ function removeSeedConflicts() {
   target.getCollection("crm.suppliers").deleteMany({ $or: [{ _id: { $in: suppliers.map((item) => item._id) } }, { number: { $in: suppliers.map((item) => item.number) } }, { phone: { $in: suppliers.map((item) => item.phone) } }] });
   target.getCollection("crm.employees").deleteMany({ $or: [{ _id: { $in: employees.map((item) => item._id) } }, { number: { $in: employees.map((item) => item.number) } }, { phone: { $in: employees.map((item) => item.phone) } }] });
   target.getCollection("crm.payments").deleteMany({ $or: [{ _id: { $in: payments.map((item) => item._id) } }, { number: { $in: payments.map((item) => item.number) } }] });
-  target.getCollection("crm.standard_items").deleteMany({ id: { $in: standardItems.map((item) => item.id) } });
-  target.getCollection("crm.sequences").deleteMany({ name: { $in: ["client_number", "quote_number", "invoice_number", "supplier_number", "employee_number", "payment_number"] } });
+  target.getCollection("crm.standard_items").deleteMany({ $or: [{ id: { $in: standardItems.map((item) => item.id) } }, { tenantId: seedTenantId, code: { $in: standardItems.map((item) => item.code) } }] });
+  target.getCollection("crm.sequences").deleteMany({ name: { $in: sequenceNames } });
   target.getCollection("bookings.services").deleteMany({ _id: { $in: Object.values(ids.bookingServices) } });
   target.getCollection("bookings.availability").deleteMany({ _id: { $in: bookingAvailability.map((item) => item._id) } });
   target.getCollection("bookings.appointments").deleteMany({ _id: { $in: Object.values(ids.bookings) } });
@@ -494,6 +497,8 @@ insertMany("crm.sequences", [
   { name: "supplier_number", value: 2 },
   { name: "employee_number", value: 2 },
   { name: "payment_number", value: 3 },
+  { name: "catalog_srv_code", value: 15 },
+  { name: "catalog_mat_code", value: 2 },
 ].map((item) => seedTenantId ? { ...item, tenantId: seedTenantId } : item));
 insertMany("bookings.availability", bookingAvailability);
 insertMany("bookings.appointments", bookingAppointments);
@@ -511,7 +516,7 @@ const summary = {
   crm_employees: target.getCollection("crm.employees").countDocuments({ _id: { $in: employees.map((item) => item._id) } }),
   crm_payments: target.getCollection("crm.payments").countDocuments({ _id: { $in: payments.map((item) => item._id) } }),
   crm_standard_items: target.getCollection("crm.standard_items").countDocuments({ id: { $in: standardItems.map((item) => item.id) } }),
-  crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: ["client_number", "quote_number", "invoice_number", "supplier_number", "employee_number", "payment_number"] } }),
+  crm_sequences: target.getCollection("crm.sequences").countDocuments({ name: { $in: sequenceNames } }),
   bookable_services: target.getCollection("crm.standard_items").countDocuments({ id: { $in: ["srv-consultation", "srv-site-visit"] }, bookable: true }),
   booking_availability: target.getCollection("bookings.availability").countDocuments({ _id: { $in: bookingAvailability.map((item) => item._id) } }),
   booking_appointments: target.getCollection("bookings.appointments").countDocuments({ _id: { $in: Object.values(ids.bookings) } }),

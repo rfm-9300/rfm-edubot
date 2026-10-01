@@ -243,6 +243,26 @@ invoice via `POST /app/api/crm/services/invoice`. Invoiced rows stay attached to
 (client-side; `GET /app/api/crm/services?clientId=` is also available). Completing a booking adds an
 open row here (see Bookings); such rows carry `bookingId`.
 
+### Catalog
+
+Optional `catalog` module (`crm.standard_items`): the services and materials that quotes, invoices,
+payments, Serviços rows and bookings pick from. Each item has:
+
+- an internal `id` (`srv-<slug>` / `mat-<slug>`, generated from the title on create) that Serviços
+  rows and bookings point at; it never changes;
+- a `code` the tenant sees and may change: left empty, it is numbered per type (`SRV-nnn`,
+  `MAT-nnn`, counters in `crm.sequences`, skipping codes typed by hand); unique per tenant, a clash
+  answers `409 code_taken`;
+- a `title` (the name in lists, pickers and bookings) and an optional `description`. An item without a
+  description stores its title there, so readers that predate titles (the previous release, the mobile
+  app) still get a name; the API and the dashboard treat a description equal to the title as none.
+
+Adding an item to a document line writes the title, then the description after " - ", which the
+classic PDF prints under the title. `CatalogItemBackfill` runs at startup and gives items saved before
+titles and codes their description as title and the next free code, in creation order; it only writes
+missing fields. `POST /app/api/crm/standard-items` (and the backoffice twin) still accepts the older
+body without `title`, `code` or `id`.
+
 ### Suppliers and payments
 
 Optional `suppliers` directory (`crm.suppliers`, numbers `FOR-nnn`) and optional `payments`
@@ -250,6 +270,9 @@ module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached
 line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of client invoices, without
 PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
 `/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
+A supplier has an optional free-text `type` (materials, subcontractor…): the form suggests the types
+already in use and the directory filters by it. `PATCH` keeps the type when omitted and clears it on
+an empty string.
 
 A payment can also name the client it was spent on (`clientId`, optional): set it on
 `POST /app/api/crm/payments`, change or clear it with `PATCH /app/api/crm/payments/{id}/client`,
@@ -413,10 +436,11 @@ sequenceDiagram
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
 | `crm.client_services` | Client-attached work; open rows can be billed together; `bookingId` when made by completing a booking | `tenantId+clientId+status`; partial `tenantId+bookingId` |
-| `crm.suppliers` | Vendor directory the tenant pays | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
+| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores) for a later payments payee | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
-| `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering counters | unique on `name` |
+| `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |

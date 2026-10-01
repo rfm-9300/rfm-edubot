@@ -18,6 +18,7 @@ import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.conversation.DeliveryStatusRecorder
+import com.rfm.edubot.crm.CatalogItemBackfill
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
@@ -109,6 +110,11 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     val dashboardUserRepository = DashboardUserRepository(mongoModule)
     val defaultTenant = kotlinx.coroutines.runBlocking { TenantSeeder(mongoModule, tenantRepository, appConfig).run() }
     kotlinx.coroutines.runBlocking {
+        try {
+            CatalogItemBackfill(mongoModule).run()
+        } catch (e: Exception) {
+            LoggerFactory.getLogger("Application").warn("Catalog backfill failed; items without a title or code read their description as title: {}", e.message)
+        }
         try {
             BookingCatalogMigration(mongoModule).run()
         } catch (e: Exception) {

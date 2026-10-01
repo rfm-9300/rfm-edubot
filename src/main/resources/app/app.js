@@ -7,7 +7,7 @@ let state = {
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
-  suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '',
+  suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterSupplierType: '',
   bookings: [], bookingUpcoming: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: '', bookingStatusFilter: '',
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -36,7 +36,6 @@ const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&
 // writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
 // else (numbered/bulleted lines, line breaks) already reads fine as plain text under pre-wrap.
 const renderChatText = (s = '') => escapeHTML(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
-const slugify = (s = '') => s.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 const uiLocale = () => (window.I18N && I18N.locale()) || 'pt-PT';
 const fmtEUR = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtEURWhole = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(n || 0));
@@ -745,6 +744,7 @@ async function setActive(tab) {
   state.filterFinanceiroClient = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
+  state.filterSupplierType = '';
   state.archivedView = '';
   try {
     await loadModule(tab);
@@ -2943,15 +2943,35 @@ function renderClients(root) {
   wireDirectoryView(root);
 }
 
+const supplierTypeKey = type => String(type || '').trim().toLocaleLowerCase();
+
+// Types differing only in case or spacing are one type, shown as first spelled.
+function supplierTypes(suppliers) {
+  const byKey = new Map();
+  for (const s of suppliers) {
+    const key = supplierTypeKey(s.type);
+    if (key && !byKey.has(key)) byKey.set(key, s.type.trim());
+  }
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, uiLocale(), { sensitivity: 'base' }));
+}
+
 function renderSuppliers(root) {
   const t = CRM.suppliers;
   const archived = state.archivedView === 'suppliers';
   const source = archived ? state.archivedRows : (state.suppliers || []);
   const q = state.search.toLowerCase();
+  const types = supplierTypes(source);
+  const typeKey = supplierTypeKey(state.filterSupplierType);
+  if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
   const rows = source
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.phone || ''} ${s.address || ''}`.toLowerCase().includes(q))
-    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${escapeHTML(s.name)}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`)
+    .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''}`.toLowerCase().includes(q))
+    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${escapeHTML(s.name)}</td><td class="muted">${escapeHTML(s.type || '')}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`)
     .join('');
+  const typeFilter = types.length
+    ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
+    : '';
+  const filtered = Boolean(state.filterSupplierType || q);
   const new30 = (state.suppliers || []).filter(s => s.createdAt && (Date.now() - new Date(s.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.suppliers, CRM.tabs.fornecedores.desc, statCards([
     { label: t.total, value: (state.suppliers || []).length },
@@ -2959,13 +2979,14 @@ function renderSuppliers(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('suppliers'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: typeFilter + directoryViewChips('suppliers'),
+    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
     rows,
-    empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
-    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
+    empty: archived ? STR.directoryArchivedEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
+    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
+  $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
   wireDirectoryView(root);
 }
 
@@ -3096,14 +3117,14 @@ function renderServices(root) {
 function serviceSourceOptions() {
   const byId = new Map();
   for (const c of (state.catalog || []).filter(c => c.type === 'service' || c.type === 'servico')) {
-    byId.set(c.id, { id: c.id, name: c.description, price: c.defaultUnitPriceEur, unit: c.unit || '' });
+    byId.set(c.id, { id: c.id, name: c.title, label: catalogItemLabel(c), price: c.defaultUnitPriceEur, unit: c.unit || '' });
   }
   for (const s of state.bookingServices || []) {
-    if (!byId.has(s.id)) byId.set(s.id, { id: s.id, name: s.name, price: s.priceEur, unit: s.unit || '' });
+    if (!byId.has(s.id)) byId.set(s.id, { id: s.id, name: s.name, label: s.name, price: s.priceEur, unit: s.unit || '' });
   }
   return [...byId.values()]
     .sort((a, b) => String(a.name).localeCompare(String(b.name), uiLocale()))
-    .map(s => `<option value="${escapeHTML(s.id)}" data-name="${escapeHTML(s.name)}" data-price="${s.price ?? ''}" data-unit="${escapeHTML(s.unit)}">${escapeHTML(s.name)}</option>`)
+    .map(s => `<option value="${escapeHTML(s.id)}" data-name="${escapeHTML(s.name)}" data-price="${s.price ?? ''}" data-unit="${escapeHTML(s.unit)}">${escapeHTML(s.label)}</option>`)
     .join('');
 }
 
@@ -4136,6 +4157,7 @@ function renderPayeeRecord() {
   const next = unpaid.find(x => !isPastDue(x, today));
   const lastPaid = paid.map(x => x.paidAt).filter(Boolean).sort().pop();
   const lines = [
+    p.type ? `<span class="record-card__line">${escapeHTML(p.type)}</span>` : '',
     `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
     p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
     p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
@@ -4211,6 +4233,9 @@ async function openSupplierForm(supplier) {
   form.innerHTML = `
     <div class="form__row"><label class="lbl" for="sf-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
       <input class="inp" id="sf-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="sf-type">${escapeHTML(t.formType)}</label>
+      <input class="inp" id="sf-type" list="sf-type-options" maxlength="60" autocomplete="off" placeholder="${escapeHTML(t.phType)}" value="${escapeHTML(editing?.type || '')}" />
+      <datalist id="sf-type-options">${supplierTypes(state.suppliers || []).map(v => `<option value="${escapeHTML(v)}"></option>`).join('')}</datalist></div>
     <div class="form__row"><label class="lbl" for="sf-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
       <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
@@ -4225,18 +4250,19 @@ async function openSupplierForm(supplier) {
     const name = $('#sf-name', form).value.trim();
     const phone = $('#sf-phone', form).value.trim();
     const address = $('#sf-address', form).value.trim() || undefined;
+    const type = $('#sf-type', form).value.trim();
     if (!name || !phone) return toast(t.validate);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
       if (editing) {
-        await api(`/app/api/crm/suppliers/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, address }) });
+        await api(`/app/api/crm/suppliers/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, address, type }) });
         closeDrawer();
         await loadModule('suppliers');
         render();
         toast(t.updated);
       } else {
-        const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify({ name, phone, address }) });
+        const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify({ name, phone, address, type }) });
         closeDrawer();
         await loadModule('suppliers');
         toast(t.created);
@@ -4294,10 +4320,13 @@ function openCatalogForm(itemId) {
   const form = document.createElement('form');
   form.className = 'form';
   const typeValue = editing?.type === 'material' ? 'material' : 'service';
+  const codePlaceholder = type => t.phCode({ prefix: type === 'material' ? 'MAT' : 'SRV' });
   form.innerHTML = `
     <div class="form__grid">
-      <div class="form__row"><label class="lbl" for="cat-id">${escapeHTML(t.idLabel)} <span class="req">●</span></label>
-        <input class="inp inp--mono" id="cat-id" required placeholder="${escapeHTML(t.phId)}" value="${escapeHTML(editing?.id || '')}" ${editing ? 'readonly' : ''} /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="cat-title">${escapeHTML(t.titleLabel)} <span class="req">●</span></label>
+        <input class="inp" id="cat-title" required placeholder="${escapeHTML(t.phTitle)}" value="${escapeHTML(editing?.title || '')}" /></div>
+      <div class="form__row"><label class="lbl" for="cat-code">${escapeHTML(t.codeLabel)}${editing ? ' <span class="req">●</span>' : ''}</label>
+        <input class="inp inp--mono" id="cat-code" maxlength="40" autocomplete="off" ${editing ? 'required' : ''} placeholder="${escapeHTML(codePlaceholder(typeValue))}" value="${escapeHTML(editing?.code || '')}" /></div>
       <div class="form__row"><label class="lbl" for="cat-type">${escapeHTML(t.typeLabel)} <span class="req">●</span></label>
         <select class="sel" id="cat-type" required>
           <option value="service" ${typeValue === 'service' ? 'selected' : ''}>${escapeHTML(t.service)}</option>
@@ -4305,8 +4334,8 @@ function openCatalogForm(itemId) {
         </select></div>
       <div class="form__row form__row--full"><label class="lbl" for="cat-cat">${escapeHTML(t.categoryLabel)} <span class="req">●</span></label>
         <input class="inp" id="cat-cat" required placeholder="${escapeHTML(t.phCategory)}" value="${escapeHTML(editing?.category || '')}" /></div>
-      <div class="form__row form__row--full"><label class="lbl" for="cat-desc">${escapeHTML(t.descLabel)} <span class="req">●</span></label>
-        <textarea class="txt" id="cat-desc" required placeholder="${escapeHTML(t.phDesc)}">${escapeHTML(editing?.description || '')}</textarea></div>
+      <div class="form__row form__row--full"><label class="lbl" for="cat-desc">${escapeHTML(t.descLabel)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <textarea class="txt" id="cat-desc" placeholder="${escapeHTML(t.phDesc)}">${escapeHTML(editing ? catalogDetails(editing) : '')}</textarea></div>
       <div class="form__row"><label class="lbl" for="cat-unit">${escapeHTML(t.unitLabel)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="cat-unit" required placeholder="${escapeHTML(t.phUnit)}" value="${escapeHTML(editing?.unit || '')}" /></div>
       <div class="form__row"><label class="lbl" for="cat-price">${escapeHTML(t.priceLabel)} <span class="req">●</span></label>
@@ -4317,50 +4346,47 @@ function openCatalogForm(itemId) {
       <div class="form__row" data-booking-fields ${typeValue === 'service' ? '' : 'hidden'}><label class="lbl" for="cat-duration">${escapeHTML(t.durationLabel)}</label>
         <input class="inp inp--mono" id="cat-duration" type="number" min="5" step="5" value="${editing?.durationMinutes ?? 30}" /></div>` : ''}
     </div>
-    ${editing ? `<p class="hint">${escapeHTML(t.editingHint({ id: editing.id }))}</p>` : ''}
+    ${editing ? `<p class="hint">${escapeHTML(t.editingHint)}</p>` : ''}
     <button class="btn btn--primary" type="submit">${escapeHTML(editing ? t.saveChanges : t.createItem)}</button>`;
-  const idEl = $('#cat-id', form), descEl = $('#cat-desc', form), typeEl = $('#cat-type', form);
-  typeEl.addEventListener('change', () => $$('[data-booking-fields]', form).forEach(row => { row.hidden = typeEl.value !== 'service'; }));
-  if (!editing) {
-    let touched = false;
-    idEl.addEventListener('input', () => { touched = true; });
-    const refresh = () => { if (!touched) idEl.value = (typeEl.value === 'service' ? 'srv-' : 'mat-') + slugify(descEl.value).slice(0, 40); };
-    descEl.addEventListener('input', refresh);
-    typeEl.addEventListener('change', refresh);
-  }
+  const titleEl = $('#cat-title', form), codeEl = $('#cat-code', form), descEl = $('#cat-desc', form), typeEl = $('#cat-type', form);
+  typeEl.addEventListener('change', () => {
+    $$('[data-booking-fields]', form).forEach(row => { row.hidden = typeEl.value !== 'service'; });
+    codeEl.placeholder = codePlaceholder(typeEl.value);
+  });
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const id = idEl.value.trim(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
+    const title = titleEl.value.trim(), code = codeEl.value.trim(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
     const type = typeEl.value, defaultUnitPriceEur = Number($('#cat-price', form).value || 0);
-    if (!id || !category || !description || !unit) return toast(t.fillRequired);
+    if (!title || !category || !unit || (editing && !code)) return toast(t.fillRequired);
     const booking = $('#cat-bookable', form)
       ? { bookable: type === 'service' && $('#cat-bookable', form).checked, durationMinutes: Math.max(5, Number($('#cat-duration', form).value || 30)) }
       : {};
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      const path = editing ? `/app/api/crm/standard-items/${encodeURIComponent(id)}` : '/app/api/crm/standard-items';
-      await api(path, { method: 'POST', body: JSON.stringify({ id, type, category, description, unit, defaultUnitPriceEur, ...booking }) });
+      const path = editing ? `/app/api/crm/standard-items/${encodeURIComponent(editing.id)}` : '/app/api/crm/standard-items';
+      const saved = await api(path, { method: 'POST', body: JSON.stringify({ code: code || undefined, type, title, category, description, unit, defaultUnitPriceEur, ...booking }) });
       closeDrawer();
       await loadModule('catalog');
       render();
-      toast(editing ? t.updated({ id }) : t.created({ id }));
-    } catch { btn.disabled = false; toast(STR.catalogCreateFailed); }
+      const ref = saved?.code || title;
+      toast(editing ? t.updated({ code: ref }) : t.created({ code: ref }));
+    } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : STR.catalogCreateFailed); }
   });
-  openDrawer(editing ? t.editTitleFull({ id: editing.id }) : t.newTitle, form);
+  openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form);
 }
 
 async function deleteCatalogItem(id) {
   const item = state.catalog.find(c => c.id === id);
   if (!item) return;
   const t = CRM.items;
-  const ok = await confirmDialog({ title: t.confirmTitle, body: t.confirmBody({ desc: item.description }), okLabel: t.confirmOk });
+  const ok = await confirmDialog({ title: t.confirmTitle, body: t.confirmBody({ desc: item.title }), okLabel: t.confirmOk });
   if (!ok) return;
   try {
     await api(`/app/api/crm/standard-items/${encodeURIComponent(id)}`, { method: 'DELETE' });
     await loadModule('catalog');
     render();
-    toast(t.deleted({ id }));
+    toast(t.deleted({ code: item.code || item.title }));
   } catch { toast(STR.catalogCreateFailed); }
 }
 
@@ -4416,7 +4442,7 @@ function generalPaymentFields() {
 }
 
 function lineItemsField(catalog) {
-  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.description)} · ${fmtEUR(c.defaultUnitPriceEur)}/${escapeHTML(c.unit)}</option>`;
+  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))} · ${fmtEUR(c.defaultUnitPriceEur)}/${escapeHTML(c.unit)}</option>`;
   const services = catalog.filter(c => c.type === 'service');
   const materials = catalog.filter(c => c.type === 'material');
   const html = `
@@ -4467,7 +4493,7 @@ function lineItemsField(catalog) {
       const id = $('#catalog-pick', form).value;
       if (!id) return toast(STR.lineChooseCatalog);
       const it = catalog.find(c => c.id === id);
-      if (it) addRow({ description: it.description, quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur });
+      if (it) addRow({ description: catalogLineText(it), quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur });
     });
   };
   return { html, wire, collect };
@@ -5229,22 +5255,40 @@ function catalogTypePill(type) {
     : `<span class="pill pill--info">${escapeHTML(CRM.items.pillMaterial)}</span>`;
 }
 
+// An item without its own description stores its title there, so only a different text is extra detail.
+function catalogDetails(item) {
+  return item.description && item.description !== item.title ? item.description : '';
+}
+
+// The classic PDF prints the part after " - " under the title.
+function catalogLineText(item) {
+  return [item.title, catalogDetails(item)].filter(Boolean).join(' - ');
+}
+
+function catalogItemLabel(item) {
+  return [item.code, item.title].filter(Boolean).join(' · ');
+}
+
 function renderCatalog(root) {
   const t = CRM.items;
   const q = state.search.toLowerCase();
   const rows = state.catalog
-    .filter(i => !q || `${i.id || ''} ${i.description || ''} ${i.category || ''}`.toLowerCase().includes(q))
-    .map(i => `<tr>
+    .filter(i => !q || `${i.code || ''} ${i.title || ''} ${i.description || ''} ${i.category || ''}`.toLowerCase().includes(q))
+    .map(i => {
+      const details = catalogDetails(i);
+      return `<tr>
+      <td class="id">${escapeHTML(i.code || '')}</td>
+      <td><div class="col"><span class="name">${escapeHTML(i.title)}</span>${details ? `<span class="sub">${escapeHTML(details)}</span>` : ''}</div></td>
       <td>${catalogTypePill(i.type)}${i.bookable && i.durationMinutes && hasModule('bookings') ? ` <span class="pill pill--ok">${escapeHTML(t.bookablePill({ min: i.durationMinutes }))}</span>` : ''}</td>
       <td class="muted">${escapeHTML(i.category)}</td>
-      <td><div class="col"><span class="name">${escapeHTML(i.description)}</span><span class="id">${escapeHTML(i.id)}</span></div></td>
       <td class="mono muted">${escapeHTML(i.unit)}</td>
       <td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>
       <td class="right"><div class="actions">
         <button class="iconbtn" type="button" title="${escapeHTML(t.editTitle)}" data-edit-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
         <button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(t.deleteTitle)}" data-delete-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 5 L13 5 M6 5 L6 3 L10 3 L10 5 M5 5 L6 13 L10 13 L11 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
       </div></td>
-    </tr>`).join('');
+    </tr>`;
+    }).join('');
   const nSrv = state.catalog.filter(i => i.type === 'service' || i.type === 'servico').length;
   const nMat = state.catalog.length - nSrv;
   root.innerHTML = hero(labels.catalog, CRM.tabs.items.desc, statCards([
@@ -5253,7 +5297,7 @@ function renderCatalog(root) {
   ])) + crmPanel({
     title: t.catalogTitle,
     tag: t.tag({ n: state.catalog.length }),
-    head: `<tr><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thCategory)}</th><th>${escapeHTML(t.thDescription)}</th><th>${escapeHTML(t.thUnit)}</th><th class="right">${escapeHTML(t.thPrice)}</th><th class="right">${escapeHTML(t.thActions)}</th></tr>`,
+    head: `<tr><th>${escapeHTML(t.thCode)}</th><th>${escapeHTML(t.thTitle)}</th><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thCategory)}</th><th>${escapeHTML(t.thUnit)}</th><th class="right">${escapeHTML(t.thPrice)}</th><th class="right">${escapeHTML(t.thActions)}</th></tr>`,
     rows,
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,

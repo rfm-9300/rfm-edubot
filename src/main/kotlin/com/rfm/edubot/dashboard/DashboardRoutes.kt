@@ -15,10 +15,11 @@ import com.rfm.edubot.admin.CreateQuoteRequest
 import com.rfm.edubot.admin.CreateEmployeeRequest
 import com.rfm.edubot.admin.CreateSupplierRequest
 import com.rfm.edubot.admin.InvoiceClientServicesRequest
-import com.rfm.edubot.admin.StandardItemRequest
 import com.rfm.edubot.admin.UpdateClientServiceRequest
+import com.rfm.edubot.admin.createStandardItem
 import com.rfm.edubot.admin.dto
 import com.rfm.edubot.admin.respondGeneratedPdf
+import com.rfm.edubot.admin.updateStandardItem
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
 import com.rfm.edubot.bookings.model.BookingSource
@@ -716,17 +717,12 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
         }
         post("/standard-items") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
-            val deps = tenantDeps(ctx)
-            val request = call.receive<StandardItemRequest>()
-            call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
+            call.createStandardItem(tenantDeps(ctx).standardItems)
         }
         post("/standard-items/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@post call.respond(HttpStatusCode.Forbidden)
-            val deps = tenantDeps(ctx)
             val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val request = call.receive<StandardItemRequest>()
-            val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
-            call.respond(deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound))
+            call.updateStandardItem(tenantDeps(ctx).standardItems, id)
         }
         delete("/standard-items/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CATALOG) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
@@ -923,7 +919,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address) } ?: return@post
+            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address, request.type) } ?: return@post
             call.respond(HttpStatusCode.Created, supplier.value.dto())
         }
         patch("/suppliers/{id}") {
@@ -932,7 +929,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address) } ?: return@patch)
+            request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address, request.type) } ?: return@patch)
                 .value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(supplier.dto())
         }

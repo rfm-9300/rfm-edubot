@@ -258,16 +258,12 @@ fun Route.tenantAdminRoutes(
                 }
                 post("/standard-items") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
-                    val request = call.receive<StandardItemRequest>()
-                    call.respond(HttpStatusCode.Created, deps.standardItems.create(request.toStandardItem(request.id)))
+                    call.createStandardItem(deps.standardItems)
                 }
                 post("/standard-items/{id}") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@post
                     val id = call.parameters["id"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-                    val request = call.receive<StandardItemRequest>()
-                    val existing = deps.standardItems.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
-                    val item = deps.standardItems.update(id, request.toStandardItem(id, existing)) ?: return@post call.respond(HttpStatusCode.NotFound)
-                    call.respond(item)
+                    call.updateStandardItem(deps.standardItems, id)
                 }
                 delete("/standard-items/{id}") {
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CATALOG) ?: return@delete

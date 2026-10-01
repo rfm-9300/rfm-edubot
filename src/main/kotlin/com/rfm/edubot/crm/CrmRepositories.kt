@@ -403,47 +403,64 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
 class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")
+    private val sequences = SequenceRepository(mongoModule, tenantId)
 
     suspend fun search(query: String? = null, type: String? = null): List<StandardItem> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         type?.trim()?.lowercase()?.takeIf { it.isNotBlank() }?.let { filters.add(Filters.eq("type", it)) }
         query?.trim()?.takeIf { it.isNotBlank() }?.let { term ->
+            val contains = ".*${Regex.escape(term)}.*"
             filters.add(
                 Filters.or(
-                    Filters.regex("description", ".*${Regex.escape(term)}.*", "i"),
-                    Filters.regex("category", ".*${Regex.escape(term)}.*", "i"),
-                    Filters.regex("id", ".*${Regex.escape(term)}.*", "i"),
+                    Filters.regex("code", contains, "i"),
+                    Filters.regex("title", contains, "i"),
+                    Filters.regex("description", contains, "i"),
+                    Filters.regex("category", contains, "i"),
+                    Filters.regex("id", contains, "i"),
                 )
             )
         }
         val filter = Filters.and(filters)
-        return collection.find(filter).sort(Document("type", 1).append("category", 1).append("description", 1)).toList().map { it.toStandardItem() }
+        return collection.find(filter).sort(Document("type", 1).append("category", 1).append("title", 1)).toList().map { it.toStandardItem() }
     }
 
     suspend fun findById(id: String): StandardItem? =
         collection.find(scoped(Filters.eq("id", id))).firstOrNull()?.toStandardItem()
+
+    suspend fun findByCode(code: String): StandardItem? =
+        collection.find(scoped(Filters.eq("code", code))).firstOrNull()?.toStandardItem()
 
     suspend fun findByIds(ids: Collection<String>): List<StandardItem> {
         if (ids.isEmpty()) return emptyList()
         return collection.find(scoped(Filters.`in`("id", ids.toList()))).toList().map { it.toStandardItem() }
     }
 
+    /** Saves a new item. One without a code gets the next free code for its type; a taken code fails on the unique index. */
     suspend fun create(item: StandardItem): StandardItem {
-        collection.insertOne(item.toDocument())
-        return item
+        val saved = item.copy(
+            description = item.description.ifBlank { item.title },
+            code = item.code?.takeIf { it.isNotBlank() } ?: freeCode(catalogCodePrefix(item.type)),
+        )
+        collection.insertOne(saved.toDocument())
+        return saved
     }
 
+    /** A null code keeps the stored one. */
     suspend fun update(id: String, item: StandardItem): StandardItem? {
         val result = collection.findOneAndUpdate(
             scoped(Filters.eq("id", id)),
             Updates.combine(
-                Updates.set("type", item.type),
-                Updates.set("category", item.category),
-                Updates.set("description", item.description),
-                Updates.set("unit", item.unit),
-                Updates.set("defaultUnitPriceEur", item.defaultUnitPriceEur),
-                Updates.set("durationMinutes", item.durationMinutes),
-                Updates.set("bookable", item.bookable),
+                listOfNotNull(
+                    Updates.set("type", item.type),
+                    Updates.set("category", item.category),
+                    Updates.set("title", item.title),
+                    Updates.set("description", item.description.ifBlank { item.title }),
+                    Updates.set("unit", item.unit),
+                    Updates.set("defaultUnitPriceEur", item.defaultUnitPriceEur),
+                    Updates.set("durationMinutes", item.durationMinutes),
+                    Updates.set("bookable", item.bookable),
+                    item.code?.takeIf { it.isNotBlank() }?.let { Updates.set("code", it) },
+                )
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
@@ -452,33 +469,50 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
 
     suspend fun delete(id: String): Boolean = collection.deleteOne(scoped(Filters.eq("id", id))).deletedCount > 0
 
-    /** A `srv-<slug>` id not yet used by this tenant, matching what the dashboard catalog form generates. */
-    suspend fun freeServiceId(name: String): String {
-        val base = "srv-" + catalogSlug(name).take(40).trimEnd('-').ifBlank { "service" }
+    /** A `srv-<slug>` id (`mat-<slug>` for materials) not yet used by this tenant. */
+    suspend fun freeId(name: String, type: String = "service"): String {
+        val prefix = if (isServiceType(type)) "srv" else "mat"
+        val base = "$prefix-" + catalogSlug(name).take(40).trimEnd('-').ifBlank { "item" }
         if (findById(base) == null) return base
         for (n in 2..99) {
             val candidate = "$base-$n"
             if (findById(candidate) == null) return candidate
         }
-        return "srv-${ObjectId().toHexString()}"
+        return "$prefix-${ObjectId().toHexString()}"
     }
 
-    private fun Document.toStandardItem() = StandardItem(
-        id = getString("id"),
-        type = getString("type"),
-        category = getString("category"),
-        description = getString("description"),
-        unit = getString("unit"),
-        defaultUnitPriceEur = getDoubleValue("defaultUnitPriceEur"),
-        durationMinutes = (get("durationMinutes") as? Number)?.toInt(),
-        bookable = getBoolean("bookable") ?: false,
-    )
+    /** The next `PREFIX-nnn` code this tenant doesn't use yet; numbers someone typed by hand are skipped. */
+    suspend fun freeCode(prefix: String): String {
+        var code: String
+        do {
+            code = "$prefix-${sequences.next("catalog_${prefix.lowercase()}_code").toString().padStart(3, '0')}"
+        } while (findByCode(code) != null)
+        return code
+    }
+
+    private fun Document.toStandardItem(): StandardItem {
+        val description = getString("description").orEmpty()
+        return StandardItem(
+            id = getString("id"),
+            type = getString("type"),
+            category = getString("category"),
+            description = description,
+            unit = getString("unit"),
+            defaultUnitPriceEur = getDoubleValue("defaultUnitPriceEur"),
+            durationMinutes = (get("durationMinutes") as? Number)?.toInt(),
+            bookable = getBoolean("bookable") ?: false,
+            title = getString("title")?.takeIf { it.isNotBlank() } ?: description,
+            code = getString("code")?.takeIf { it.isNotBlank() },
+        )
+    }
 
     private fun StandardItem.toDocument() = Document("id", id)
         .append("tenantId", tenantId)
+        .append("code", code)
         .append("type", type)
         .append("category", category)
-        .append("description", description)
+        .append("title", title)
+        .append("description", description.ifBlank { title })
         .append("unit", unit)
         .append("defaultUnitPriceEur", defaultUnitPriceEur)
         .append("durationMinutes", durationMinutes)

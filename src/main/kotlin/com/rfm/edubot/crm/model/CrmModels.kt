@@ -47,6 +47,8 @@ data class Supplier(
     val name: String,
     val phone: String,
     val address: String? = null,
+    /** Free text the tenant chooses (materials, subcontractor…); the form suggests the types already in use. */
+    val type: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     /** Set on a supplier that has payments and was removed: hidden from lists and pickers, restorable. */

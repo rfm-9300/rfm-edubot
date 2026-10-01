@@ -1,5 +1,7 @@
 package com.rfm.edubot.admin
 
+import com.mongodb.ErrorCategory
+import com.mongodb.MongoServerException
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Employee
@@ -9,8 +11,10 @@ import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.Supplier
 import com.rfm.edubot.crm.MIN_BOOKING_MINUTES
 import com.rfm.edubot.crm.StandardItem
+import com.rfm.edubot.crm.StandardItemRepository
 import io.ktor.http.*
 import io.ktor.server.application.*
+import io.ktor.server.request.*
 import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.serialization.Serializable
@@ -97,28 +101,80 @@ internal data class CreateLineItemRequest(
     fun toLineItem() = lineItem(description, quantity, unitPriceEur, unit)
 }
 
+/**
+ * Create and update body of a catalog item. Clients that predate titles (the mobile app) send only a
+ * description, which then is the title. A new item without an [id] gets one from its title.
+ */
 @Serializable
 internal data class StandardItemRequest(
-    val id: String,
+    val id: String? = null,
     val type: String,
     val category: String,
-    val description: String,
+    val description: String = "",
     val unit: String,
     val defaultUnitPriceEur: Double,
     val durationMinutes: Int? = null,
     val bookable: Boolean? = null,
+    val title: String? = null,
+    val code: String? = null,
 ) {
-    /** Omitted booking fields keep [existing]'s values, so clients that don't know them never reset them. */
+    private val titleText: String get() = title?.trim()?.takeIf { it.isNotBlank() } ?: description.trim()
+    private val codeText: String? get() = code?.trim()?.takeIf { it.isNotBlank() }
+
+    /** Stable error code for the first invalid field, or null. */
+    fun error(): String? = when {
+        titleText.isBlank() -> "title_required"
+        (codeText?.length ?: 0) > MAX_CODE -> "code_too_long"
+        else -> null
+    }
+
+    /** Omitted booking fields and code keep [existing]'s values, so clients that don't know them never reset them. */
     fun toStandardItem(itemId: String, existing: StandardItem? = null) = StandardItem(
         id = itemId.trim(),
         type = type.trim().lowercase(),
         category = category.trim(),
-        description = description.trim(),
+        description = description.trim().ifBlank { titleText },
         unit = unit.trim(),
         defaultUnitPriceEur = defaultUnitPriceEur,
         durationMinutes = durationMinutes?.takeIf { it >= MIN_BOOKING_MINUTES } ?: existing?.durationMinutes,
         bookable = bookable ?: existing?.bookable ?: false,
+        title = titleText,
+        code = codeText ?: existing?.code,
     )
+
+    companion object {
+        const val MAX_CODE = 40
+    }
+}
+
+/** `POST …/standard-items` for the dashboard and the backoffice: 201 with the saved item, or 400/409 with a stable error code. */
+internal suspend fun ApplicationCall.createStandardItem(items: StandardItemRepository) {
+    val request = receive<StandardItemRequest>()
+    request.error()?.let { return respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+    val requestedId = request.id?.trim()?.takeIf { it.isNotBlank() }
+    if (requestedId != null && items.findById(requestedId) != null) return respond(HttpStatusCode.Conflict, mapOf("error" to "id_taken"))
+    val draft = request.toStandardItem(requestedId.orEmpty())
+    val item = if (requestedId != null) draft else draft.copy(id = items.freeId(draft.title, draft.type))
+    respondCatalogWrite(HttpStatusCode.Created) { items.create(item) }
+}
+
+/** `POST …/standard-items/{id}`: the internal id never changes, the code may. */
+internal suspend fun ApplicationCall.updateStandardItem(items: StandardItemRepository, id: String) {
+    val existing = items.findById(id) ?: return respond(HttpStatusCode.NotFound)
+    val request = receive<StandardItemRequest>()
+    request.error()?.let { return respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+    respondCatalogWrite(HttpStatusCode.OK) { items.update(id, request.toStandardItem(id, existing)) }
+}
+
+/** Ids are checked or generated free before writing, so a duplicate key here is another item's code. */
+private suspend fun ApplicationCall.respondCatalogWrite(status: HttpStatusCode, write: suspend () -> StandardItem?) {
+    val saved = try {
+        write()
+    } catch (e: MongoServerException) {
+        if (ErrorCategory.fromErrorCode(e.code) != ErrorCategory.DUPLICATE_KEY) throw e
+        return respond(HttpStatusCode.Conflict, mapOf("error" to "code_taken"))
+    }
+    if (saved == null) respond(HttpStatusCode.NotFound) else respond(status, saved)
 }
 
 @Serializable
@@ -176,12 +232,21 @@ internal data class InvoiceDto(
     val items: List<LineItemDto> = emptyList(),
 )
 
+/** Also the PATCH body: an omitted [type] keeps the stored one; an empty string clears it. */
 @Serializable
 internal data class CreateSupplierRequest(
     val name: String,
     val phone: String,
     val address: String? = null,
-)
+    val type: String? = null,
+) {
+    /** Stable error code for the first invalid optional field, or null. */
+    fun detailsError(): String? = if ((type?.trim()?.length ?: 0) > MAX_TYPE) "type_too_long" else null
+
+    companion object {
+        const val MAX_TYPE = 60
+    }
+}
 
 @Serializable
 internal data class CreateEmployeeRequest(
@@ -207,6 +272,7 @@ internal data class SupplierDto(
     val name: String,
     val phone: String,
     val address: String? = null,
+    val type: String? = null,
     val createdAt: String,
     val archivedAt: String? = null,
 )
@@ -371,6 +437,7 @@ internal fun Supplier.dto() = SupplierDto(
     name = name,
     phone = phone,
     address = address,
+    type = type,
     createdAt = createdAt.toString(),
     archivedAt = archivedAt?.toString(),
 )

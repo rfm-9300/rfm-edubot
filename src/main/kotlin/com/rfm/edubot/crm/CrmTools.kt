@@ -28,7 +28,7 @@ class CrmTools(
     val definitions: List<ToolDefinition> = listOf(
         tool("search_clients", "Search clients by name or phone", obj("query" to "string"), listOf("query")),
         tool("list_service_templates", "List reusable construction service templates and default clauses", obj("query" to "string")),
-        tool("list_standard_items", "List standard quote/invoice line items split by service or material", obj("query" to "string", "type" to "string")),
+        tool("list_standard_items", "List standard quote/invoice line items split by service or material; query matches an item's code, title, description or category", obj("query" to "string", "type" to "string")),
         tool("create_client", "Create a new client", obj("name" to "string", "phone" to "string", "address" to "string"), listOf("name", "phone")),
         tool("create_quote", "Create a quote for a client", createDocumentSchema(false), listOf("client_id", "items")),
         tool("update_quote", "Update an existing quote: replace items, change status (PENDENTE/SENT/ACEITO), update notes or valid_until. Pass only the fields to change.", updateQuoteSchema(), listOf("quote_id")),
@@ -106,9 +106,11 @@ class CrmTools(
                 items.forEach { item ->
                     add(buildJsonObject {
                         put("id", item.id)
+                        item.code?.let { put("code", it) }
                         put("type", item.type)
                         put("category", item.category)
-                        put("description", item.description)
+                        put("title", item.title)
+                        item.details().takeIf { it.isNotBlank() }?.let { put("description", it) }
                         put("unit", item.unit)
                         put("default_unit_price_eur", item.defaultUnitPriceEur)
                     })
