@@ -391,6 +391,41 @@ shows whether Google is offered. Refused tenant sign-ins are logged by `Dashboar
   `cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml exec mongo mongosh wabot --eval 'db.dashboard_users.updateOne({ email: "user@example.com" }, { $set: { passwordHash: "<hash>" }, $unset: { googleUid: 1, googleEmail: 1 } })'`
   (drop the `$unset` to keep the Google link). The user then signs in with that password and changes it.
 
+## Agents and Gmail
+
+Both start off for companies: the Agents module is opt-in per company (backoffice → edit the
+tenant → Modules), and the Gmail integration stays hidden until a Google OAuth client is set.
+A routine deploy needs none of this.
+
+- **Agents runtime** (optional; defaults in `.env.example`): `AGENTS_TICK_SECONDS` (scheduler
+  tick, 30), `AGENTS_LANES` (run workers, 4) and `AGENTS_MAX_CONCURRENT_RUNS_PER_COMPANY` (2).
+  The agents scheduler, the Gmail sync and the email clean-up each take a Mongo lease
+  (`scheduler_leases`) before running.
+- **Per company**: the tenants table's **Agents** action (once a company has Agents on) shows its
+  runs of the last 7 days, pauses or resumes all its agents, and sets the limits only the platform
+  controls (active agents, runs per day, emails per day).
+- **Google OAuth client**: a "Web application" client in the Google Cloud project with the
+  authorized redirect URI `https://<host>/integrations/google/callback`. Set
+  `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_REDIRECT` in the VPS
+  `.env`, or in the backoffice's **Platform settings → Google**, which applies them without a
+  restart. Consent screen, scopes, verification and the demo video:
+  [docs/google-oauth-verification.md](docs/google-oauth-verification.md).
+- **`INTEGRATIONS_ENCRYPTION_KEY`** (env only) encrypts the Google tokens kept in Mongo. Generate
+  it once with `openssl rand -base64 32`, add it to the VPS `.env`, and keep a copy off the VPS:
+  the nightly backup is a `mongodump`, so it holds the tokens but not the key, and without the key
+  every account has to be connected again. Without it the app still starts, logs a warning, and
+  Gmail can't be connected. Rotate only when Rodrigo asks: put a new key first, then a comma and the
+  old one; each account moves to the new key at its next token refresh, and an account that only a
+  removed key could open has to be reconnected.
+- **Inbox reading** (`GMAIL_INBOX_ENABLED`, default `false`, read at startup) starts the Gmail
+  sync job (every `GMAIL_SYNC_SECONDS`, default 60) and lets company admins turn on "Use my inbox
+  in automations". Keep it off until Google verified the restricted read scopes and the CASA
+  assessment passed. `GMAIL_PUBSUB_TOPIC` is reserved for push and not used yet.
+- Email text is dropped 90 days after the email's date. Disconnecting an account deletes its tokens
+  and kept mail.
+- After editing `.env`, recreate the app on the deployed tag:
+  `cd ~/whatsapp-bot && TAG=$(cat .last-good-tag) docker compose -f docker-compose.prod.yml up -d app`.
+
 ## Failure Rules
 
 - If the image push fails, check `packages: write` permission and GHCR login.
