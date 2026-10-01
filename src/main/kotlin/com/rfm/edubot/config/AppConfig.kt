@@ -33,7 +33,7 @@ data class AppConfig(
         val clientId: String = "",
         val clientSecret: String = "",
         val redirectUri: String = "",
-        /** Pub/Sub topic for Gmail push notifications; blank keeps polling. */
+        /** Reserved for Gmail push through Pub/Sub; not used yet, connected inboxes are polled. */
         val pubsubTopic: String = "",
         /**
          * Companies may turn on "Use my inbox in automations", which asks for Gmail's *restricted* read
