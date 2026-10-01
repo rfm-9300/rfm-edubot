@@ -71,6 +71,7 @@ import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.buildJsonObject
@@ -580,6 +581,10 @@ class AgentRoutesTest {
         assertEquals(500, limits["maxActiveAgents"]!!.jsonPrimitive.int, "limits stay in range")
         assertEquals(50, limits["runsPerDay"]!!.jsonPrimitive.int)
         assertEquals(300, limits["emailSendsPerDay"]!!.jsonPrimitive.int, "a limit left out keeps its value")
+        val cleared = http.send("PUT", "$base/limits", operator, buildJsonObject { put("maxActiveAgents", JsonNull); put("emailSendsPerDay", 0) }).obj()
+        assertEquals(500, cleared["maxActiveAgents"]!!.jsonPrimitive.int, "a limit sent as null keeps its value")
+        assertEquals(0, cleared["emailSendsPerDay"]!!.jsonPrimitive.int, "0 is a limit, not a missing one")
+        assertEquals(50, cleared["runsPerDay"]!!.jsonPrimitive.int)
         assertEquals(HttpStatusCode.BadRequest, http.send("PUT", "$base/limits", operator).status)
         assertEquals(HttpStatusCode.Unauthorized, http.send("PUT", "$base/limits", company.adminToken, buildJsonObject { put("runsPerDay", 1) }).status)
         val platform = http.send("GET", "/app/api/agents/settings", company.adminToken).obj()["platform"]!!.jsonObject

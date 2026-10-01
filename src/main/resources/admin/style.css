@@ -2057,8 +2057,8 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .plain-list { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
 .agents-settings { display: grid; gap: 16px; }
 .agents-settings .form { display: grid; gap: 12px; }
-.agents-settings .panel__body > .dash-facts { margin-top: 0; }
-.agents-settings .panel__body > .dash-facts > div:first-child { padding-top: 0; border-top: 0; }
+.panel__body > .dash-facts { margin-top: 0; }
+.panel__body > .dash-facts > div:first-child { padding-top: 0; border-top: 0; }
 
 @media (max-width: 620px) {
   .cond-row { grid-template-columns: 1fr 1fr; }
