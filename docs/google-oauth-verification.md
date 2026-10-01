@@ -72,7 +72,7 @@ automation handled) or drop it from `GoogleScopes.inbox`: reviewers refuse scope
 | Disclose the use and link the policy | `/privacy` section 5 carries Google's Limited Use sentence and the link (`LegalRoutesTest`). |
 | Use only for user-facing features | Sends come from dashboard buttons or the company's own automations (`EmailService`, `email.send`). |
 | Tokens protected | AES-256-GCM at rest (`TokenCipher`), never sent to the browser (`IntegrationConnectionDto`). |
-| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`), with what automation runs and approvals made of it; runs and events never store the text itself; attachment contents never stored. |
+| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`), with what automation runs and approvals made of it; runs and events never store the text itself; attachment contents never stored. Tasks and notifications an automation made from an email keep what its steps wrote into them (an AI summary, say), and neither the retention job nor a disconnect clears them: notifications expire after 90 days, tasks stay. |
 | Delete on request | Disconnect deletes tokens and kept mail, redacts the account's emails from the activity log, runs and approvals, and revokes the grant (`DELETE /app/api/integrations/{id}`, `EmailService.forget`); `/data-deletion` explains it. |
 | No ads, no model training | Stated on `/privacy`; Gmail text reaches the LLM provider only inside a step the company set up. |
 | No human reading | Stated on `/privacy`; support access only when the company asks. |
