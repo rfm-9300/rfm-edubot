@@ -6,6 +6,7 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.ClientService
 import com.rfm.edubot.crm.model.ClientServiceStatus
+import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -42,6 +43,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             .map { it.toClientService() }
     }
 
+    /** With [items], the row totals their sum and [quantity], [unit] and [unitPriceCents] are ignored. */
     suspend fun create(
         clientId: ObjectId,
         name: String,
@@ -53,18 +55,21 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         catalogItemId: String?,
         performedAt: LocalDate?,
         bookingId: ObjectId? = null,
+        items: List<LineItem> = emptyList(),
     ): ClientService {
         val now = SystemClock.now()
         val qty = quantity.takeIf { it > 0 } ?: 1.0
+        val summary = if (items.isEmpty()) ServiceSummary(qty, unit.trim(), unitPriceCents, clientServiceTotals(qty, unitPriceCents)) else summarize(items)
         val service = ClientService(
             tenantId = tenantId,
             clientId = clientId,
             name = name.trim(),
             notes = notes?.trim()?.takeIf { it.isNotBlank() },
-            quantity = qty,
-            unit = unit.trim(),
-            unitPriceCents = unitPriceCents,
-            totalCents = clientServiceTotals(qty, unitPriceCents),
+            quantity = summary.quantity,
+            unit = summary.unit,
+            unitPriceCents = summary.unitPriceCents,
+            totalCents = summary.totalCents,
+            items = items,
             bookingServiceId = bookingServiceId,
             catalogItemId = catalogItemId?.trim()?.takeIf { it.isNotBlank() },
             bookingId = bookingId,
@@ -76,6 +81,10 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         return service
     }
 
+    /**
+     * Null [items] keep the stored ones. A row with items is summarized from them, so [quantity], [unit] and
+     * [unitPriceCents] only change a row without items.
+     */
     suspend fun update(
         id: ObjectId,
         name: String?,
@@ -85,23 +94,30 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         unitPriceCents: Long?,
         performedAt: LocalDate?,
         status: ClientServiceStatus?,
+        items: List<LineItem>? = null,
     ): ClientService? {
         val existing = findById(id) ?: return null
         if (existing.status == ClientServiceStatus.INVOICED) return existing
         val now = SystemClock.now()
         val nextName = name?.trim()?.takeIf { it.isNotBlank() } ?: existing.name
-        val nextQty = quantity?.takeIf { it > 0 } ?: existing.quantity
-        val nextUnit = unit?.trim() ?: existing.unit
-        val nextPrice = unitPriceCents ?: existing.unitPriceCents
+        val nextItems = items ?: existing.items
+        val summary = if (nextItems.isNotEmpty()) {
+            summarize(nextItems)
+        } else {
+            val nextQty = quantity?.takeIf { it > 0 } ?: existing.quantity
+            val nextPrice = unitPriceCents ?: existing.unitPriceCents
+            ServiceSummary(nextQty, unit?.trim() ?: existing.unit, nextPrice, clientServiceTotals(nextQty, nextPrice))
+        }
         val ops = mutableListOf<Bson>(
             Updates.set("name", nextName),
             Updates.set("notes", notes?.trim()?.takeIf { it.isNotBlank() }),
-            Updates.set("quantity", nextQty),
-            Updates.set("unit", nextUnit),
-            Updates.set("unitPriceCents", nextPrice),
-            Updates.set("totalCents", clientServiceTotals(nextQty, nextPrice)),
+            Updates.set("quantity", summary.quantity),
+            Updates.set("unit", summary.unit),
+            Updates.set("unitPriceCents", summary.unitPriceCents),
+            Updates.set("totalCents", summary.totalCents),
             Updates.set("updatedAt", now.toDate()),
         )
+        items?.let { ops.add(Updates.set("items", it.map { item -> item.toDocument() })) }
         performedAt?.let { ops.add(Updates.set("performedAt", it.toString())) }
         status?.takeIf { it != ClientServiceStatus.INVOICED }?.let { ops.add(Updates.set("status", it.name)) }
         val doc = collection.findOneAndUpdate(
@@ -148,6 +164,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         unit = getString("unit") ?: "",
         unitPriceCents = getLongValue("unitPriceCents"),
         totalCents = getLongValue("totalCents"),
+        items = getList("items", Document::class.java).orEmpty().map { it.toLineItem() },
         status = runCatching { ClientServiceStatus.valueOf(getString("status") ?: "OPEN") }.getOrDefault(ClientServiceStatus.OPEN),
         invoiceId = get("invoiceId", ObjectId::class.java),
         bookingServiceId = get("bookingServiceId", ObjectId::class.java),
@@ -167,6 +184,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         .append("unit", unit)
         .append("unitPriceCents", unitPriceCents)
         .append("totalCents", totalCents)
+        .append("items", items.map { it.toDocument() })
         .append("status", status.name)
         .append("invoiceId", invoiceId)
         .append("bookingServiceId", bookingServiceId)

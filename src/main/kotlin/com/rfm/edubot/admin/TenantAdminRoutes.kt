@@ -280,8 +280,11 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-                    request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-                    val client = deps.clients.create(request.name, request.phone, request.address, request.email, request.taxId, request.notes)
+                    (request.requiredError() ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    val client = deps.clients.create(
+                        request.name, request.phone, request.address, request.email, request.taxId, request.notes,
+                        request.postalCode, request.city, request.contactPerson,
+                    )
                     call.respond(HttpStatusCode.Created, client.dto())
                 }
                 get("/quotes") {

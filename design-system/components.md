@@ -354,7 +354,7 @@ Type-ahead matches for an existing record (e.g. a CRM client under a booking's n
 
 ## Line items
 
-Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote/invoice editors. Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table.
+Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice and Serviços editors (`lineItemsField()` in `app.js`). Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description input (`data-k="description"`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
 
 ## Drawer
 

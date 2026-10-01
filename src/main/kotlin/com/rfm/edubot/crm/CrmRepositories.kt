@@ -21,6 +21,7 @@ import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import java.util.Date
+import kotlin.math.roundToLong
 
 class ClientRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.clients")
@@ -47,6 +48,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
                     Filters.regex("name", contains, "i"),
                     Filters.regex("phone", contains, "i"),
                     Filters.regex("address", contains, "i"),
+                    Filters.regex("postalCode", contains, "i"),
+                    Filters.regex("city", contains, "i"),
+                    Filters.regex("contactPerson", contains, "i"),
                     Filters.regex("email", contains, "i"),
                     Filters.regex("taxId", contains, "i"),
                     phoneDigits,
@@ -84,8 +88,8 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
     }
 
     /**
-     * [address] is replaced as given (null clears it). [email], [taxId] and [notes] are only written when
-     * not null, so callers that don't send them keep the stored values; a blank string clears them.
+     * [address] is replaced as given (null clears it). The other details are only written when not null,
+     * so callers that don't send them keep the stored values; a blank string clears them.
      */
     suspend fun update(
         id: ObjectId,
@@ -95,6 +99,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email: String? = null,
         taxId: String? = null,
         notes: String? = null,
+        postalCode: String? = null,
+        city: String? = null,
+        contactPerson: String? = null,
     ): Client? {
         val now = SystemClock.now()
         val updates = mutableListOf(
@@ -106,6 +113,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email?.let { updates += Updates.set("email", it.cleaned()) }
         taxId?.let { updates += Updates.set("taxId", it.cleaned()) }
         notes?.let { updates += Updates.set("notes", it.cleaned()) }
+        postalCode?.let { updates += Updates.set("postalCode", it.cleaned()) }
+        city?.let { updates += Updates.set("city", it.cleaned()) }
+        contactPerson?.let { updates += Updates.set("contactPerson", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(updates),
@@ -121,6 +131,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         email: String? = null,
         taxId: String? = null,
         notes: String? = null,
+        postalCode: String? = null,
+        city: String? = null,
+        contactPerson: String? = null,
     ): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"
@@ -130,6 +143,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             name = name.trim(),
             phone = phone.trim(),
             address = address.cleaned(),
+            postalCode = postalCode.cleaned(),
+            city = city.cleaned(),
+            contactPerson = contactPerson.cleaned(),
             email = email.cleaned(),
             taxId = taxId.cleaned(),
             notes = notes.cleaned(),
@@ -149,6 +165,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         name = getString("name"),
         phone = getString("phone"),
         address = getString("address"),
+        postalCode = getString("postalCode"),
+        city = getString("city"),
+        contactPerson = getString("contactPerson"),
         email = getString("email"),
         taxId = getString("taxId"),
         notes = getString("notes"),
@@ -163,6 +182,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         .append("name", name)
         .append("phone", phone)
         .append("address", address)
+        .append("postalCode", postalCode)
+        .append("city", city)
+        .append("contactPerson", contactPerson)
         .append("email", email)
         .append("taxId", taxId)
         .append("notes", notes)
@@ -538,8 +560,11 @@ internal class SequenceRepository(mongoModule: MongoModule, private val tenantId
     }
 }
 
+/** Rounded, not truncated: 4.35 * 100 is 434.99999999999994 in floating point. */
+fun eurToCents(eur: Double): Long = (eur * 100).roundToLong()
+
 fun lineItem(description: String, quantity: Double = 1.0, unitPriceEur: Double, unit: String = ""): LineItem {
-    val unitPriceCents = (unitPriceEur * 100).toLong()
+    val unitPriceCents = eurToCents(unitPriceEur)
     return LineItem(
         description = description,
         quantity = quantity,

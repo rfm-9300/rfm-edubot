@@ -2918,12 +2918,12 @@ function renderClients(root) {
   const q = state.search.trim().toLowerCase();
   const qDigits = phoneDigits(q);
   const matches = c => !q
-    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${c.address || ''} ${c.email || ''} ${c.taxId || ''}`.toLowerCase().includes(q)
+    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
   const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
-    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML(c.address || '')}</td><td class="mono muted">${escapeHTML(c.phone)}</td><td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
+    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML([c.address, c.city].filter(Boolean).join(', '))}</td><td class="mono muted">${escapeHTML(c.phone)}</td><td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
@@ -2996,7 +2996,7 @@ function renderEmployees(root) {
   const source = archived ? state.archivedRows : (state.employees || []);
   const q = state.search.toLowerCase();
   const rows = source
-    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''}`.toLowerCase().includes(q))
+    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
     .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
     .join('');
   const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
@@ -3036,7 +3036,7 @@ function renderServices(root) {
         <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
         <td class="name">${escapeHTML(s.clientName || '')}</td>
         <td>${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
-        <td class="mono muted">${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}</td>
+        <td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>
         <td class="num">${fmtEUR(s.totalEur)}</td>
         <td>${servicePill(s.status)}</td>
       </tr>`;
@@ -3114,91 +3114,75 @@ function renderServices(root) {
 
 // Bookable services are catalog services, so both lists merge into one (the booking list only
 // arrives when the Catalog module is off but Bookings is on).
-function serviceSourceOptions() {
+function serviceCatalog() {
   const byId = new Map();
-  for (const c of (state.catalog || []).filter(c => c.type === 'service' || c.type === 'servico')) {
-    byId.set(c.id, { id: c.id, name: c.title, label: catalogItemLabel(c), price: c.defaultUnitPriceEur, unit: c.unit || '' });
-  }
+  for (const c of state.catalog || []) byId.set(c.id, c.type === 'servico' ? { ...c, type: 'service' } : c);
   for (const s of state.bookingServices || []) {
-    if (!byId.has(s.id)) byId.set(s.id, { id: s.id, name: s.name, label: s.name, price: s.priceEur, unit: s.unit || '' });
+    if (!byId.has(s.id)) byId.set(s.id, { id: s.id, type: 'service', title: s.name, unit: s.unit || '', defaultUnitPriceEur: s.priceEur ?? 0 });
   }
-  return [...byId.values()]
-    .sort((a, b) => String(a.name).localeCompare(String(b.name), uiLocale()))
-    .map(s => `<option value="${escapeHTML(s.id)}" data-name="${escapeHTML(s.name)}" data-price="${s.price ?? ''}" data-unit="${escapeHTML(s.unit)}">${escapeHTML(s.label)}</option>`)
-    .join('');
+  return [...byId.values()].sort((a, b) => String(a.title).localeCompare(String(b.title), uiLocale()));
 }
 
+// An unnamed service is called after its lines ("Limpeza + Vidros"); catalog lines read "title - details".
+function serviceNameFrom(items) {
+  const name = items.map(it => it.description.split(' - ')[0].trim()).filter(Boolean).join(' + ');
+  return name.length > 160 ? `${name.slice(0, 159)}…` : name;
+}
+
+// One service can sum several lines, picked from the catalog or typed; invoicing it bills each line.
 async function openServiceForm(service, presetClientId) {
   const t = CRM.services;
   const editing = service && service.id ? service : null;
+  if (editing?.status === 'INVOICED') return openServiceDetail(editing);
   const missingPreset = presetClientId && !state.clients.some(c => c.id === presetClientId);
   if ((!state.clients.length || missingPreset) && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
   if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
-  const sources = serviceSourceOptions();
-  const clientId = editing?.clientId || presetClientId || '';
+  const li = lineItemsField(serviceCatalog());
+  const clientCell = editing
+    ? `<div class="form__row"><span class="lbl">${escapeHTML(STR.lineClient)}</span><p class="hint">${escapeHTML(editing.clientName || '')}</p></div>`
+    : clientSelect(state.clients, presetClientId || '');
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
-    ${editing ? '' : clientSelect(state.clients)}
-    ${editing ? `<p class="hint">${escapeHTML(editing.clientName || '')}</p>` : ''}
-    ${sources && !editing ? `<div class="form__row"><label class="lbl" for="svc-source">${escapeHTML(t.fromCatalog)}</label>
-      <select class="sel" id="svc-source"><option value="">${escapeHTML(t.fromCatalogNone)}</option>${sources}</select></div>` : ''}
-    <div class="form__row"><label class="lbl" for="svc-name">${escapeHTML(t.name)} <span class="req">●</span></label>
-      <input class="inp" id="svc-name" required placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
     <div class="form__grid">
-      <div class="form__row"><label class="lbl" for="svc-qty">${escapeHTML(t.qty)}</label>
-        <input class="inp inp--mono" id="svc-qty" type="number" min="0" step="0.01" value="${editing?.quantity ?? 1}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
-      <div class="form__row"><label class="lbl" for="svc-unit">${escapeHTML(t.unit)}</label>
-        <input class="inp" id="svc-unit" value="${escapeHTML(editing?.unit || '')}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
-      <div class="form__row"><label class="lbl" for="svc-price">${escapeHTML(t.price)} <span class="req">●</span></label>
-        <input class="inp inp--mono inp--right" id="svc-price" type="number" min="0" step="0.01" required value="${editing?.unitPriceEur ?? ''}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+      ${clientCell}
       <div class="form__row"><label class="lbl" for="svc-when">${escapeHTML(t.when)}</label>
-        <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing ? editing.performedAt || '' : todayKey()).slice(0, 10))}" ${editing?.status === 'INVOICED' ? 'readonly' : ''} /></div>
+        <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing ? editing.performedAt || '' : todayKey()).slice(0, 10))}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="svc-name">${escapeHTML(t.name)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <input class="inp" id="svc-name" maxlength="160" autocomplete="off" placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" />
+        <p class="hint">${escapeHTML(t.nameHint)}</p></div>
     </div>
+    ${li.html}
     <div class="form__row form__row--full"><label class="lbl" for="svc-notes">${escapeHTML(t.notes)}</label>
-      <textarea class="txt" id="svc-notes" ${editing?.status === 'INVOICED' ? 'readonly' : ''}>${escapeHTML(editing?.notes || '')}</textarea></div>
-    ${editing?.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : `<p class="hint" id="svc-total"></p>
+      <textarea class="txt" id="svc-notes">${escapeHTML(editing?.notes || '')}</textarea></div>
     <div class="actions">
       <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
       ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
-    </div>`}`;
-  if (clientId && $('#f-client', form)) $('#f-client', form).value = clientId;
+    </div>`;
   $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
-  const totalHint = $('#svc-total', form);
-  const refreshTotal = () => {
-    if (totalHint) totalHint.textContent = `${t.thTotal}: ${fmtEUR(Number($('#svc-qty', form).value || 0) * Number($('#svc-price', form).value || 0))}`;
-  };
-  ['#svc-qty', '#svc-price'].forEach(sel => $(sel, form)?.addEventListener('input', refreshTotal));
-  refreshTotal();
-  const source = $('#svc-source', form);
-  source?.addEventListener('change', () => {
-    const opt = source.selectedOptions[0];
-    if (!opt || !opt.value) return;
-    $('#svc-name', form).value = opt.dataset.name || '';
-    if (opt.dataset.price) $('#svc-price', form).value = opt.dataset.price;
-    if (opt.dataset.unit) $('#svc-unit', form).value = opt.dataset.unit;
-    refreshTotal();
+  const nameInput = $('#svc-name', form);
+  li.wire(form, {
+    initial: editing?.items || [],
+    onChange: () => { nameInput.placeholder = serviceNameFrom(li.collect(form)) || t.namePh; },
   });
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    if (editing?.status === 'INVOICED') return;
     const chosenClient = editing?.clientId || $('#f-client', form)?.value;
-    const name = $('#svc-name', form).value.trim();
-    if (!chosenClient || !name) return toast(t.validate);
-    const sourceVal = $('#svc-source', form)?.value || '';
+    if (!chosenClient) return toast(t.validate);
+    const items = li.collect(form);
+    if (!items.length) return toast(t.addLine);
+    if (items.some(it => !(it.quantity > 0))) return toast(t.lineQty);
     const payload = {
       clientId: chosenClient,
-      name,
+      name: nameInput.value.trim() || serviceNameFrom(items),
       notes: $('#svc-notes', form).value.trim() || null,
-      quantity: Number($('#svc-qty', form).value || 1),
-      unit: $('#svc-unit', form).value.trim(),
-      unitPriceEur: Number($('#svc-price', form).value || 0),
       performedAt: $('#svc-when', form).value || null,
-      catalogItemId: sourceVal || null,
+      items,
+      catalogItemId: $('.line[data-catalog]', form)?.dataset.catalog || null,
     };
     const btn = $('button[type=submit]', form);
-    if (btn) btn.disabled = true;
+    btn.disabled = true;
     try {
       if (editing) await api(`/app/api/crm/services/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
       else await api('/app/api/crm/services', { method: 'POST', body: JSON.stringify(payload) });
@@ -3206,9 +3190,9 @@ async function openServiceForm(service, presetClientId) {
       await loadModule('services');
       render();
       toast(editing ? t.updated : t.created);
-    } catch { if (btn) btn.disabled = false; toast(t.saveFailed); }
+    } catch { btn.disabled = false; toast(t.saveFailed); }
   });
-  openDrawer(editing ? t.editTitle : t.formTitle, form);
+  openDrawer(editing ? t.editTitle : t.formTitle, form, true);
 }
 
 async function cancelClientService(service) {
@@ -3273,17 +3257,20 @@ async function openServiceDetail(ref) {
   const isOpen = service.status === 'OPEN';
   const tone = { OPEN: 'warn', INVOICED: 'ok' }[service.status] || '';
   const clientLink = hasModule('clients') && !!service.clientId && !linksBackTo(`client:${service.clientId}`);
+  const lines = service.items || [];
+  const showLines = lines.length > 1 || (lines.length === 1 && lines[0].description !== service.name);
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
     ${detailHead(service.clientName, servicePill(service.status), service.totalEur, tone, clientLink)}
     ${detailMeta([
       { label: t.when, value: service.performedAt ? fmtDay(service.performedAt) : '—' },
-      { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
+      lines.length > 1 ? null : { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
       booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
       invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
       { label: STR.detailCreated, value: fmtDay(service.createdAt) },
     ])}
+    ${showLines ? itemsTable(lines) : ''}
     ${service.notes ? `<p class="hint">${escapeHTML(service.notes)}</p>` : ''}
     ${service.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : ''}
     <div class="detail__foot">
@@ -3363,6 +3350,14 @@ const phoneKey = p => { const d = phoneDigits(p); return d.length >= 9 ? d.slice
 const sumBy = (list, key) => list.reduce((t, x) => t + Number(x[key] || 0), 0);
 const telHref = phone => `tel:${String(phone || '').replace(/[^\d+]/g, '')}`;
 const mapsHref = address => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`;
+// "Rua das Flores 12, 1200-001 Lisboa": the street, then postal code and city.
+const fullAddress = r => [r.address, [r.postalCode, r.city].filter(Boolean).join(' ')].filter(Boolean).join(', ');
+// Whole years on the tenant's today, from a yyyy-MM-dd birth date.
+function ageOn(birthKey, today = todayKey()) {
+  const [by, bm, bd] = birthKey.slice(0, 10).split('-').map(Number);
+  const [ty, tm, td] = today.split('-').map(Number);
+  return ty - by - (tm < bm || (tm === bm && td < bd) ? 1 : 0);
+}
 function clientInitials(name) {
   const words = String(name || '').trim().split(/\s+/).filter(Boolean);
   if (!words.length) return '?';
@@ -3607,10 +3602,12 @@ function clientCardHtml(r, bk) {
     bk.noShows ? STR.bookingsClientNoShows({ n: bk.noShows }) : '',
     last ? STR.clientLastActivity({ when: relTime(last) }) : '',
   ].filter(Boolean).join(' · ');
+  const address = fullAddress(c);
   const lines = [
     `<span class="record-card__line mono">${escapeHTML(c.phone)}</span>`,
     c.email ? `<a class="record-card__line" href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>` : '',
-    c.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(c.address))}" target="_blank" rel="noopener">${escapeHTML(c.address)}</a>` : '',
+    c.contactPerson ? `<span class="record-card__line">${escapeHTML(STR.clientContactShort({ name: c.contactPerson }))}</span>` : '',
+    address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(address))}" target="_blank" rel="noopener">${escapeHTML(address)}</a>` : '',
     c.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: c.taxId }))}</span>` : '',
   ].filter(Boolean).join('');
   const chat = r.conversation
@@ -4047,20 +4044,22 @@ function wireDuplicatePhone(form, editingId) {
 
 async function openClientForm(client) {
   const editing = client && client.id ? client : null;
-  const field = ({ id, label, value, attrs = '', cls = 'inp', required = false }) => `<div class="form__row"><label class="lbl" for="${id}">${escapeHTML(label)}${required ? ' <span class="req">●</span>' : ''}</label>
-    <input class="${cls}" id="${id}" value="${escapeHTML(value || '')}" ${attrs} /></div>`;
+  const field = ({ id, label, value, attrs = '', cls = 'inp', required = false, full = false }) => `<div class="form__row${full ? ' form__row--full' : ''}"><label class="lbl" for="${id}">${escapeHTML(label)}${required ? ' <span class="req">●</span>' : ''}</label>
+    <input class="${cls}" id="${id}" value="${escapeHTML(value || '')}" ${required ? 'required ' : ''}${attrs} /></div>`;
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${field({ id: 'cf-name', label: STR.clientFormName, value: editing?.name, required: true, attrs: `required maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
-      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
+      ${field({ id: 'cf-name', label: STR.clientFormName, value: editing?.name, required: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
+      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', required: true, attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
       <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="cf-phone" type="tel" required maxlength="40" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(editing?.phone || '')}" />
         <p class="hint hint--warn" id="cf-dup" hidden></p></div>
       ${field({ id: 'cf-email', label: STR.clientFormEmail, value: editing?.email, attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
-      <div class="form__row form__row--full"><label class="lbl" for="cf-address">${escapeHTML(STR.clientFormAddress)}</label>
-        <input class="inp" id="cf-address" maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+      ${field({ id: 'cf-contact', label: STR.clientFormContact, value: editing?.contactPerson, full: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhContact)}"` })}
+      ${field({ id: 'cf-address', label: STR.clientFormAddress, value: editing?.address, full: true, required: true, attrs: `maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}"` })}
+      ${field({ id: 'cf-postal', label: STR.clientFormPostalCode, value: editing?.postalCode, cls: 'inp inp--mono', attrs: `maxlength="20" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPostalCode)}"` })}
+      ${field({ id: 'cf-city', label: STR.clientFormCity, value: editing?.city, attrs: `maxlength="100" autocomplete="off" placeholder="${escapeHTML(STR.clientPhCity)}"` })}
       <div class="form__row form__row--full"><label class="lbl" for="cf-notes">${escapeHTML(STR.clientFormNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <textarea class="txt" id="cf-notes" maxlength="4000" placeholder="${escapeHTML(STR.clientPhNotes)}">${escapeHTML(editing?.notes || '')}</textarea>
         <p class="hint">${escapeHTML(STR.clientNotesHint)}</p></div>
@@ -4076,9 +4075,10 @@ async function openClientForm(client) {
     const val = sel => $(sel, form).value.trim();
     const payload = {
       name: val('#cf-name'), phone: val('#cf-phone'), taxId: val('#cf-tax'), email: val('#cf-email'),
-      address: val('#cf-address'), notes: val('#cf-notes'),
+      contactPerson: val('#cf-contact'), address: val('#cf-address'), postalCode: val('#cf-postal'), city: val('#cf-city'),
+      notes: val('#cf-notes'),
     };
-    if (!payload.name || !payload.phone) return toast(STR.clientValidate);
+    if (!payload.name || !payload.phone || !payload.taxId || !payload.address) return toast(STR.clientValidate);
     if (payload.email && !EMAIL_SHAPE.test(payload.email)) return toast(STR.clientInvalidEmail);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
@@ -4094,7 +4094,8 @@ async function openClientForm(client) {
       btn.disabled = false;
       toast(err?.code === 'invalid_email' ? STR.clientInvalidEmail
         : err?.code === 'phone_taken' ? STR.clientPhoneTaken
-          : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
+          : err?.code === 'tax_id_required' || err?.code === 'address_required' ? STR.clientValidate
+            : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
     }
   });
   openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { eyebrow: STR.clientEyebrow });
@@ -4161,6 +4162,8 @@ function renderPayeeRecord() {
     `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
     p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
     p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
+    p.birthDate ? `<span class="record-card__line">${escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))}</span>` : '',
+    p.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: p.taxId }))}</span>` : '',
   ].filter(Boolean).join('');
   const since = [
     cfg.since(fmtDay(p.createdAt)),
@@ -4281,12 +4284,20 @@ async function openEmployeeForm(employee) {
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
-    <div class="form__row"><label class="lbl" for="ef-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
-      <input class="inp" id="ef-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
-    <div class="form__row"><label class="lbl" for="ef-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
-      <input class="inp inp--mono" id="ef-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
-    <div class="form__row"><label class="lbl" for="ef-role">${escapeHTML(t.formRole)}</label>
-      <input class="inp" id="ef-role" placeholder="${escapeHTML(t.phRole)}" value="${escapeHTML(editing?.role || '')}" /></div>
+    <div class="form__grid">
+      <div class="form__row form__row--full"><label class="lbl" for="ef-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
+        <input class="inp" id="ef-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
+      <div class="form__row"><label class="lbl" for="ef-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
+        <input class="inp inp--mono" id="ef-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
+      <div class="form__row"><label class="lbl" for="ef-role">${escapeHTML(t.formRole)}</label>
+        <input class="inp" id="ef-role" placeholder="${escapeHTML(t.phRole)}" value="${escapeHTML(editing?.role || '')}" /></div>
+      <div class="form__row"><label class="lbl" for="ef-birth">${escapeHTML(t.formBirthDate)}</label>
+        <input class="inp inp--mono" id="ef-birth" type="date" min="1900-01-01" max="${todayKey()}" value="${escapeHTML((editing?.birthDate || '').slice(0, 10))}" /></div>
+      <div class="form__row"><label class="lbl" for="ef-tax">${escapeHTML(t.formTaxId)}</label>
+        <input class="inp inp--mono" id="ef-tax" maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}" value="${escapeHTML(editing?.taxId || '')}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="ef-address">${escapeHTML(t.formAddress)}</label>
+        <input class="inp" id="ef-address" maxlength="300" autocomplete="off" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+    </div>
     <div class="actions">
       <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
       ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
@@ -4294,22 +4305,27 @@ async function openEmployeeForm(employee) {
   $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const name = $('#ef-name', form).value.trim();
-    const phone = $('#ef-phone', form).value.trim();
-    const role = $('#ef-role', form).value.trim() || undefined;
-    if (!name || !phone) return toast(t.validate);
+    const val = sel => $(sel, form).value.trim();
+    const payload = {
+      name: val('#ef-name'), phone: val('#ef-phone'), role: val('#ef-role') || undefined,
+      birthDate: val('#ef-birth'), taxId: val('#ef-tax'), address: val('#ef-address'),
+    };
+    if (!payload.name || !payload.phone) return toast(t.validate);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
       const saved = editing
-        ? await api(`/app/api/crm/employees/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, role }) })
-        : await api('/app/api/crm/employees', { method: 'POST', body: JSON.stringify({ name, phone, role }) });
+        ? await api(`/app/api/crm/employees/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) })
+        : await api('/app/api/crm/employees', { method: 'POST', body: JSON.stringify(payload) });
       closeDrawer();
       await loadModule('employees');
       render();
       toast(editing ? t.updated : t.created);
       if (!editing) openPayeeDrawer('employee', saved);
-    } catch (err) { btn.disabled = false; toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : t.saveFailed); }
+    } catch (err) {
+      btn.disabled = false;
+      toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : err?.code === 'invalid_birth_date' ? t.invalidBirthDate : t.saveFailed);
+    }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
 }
@@ -4442,7 +4458,7 @@ function generalPaymentFields() {
 }
 
 function lineItemsField(catalog) {
-  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))} · ${fmtEUR(c.defaultUnitPriceEur)}/${escapeHTML(c.unit)}</option>`;
+  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))} · ${fmtEUR(c.defaultUnitPriceEur)}${c.unit ? `/${escapeHTML(c.unit)}` : ''}</option>`;
   const services = catalog.filter(c => c.type === 'service');
   const materials = catalog.filter(c => c.type === 'material');
   const html = `
@@ -4470,12 +4486,19 @@ function lineItemsField(catalog) {
     const get = k => $(`[data-k="${k}"]`, row).value;
     return { description: get('description').trim(), quantity: Number(get('quantity') || 0), unit: get('unit').trim(), unitPriceEur: Number(get('unitPriceEur') || 0) };
   }).filter(it => it.description && (it.quantity > 0 || it.unitPriceEur > 0));
-  const wire = form => {
+  // `initial` rows replace the empty first row; `onChange` runs after every edit, with the total.
+  const wire = (form, { initial = [], onChange } = {}) => {
     const body = $('#lines-body', form);
-    const recalc = () => { $('#lines-total', form).textContent = fmtEUR(collect(form).reduce((t, it) => t + it.quantity * it.unitPriceEur, 0)); };
+    const recalc = () => {
+      const total = collect(form).reduce((t, it) => t + it.quantity * it.unitPriceEur, 0);
+      $('#lines-total', form).textContent = fmtEUR(total);
+      onChange?.(total);
+    };
+    const blank = row => [...row.querySelectorAll('input')].every(i => !i.value.trim());
     const addRow = (preset = {}) => {
       const row = document.createElement('div');
       row.className = 'line';
+      if (preset.catalogItemId) row.dataset.catalog = preset.catalogItemId;
       row.innerHTML = `
         <input type="text" data-k="description" placeholder="${escapeHTML(STR.lineDescPh)}" value="${escapeHTML(preset.description || '')}" />
         <input type="number" data-k="quantity" class="num" min="0" step="0.01" placeholder="0" value="${preset.quantity ?? ''}" />
@@ -4487,13 +4510,16 @@ function lineItemsField(catalog) {
       body.appendChild(row);
       recalc();
     };
-    addRow();
+    if (initial.length) initial.forEach(addRow);
+    else addRow();
     $('#add-empty', form).addEventListener('click', () => addRow());
     $('#add-from-catalog', form).addEventListener('click', () => {
       const id = $('#catalog-pick', form).value;
       if (!id) return toast(STR.lineChooseCatalog);
       const it = catalog.find(c => c.id === id);
-      if (it) addRow({ description: catalogLineText(it), quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur });
+      if (!it) return;
+      if (body.lastElementChild && blank(body.lastElementChild)) body.lastElementChild.remove();
+      addRow({ description: catalogLineText(it), quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur, catalogItemId: it.id });
     });
   };
   return { html, wire, collect };
