@@ -1,6 +1,6 @@
 # Implementation Plan — Agents (Automations) and Google/Gmail Integration
 
-Status: **In progress** · Owner: Rodrigo · Last updated: 2026-09-30
+Status: **Implemented** through Phase 5 (Gmail Pub/Sub push and Phase 6 not started; Google verification and CASA pending) · Owner: Rodrigo · Last updated: 2026-09-30
 
 An **Agents** dashboard module built on one automation engine. Agents wake up on CRM events,
 schedules, dates, inactivity, messages or emails; they run ordered steps that can be deterministic
