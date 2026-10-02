@@ -6,6 +6,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -140,7 +141,7 @@ fun Panel(
     modifier: Modifier = Modifier,
     tone: Tone = Tone.Neutral,
     onClick: (() -> Unit)? = null,
-    content: @Composable ColumnScopeAlias.() -> Unit,
+    content: @Composable ColumnScope.() -> Unit,
 ) {
     val clickable = if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier
     Surface(
@@ -152,9 +153,6 @@ fun Panel(
         Column(Modifier.padding(BotSpace.lg), content = content)
     }
 }
-
-/** Compose's `ColumnScope` is not exported from this module's API surface; this keeps call sites terse. */
-typealias ColumnScopeAlias = androidx.compose.foundation.layout.ColumnScope
 
 @Composable
 fun Badge(text: String, tone: Tone = Tone.Neutral, modifier: Modifier = Modifier) = Surface(

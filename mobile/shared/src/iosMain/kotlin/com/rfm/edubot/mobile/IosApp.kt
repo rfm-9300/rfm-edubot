@@ -5,29 +5,26 @@ import com.rfm.edubot.mobile.app.DashboardApp
 import com.rfm.edubot.mobile.app.MobileGraph
 import com.rfm.edubot.mobile.core.common.SnapshotStore
 import com.rfm.edubot.mobile.core.common.TokenStore
-import platform.Foundation.NSLocale
 import platform.Foundation.NSUserDefaults
-import platform.Foundation.currentLocale
-import platform.Foundation.languageCode
 import platform.UIKit.UIViewController
 
-fun MainViewController(baseUrl: String = DEFAULT_BASE_URL): UIViewController {
+/**
+ * [deviceLocale] comes from Swift (`Locale.current.identifier`) so the sign-in screen is in the
+ * reader's language before any tenant is known.
+ */
+fun MainViewController(deviceLocale: String?): UIViewController {
     val graph = MobileGraph(
-        baseUrl = baseUrl,
+        baseUrl = BASE_URL,
         tokenStore = IosTokenStore(),
         snapshotStore = IosSnapshotStore(),
         voiceInput = IosVoiceInput(),
     )
     return ComposeUIViewController {
-        DashboardApp(
-            graph = graph,
-            // So the sign-in screen is in the reader's language before any tenant is known.
-            deviceLocale = NSLocale.currentLocale.languageCode,
-        )
+        DashboardApp(graph = graph, deviceLocale = deviceLocale)
     }
 }
 
-const val DEFAULT_BASE_URL = "https://thebotslab.pt"
+private const val BASE_URL = "https://thebotslab.pt"
 
 private class IosTokenStore : TokenStore {
     private val defaults = NSUserDefaults.standardUserDefaults
