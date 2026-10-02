@@ -33,6 +33,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModelStore
@@ -362,8 +364,17 @@ private fun TenantBar(
                 )
             }
         }
+        // The glyph carries no meaning to a screen reader, so the row describes itself.
+        val bellLabel = if (unread > 0) {
+            "${strings[Txt.NOTIFICATIONS_TITLE]}, ${strings.format(Txt.NOTIFICATIONS_UNREAD, "count" to unread)}"
+        } else {
+            strings[Txt.NOTIFICATIONS_TITLE]
+        }
         Row(
-            Modifier.clickable(onClick = onNotifications).padding(BotSpace.sm),
+            Modifier
+                .clickable(onClick = onNotifications)
+                .semantics { contentDescription = bellLabel }
+                .padding(BotSpace.sm),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(BotSpace.xs),
         ) {

@@ -161,6 +161,7 @@ object Txt {
     const val CRM_LINE_QUANTITY = "crm.line.quantity"
     const val CRM_LINE_UNIT_PRICE = "crm.line.unitPrice"
     const val CRM_LINE_ADD = "crm.line.add"
+    const val CRM_NOTES = "crm.notes"
     const val CRM_PICK_CLIENT = "crm.pickClient"
     const val CRM_DATE_FORMAT_HINT = "crm.dateFormatHint"
 

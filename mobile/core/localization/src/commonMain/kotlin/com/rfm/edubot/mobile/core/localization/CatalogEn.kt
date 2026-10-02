@@ -164,6 +164,7 @@ internal val englishCatalog: Map<String, String> = mapOf(
     Txt.CRM_LINE_QUANTITY to "Quantity",
     Txt.CRM_LINE_UNIT_PRICE to "Unit price",
     Txt.CRM_LINE_ADD to "Add line",
+    Txt.CRM_NOTES to "Notes",
     Txt.CRM_PICK_CLIENT to "Choose a client",
     Txt.CRM_DATE_FORMAT_HINT to "YYYY-MM-DD",
 

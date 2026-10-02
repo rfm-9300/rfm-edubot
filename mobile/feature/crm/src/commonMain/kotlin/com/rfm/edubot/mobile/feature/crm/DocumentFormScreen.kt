@@ -152,7 +152,7 @@ fun DocumentFormScreen(
                         BotField(
                             value = state.notes,
                             onValueChange = vm::setNotes,
-                            label = "${strings[Txt.CRM_LINE_DESCRIPTION]} (${strings[Txt.LABEL_OPTIONAL]})",
+                            label = "${strings[Txt.CRM_NOTES]} (${strings[Txt.LABEL_OPTIONAL]})",
                             modifier = Modifier.fillMaxWidth(),
                             singleLine = false,
                         )
@@ -207,14 +207,20 @@ private fun LineEditor(
             value = line.quantity,
             onValueChange = { value -> onEdit { copy(quantity = value) } },
             label = strings[Txt.CRM_LINE_QUANTITY],
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(0.9f),
             numeric = true,
+        )
+        BotField(
+            value = line.unit,
+            onValueChange = { value -> onEdit { copy(unit = value) } },
+            label = strings[Txt.CRM_CATALOG_UNIT],
+            modifier = Modifier.weight(0.8f),
         )
         BotField(
             value = line.unitPrice,
             onValueChange = { value -> onEdit { copy(unitPrice = value) } },
             label = strings[Txt.CRM_LINE_UNIT_PRICE],
-            modifier = Modifier.weight(1f),
+            modifier = Modifier.weight(1.1f),
             numeric = true,
         )
     }
