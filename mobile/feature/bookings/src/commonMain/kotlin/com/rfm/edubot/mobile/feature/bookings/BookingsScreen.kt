@@ -105,7 +105,7 @@ fun BookingsScreen(
                         booking.priceEur?.let { "€ ${formatEuros(it)}" },
                         strings[Txt.BOOKINGS_BILLABLE].takeIf { booking.billable },
                     ).joinToString(" · "),
-                    leading = clock.timeOfDay(booking.startAt) ?: booking.contactName,
+                    leading = booking.contactName.ifBlank { booking.contactPhone },
                     trailingLabel = clock.listStamp(booking.startAt),
                     status = booking.status,
                     statusLabel = strings.status(booking.status),

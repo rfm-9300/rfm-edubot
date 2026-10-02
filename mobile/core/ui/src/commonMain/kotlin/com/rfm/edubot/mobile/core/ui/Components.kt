@@ -530,19 +530,22 @@ fun MessageBubble(
                     Spacer(Modifier.width(BotSpace.sm))
                     Text(
                         it,
+                        // A delivery error can run to two lines; weighting it keeps it off the
+                        // retry action rather than pushing that past the bubble's edge.
+                        Modifier.weight(1f, fill = false),
                         style = MaterialTheme.typography.labelSmall,
                         color = if (failed) BotColors.badInk else BotColors.inkFaint,
                     )
                 }
-                if (failed && onRetry != null && retryLabel != null) {
-                    Spacer(Modifier.width(BotSpace.sm))
-                    Text(
-                        retryLabel,
-                        Modifier.clickable(onClick = onRetry),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = BotColors.badInk,
-                    )
-                }
+            }
+            if (failed && onRetry != null && retryLabel != null) {
+                Spacer(Modifier.height(BotSpace.xs))
+                Text(
+                    retryLabel,
+                    Modifier.clickable(onClick = onRetry),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = BotColors.badInk,
+                )
             }
         }
     }

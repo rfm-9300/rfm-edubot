@@ -165,6 +165,7 @@ internal val englishCatalog: Map<String, String> = mapOf(
     Txt.CRM_LINE_UNIT_PRICE to "Unit price",
     Txt.CRM_LINE_ADD to "Add line",
     Txt.CRM_NOTES to "Notes",
+    Txt.CRM_LINES to "Lines",
     Txt.CRM_PICK_CLIENT to "Choose a client",
     Txt.CRM_DATE_FORMAT_HINT to "YYYY-MM-DD",
 
@@ -293,6 +294,9 @@ internal val englishCatalog: Map<String, String> = mapOf(
     "module.agents.subtitle" to "Approvals and tasks",
     "module.settings" to "Settings",
     "module.settings.subtitle" to "Language, channels, account",
+
+    "module.conversations.short" to "Inbox",
+    "module.ai-assistant.short" to "Assistant",
 
     "status.ACTIVE" to "Active",
     "status.DISABLED" to "Disabled",

@@ -47,6 +47,15 @@ class Strings internal constructor(
 
     fun moduleSubtitle(id: String): String = get("module.$id.subtitle")
 
+    /**
+     * The bottom bar's label, which has about ten characters before it elides. Falls back to the
+     * full name where that already fits — only the languages that need a shorter word define one.
+     */
+    fun moduleShort(id: String): String {
+        val key = "module.$id.short"
+        return values[key] ?: fallback[key] ?: module(id)
+    }
+
     fun error(error: SessionError): String = get(
         when (error) {
             SessionError.MISSING_CREDENTIALS -> Txt.LOGIN_ERROR_MISSING

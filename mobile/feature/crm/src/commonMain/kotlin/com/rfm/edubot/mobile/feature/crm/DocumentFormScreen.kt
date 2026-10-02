@@ -74,7 +74,7 @@ fun DocumentFormScreen(
         )
         state.error?.let { ErrorPanel(strings.error(it)) }
 
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = BotSpace.lg)) {
+        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(bottom = BotSpace.xxl)) {
             item { SectionLabel(strings[Txt.CRM_PICK_CLIENT]) }
             item {
                 Panel(Modifier.padding(horizontal = BotSpace.xl, vertical = BotSpace.xs)) {
@@ -116,7 +116,7 @@ fun DocumentFormScreen(
                 }
             }
 
-            item { SectionLabel(strings[Txt.CRM_LINE_DESCRIPTION]) }
+            item { SectionLabel(strings[Txt.CRM_LINES]) }
             items(state.lines.size) { index ->
                 LineEditor(
                     line = state.lines[index],

@@ -400,7 +400,7 @@ private fun BottomBar(
     Row(Modifier.fillMaxWidth().height(64.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
         modules.forEach { module ->
             BottomDestination(
-                label = strings.module(module.id),
+                label = strings.moduleShort(module.id),
                 glyph = module.glyph,
                 selected = !moreSelected && activeModule == module.id,
             ) { onModule(module.id) }

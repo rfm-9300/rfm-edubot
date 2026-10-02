@@ -162,6 +162,7 @@ internal val portugueseCatalog: Map<String, String> = mapOf(
     Txt.CRM_LINE_UNIT_PRICE to "Preço unitário",
     Txt.CRM_LINE_ADD to "Adicionar linha",
     Txt.CRM_NOTES to "Notas",
+    Txt.CRM_LINES to "Linhas",
     Txt.CRM_PICK_CLIENT to "Escolher cliente",
     Txt.CRM_DATE_FORMAT_HINT to "AAAA-MM-DD",
 
@@ -290,6 +291,9 @@ internal val portugueseCatalog: Map<String, String> = mapOf(
     "module.agents.subtitle" to "Aprovações e tarefas",
     "module.settings" to "Definições",
     "module.settings.subtitle" to "Idioma, canais, conta",
+
+    "module.conversations.short" to "Mensagens",
+    "module.ai-assistant.short" to "Assistente",
 
     "status.ACTIVE" to "Ativo",
     "status.DISABLED" to "Desativado",

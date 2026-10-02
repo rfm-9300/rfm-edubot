@@ -137,4 +137,23 @@ class ModuleRegistryTest {
     fun `module ids are unique`() {
         assertEquals(ModuleRegistry.catalog.size, ModuleRegistry.catalog.map { it.id }.toSet().size)
     }
+
+    @Test
+    fun `bottom bar labels fit the tab without eliding`() {
+        AppLocale.entries.forEach { locale ->
+            val strings = Localization.of(locale)
+            ModuleRegistry.bottomBar(fullPlan).forEach { module ->
+                val label = strings.moduleShort(module.id)
+                assertTrue(
+                    label.length <= BOTTOM_BAR_LABEL_CHARS,
+                    "${locale.tag}'s \"$label\" for ${module.id} is too long for a 76dp tab",
+                )
+            }
+        }
+    }
+
+    private companion object {
+        /** What fits a bottom-bar tab at the label style before Compose elides it. */
+        const val BOTTOM_BAR_LABEL_CHARS = 10
+    }
 }
