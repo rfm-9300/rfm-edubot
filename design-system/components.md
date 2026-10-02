@@ -354,9 +354,27 @@ Type-ahead matches for an existing record (e.g. a CRM client under a booking's n
 
 `.suggest` floats under its `.suggest-host` row (`hidden` when empty). Keep focus in the input on `mousedown` so a click still picks the row.
 
+A list long enough to scroll takes `.suggest--scroll`. Headings inside it are `.suggest__group`, and “nothing matched” is `.suggest__empty`. The entry the arrow keys are on carries `aria-selected="true"`, which highlights it like `:hover`.
+
 ## Line items
 
-Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice and Serviços editors (`lineItemsField()` in `app.js`). Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description input (`data-k="description"`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
+Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, payment and Serviços editors (`lineItemsField()` in `app.js`), wrapped in `.lines-field` with the section `.lbl`. Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description cell (`.line__desc`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
+
+The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo (the backoffice channels table has no foot) keeps clipping as before.
+
+```html
+<div class="line">
+  <div class="line__desc">
+    <input data-k="description" role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="line-opts-1" />
+    <button class="line__caret" type="button" tabindex="-1" aria-label="Show catalog">▾</button>
+    <div class="suggest suggest--scroll line__opts" id="line-opts-1" role="listbox" hidden></div>
+  </div>
+  <input class="num" data-k="quantity" /><input class="num" data-k="unit" /><input class="num" data-k="unitPriceEur" />
+  <button class="l-rm" type="button">×</button>
+</div>
+```
+
+The foot holds one button that appends an empty row, and the total. Do not put a second catalog `.sel` + Add button back there: picking happens in the row being filled.
 
 ## Drawer
 
