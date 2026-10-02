@@ -45,6 +45,8 @@ const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&
 // writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
 // else (numbered/bulleted lines, line breaks) already reads fine as plain text under pre-wrap.
 const renderChatText = (s = '') => escapeHTML(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+// Filtering a list as someone types has to ignore case and accents: "orcamento" finds "Orçamento".
+const foldText = (s = '') => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const uiLocale = () => (window.I18N && I18N.locale()) || 'pt-PT';
 const fmtEUR = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
 const fmtEURWhole = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(n || 0));
@@ -4785,35 +4787,49 @@ function generalPaymentFields() {
   </div>`;
 }
 
+// Each row's description field is also the catalog picker: click it (or press ↓) for the full
+// list, keep typing to filter it, pick an entry to fill description, unit and price. Nothing
+// forces a catalog item — a line typed by hand stays as typed. The foot only adds empty rows.
+let lineComboSeq = 0;
+
 function lineItemsField(catalog) {
-  const opt = c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))} · ${fmtEUR(c.defaultUnitPriceEur)}${c.unit ? `/${escapeHTML(c.unit)}` : ''}</option>`;
-  const services = catalog.filter(c => c.type === 'service');
-  const materials = catalog.filter(c => c.type === 'material');
+  // Legacy items were stored as `servico`; group them with the services rather than dropping them.
+  const options = (catalog || []).map(c => ({
+    item: c,
+    service: c.type === 'service' || c.type === 'servico',
+    label: catalogItemLabel(c),
+    meta: `${fmtEUR(c.defaultUnitPriceEur)}${c.unit ? `/${c.unit}` : ''}`,
+    haystack: foldText(`${c.code || ''} ${c.title || ''} ${c.category || ''} ${c.description || ''}`),
+  }));
   const html = `
-    <div>
-      <div class="lbl" style="margin-bottom:8px">${escapeHTML(STR.lineItemsLabel)} <span class="req">●</span></div>
-      <div class="lines">
+    <div class="lines-field">
+      <div class="lbl">${escapeHTML(STR.lineItemsLabel)} <span class="req">●</span></div>
+      <div class="lines${options.length ? ' lines--combo' : ''}">
         <div class="lines__head"><span>${escapeHTML(STR.lineColDesc)}</span><span>${escapeHTML(STR.lineColQty)}</span><span>${escapeHTML(STR.lineColUnit)}</span><span>${escapeHTML(STR.lineColPrice)}</span><span></span></div>
         <div id="lines-body"></div>
         <div class="lines__foot">
-          <div class="lines__left">
-            <button class="btn btn--sm btn--ghost" type="button" id="add-empty">${escapeHTML(STR.lineAddEmpty)}</button>
-            <div class="lines__pick">
-              <select class="sel" id="catalog-pick"><option value="">${escapeHTML(STR.lineCatalogPick)}</option>
-                <optgroup label="${escapeHTML(STR.catalogService)}">${services.map(opt).join('')}</optgroup>
-                <optgroup label="${escapeHTML(STR.catalogMaterial)}">${materials.map(opt).join('')}</optgroup>
-              </select>
-              <button class="btn btn--sm" type="button" id="add-from-catalog">${escapeHTML(STR.lineAdd)}</button>
-            </div>
-          </div>
+          <button class="btn btn--sm btn--ghost" type="button" id="add-line">${escapeHTML(STR.lineAddItem)}</button>
           <div class="lines__total"><span class="muted">${escapeHTML(STR.lineTotal)}</span><span class="v" id="lines-total">${fmtEUR(0)}</span></div>
         </div>
       </div>
     </div>`;
-  const collect = form => [...$$('.line', form)].map(row => {
+  const collect = form => $$('.line', form).map(row => {
     const get = k => $(`[data-k="${k}"]`, row).value;
     return { description: get('description').trim(), quantity: Number(get('quantity') || 0), unit: get('unit').trim(), unitPriceEur: Number(get('unitPriceEur') || 0) };
   }).filter(it => it.description && (it.quantity > 0 || it.unitPriceEur > 0));
+  // Services come first, then materials, each under its own heading. The rendered order is the
+  // order the arrow keys walk, so the caller keeps this list to resolve `data-opt`.
+  const optionsHTML = (list, optsId) => {
+    const ordered = [...list.filter(o => o.service), ...list.filter(o => !o.service)];
+    let heading = null;
+    const markup = ordered.map((o, i) => {
+      const group = o.service ? STR.catalogService : STR.catalogMaterial;
+      const head = group === heading ? '' : `<p class="suggest__group">${escapeHTML(group)}</p>`;
+      heading = group;
+      return `${head}<button type="button" class="suggest__item" role="option" aria-selected="false" tabindex="-1" id="${optsId}-${i}" data-opt="${i}"><strong>${escapeHTML(o.label)}</strong><span class="mono">${escapeHTML(o.meta)}</span></button>`;
+    }).join('');
+    return { ordered, markup };
+  };
   // `initial` rows replace the empty first row; `onChange` runs after every edit, with the total.
   const wire = (form, { initial = [], onChange } = {}) => {
     const body = $('#lines-body', form);
@@ -4822,13 +4838,103 @@ function lineItemsField(catalog) {
       $('#lines-total', form).textContent = fmtEUR(total);
       onChange?.(total);
     };
-    const blank = row => [...row.querySelectorAll('input')].every(i => !i.value.trim());
+    const closeCombos = except => $$('.line__opts', form).forEach(box => {
+      if (box === except || box.hidden) return;
+      box.hidden = true;
+      const desc = $('[data-k="description"]', box.parentElement);
+      desc?.setAttribute('aria-expanded', 'false');
+      desc?.removeAttribute('aria-activedescendant');
+    });
+    const wireCombo = (row, desc) => {
+      const box = $('.line__opts', row);
+      if (!box) return;
+      let shown = [];
+      let active = -1;
+      const close = () => {
+        box.hidden = true;
+        active = -1;
+        desc.setAttribute('aria-expanded', 'false');
+        desc.removeAttribute('aria-activedescendant');
+      };
+      const mark = () => $$('.suggest__item', box).forEach((el, i) => {
+        el.setAttribute('aria-selected', i === active ? 'true' : 'false');
+        if (i !== active) return;
+        el.scrollIntoView({ block: 'nearest' });
+        desc.setAttribute('aria-activedescendant', el.id);
+      });
+      const open = query => {
+        const q = foldText(query.trim());
+        const hits = q ? options.filter(o => o.haystack.includes(q)) : options;
+        const { ordered, markup } = optionsHTML(hits, box.id);
+        shown = ordered;
+        active = -1;
+        box.innerHTML = markup || `<p class="suggest__empty">${escapeHTML(STR.lineCatalogNoMatch)}</p>`;
+        box.scrollTop = 0;
+        box.hidden = false;
+        desc.setAttribute('aria-expanded', 'true');
+        desc.removeAttribute('aria-activedescendant');
+        closeCombos(box);
+      };
+      const pick = o => {
+        if (!o) return;
+        row.dataset.catalog = o.item.id;
+        desc.value = catalogLineText(o.item);
+        const qty = $('[data-k="quantity"]', row);
+        if (!(Number(qty.value) > 0)) qty.value = 1;
+        $('[data-k="unit"]', row).value = o.item.unit || '';
+        $('[data-k="unitPriceEur"]', row).value = o.item.defaultUnitPriceEur ?? '';
+        close();
+        recalc();
+        desc.focus();
+      };
+      // Keep the caret in the field on mousedown so clicking an option never blurs it away first.
+      box.addEventListener('mousedown', e => { if (e.target.closest('.suggest__item')) e.preventDefault(); });
+      box.addEventListener('click', e => {
+        const btn = e.target.closest('[data-opt]');
+        if (btn) pick(shown[Number(btn.dataset.opt)]);
+      });
+      desc.addEventListener('input', () => open(desc.value));
+      desc.addEventListener('click', () => { if (box.hidden) open(desc.value); });
+      desc.addEventListener('blur', close);
+      desc.addEventListener('keydown', e => {
+        if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          if (box.hidden) return open(desc.value);
+          if (!shown.length) return;
+          const step = e.key === 'ArrowDown' ? 1 : -1;
+          active = active < 0 ? (step > 0 ? 0 : shown.length - 1) : (active + step + shown.length) % shown.length;
+          mark();
+        } else if (e.key === 'Enter' && !box.hidden) {
+          e.preventDefault();
+          if (active < 0) close(); else pick(shown[active]);
+        } else if (e.key === 'Escape' && !box.hidden) {
+          e.preventDefault();
+          e.stopPropagation();
+          close();
+        }
+      });
+      const caret = $('.line__caret', row);
+      caret.addEventListener('mousedown', e => e.preventDefault());
+      caret.addEventListener('click', () => {
+        if (!box.hidden) return close();
+        desc.focus();
+        open('');
+      });
+    };
     const addRow = (preset = {}) => {
       const row = document.createElement('div');
       row.className = 'line';
       if (preset.catalogItemId) row.dataset.catalog = preset.catalogItemId;
+      const optsId = `line-opts-${++lineComboSeq}`;
+      const combo = options.length
+        ? ` role="combobox" aria-expanded="false" aria-autocomplete="list" aria-controls="${optsId}"`
+        : '';
       row.innerHTML = `
-        <input type="text" data-k="description" placeholder="${escapeHTML(STR.lineDescPh)}" value="${escapeHTML(preset.description || '')}" />
+        <div class="line__desc">
+          <input type="text" data-k="description" autocomplete="off"${combo} placeholder="${escapeHTML(STR.lineDescPh)}" value="${escapeHTML(preset.description || '')}" />
+          ${options.length ? `<button type="button" class="line__caret" tabindex="-1" title="${escapeHTML(STR.lineCatalogOpen)}" aria-label="${escapeHTML(STR.lineCatalogOpen)}"><svg width="10" height="7" viewBox="0 0 10 7" aria-hidden="true"><path d="M1 1.5 L5 5.5 L9 1.5" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+          <div class="suggest suggest--scroll line__opts" id="${optsId}" role="listbox" hidden></div>` : ''}
+        </div>
         <input type="number" data-k="quantity" class="num" min="0" step="0.01" placeholder="0" value="${preset.quantity ?? ''}" />
         <input type="text" data-k="unit" class="num" placeholder="${escapeHTML(STR.lineUnitPh)}" value="${escapeHTML(preset.unit || '')}" />
         <input type="number" data-k="unitPriceEur" class="num" min="0" step="0.01" placeholder="0.00" value="${preset.unitPriceEur ?? ''}" />
@@ -4836,19 +4942,13 @@ function lineItemsField(catalog) {
       row.querySelectorAll('input').forEach(i => i.addEventListener('input', recalc));
       row.querySelector('.l-rm').addEventListener('click', () => { row.remove(); recalc(); });
       body.appendChild(row);
+      wireCombo(row, $('[data-k="description"]', row));
       recalc();
+      return row;
     };
     if (initial.length) initial.forEach(addRow);
     else addRow();
-    $('#add-empty', form).addEventListener('click', () => addRow());
-    $('#add-from-catalog', form).addEventListener('click', () => {
-      const id = $('#catalog-pick', form).value;
-      if (!id) return toast(STR.lineChooseCatalog);
-      const it = catalog.find(c => c.id === id);
-      if (!it) return;
-      if (body.lastElementChild && blank(body.lastElementChild)) body.lastElementChild.remove();
-      addRow({ description: catalogLineText(it), quantity: 1, unit: it.unit, unitPriceEur: it.defaultUnitPriceEur, catalogItemId: it.id });
-    });
+    $('#add-line', form).addEventListener('click', () => $('[data-k="description"]', addRow()).focus());
   };
   return { html, wire, collect };
 }
