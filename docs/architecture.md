@@ -757,6 +757,17 @@ flowchart TD
 - `mobile/androidApp` / `mobile/iosApp` — the entry points. Each supplies a `TokenStore` (encrypted
   on Android, user defaults on iOS), a `SnapshotStore`, a `VoiceInput`, and the device locale.
 
+A debug build can be pointed at a backend other than production:
+
+```bash
+cd mobile && ./gradlew :androidApp:installDebug -PapiBaseUrl=http://10.0.2.2:8080
+```
+
+`10.0.2.2` is the host as an emulator sees it; use the machine's LAN address for a real device, or
+the `cloudflared` tunnel URL from the local dev setup. The debug manifest already allows cleartext,
+so a local HTTP backend works without further changes. Without the property the build points at
+production, which is what a release build always does.
+
 ### Auth
 
 `SessionTokens` is the only thing that knows the bearer token. `DashboardHttpClient` attaches it,
