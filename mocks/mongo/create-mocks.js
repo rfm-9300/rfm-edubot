@@ -100,6 +100,19 @@ const ids = {
     lead: oid("665fa7000000000000000002"),
     request: oid("665fa7000000000000000003"),
   },
+  employeeLogins: {
+    ana: oid("665fb0000000000000000001"),
+  },
+  serviceSubmissions: {
+    facade: oid("665fb1000000000000000001"),
+    wash: oid("665fb1000000000000000002"),
+    interior: oid("665fb1000000000000000003"),
+    roof: oid("665fb1000000000000000004"),
+  },
+  clientServices: {
+    interior: oid("665fb2000000000000000001"),
+  },
+  submittedNotification: oid("665fb3000000000000000001"),
 };
 
 const line = (description, quantity, unit, unitPriceEur) => {
@@ -1368,6 +1381,135 @@ const agentSeed = seedTenantId
   ? buildAgentSeed()
   : { agents: [], runs: [], approvals: [], tasks: [], notifications: [], connections: [], emails: [] };
 
+// bcrypt of "colaborador123", the mock employee's password (see README.md).
+const EMPLOYEE_PASSWORD_HASH = "$2b$12$GimrgeRMzPGOSDQJkIufNu.sudM4XzmUu8w8m9WAqgYhXVbyR89Fq";
+const EMPLOYEE_EMAIL = "ana.costa@example.com";
+
+/**
+ * Ana Costa's own sign-in and the services she registered: two waiting for the team, one approved
+ * into a Serviços row done by her, one rejected with a reason. Dated from when the script runs, like
+ * the agents, so the waiting ones read as recent.
+ */
+function buildEmployeeWorkSeed() {
+  const runAt = new Date();
+  const hoursAgo = (hours) => new Date(runAt.getTime() - hours * 3600 * 1000);
+  const dayOf = (value) => value.toISOString().slice(0, 10);
+  const reviewer = target.getCollection("dashboard_users").findOne({ tenantId: seedTenantId, role: { $ne: "TENANT_EMPLOYEE" } });
+  const reviewedBy = reviewer ? reviewer.email : "operator";
+  const sumCents = (items) => items.reduce((sum, item) => sum + item.totalCents, 0);
+  const submission = ({ id, clientId, name, items, notes = null, doneHoursAgo, sentHoursAgo, status = "PENDING", decided = {} }) => ({
+    _id: id,
+    tenantId: seedTenantId,
+    employeeId: ids.employees.ana,
+    clientId,
+    name,
+    notes,
+    items,
+    totalCents: sumCents(items),
+    catalogItemId: null,
+    performedAt: dayOf(hoursAgo(doneHoursAgo)),
+    status,
+    adjusted: false,
+    createdAt: hoursAgo(sentHoursAgo),
+    updatedAt: decided.reviewedAt || hoursAgo(sentHoursAgo),
+    ...decided,
+  });
+  const interiorItems = [line("Pintura interior da rececao", 6, "h", 18.5)];
+  const approvedAt = hoursAgo(46);
+  const submissions = [
+    submission({
+      id: ids.serviceSubmissions.facade,
+      clientId: ids.clients.oliveira,
+      name: "Pintura de fachada + Tinta acrilica exterior",
+      items: [line("Pintura de fachada - Pintura exterior com duas demaos", 40, "m2", 8.5), line("Tinta acrilica exterior - Tinta acrilica exterior premium", 6, "l", 12)],
+      notes: "Lado norte terminado. Falta o lado sul.",
+      doneHoursAgo: 20,
+      sentHoursAgo: 3,
+    }),
+    submission({
+      id: ids.serviceSubmissions.wash,
+      clientId: ids.clients.costa,
+      name: "Lavagem de fachada",
+      items: [line("Lavagem de fachada - Lavagem e preparacao de fachada", 55, "m2", 4.5)],
+      doneHoursAgo: 28,
+      sentHoursAgo: 26,
+    }),
+    submission({
+      id: ids.serviceSubmissions.interior,
+      clientId: ids.clients.hillsong,
+      name: "Pintura interior da rececao",
+      items: interiorItems,
+      doneHoursAgo: 72,
+      sentHoursAgo: 70,
+      status: "APPROVED",
+      decided: { serviceId: ids.clientServices.interior, reviewedBy, reviewedAt: approvedAt },
+    }),
+    submission({
+      id: ids.serviceSubmissions.roof,
+      clientId: ids.clients.martins,
+      name: "Reparacao de cobertura",
+      items: [line("Reparacao de cobertura", 4, "h", 22)],
+      doneHoursAgo: 96,
+      sentHoursAgo: 94,
+      status: "REJECTED",
+      decided: { reviewedBy, reviewedAt: hoursAgo(90), rejectionReason: "Foram 2 horas, nao 4. Regista de novo, por favor." },
+    }),
+  ];
+  const interior = submissions[2];
+  return {
+    login: {
+      _id: ids.employeeLogins.ana,
+      tenantId: seedTenantId,
+      email: EMPLOYEE_EMAIL,
+      passwordHash: EMPLOYEE_PASSWORD_HASH,
+      role: "TENANT_EMPLOYEE",
+      status: "ACTIVE",
+      createdAt: hoursAgo(24 * 10),
+      lastLoginAt: hoursAgo(3),
+      employeeId: ids.employees.ana,
+      employeeTenantId: seedTenantId,
+    },
+    submissions,
+    services: [{
+      _id: ids.clientServices.interior,
+      tenantId: seedTenantId,
+      clientId: interior.clientId,
+      name: interior.name,
+      notes: null,
+      quantity: interiorItems[0].quantity,
+      unit: interiorItems[0].unit,
+      unitPriceCents: interiorItems[0].unitPriceCents,
+      totalCents: interior.totalCents,
+      items: interiorItems,
+      status: "OPEN",
+      invoiceId: null,
+      bookingServiceId: null,
+      catalogItemId: null,
+      bookingId: null,
+      performedAt: interior.performedAt,
+      createdAt: approvedAt,
+      updatedAt: approvedAt,
+      employeeId: ids.employees.ana,
+    }],
+    notifications: [{
+      _id: ids.submittedNotification,
+      tenantId: seedTenantId,
+      audience: "ALL",
+      userId: null,
+      kind: "service_submitted",
+      params: { employee: "Ana Costa", service: submissions[0].name, client: "Condominio Rua Oliveira" },
+      body: null,
+      link: "employees",
+      subject: { type: "employee", id: ids.employees.ana.toHexString() },
+      ref: `submission:${ids.serviceSubmissions.facade.toHexString()}`,
+      readBy: [],
+      createdAt: submissions[0].createdAt,
+    }],
+  };
+}
+
+const workSeed = seedTenantId ? buildEmployeeWorkSeed() : { login: null, submissions: [], services: [], notifications: [] };
+
 function removeSeedConflicts() {
   target.users.deleteMany({ $or: [{ _id: { $in: users.map((item) => item._id) } }, { waId: { $in: users.map((item) => item.waId) } }, { "metadata.mockSeed": "create-mocks" }] });
   target.conversations.deleteMany({ $or: [{ _id: { $in: conversations.map((item) => item._id) } }, { waId: { $in: conversations.map((item) => item.waId) } }] });
@@ -1395,6 +1537,11 @@ function removeSeedConflicts() {
     $or: [{ _id: ids.gmail }, ...agentSeed.connections.map((item) => ({ tenantId: item.tenantId, provider: item.provider, accountEmail: item.accountEmail }))],
   });
   target.getCollection("email_messages").deleteMany({ $or: [{ _id: { $in: Object.values(ids.emails) } }, { connectionId: ids.gmail }] });
+  // What the app saved for the mock employee goes too, so the counts start from the seed again.
+  target.getCollection("dashboard_users").deleteMany({ $or: [{ _id: ids.employeeLogins.ana }, { employeeId: ids.employees.ana }, { email: EMPLOYEE_EMAIL }] });
+  target.getCollection("crm.service_submissions").deleteMany({ $or: [{ _id: { $in: Object.values(ids.serviceSubmissions) } }, { employeeId: ids.employees.ana }] });
+  target.getCollection("crm.client_services").deleteMany({ $or: [{ _id: { $in: Object.values(ids.clientServices) } }, { employeeId: ids.employees.ana }] });
+  target.notifications.deleteMany({ $or: [{ _id: ids.submittedNotification }, { kind: "service_submitted", "subject.id": ids.employees.ana.toHexString() }] });
 }
 
 function insertMany(collectionName, docs) {
@@ -1433,6 +1580,10 @@ insertMany("agent_tasks", agentSeed.tasks);
 insertMany("notifications", agentSeed.notifications);
 insertMany("integration_connections", agentSeed.connections);
 insertMany("email_messages", agentSeed.emails);
+insertMany("dashboard_users", workSeed.login ? [workSeed.login] : []);
+insertMany("crm.service_submissions", workSeed.submissions);
+insertMany("crm.client_services", workSeed.services);
+insertMany("notifications", workSeed.notifications);
 
 const summary = {
   database: dbName,
@@ -1458,6 +1609,9 @@ const summary = {
   notifications: target.notifications.countDocuments({ _id: { $in: Object.values(ids.notifications) } }),
   integration_connections: target.getCollection("integration_connections").countDocuments({ _id: ids.gmail }),
   email_messages: target.getCollection("email_messages").countDocuments({ _id: { $in: Object.values(ids.emails) } }),
+  employee_logins: target.getCollection("dashboard_users").countDocuments({ _id: ids.employeeLogins.ana }),
+  service_submissions: target.getCollection("crm.service_submissions").countDocuments({ _id: { $in: Object.values(ids.serviceSubmissions) } }),
+  crm_client_services: target.getCollection("crm.client_services").countDocuments({ _id: { $in: Object.values(ids.clientServices) } }),
 };
 
 printjson(summary);

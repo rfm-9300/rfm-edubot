@@ -40,8 +40,17 @@ Seeded collections:
 - `notifications`
 - `integration_connections`
 - `email_messages`
+- `dashboard_users` (only the mock employee's own sign-in)
+- `crm.service_submissions`
+- `crm.client_services` (only the service approved from a submission)
 
-Bookings, agents and email are seeded only when the database already has a tenant; they go to the first one. Start the app once before seeding a fresh database.
+Bookings, agents, email and the employee's sign-in are seeded only when the database already has a tenant; they go to the first one. Start the app once before seeding a fresh database.
+
+Employee sign-in:
+
+- Ana Costa (`COL-001`) signs in to `/app` as `ana.costa@example.com` with the password `colaborador123`. Her session only shows My services.
+- She registered four services: two waiting for approval (they show on her employee record, on Home's Needs you and in the bell), one approved into a Serviços row done by her, one rejected with a reason.
+- They are dated from when the script runs. Running it again also removes what the app saved for her since (her submissions, the services approved from them and her sign-in), then seeds them again.
 
 Agents and email:
 
