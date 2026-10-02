@@ -53,10 +53,13 @@ internal object EmployeePortal {
 
     /**
      * Checked by the `dashboard` validator before any route runs, so an employee's token can't reach a route
-     * that forgets its module check.
+     * that forgets its module check. Dot segments are refused: they would step out of these prefixes if
+     * routing ever resolved them.
      */
-    fun allowsPath(path: String): Boolean =
-        path == "/app/api/me" || path == "/app/api/account" || path.startsWith("/app/api/account/") || path.startsWith("/app/api/portal/")
+    fun allowsPath(path: String): Boolean {
+        if (path.split('/').any { it == "." || it == ".." } || path.contains("%2e", ignoreCase = true)) return false
+        return path == "/app/api/me" || path == "/app/api/account" || path.startsWith("/app/api/account/") || path.startsWith("/app/api/portal/")
+    }
 
     /** The employee [user] signs in as, while that record exists in [tenant] and isn't archived. */
     suspend fun employeeOf(user: DashboardUser, tenant: Tenant, employees: EmployeeLookup): Employee? =

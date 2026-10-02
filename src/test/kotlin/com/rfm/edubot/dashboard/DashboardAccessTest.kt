@@ -175,6 +175,7 @@ class DashboardAccessTest {
             "/app/api/overview", "/app/api/crm/clients", "/app/api/crm/service-submissions", "/app/api/notifications",
             "/app/api/companies/x/switch", "/app/api/instagram/connect", "/app/api/whatsapp/connect", "/app/api/email/send",
             "/app/api/accounting", "/app/api/portal", "/app/api/me/x",
+            "/app/api/portal/../overview", "/app/api/account/../crm/clients", "/app/api/portal/%2E%2E/overview", "/app/api/portal/./x",
         ).forEach { assertFalse(EmployeePortal.allowsPath(it), it) }
     }
 }
