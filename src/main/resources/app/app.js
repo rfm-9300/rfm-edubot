@@ -864,6 +864,9 @@ async function bootAuthed() {
   // An employee's session reaches only its own pages: no bell, no Home figures.
   if (!isPortal()) startNotifications();
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
+  // The address may still name the previous session's page, or one this session can't open.
+  const hashTab = (location.hash || '').replace('#', '');
+  if (hashTab && hashTab !== state.active) history.replaceState(null, '', `#${state.active}`);
   renderNav();
   if (state.active !== 'overview' && !isPortal()) {
     state.overview = await api('/app/api/overview').catch(() => state.overview);
