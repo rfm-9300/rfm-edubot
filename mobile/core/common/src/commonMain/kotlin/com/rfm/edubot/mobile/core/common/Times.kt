@@ -67,24 +67,28 @@ class TenantClock(
     }
 }
 
-/** Cents to `1.234,56` — the European grouping the quotes and invoices already print. */
-fun formatCents(cents: Long): String = formatAmount(cents / 100, (cents % 100).let { if (it < 0) -it else it }.toInt())
-
-/** Euro doubles to the same shape, rounding half-up on the cent. */
-fun formatEuros(amount: Double): String {
-    val totalCents = ((if (amount < 0) -amount else amount) * 100.0 + 0.5).toLong()
-    val signed = if (amount < 0) -totalCents else totalCents
-    return formatCents(signed)
-}
-
-private fun formatAmount(whole: Long, cents: Int): String {
-    val negative = whole < 0 || (whole == 0L && cents < 0)
-    val digits = (if (whole < 0) -whole else whole).toString()
-    val grouped = StringBuilder()
+/**
+ * Cents to `1.234,56` — the European grouping the quotes and invoices already print.
+ *
+ * The sign is taken from the input rather than from the whole-euro part, because an amount between
+ * -99 and -1 cents has a whole part of zero and would otherwise lose its minus.
+ */
+fun formatCents(cents: Long): String {
+    val negative = cents < 0
+    val absolute = if (negative) -cents else cents
+    val digits = (absolute / 100).toString()
+    val grouped = StringBuilder(if (negative) "-" else "")
     digits.forEachIndexed { index, digit ->
         if (index > 0 && (digits.length - index) % 3 == 0) grouped.append('.')
         grouped.append(digit)
     }
-    val fraction = if (cents < 10) "0$cents" else cents.toString()
-    return "${if (negative) "-" else ""}$grouped,$fraction"
+    val fraction = (absolute % 100).toInt()
+    return "$grouped,${if (fraction < 10) "0$fraction" else fraction.toString()}"
+}
+
+/** Euro doubles to the same shape, rounding half-up on the cent. */
+fun formatEuros(amount: Double): String {
+    val negative = amount < 0
+    val absoluteCents = ((if (negative) -amount else amount) * 100.0 + 0.5).toLong()
+    return formatCents(if (negative) -absoluteCents else absoluteCents)
 }

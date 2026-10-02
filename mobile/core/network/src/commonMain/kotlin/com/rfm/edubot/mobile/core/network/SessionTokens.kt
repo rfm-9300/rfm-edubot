@@ -39,10 +39,16 @@ class SessionTokens(private val store: TokenStore) {
         store.write(token)
     }
 
-    /** The backend rejected the token. Clears it and signals the session to sign out. */
+    /**
+     * The backend rejected the token. Clears it and signals the session to sign out.
+     *
+     * Whether there was a token is read through to storage rather than taken from [cached]: a
+     * caller that invalidates before anything has read would otherwise look like a no-op and the
+     * expiry would never be announced.
+     */
     suspend fun invalidate() {
         val had = guard.withLock {
-            val previous = cached
+            val previous = if (loaded) cached else store.read()
             cached = null
             loaded = true
             store.clear()
