@@ -122,7 +122,7 @@ fun ConversationScreen(
             }
         }
 
-        val closed = conversation.windowClosed(clock.instant().toString())
+        val closed = conversation.windowClosed(clock)
         when {
             conversation.channel == ChannelAsset.WEB ->
                 InfoPanel(strings[Txt.INBOX_WEB_REPLY_UNAVAILABLE], tone = Tone.Info)

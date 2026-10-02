@@ -2,7 +2,6 @@ package com.rfm.edubot.mobile.feature.inbox
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -120,18 +119,16 @@ private fun ConversationRow(
         if (isEmpty()) add(strings.plural(Txt.INBOX_MESSAGES_COUNT, conversation.messageCount))
         if (!conversation.autoReplyEnabled) add(strings[Txt.INBOX_FILTER_PAUSED])
     }.joinToString(" · ")
-    Row(Modifier) {
-        ListRow(
-            title = conversation.title,
-            detail = detail,
-            leading = conversation.title,
-            trailingLabel = clock.listStamp(conversation.lastMessageAt),
-            status = conversation.badgeStatus(),
-            statusLabel = conversation.badgeLabel(strings),
-            emphasised = conversation.unreadCount > 0,
-            onClick = onClick,
-        )
-    }
+    ListRow(
+        title = conversation.title,
+        detail = detail,
+        leading = conversation.title,
+        trailingLabel = clock.listStamp(conversation.lastMessageAt),
+        status = conversation.badgeStatus(),
+        statusLabel = conversation.badgeLabel(strings),
+        emphasised = conversation.unreadCount > 0,
+        onClick = onClick,
+    )
 }
 
 /** The one badge worth a row: waiting beats unread, and unread beats the channel. */

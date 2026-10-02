@@ -1,6 +1,8 @@
 package com.rfm.edubot.mobile.feature.crm
 
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +26,7 @@ import com.rfm.edubot.mobile.core.localization.Strings
 import com.rfm.edubot.mobile.core.localization.Txt
 import com.rfm.edubot.mobile.core.model.DashboardModules
 import com.rfm.edubot.mobile.core.ui.BotColors
+import com.rfm.edubot.mobile.core.ui.BotSpace
 import com.rfm.edubot.mobile.core.ui.EmptyState
 import com.rfm.edubot.mobile.core.ui.ErrorPanel
 import com.rfm.edubot.mobile.core.ui.InfoPanel
@@ -46,7 +49,7 @@ fun CrmScreen(
     strings: Strings,
     clock: TenantClock,
     padding: PaddingValues,
-    onNewClient: () -> Unit,
+    onNew: (() -> Unit)?,
     onOpenClient: (String) -> Unit,
 ) {
     val vm = viewModel<CrmViewModel>(
@@ -59,13 +62,14 @@ fun CrmScreen(
 
     val header: @Composable () -> Unit = {
         ScreenHeader(strings[Txt.NAV_GROUP_BUSINESS], strings.module(section)) {
-            if (section == DashboardModules.CLIENTS) {
-                TextButton(onClick = onNewClient) {
-                    Text(strings[Txt.ACTION_NEW], color = BotColors.accentDeep)
-                }
-            } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(BotSpace.xs)) {
                 TextButton(onClick = { vm.refresh() }) {
-                    Text(strings[Txt.ACTION_REFRESH], color = BotColors.accentDeep)
+                    Text(strings[Txt.ACTION_REFRESH], color = BotColors.inkMuted)
+                }
+                onNew?.let {
+                    TextButton(onClick = it) {
+                        Text(strings[Txt.ACTION_NEW], color = BotColors.accentDeep)
+                    }
                 }
             }
         }

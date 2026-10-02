@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.rfm.edubot.mobile.core.common.AppError
 import com.rfm.edubot.mobile.core.common.Outcome
+import com.rfm.edubot.mobile.core.common.TenantClock
 import com.rfm.edubot.mobile.core.data.InboxRepository
 import com.rfm.edubot.mobile.core.data.ThreadSnapshot
 import com.rfm.edubot.mobile.core.model.ChannelAsset
@@ -148,9 +149,11 @@ class ConversationViewModel(
     }
 }
 
-/** True while WhatsApp's 24-hour service window has closed, so only a template may be sent. */
-internal fun Conversation.windowClosed(nowIso: String?): Boolean {
-    val expires = windowExpiresAt ?: return false
-    val now = nowIso ?: return false
-    return expires < now
+/**
+ * True once WhatsApp's 24-hour service window has closed, so only an approved template may be sent.
+ * A conversation with no window (the web widget, Instagram) is never closed.
+ */
+internal fun Conversation.windowClosed(clock: TenantClock): Boolean {
+    val expires = windowExpiresAt?.let(clock::parse) ?: return false
+    return expires < clock.instant()
 }

@@ -14,6 +14,12 @@ sealed interface Destination {
 
     data object NewClient : Destination
 
+    data object NewQuote : Destination
+
+    data object NewInvoice : Destination
+
+    data object NewCatalogItem : Destination
+
     data object Notifications : Destination
 
     data object MoreMenu : Destination

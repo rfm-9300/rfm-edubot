@@ -61,8 +61,11 @@ import com.rfm.edubot.mobile.feature.assistant.AssistantScreen
 import com.rfm.edubot.mobile.feature.auth.LoginExperienceScreen
 import com.rfm.edubot.mobile.feature.bookings.BookingsScreen
 import com.rfm.edubot.mobile.feature.contacts.ContactsScreen
+import com.rfm.edubot.mobile.feature.crm.CatalogItemFormScreen
 import com.rfm.edubot.mobile.feature.crm.ClientFormScreen
 import com.rfm.edubot.mobile.feature.crm.CrmScreen
+import com.rfm.edubot.mobile.feature.crm.DocumentFormScreen
+import com.rfm.edubot.mobile.feature.crm.DocumentKind
 import com.rfm.edubot.mobile.feature.inbox.ConversationScreen
 import com.rfm.edubot.mobile.feature.inbox.InboxScreen
 import com.rfm.edubot.mobile.feature.notifications.NotificationsScreen
@@ -211,6 +214,21 @@ private fun DashboardShell(
                 onSaved = { navigator.back() },
                 onCancel = { navigator.back() },
             )
+            is Destination.NewQuote, is Destination.NewInvoice -> DocumentFormScreen(
+                repository = graph.crm,
+                kind = if (destination is Destination.NewQuote) DocumentKind.Quote else DocumentKind.Invoice,
+                strings = strings,
+                padding = padding,
+                onSaved = { navigator.back() },
+                onCancel = { navigator.back() },
+            )
+            is Destination.NewCatalogItem -> CatalogItemFormScreen(
+                repository = graph.crm,
+                strings = strings,
+                padding = padding,
+                onSaved = { navigator.back() },
+                onCancel = { navigator.back() },
+            )
             is Destination.Client -> ClientFormScreen(
                 repository = graph.crm,
                 strings = strings,
@@ -308,7 +326,7 @@ private fun ModuleScreen(
             strings = strings,
             clock = clock,
             padding = padding,
-            onNewClient = { navigator.open(Destination.NewClient) },
+            onNew = newRecordFor(moduleId)?.let { destination -> ({ navigator.open(destination) }) },
             onOpenClient = { navigator.open(Destination.Client(it)) },
         )
     }
@@ -453,6 +471,15 @@ private fun MoreScreen(
             item { EmptyState(strings[Txt.EMPTY_TITLE]) }
         }
     }
+}
+
+/** What the list's "New" button creates, or null for the lists the app cannot add to yet. */
+private fun newRecordFor(moduleId: String): Destination? = when (moduleId) {
+    DashboardModules.CLIENTS -> Destination.NewClient
+    DashboardModules.QUOTES -> Destination.NewQuote
+    DashboardModules.INVOICES -> Destination.NewInvoice
+    DashboardModules.CATALOG -> Destination.NewCatalogItem
+    else -> null
 }
 
 private fun ModuleGroup.labelKey(): String = when (this) {

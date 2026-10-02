@@ -31,37 +31,17 @@ class CrmViewModel(
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
 
-    private val mutableQuery = MutableStateFlow("")
-    val query: StateFlow<String> = mutableQuery.asStateFlow()
-
-    private val mutableStatus = MutableStateFlow<String?>(null)
-    val statusFilter: StateFlow<String?> = mutableStatus.asStateFlow()
-
     private val mutablePending = MutableStateFlow<String?>(null)
     val pending: StateFlow<String?> = mutablePending.asStateFlow()
 
     private val mutableFailure = MutableStateFlow<AppError?>(null)
     val failure: StateFlow<AppError?> = mutableFailure.asStateFlow()
 
-    /** The list the clients picker needs when creating a quote or an invoice. */
-    val clients = repository.clients
-
-    fun load() = scope.launch {
-        resource()?.load()
-        if (section in SECTIONS_NEEDING_CLIENTS) repository.clients.load()
-    }
+    fun load() = scope.launch { resource()?.load() }
 
     fun refresh() = scope.launch {
         mutableFailure.value = null
         resource()?.refresh()
-    }
-
-    fun setQuery(value: String) {
-        mutableQuery.value = value
-    }
-
-    fun setStatus(value: String?) {
-        mutableStatus.value = value
     }
 
     fun markInvoicePaid(invoice: Invoice) = act(invoice.id) { repository.markInvoicePaid(invoice) }
@@ -93,7 +73,4 @@ class CrmViewModel(
         else -> null
     }
 
-    private companion object {
-        val SECTIONS_NEEDING_CLIENTS = setOf(DashboardModules.QUOTES, DashboardModules.INVOICES)
-    }
 }
