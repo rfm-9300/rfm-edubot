@@ -94,6 +94,15 @@ class Strings internal constructor(
     /** Monday-first weekday name for `AvailabilityRule.dayOfWeek` (1..7). */
     fun weekday(dayOfWeek: Int): String = get("weekday.${dayOfWeek.coerceIn(1, 7)}")
 
+    /**
+     * Why a Home queue row needs a person, keyed by the `kind` the overview sends. An unknown kind
+     * falls back to the module's name, which is still useful.
+     */
+    fun attention(kind: String, moduleId: String): String {
+        val key = "attention.$kind"
+        return values[key] ?: fallback[key] ?: module(moduleId)
+    }
+
     /** Notification copy, keyed by the `kind` the backend sends instead of a prewritten sentence. */
     fun notification(kind: String, params: Map<String, String>): String {
         val key = "notification.$kind"

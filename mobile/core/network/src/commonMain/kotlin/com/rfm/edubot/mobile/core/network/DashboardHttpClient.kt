@@ -34,12 +34,22 @@ class ApiException(val error: AppError) : Exception(error.toString())
  *    keeps the backend's stable error code (`tax_id_required`, `id_taken`, …);
  * 3. the single place that reports an expired session, via [SessionTokens.invalidate].
  */
-class DashboardHttpClient(
+class DashboardHttpClient internal constructor(
     baseUrl: String,
     private val tokens: SessionTokens,
-    engine: HttpClientEngine? = null,
+    engine: HttpClientEngine?,
     requestTimeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
 ) {
+    /**
+     * The constructor the app uses. Kept separate so `HttpClientEngine` stays out of the public
+     * signature and the modules above this one never put Ktor on their compile classpath.
+     */
+    constructor(
+        baseUrl: String,
+        tokens: SessionTokens,
+        requestTimeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    ) : this(baseUrl, tokens, null, requestTimeoutMillis)
+
     private val root = baseUrl.trimEnd('/')
 
     val json: Json = Json {

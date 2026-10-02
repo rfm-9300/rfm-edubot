@@ -1,95 +1,99 @@
 package com.rfm.edubot.mobile.feature.crm
 
-import com.rfm.edubot.mobile.core.model.CatalogItem
-import com.rfm.edubot.mobile.core.model.CrmClient
-import com.rfm.edubot.mobile.core.model.CreateInvoice
-import com.rfm.edubot.mobile.core.model.CreateQuote
-import com.rfm.edubot.mobile.core.model.Invoice
-import com.rfm.edubot.mobile.core.model.Quote
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.rfm.edubot.mobile.core.network.DashboardApi
+import com.rfm.edubot.mobile.core.common.AppError
+import com.rfm.edubot.mobile.core.common.Outcome
+import com.rfm.edubot.mobile.core.data.CachedResource
+import com.rfm.edubot.mobile.core.data.CrmRepository
+import com.rfm.edubot.mobile.core.model.DashboardModules
+import com.rfm.edubot.mobile.core.model.Invoice
+import com.rfm.edubot.mobile.core.model.Payment
+import com.rfm.edubot.mobile.core.model.Quote
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class CrmUiState(
-    val clients: List<CrmClient> = emptyList(),
-    val quotes: List<Quote> = emptyList(),
-    val invoices: List<Invoice> = emptyList(),
-    val catalog: List<CatalogItem> = emptyList(),
-    val loading: Boolean = false,
-    val error: Boolean = false,
-)
-
+/**
+ * One view model for every CRM list.
+ *
+ * The lists differ only in which resource they read and which actions a row offers, so [section]
+ * picks the resource and the screen asks for the actions it needs. This is what lets the app cover
+ * jobs, payments, suppliers and employees — four modules it had no screen for — without four
+ * near-identical files.
+ */
 class CrmViewModel(
-    private val api: DashboardApi,
-    private val token: String,
+    private val repository: CrmRepository,
+    private val section: String,
     scopeOverride: CoroutineScope? = null,
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
-    private val mutableState = MutableStateFlow(CrmUiState())
-    val state: StateFlow<CrmUiState> = mutableState.asStateFlow()
 
-    fun load(module: String) = scope.launch {
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val current = mutableState.value
-            mutableState.value = when (module) {
-                "clients" -> current.copy(clients = api.clients(token), loading = false)
-                "quotes" -> current.copy(quotes = api.quotes(token), loading = false)
-                "invoices" -> current.copy(invoices = api.invoices(token), loading = false)
-                "catalog" -> current.copy(catalog = api.catalog(token), loading = false)
-                else -> current.copy(loading = false)
-            }
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
-        }
+    private val mutableQuery = MutableStateFlow("")
+    val query: StateFlow<String> = mutableQuery.asStateFlow()
+
+    private val mutableStatus = MutableStateFlow<String?>(null)
+    val statusFilter: StateFlow<String?> = mutableStatus.asStateFlow()
+
+    private val mutablePending = MutableStateFlow<String?>(null)
+    val pending: StateFlow<String?> = mutablePending.asStateFlow()
+
+    private val mutableFailure = MutableStateFlow<AppError?>(null)
+    val failure: StateFlow<AppError?> = mutableFailure.asStateFlow()
+
+    /** The list the clients picker needs when creating a quote or an invoice. */
+    val clients = repository.clients
+
+    fun load() = scope.launch {
+        resource()?.load()
+        if (section in SECTIONS_NEEDING_CLIENTS) repository.clients.load()
     }
 
-    fun createClient(name: String, phone: String, address: String?) = scope.launch {
-        if (name.isBlank() || phone.isBlank() || mutableState.value.loading) return@launch
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val client = api.createClient(token, name.trim(), phone.trim(), address?.trim()?.ifBlank { null })
-            mutableState.value = mutableState.value.copy(clients = listOf(client) + mutableState.value.clients, loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
-        }
+    fun refresh() = scope.launch {
+        mutableFailure.value = null
+        resource()?.refresh()
     }
 
-    fun createCatalogItem(item: CatalogItem) = scope.launch {
-        if (item.id.isBlank() || item.category.isBlank() || item.description.isBlank() || item.unit.isBlank() || mutableState.value.loading) return@launch
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val created = api.createCatalogItem(token, item)
-            mutableState.value = mutableState.value.copy(catalog = listOf(created) + mutableState.value.catalog, loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
-        }
+    fun setQuery(value: String) {
+        mutableQuery.value = value
     }
 
-    fun createQuote(request: CreateQuote) = scope.launch {
-        if (request.clientId.isBlank() || request.items.isEmpty() || mutableState.value.loading) return@launch
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val created = api.createQuote(token, request)
-            mutableState.value = mutableState.value.copy(quotes = listOf(created) + mutableState.value.quotes, loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
-        }
+    fun setStatus(value: String?) {
+        mutableStatus.value = value
     }
 
-    fun createInvoice(request: CreateInvoice) = scope.launch {
-        if (request.clientId.isBlank() || request.dueDate.isBlank() || request.items.isEmpty() || mutableState.value.loading) return@launch
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val created = api.createInvoice(token, request)
-            mutableState.value = mutableState.value.copy(invoices = listOf(created) + mutableState.value.invoices, loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
-        }
+    fun markInvoicePaid(invoice: Invoice) = act(invoice.id) { repository.markInvoicePaid(invoice) }
+
+    fun markPaymentPaid(payment: Payment) = act(payment.id) { repository.markPaymentPaid(payment) }
+
+    fun setQuoteStatus(quote: Quote, status: String) = act(quote.id) { repository.setQuoteStatus(quote, status) }
+
+    fun convertQuote(quote: Quote, dueDate: String) = act(quote.id) { repository.convertQuote(quote, dueDate) }
+
+    private fun act(id: String, block: suspend () -> Outcome<*>) = scope.launch {
+        if (mutablePending.value != null) return@launch
+        mutablePending.value = id
+        mutableFailure.value = null
+        val result = block()
+        mutablePending.value = null
+        if (result is Outcome.Failure) mutableFailure.value = result.error
+    }
+
+    private fun resource(): CachedResource<*>? = when (section) {
+        DashboardModules.CLIENTS -> repository.clients
+        DashboardModules.QUOTES -> repository.quotes
+        DashboardModules.INVOICES -> repository.invoices
+        DashboardModules.CATALOG -> repository.catalog
+        DashboardModules.SERVICES -> repository.services
+        DashboardModules.PAYMENTS -> repository.payments
+        DashboardModules.SUPPLIERS -> repository.suppliers
+        DashboardModules.EMPLOYEES -> repository.employees
+        else -> null
+    }
+
+    private companion object {
+        val SECTIONS_NEEDING_CLIENTS = setOf(DashboardModules.QUOTES, DashboardModules.INVOICES)
     }
 }

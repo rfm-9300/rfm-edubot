@@ -30,6 +30,8 @@ object Txt {
     const val ACTION_MARK_PAID = "action.markPaid"
     const val ACTION_MARK_ALL_READ = "action.markAllRead"
     const val ACTION_LOAD_MORE = "action.loadMore"
+    const val ACTION_SHOW = "action.show"
+    const val ACTION_HIDE = "action.hide"
 
     const val LABEL_ALL = "label.all"
     const val LABEL_OPEN = "label.open"
@@ -50,6 +52,7 @@ object Txt {
     const val LOGIN_ERROR_EXPIRED = "login.error.expired"
     const val LOGIN_ERROR_INACTIVE = "login.error.inactive"
     const val LOGIN_ERROR_CONNECTION = "login.error.connection"
+    const val LOGIN_SECURITY_NOTE = "login.securityNote"
 
     // Failures.
     const val ERROR_UNAUTHORIZED = "error.unauthorized"
@@ -66,6 +69,7 @@ object Txt {
 
     // Navigation chrome.
     const val NAV_MORE = "nav.more"
+    const val NAV_GROUP_HOME = "nav.group.home"
     const val NAV_GROUP_INBOX = "nav.group.inbox"
     const val NAV_GROUP_BUSINESS = "nav.group.business"
     const val NAV_GROUP_AUTOMATION = "nav.group.automation"
