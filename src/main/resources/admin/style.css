@@ -864,7 +864,13 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 }
 
 /* Line items */
+.lines-field > .lbl { display: block; margin-bottom: 8px; }
 .lines { border: 1.5px solid var(--line); border-radius: var(--r-md); overflow: hidden; background: var(--surface); }
+/* The catalog dropdown of a description cell has to escape the box, so these corners are
+   rounded by the head and foot instead of clipped by the container. */
+.lines--combo { overflow: visible; }
+.lines--combo .lines__head { border-radius: calc(var(--r-md) - 2px) calc(var(--r-md) - 2px) 0 0; }
+.lines--combo .lines__foot { border-radius: 0 0 calc(var(--r-md) - 2px) calc(var(--r-md) - 2px); }
 .lines__head {
   display: grid; grid-template-columns: 1fr 70px 80px 110px 32px;
   background: var(--surface-2); border-bottom: 1px solid var(--line-soft);
@@ -888,25 +894,35 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 .line input:focus { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--focus-border); }
 .line .l-rm { border: 0; background: transparent; color: var(--ink-faint); cursor: pointer; display: grid; place-items: center; border-radius: 8px; }
 .line .l-rm:hover { color: var(--bad-ink); background: var(--bad-soft); }
+/* Description cell: a text field that doubles as the catalog picker. The cell, not the input,
+   carries the focus ring, so the highlight wraps the caret instead of stopping short of it. */
+.line__desc { position: relative; display: flex; align-items: center; min-width: 0; border-right: 1px solid var(--line-soft); }
+.line__desc > input { border-right: 0; }
+.line__desc:focus-within { background: var(--accent-soft); box-shadow: inset 0 0 0 1.5px var(--focus-border); }
+.line__desc > input:focus { background: transparent; box-shadow: none; }
+.line__caret {
+  flex: none; width: 26px; align-self: stretch; display: grid; place-items: center;
+  border: 0; background: transparent; color: var(--ink-faint); cursor: pointer;
+}
+.line__caret:hover { color: var(--ink); }
+.line__desc:focus-within .line__caret { color: var(--ink-2); }
+.line__opts { top: calc(100% - 1px); }
+.line__opts .suggest__item > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line__opts .suggest__item > span { flex: none; }
 .lines__foot {
   display: flex; align-items: center; justify-content: space-between;
   padding: 10px 12px; background: var(--surface-2); border-top: 1px solid var(--line-soft); gap: 10px;
 }
-.lines__left { display: flex; gap: 6px; align-items: center; flex: 1; flex-wrap: wrap; }
-.lines__pick { display: flex; gap: 6px; align-items: center; }
-.lines__pick .sel { height: 30px; font-size: 12px; min-width: 200px; }
 .lines__total { font-variant-numeric: tabular-nums; display: flex; align-items: baseline; gap: 10px; font-size: 13px; font-weight: 700; }
 .lines__total .v { font-family: var(--display); font-size: 17px; font-weight: 700; color: var(--accent-deep); }
 html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
 @media (max-width: 560px) {
   .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
-  .lines__head > span:first-child, .line input[data-k="description"] { grid-column: 1 / -1; }
+  .lines__head > span:first-child, .line > .line__desc { grid-column: 1 / -1; }
   .line input { min-width: 0; }
-  .line input[data-k="description"] { border-right: 0; border-bottom: 1px solid var(--line-soft); }
+  .line > .line__desc { border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .lines__foot { flex-wrap: wrap; }
-  .lines__pick { flex: 1 1 100%; }
-  .lines__pick .sel { min-width: 0; flex: 1; }
 }
 
 /* ============================================================
@@ -1695,12 +1711,20 @@ html[data-theme="dark"] .cal-grid__dayhead.is-today { color: var(--accent); }
   background: var(--surface); box-shadow: var(--shadow-md);
 }
 .suggest[hidden] { display: none; }
+/* A list long enough to scroll (the whole catalog under a line's description field). */
+.suggest--scroll { max-height: 264px; overflow-y: auto; }
 .suggest__item {
   display: flex; justify-content: space-between; gap: 12px; padding: 8px 10px; border: 0; border-radius: var(--r-xs);
   background: transparent; color: var(--ink); font: inherit; font-size: 13px; text-align: left; cursor: pointer;
 }
 .suggest__item span { color: var(--ink-mute); font-size: 12px; }
-.suggest__item:hover, .suggest__item:focus-visible { background: var(--surface-2); outline: none; }
+.suggest__item:hover, .suggest__item:focus-visible, .suggest__item[aria-selected="true"] { background: var(--surface-2); outline: none; }
+.suggest__group {
+  margin: 6px 0 2px; padding: 0 10px; font-size: 10px; letter-spacing: 0.06em;
+  text-transform: uppercase; font-weight: 800; color: var(--ink-faint);
+}
+.suggest__group:first-child { margin-top: 2px; }
+.suggest__empty { margin: 0; padding: 10px; font-size: 13px; color: var(--ink-mute); }
 .tbl tbody tr.is-day td,
 .tbl tbody tr.is-day:hover td {
   padding: 8px 18px; background: var(--surface-2); color: var(--ink-mute); cursor: default;
