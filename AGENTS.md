@@ -95,6 +95,15 @@ When Rodrigo says "create-mocks", "create mocks", "seed mocks", or asks to resto
 4. Expose webhook: `cloudflared tunnel --url http://localhost:8080`
 5. Register tunnel URL + verify token in Meta Developer Dashboard
 
+## Cursor Cloud specific instructions
+
+The Cloud Agent environment installs Docker and the Gradle JDK 20 toolchain, then on boot starts MongoDB and `./gradlew run`.
+
+- JDK 20 is provisioned by Gradle (`jvmToolchain(20)`). Leave the toolchain as it is.
+- `./gradlew test` needs the Docker daemon. Testcontainers 1.20 cannot speak Docker Engine 29's default API, so the environment writes `~/.docker-java.properties` with `api.version=1.44`. Mongo 7 also needs a container nofile ulimit of 65536, which is set in `/etc/docker/daemon.json`.
+- If `.env` is missing, boot writes local placeholders. They are not Meta or OpenRouter credentials. Backoffice password login uses `local-dev`.
+- `mobile/` is a separate Kotlin Multiplatform app and is not part of this environment.
+
 ## Architecture
 WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to a Kotlin Channel, processes async via MessagePipeline (dedup → user/convo lookup → rate limit → LLM via OpenRouter → reply via WhatsApp Graph API → persist to MongoDB).
 
