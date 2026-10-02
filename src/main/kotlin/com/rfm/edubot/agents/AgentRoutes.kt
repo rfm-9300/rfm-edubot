@@ -98,7 +98,8 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
 
             get("/people") {
                 val ctx = call.agentsContext() ?: return@get
-                val users = agents.services.dashboardUsers.listByTenant(ctx.tenant.primaryTenantId)
+                // Employees' sign-ins only register their own services, so they can't take tasks or approve.
+                val users = agents.services.dashboardUsers.listByTenant(ctx.tenant.primaryTenantId).filterNot { it.isEmployee }
                 call.respond(users.map { PersonDto(it.id.toHexString(), it.email, it.role.name) })
             }
 
@@ -400,7 +401,8 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val ctx = call.agentsContext() ?: return@post
                 val request = runCatching { call.receive<TaskWriteRequest>() }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
                 val title = request.title?.trim()?.takeIf { it.isNotEmpty() }?.take(200) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "title_required"))
-                val assignee = request.assigneeUserId?.toObjectIdOrNull()?.let { agents.services.dashboardUsers.findById(it) }?.takeIf { it.tenantId == ctx.tenant.primaryTenantId }
+                val assignee = request.assigneeUserId?.toObjectIdOrNull()?.let { agents.services.dashboardUsers.findById(it) }
+                    ?.takeIf { it.tenantId == ctx.tenant.primaryTenantId && !it.isEmployee }
                 val now = clock()
                 val subject = SubjectRef(request.subjectType ?: "", request.subjectId ?: "").takeIf { it.type.isNotBlank() && it.id.isNotBlank() }
                 val context = subject?.let { runtime.contextBuilder.build(ctx.tenant, it) }
@@ -427,7 +429,8 @@ fun Route.agentRoutes(agents: AgentsModule, runtime: AgentRuntime, tenants: Tena
                 val ctx = call.agentsContext() ?: return@patch
                 val id = call.parameters["id"].toObjectIdOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
                 val request = runCatching { call.receive<TaskWriteRequest>() }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val assignee = request.assigneeUserId?.toObjectIdOrNull()?.let { agents.services.dashboardUsers.findById(it) }?.takeIf { it.tenantId == ctx.tenant.primaryTenantId }
+                val assignee = request.assigneeUserId?.toObjectIdOrNull()?.let { agents.services.dashboardUsers.findById(it) }
+                    ?.takeIf { it.tenantId == ctx.tenant.primaryTenantId && !it.isEmployee }
                 val updated = agents.tasks.update(
                     ctx.tenant.id,
                     id,

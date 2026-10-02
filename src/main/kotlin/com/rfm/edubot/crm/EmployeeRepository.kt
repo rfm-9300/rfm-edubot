@@ -38,9 +38,12 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         return collection.find(filter).sort(Document("name", 1)).limit(100).toList().map { it.toEmployee() }
     }
 
-    /** Only an employee with no payments can be deleted; the others get archived. */
+    /** Only an employee with no payments, registered services or services done can be deleted; the others get archived. */
     suspend fun delete(id: ObjectId): DirectoryDelete =
-        collection.deleteUnreferenced(mongoModule, tenantId, id, "employeeId", listOf("crm.payments"))
+        collection.deleteUnreferenced(
+            mongoModule, tenantId, id, "employeeId",
+            listOf("crm.payments", ServiceSubmissionRepository.COLLECTION, "crm.client_services"),
+        )
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
 

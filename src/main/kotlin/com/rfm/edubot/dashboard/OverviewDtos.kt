@@ -27,7 +27,7 @@ data class OverviewDto(
     val catalog: OverviewCatalogDto? = null,
     val services: OverviewServicesDto? = null,
     val suppliers: OverviewSuppliersDto? = null,
-    val employees: OverviewSuppliersDto? = null,
+    val employees: OverviewEmployeesDto? = null,
     val payments: OverviewPaymentsDto? = null,
     val assistant: OverviewAssistantDto? = null,
     val agents: OverviewAgentsDto? = null,
@@ -205,6 +205,15 @@ data class OverviewSuppliersDto(
     val total: Long,
     val newThisMonth: Long,
     val newLastMonth: Long,
+)
+
+@Serializable
+data class OverviewEmployeesDto(
+    val total: Long,
+    val newThisMonth: Long,
+    val newLastMonth: Long,
+    /** Services employees registered that wait for someone to approve them (needs the services module). */
+    val pendingSubmissions: Long = 0,
 )
 
 @Serializable

@@ -35,12 +35,15 @@ import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.crm.CatalogItemBackfill
+import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.dashboard.DashboardUserRepository
+import com.rfm.edubot.dashboard.EmployeeLookup
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
+import com.rfm.edubot.dashboard.employeeWorkRoutes
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
@@ -306,7 +309,8 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     val adminAccess = AdminAccess(AdminEmailRepository(mongoModule), runtimeConfig)
     kotlinx.coroutines.runBlocking { adminAccess.initialize() }
     val backupControl = BackupControl(appConfig.backups.archiveDir, appConfig.backups.controlDir)
-    configureAdminAuth(runtimeConfig, tenantRepository, dashboardUserRepository)
+    val employeeLookup: EmployeeLookup = { tenantId, employeeId -> EmployeeRepository(mongoModule, tenantId).findById(employeeId) }
+    configureAdminAuth(runtimeConfig, tenantRepository, dashboardUserRepository, employeeLookup)
 
     routing {
         get("/health") {
@@ -363,7 +367,9 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             tenantRepository = tenantRepository,
             dashboardUsers = dashboardUserRepository,
             runtimeConfig = runtimeConfig,
+            employees = employeeLookup,
         )
+        employeeWorkRoutes(mongoModule, dashboardUserRepository, agentServices.notifications)
         dashboardCompanyRoutes(
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,

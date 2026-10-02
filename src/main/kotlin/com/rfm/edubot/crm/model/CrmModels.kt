@@ -61,7 +61,7 @@ data class Supplier(
     val archivedAt: Instant? = null,
 )
 
-/** Person on the tenant's team. Payments still attach only to a supplier; this directory is the payee list a later payments change can use. */
+/** Person on the tenant's team: a payments payee, and with a sign-in of their own, the one registering the services they do. */
 data class Employee(
     @BsonId val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
@@ -122,6 +122,36 @@ data class ClientService(
     val catalogItemId: String? = null,
     val bookingId: ObjectId? = null,
     val performedAt: LocalDate? = null,
+    val createdAt: Instant,
+    val updatedAt: Instant,
+    /** Who did the work, on a row made by approving an employee's registered service. */
+    val employeeId: ObjectId? = null,
+)
+
+enum class ServiceSubmissionStatus { PENDING, APPROVED, REJECTED }
+
+/**
+ * Work an employee registered from their own sign-in. Staff approve it, which creates the Serviços row
+ * [serviceId] from its content, or reject it with an optional [rejectionReason]. Only a pending one changes.
+ * [adjusted] says the approver changed the content first; the submission then holds what was approved.
+ */
+data class ServiceSubmission(
+    @BsonId val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val employeeId: ObjectId,
+    val clientId: ObjectId,
+    val name: String,
+    val notes: String? = null,
+    val items: List<LineItem>,
+    val totalCents: Long,
+    val catalogItemId: String? = null,
+    val performedAt: LocalDate,
+    val status: ServiceSubmissionStatus = ServiceSubmissionStatus.PENDING,
+    val serviceId: ObjectId? = null,
+    val reviewedBy: String? = null,
+    val reviewedAt: Instant? = null,
+    val rejectionReason: String? = null,
+    val adjusted: Boolean = false,
     val createdAt: Instant,
     val updatedAt: Instant,
 )

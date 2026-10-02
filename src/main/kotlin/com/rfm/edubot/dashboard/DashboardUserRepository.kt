@@ -29,6 +29,21 @@ class DashboardUserRepository(mongoModule: MongoModule) {
     suspend fun findByGoogleUid(uid: String): DashboardUser? =
         collection.find(Filters.eq("googleUid", uid)).firstOrNull()?.toDashboardUser()
 
+    /** The sign-in of an employee record, if they have one. */
+    suspend fun findByEmployee(employeeId: ObjectId): DashboardUser? =
+        collection.find(Filters.eq("employeeId", employeeId)).firstOrNull()?.toDashboardUser()
+
+    /** Throws a duplicate-key error when another user has [email]. */
+    suspend fun setEmail(id: ObjectId, email: String): DashboardUser? =
+        collection.findOneAndUpdate(
+            Filters.eq("_id", id),
+            Updates.set("email", email.trim().lowercase()),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toDashboardUser()
+
+    suspend fun deleteByEmployee(employeeId: ObjectId): Boolean =
+        collection.deleteOne(Filters.eq("employeeId", employeeId)).deletedCount > 0
+
     enum class LinkResult { LINKED, TAKEN, NOT_FOUND }
 
     /** Attaches a Google account to [id]. A Google account belongs to one user at most (unique index). */
@@ -91,6 +106,8 @@ class DashboardUserRepository(mongoModule: MongoModule) {
         lastLoginAt = getDate("lastLoginAt")?.let { Instant.fromEpochMilliseconds(it.time) },
         googleUid = getString("googleUid"),
         googleEmail = getString("googleEmail"),
+        employeeId = get("employeeId", ObjectId::class.java),
+        employeeTenantId = get("employeeTenantId", ObjectId::class.java),
     )
 
     private fun DashboardUser.toDocument() = Document("_id", id)
@@ -104,6 +121,8 @@ class DashboardUserRepository(mongoModule: MongoModule) {
             passwordHash?.let { append("passwordHash", it) }
             googleUid?.let { append("googleUid", it) }
             googleEmail?.let { append("googleEmail", it) }
+            employeeId?.let { append("employeeId", it) }
+            employeeTenantId?.let { append("employeeTenantId", it) }
         }
 }
 

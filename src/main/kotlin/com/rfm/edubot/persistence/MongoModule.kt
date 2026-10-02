@@ -55,6 +55,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 IndexOptions().unique(true).partialFilterExpression(Document("googleUid", Document("\$type", "string"))),
             )
             dashboardUsers.createIndex(Document("tenantId", 1))
+            dashboardUsers.createIndex(
+                Document("employeeId", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("employeeId", Document("\$type", "objectId"))),
+            )
 
             db.getCollection<Document>("admin_emails").createIndex(Document("email", 1), IndexOptions().unique(true))
 
@@ -196,6 +200,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 Document("tenantId", 1).append("bookingId", 1),
                 IndexOptions().partialFilterExpression(Document("bookingId", Document("\$type", "objectId"))),
             )
+            crmClientServices.createIndex(
+                Document("tenantId", 1).append("employeeId", 1),
+                IndexOptions().partialFilterExpression(Document("employeeId", Document("\$type", "objectId"))),
+            )
 
             val crmSuppliers = db.getCollection<Document>("crm.suppliers")
             crmSuppliers.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
@@ -206,6 +214,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmEmployees.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
             crmEmployees.createIndex(Document("tenantId", 1).append("name", 1))
             crmEmployees.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+
+            val serviceSubmissions = db.getCollection<Document>("crm.service_submissions")
+            serviceSubmissions.createIndex(Document("tenantId", 1).append("employeeId", 1).append("createdAt", -1))
+            serviceSubmissions.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
 
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
