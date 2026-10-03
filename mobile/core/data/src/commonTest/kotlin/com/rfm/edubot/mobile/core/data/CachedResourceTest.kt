@@ -89,7 +89,7 @@ class CachedResourceTest {
     }
 
     @Test
-    fun `a failure with nothing cached leaves an empty state, not a stale one`() = runTest {
+    fun `a failure with nothing cached leaves an empty state rather than a stale one`() = runTest {
         val resource = resource { throw ApiException(AppError.Forbidden) }
         resource.load()
         val state = resource.state.value
@@ -117,7 +117,7 @@ class CachedResourceTest {
     }
 
     @Test
-    fun `a snapshot written by an older model version is dropped, not raised`() = runTest {
+    fun `a snapshot written by an older model version is dropped rather than raised`() = runTest {
         val store = InMemorySnapshotStore()
         store.write("key", """{"shape":"no longer a list"}""")
 

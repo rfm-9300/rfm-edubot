@@ -110,7 +110,7 @@ class DashboardSessionViewModelTest {
     }
 
     @Test
-    fun `a 403 at sign-in reads as an inactive account, not as a wrong password`() = runTest {
+    fun `a 403 at sign-in reads as an inactive account rather than a wrong password`() = runTest {
         val api = object : StubSessionApi() {
             override suspend fun login(email: String, password: String): Session =
                 throw ApiException(AppError.Forbidden)

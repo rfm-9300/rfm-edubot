@@ -27,6 +27,9 @@ jobs:
           distribution: temurin
           java-version: "17"
       - uses: gradle/actions/setup-gradle@v4
+      # Kotlin/Native-only naming rules that the JVM and Android accept, so without this they are
+      # only caught by the macOS job minutes later. Runs before the tests because it takes a second.
+      - run: ./scripts/check-native-test-names.sh
       - run: ./gradlew jvmTest
 
   android:

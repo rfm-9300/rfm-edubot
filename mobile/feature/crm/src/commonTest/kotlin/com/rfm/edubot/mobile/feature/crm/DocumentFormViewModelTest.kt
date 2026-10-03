@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  */
 class LineDraftTest {
     @Test
-    fun `a comma decimal is accepted, because a Portuguese keyboard offers one`() {
+    fun `a comma decimal is accepted because a Portuguese keyboard offers one`() {
         assertEquals(12.5, LineDraft(unitPrice = "12,5").unitPriceValue)
         assertEquals(12.5, LineDraft(unitPrice = "12.5").unitPriceValue)
     }
@@ -104,7 +104,7 @@ class DocumentFormStateTest {
 
 class CatalogItemFormStateTest {
     @Test
-    fun `an item needs a title, which is what the backend requires`() {
+    fun `an item needs a title because the backend requires one`() {
         assertFalse(CatalogItemFormState().canSave)
         assertTrue(CatalogItemFormState(title = "Installation").canSave)
     }
@@ -133,7 +133,7 @@ class CatalogItemFormStateTest {
 
 class ClientFormStateTest {
     @Test
-    fun `a client needs its NIF and address, which is why saving used to always fail`() {
+    fun `a client needs its NIF and address which is why saving used to fail`() {
         val missingTaxId = ClientFormState(name = "Maria", phone = "351900000001", address = "Rua X")
         assertFalse(missingTaxId.canSave)
 

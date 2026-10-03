@@ -21,7 +21,7 @@ class NavigatorTest {
     }
 
     @Test
-    fun `back at a module root is left to the platform, which closes the app`() {
+    fun `back at a module root is left to the platform so the app closes`() {
         val navigator = navigator()
         assertFalse(navigator.back(), "returning false is what lets the OS handle it")
     }
@@ -68,7 +68,7 @@ class NavigatorTest {
     }
 
     @Test
-    fun `different conversations do stack, so back walks the trail`() {
+    fun `different conversations stack so back walks the trail`() {
         val navigator = navigator()
         navigator.open(Destination.Conversation("c1"))
         navigator.open(Destination.Conversation("c2"))
@@ -100,7 +100,7 @@ class NavigatorTest {
     }
 
     @Test
-    fun `the notifications screen is a push, so back returns where it was opened from`() {
+    fun `the notifications screen is a push so back returns where it opened from`() {
         val navigator = navigator()
         navigator.selectModule(DashboardModules.BOOKINGS)
         navigator.open(Destination.Notifications)

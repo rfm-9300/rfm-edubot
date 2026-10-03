@@ -17,7 +17,7 @@ class TimesTest {
     private val lisbonWinter = TenantClock("Europe/Lisbon") { Instant.parse("2026-01-15T12:00:00Z") }
 
     @Test
-    fun `clock times are in the tenant's zone, not UTC`() {
+    fun `clock times are in the tenant's zone rather than UTC`() {
         // Lisbon is UTC+1 in July.
         assertEquals("13:05", lisbonSummer.timeOfDay("2026-07-15T12:05:00Z"))
         // And UTC+0 in January.
@@ -38,7 +38,7 @@ class TimesTest {
     }
 
     @Test
-    fun `a value that is not an instant is passed through, not blanked`() {
+    fun `a value that is not an instant is passed through rather than blanked`() {
         assertEquals("not a date", lisbonWinter.listStamp("not a date"))
         assertNull(lisbonWinter.timeOfDay("not a date"))
     }
@@ -51,7 +51,7 @@ class TimesTest {
     }
 
     @Test
-    fun `days since counts whole days, and is negative in the future`() {
+    fun `days since counts whole days and is negative in the future`() {
         assertEquals(3, lisbonWinter.daysSince("2026-01-12T12:00:00Z"))
         assertEquals(-3, lisbonWinter.daysSince("2026-01-18T12:00:00Z"))
         assertEquals(0, lisbonWinter.daysSince("2026-01-15T06:00:00Z"))
@@ -89,7 +89,7 @@ class MoneyTest {
     }
 
     @Test
-    fun `a negative amount keeps one sign, in front`() {
+    fun `a negative amount keeps one sign at the front`() {
         assertEquals("-1.234,56", formatCents(-123_456))
         assertEquals("-0,05", formatCents(-5))
     }

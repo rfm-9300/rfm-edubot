@@ -72,7 +72,7 @@ class AgentsRepositoryTest {
     }
 
     @Test
-    fun `rejecting also removes it, and passes the reason on`() = runTest {
+    fun `rejecting also removes it and passes the reason on`() = runTest {
         val (repository, api) = repository()
         repository.approvals.load()
 

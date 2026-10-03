@@ -42,7 +42,7 @@ class ModuleRegistryTest {
     }
 
     @Test
-    fun `a module the tenant pays for but the app cannot render is named, not hidden or faked`() {
+    fun `a module the tenant pays for but the app cannot render is named rather than faked`() {
         val webOnly = ModuleRegistry.webOnly(fullPlan).map { it.id }
         assertEquals(listOf(DashboardModules.INSTAGRAM), webOnly)
         assertFalse(

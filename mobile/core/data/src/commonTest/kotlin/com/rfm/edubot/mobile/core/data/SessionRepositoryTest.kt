@@ -77,7 +77,7 @@ class SessionRepositoryTest {
     }
 
     @Test
-    fun `a sign-in that cannot reach the backend reports offline, not bad credentials`() = runTest {
+    fun `a sign-in that cannot reach the backend reports offline rather than bad credentials`() = runTest {
         val api = FakeSessionApi(loginResult = { throw ApiException(AppError.Offline("no route")) })
         val (repository, _, _) = repository(api)
 

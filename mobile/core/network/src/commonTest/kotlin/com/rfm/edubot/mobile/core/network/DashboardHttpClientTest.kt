@@ -88,7 +88,7 @@ class DashboardHttpClientTest {
     }
 
     @Test
-    fun `a 403 is forbidden, not an expired session`() = runTest {
+    fun `a 403 is forbidden rather than an expired session`() = runTest {
         val (http, _, store) = client { respondError(HttpStatusCode.Forbidden) }
         val failure = assertFailsWith<ApiException> { KtorSettingsApi(http).account() }
         assertEquals(AppError.Forbidden, failure.error)
@@ -147,7 +147,7 @@ class DashboardHttpClientTest {
     }
 
     @Test
-    fun `an unreachable backend reads as offline, not as a crash`() = runTest {
+    fun `an unreachable backend reads as offline rather than as a crash`() = runTest {
         val (http, _, _) = client { throw kotlinx.io.IOException("no route to host") }
         val failure = assertFailsWith<ApiException> { KtorSettingsApi(http).account() }
         assertTrue(failure.error is AppError.Offline)
