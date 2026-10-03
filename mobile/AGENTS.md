@@ -1,14 +1,20 @@
 ## Personal wiki (second brain)
 
-Rodrigo keeps a compiled knowledge wiki at `/Users/rodrigomartins/projects/my-wiki`.
-Canonical protocol: `/Users/rodrigomartins/projects/my-wiki/ops/bootstrap-prompt.md`
-(that file wins if this section drifts).
+Rodrigo keeps a compiled knowledge wiki, a git repo at `/Users/rodrigomartins/projects/my-wiki`
+whose remote is the private GitHub repo `rfm-9300/my-wiki`. Below, `<vault>` means that path.
+Canonical protocol: `<vault>/ops/bootstrap-prompt.md` (that file wins if this section drifts).
+
+If that path doesn't exist (Cursor cloud agents, other machines), `<vault>` is the `my-wiki`
+checkout next to this repo (a Cursor multi-repo environment clones it), or a fresh
+`git clone https://github.com/rfm-9300/my-wiki.git`. If neither works, tell Rodrigo and carry on
+without the wiki.
 
 ### Consult before substantial work
 
-1. Read `/Users/rodrigomartins/projects/my-wiki/wiki/index.md` — one line per page.
-2. Open a page only when its index line is clearly relevant. Never bulk-read.
-3. Applicable pages are **binding instructions**, not suggestions.
+1. Sync first: `git -C <vault> pull --rebase --autostash`.
+2. Read `<vault>/wiki/index.md` — one line per page.
+3. Open a page only when its index line is clearly relevant. Never bulk-read.
+4. Applicable pages are **binding instructions**, not suggestions.
 
 **This repo — start here when the index line matches the task:**
 
@@ -23,12 +29,15 @@ Chat is ephemeral; the wiki is the compounding layer. When this session produces
 knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"):
 
 1. Check the index — update an existing page if one exists; otherwise file a note via
-   `/Users/rodrigomartins/projects/my-wiki/ops/workflows/file-note.md`.
-2. Write with absolute paths under `/Users/rodrigomartins/projects/my-wiki/`. Always bump
-   `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
-3. **Do not file:** one-off bugfixes, secrets, deploy credentials, or commands that belong
+   `<vault>/ops/workflows/file-note.md`.
+2. Write inside `<vault>`. Always bump `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
+3. Commit only the vault files you changed and push to `main` (if the push is rejected, pull
+   with `--rebase` and push again). Unpushed edits are invisible to other machines and cloud
+   agents. Committing and pushing the vault is part of filing, even where this repo restricts
+   its own git commands.
+4. **Do not file:** one-off bugfixes, secrets, deploy credentials, or commands that belong
    in this `AGENTS.md` (the repo operating manual).
-4. If unsure whether it belongs, tell Rodrigo instead of writing.
+5. If unsure whether it belongs, tell Rodrigo instead of writing.
 
 When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
