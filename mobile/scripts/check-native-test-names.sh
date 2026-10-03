@@ -6,25 +6,44 @@
 #   e: ...TimesTest.kt:20:9 Name contains illegal characters: ",".
 #
 # This catches it on Linux in under a second. Run from the `mobile` directory.
+#
+# The comparison is plain bash string equality, one character at a time. Regex classes and `awk -v`
+# both mangle at least one of these characters — a lone backslash through `awk -v` arrives empty,
+# and `index(s, "")` is true for every line, which is how an earlier version of this script
+# reported every name in a file as an offender.
 set -uo pipefail
 
 cd "$(dirname "$0")/.."
 
-# What Kotlin/Native refuses in a backticked name. Space and apostrophe are fine. Matched one
-# character at a time with grep -F, because several of these are awkward in a shell or regex class.
+# What Kotlin/Native refuses in a backticked name. Space and apostrophe are fine.
 illegal=(',' '.' ';' '(' ')' '[' ']' '{' '}' '/' '\' '<' '>' ':')
 
-names=$(grep -rn 'fun `' --include='*.kt' . | grep -v '/build/' | sed 's/^\(.*:[0-9]*\): *fun `\([^`]*\)`.*/\1\t\2/')
+contains_illegal() {
+    local name=$1 i char bad
+    for ((i = 0; i < ${#name}; i++)); do
+        char=${name:i:1}
+        for bad in "${illegal[@]}"; do
+            if [[ $char == "$bad" ]]; then
+                return 0
+            fi
+        done
+    done
+    return 1
+}
 
-offenders=""
-for char in "${illegal[@]}"; do
-    # Only the name half of each line is checked; a path always contains "/" and "." legitimately.
-    hits=$(printf '%s\n' "$names" | awk -F'\t' -v c="$char" 'index($2, c) { print }')
-    [ -n "$hits" ] && offenders+="$hits"$'\n'
-done
+found=0
+while IFS= read -r line; do
+    # "path:line: fun `the name`() {" -> location and name, without touching the path.
+    location=${line%%: *}
+    name=${line#*fun \`}
+    name=${name%%\`*}
+    if contains_illegal "$name"; then
+        printf '  %s\n    %s\n' "$location" "$name" >&2
+        found=1
+    fi
+done < <(grep -rn 'fun `' --include='*.kt' . | grep -v '/build/')
 
-if [ -n "${offenders//[$'\n']/}" ]; then
-    printf '%s' "$offenders" | sort -u | awk -F'\t' '{printf "  %s\n    %s\n", $1, $2}' >&2
+if [[ $found -eq 1 ]]; then
     cat >&2 <<'EOF'
 
 Those backtick-quoted names contain characters Kotlin/Native rejects, so the iOS targets will not
