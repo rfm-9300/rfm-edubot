@@ -105,7 +105,7 @@ object CreateTaskAction : AgentAction {
         val assignee = input.string("assigneeUserId")
             ?.let { id -> runCatching { ObjectId(id) }.getOrNull() }
             ?.let { ctx.services.dashboardUsers.findById(it) }
-            ?.takeIf { it.tenantId == ctx.tenant.primaryTenantId }
+            ?.takeIf { it.tenantId == ctx.tenant.primaryTenantId && !it.isEmployee }
         val task = ctx.services.tasks.insert(
             AgentTask(
                 tenantId = ctx.tenant.id,

@@ -2,7 +2,9 @@ package com.rfm.edubot.dashboard
 
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
+import com.rfm.edubot.crm.model.Employee
 import com.rfm.edubot.dashboard.model.DashboardUser
+import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
@@ -115,5 +117,65 @@ class DashboardAccessTest {
         coEvery { tenants.findById(any()) } returns null
         assertNull(resolveDashboardContext(token("tenant", "not-an-object-id"), tenants, users))
         assertNull(resolveDashboardContext(token("tenant", ObjectId().toHexString(), ObjectId().toHexString()), tenants, users))
+    }
+
+    private fun employee(company: Tenant, archivedAt: kotlinx.datetime.Instant? = null) = Employee(
+        tenantId = company.id, number = "COL-001", name = "Ana Costa", phone = "+351910200001",
+        createdAt = now, updatedAt = now, archivedAt = archivedAt,
+    )
+
+    private fun employeeLogin(first: Tenant, company: Tenant, record: Employee) = DashboardUser(
+        tenantId = first.id, email = "ana@acme.test", passwordHash = "hash", role = DashboardUserRole.TENANT_EMPLOYEE,
+        createdAt = now, employeeId = record.id, employeeTenantId = company.id,
+    )
+
+    @Test
+    fun `an employee's sign-in opens only the company of their record, while it has employees and services`() {
+        val first = tenant()
+        val second = tenant().copy(parentTenantId = first.id)
+        val login = employeeLogin(first, second, employee(second))
+        assertTrue(DashboardAccessPolicy.allows(second, login, DashboardAccessPolicy.TENANT_USER))
+        assertFalse(DashboardAccessPolicy.allows(first, login, DashboardAccessPolicy.TENANT_USER), "the tenant's other companies stay closed")
+        assertFalse(DashboardAccessPolicy.allows(second.copy(enabledModules = listOf(DashboardModules.EMPLOYEES)), login, DashboardAccessPolicy.TENANT_USER))
+        assertTrue(DashboardAccessPolicy.allows(second.copy(enabledModules = listOf(DashboardModules.EMPLOYEES, DashboardModules.CLIENTS)), login, DashboardAccessPolicy.TENANT_USER))
+        assertFalse(DashboardAccessPolicy.allows(second, login.copy(employeeId = null), DashboardAccessPolicy.TENANT_USER))
+    }
+
+    @Test
+    fun `an employee's token needs their record, and archiving it ends the session`() = runBlocking {
+        val company = tenant()
+        val record = employee(company)
+        val login = employeeLogin(company, company, record)
+        coEvery { tenants.findById(company.id) } returns company
+        coEvery { users.findById(login.id) } returns login
+        val payload = token("tenant", company.id.toHexString(), login.id.toHexString())
+
+        val context = resolveDashboardContext(payload, tenants, users) { tenantId, id -> record.takeIf { tenantId == company.id && id == record.id } }
+        assertEquals(record, context?.employee)
+        assertFalse(context!!.requireModule(DashboardModules.SERVICES), "an employee has none of the company's modules")
+        assertFalse(context.requireModule(DashboardModules.EMPLOYEES))
+
+        assertNull(resolveDashboardContext(payload, tenants, users) { _, _ -> record.copy(archivedAt = now) })
+        assertNull(resolveDashboardContext(payload, tenants, users) { _, _ -> null })
+        assertNull(resolveDashboardContext(payload, tenants, users), "refused where no lookup is passed")
+    }
+
+    @Test
+    fun `team members keep the company's modules`() {
+        val t = tenant()
+        assertTrue(DashboardContext(t, user(t), DashboardAccessPolicy.TENANT_USER).requireModule(DashboardModules.SERVICES))
+        assertTrue(DashboardContext(t, null, DashboardAccessPolicy.OPERATOR_IMPERSONATION).requireModule(DashboardModules.SERVICES))
+    }
+
+    @Test
+    fun `an employee's session only reaches its own pages`() {
+        listOf("/app/api/me", "/app/api/account", "/app/api/account/password", "/app/api/portal/services", "/app/api/portal/services/abc")
+            .forEach { assertTrue(EmployeePortal.allowsPath(it), it) }
+        listOf(
+            "/app/api/overview", "/app/api/crm/clients", "/app/api/crm/service-submissions", "/app/api/notifications",
+            "/app/api/companies/x/switch", "/app/api/instagram/connect", "/app/api/whatsapp/connect", "/app/api/email/send",
+            "/app/api/accounting", "/app/api/portal", "/app/api/me/x",
+            "/app/api/portal/../overview", "/app/api/account/../crm/clients", "/app/api/portal/%2E%2E/overview", "/app/api/portal/./x",
+        ).forEach { assertFalse(EmployeePortal.allowsPath(it), it) }
     }
 }

@@ -213,6 +213,9 @@ sequenceDiagram
     S-->>B: dashboard JWT (typ tenant)
 ```
 
+An employee's own sign-in (role `TENANT_EMPLOYEE`, see [Employee sign-in and registered services](#employee-sign-in-and-registered-services))
+uses the same password and Google sign-in, but opens the company of its employee record instead of the first company.
+
 Each user manages their own sign-in from the account drawer (`/app/api/account`, tenant users only;
 an operator opening the dashboard gets `403 no_user_account`). Linking, unlinking and changing the
 password need the current password. Turning the password off (`password/disable`) or setting one
@@ -281,7 +284,8 @@ then summarize the lines (a single line's values, or 1 × the sum of several), s
 lines still add up, and a `PATCH` without `items` keeps the stored lines and ignores those three fields.
 Rows without lines (older rows, bookings) are one line made of `name` and those fields. The API always
 returns `items` (an older row as its one line). The form names an unnamed service after its lines
-("Corte + Massagem").
+("Corte + Massagem"). A row approved from an employee's registered service carries `employeeId`, the
+employee who did the work; its detail shows "Done by" and links to the employee.
 
 ### Catalog
 
@@ -325,11 +329,75 @@ links them.
 
 Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the team (name, phone, role, and an optional profile: `birthDate` as `yyyy-MM-dd`, `address`, `taxId`). `PATCH` keeps the profile fields when omitted and clears them on an empty string; a birth date in the future or before 1900 answers `400 invalid_birth_date`. No bot tool reads employees. It is not turned on with `payments`. A payment attaches to exactly one payee: `supplierId` or `employeeId`. Paying an employee requires the `employees` module. Surfaces: `/app/api/crm/employees`, `POST /app/api/crm/payments` with `employeeId`, and a Home snapshot.
 
+### Employee sign-in and registered services
+
+With the `employees` and `services` modules on, an employee can sign in to `/app` to register the work
+they did, and the team approves it into an ordinary Serviços row (`dashboard/EmployeeWorkRoutes.kt`).
+
+- **Sign-in.** Admins (and operators opening the dashboard) give an employee a sign-in from the
+  employee's record: `POST`/`PATCH`/`DELETE /app/api/crm/employees/{id}/access` (email and password;
+  `PATCH` also changes the email or turns it off with `active`). It is a `dashboard_users` row with the
+  `TENANT_EMPLOYEE` role, `employeeId` (partial unique index: one sign-in per employee) and
+  `employeeTenantId` (the record's company); `tenantId` stays the first company, as for every user.
+  Members see it read-only. The backoffice's user endpoint refuses that role (`400 invalid_role`), since
+  the sign-in belongs to an employee record. Deleting the employee deletes the sign-in.
+- **Locked to its own pages.** `DashboardAccessPolicy` lets an employee's token open only
+  `employeeTenantId`, and only while that company has `employees` and `services`; the `dashboard`
+  validator also needs the employee record, not archived. Turning the sign-in off, archiving or
+  deleting the employee, or turning a module off ends the session on the next request, and sign-in
+  refuses it (`403`). `requireModule` is always false for an employee, so every module route answers
+  `403`, and the validator refuses the token (`401`) on any path but `/app/api/me`, `/app/api/account…`
+  and `/app/api/portal/…`. That last check also covers the routes that check no module (channel
+  connects, email, notifications, company switch). `/me` answers `modules: ["my-services"]` and the
+  `employee` (id, number, name). Agents don't offer employees' sign-ins as task assignees.
+- **Registering.** `/app/api/portal/clients` lists the active clients (id, number, name only),
+  `/catalog` the catalog (or only the bookable services when the catalog module is off), and
+  `/services` the employee's own submissions in `crm.service_submissions` (client, `performedAt`,
+  lines, optional name and notes; an unnamed one is named after its lines). `POST` registers one (not
+  dated after today in the company's timezone, `400 date_in_future`) and notifies the team
+  (`service_submitted`, audience all, `ref` `submission:ID`); `PATCH` and `DELETE` change or withdraw
+  it while it is `PENDING`, else `409 not_pending`.
+- **Approving.** The team (admins and members, with both modules) reads
+  `/app/api/crm/service-submissions?employeeId=&status=`. `POST …/{id}/approve` takes optional
+  `changes` (the same body, without the date limit). It first claims the submission (`PENDING` →
+  `APPROVED` with a new `serviceId`, `reviewedBy`, `reviewedAt` and the approved content; `adjusted` when
+  the content changed), so two approvals at once save one service (`409 not_pending`), then saves the
+  Serviços row with that id and `employeeId`; if that fails, the claim is undone. `POST …/{id}/reject`
+  takes an optional `reason` (500 characters) the employee reads. An employee with submissions or
+  services done is archived instead of deleted.
+- **Where the team sees it.** The employee record (to approve, needs attention, sign-in, registered
+  services), the Employees list and nav count, Home's Needs you (the five waiting longest, kind
+  `service_submission`, counted in the health line; `employees.pendingSubmissions` on the overview)
+  and the bell.
+
+```mermaid
+sequenceDiagram
+    participant E as Employee (/app)
+    participant T as Team member (/app)
+    participant S as Ktor
+    participant M as MongoDB
+    T->>S: POST /app/api/crm/employees/{id}/access {email, password} (admin)
+    S->>M: dashboard_users (TENANT_EMPLOYEE, employeeId, employeeTenantId)
+    E->>S: POST /app/auth/login
+    S->>M: user, employee's company, employee record (not archived)
+    S-->>E: dashboard JWT for the employee's company
+    E->>S: POST /app/api/portal/services {clientId, performedAt, items}
+    Note over S: validator: employee record + /me, /account, /portal paths only
+    S->>M: crm.service_submissions (PENDING)
+    S->>M: notifications (service_submitted, all)
+    T->>S: POST /app/api/crm/service-submissions/{id}/approve {changes?}
+    S->>M: claim PENDING → APPROVED with serviceId
+    S->>M: crm.client_services (OPEN, employeeId), domain event service.created
+    S-->>T: submission + service
+    E->>S: GET /app/api/portal/services
+    S-->>E: APPROVED (or REJECTED with the reason)
+```
+
 ### Removing clients, suppliers and employees
 
 `DELETE /app/api/crm/{clients|suppliers|employees}/{id}` deletes the record only when no document
 refers to it: quotes, invoices, Serviços rows, bookings or linked payments for a client, payments
-for a supplier or employee. Otherwise it answers `409 in_use` and the record can only be archived
+for a supplier, payments, registered services or Serviços rows done for an employee. Otherwise it answers `409 in_use` and the record can only be archived
 (`POST …/{id}/archive`, undone by `POST …/{id}/restore`), so those documents keep their name and
 their PDFs keep generating (`crm/DirectoryRecords.kt`).
 
@@ -475,10 +543,11 @@ sequenceDiagram
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
-| `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking | `tenantId+clientId+status`; partial `tenantId+bookingId` |
+| `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
+| `crm.service_submissions` | Services employees registered from their own sign-in: client, day, lines, status (PENDING/APPROVED/REJECTED), the approved Serviços row (`serviceId`) or the rejection reason | `tenantId+employeeId+createdAt`; `tenantId+status+createdAt` |
 | `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
 | `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` | unique `(tenantId, phone)` and `(tenantId, number)` |
-| `crm.employees` | Team directory (colaboradores) for a later payments payee | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |

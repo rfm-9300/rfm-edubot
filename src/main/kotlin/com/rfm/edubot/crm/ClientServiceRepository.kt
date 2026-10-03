@@ -50,7 +50,10 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             .map { it.toClientService() }
     }
 
-    /** With [items], the row totals their sum and [quantity], [unit] and [unitPriceCents] are ignored. */
+    /**
+     * With [items], the row totals their sum and [quantity], [unit] and [unitPriceCents] are ignored.
+     * [id] lets an approval decide the row's id before it exists, so the submission can point at it.
+     */
     suspend fun create(
         clientId: ObjectId,
         name: String,
@@ -63,11 +66,14 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         performedAt: LocalDate?,
         bookingId: ObjectId? = null,
         items: List<LineItem> = emptyList(),
+        employeeId: ObjectId? = null,
+        id: ObjectId = ObjectId(),
     ): ClientService {
         val now = SystemClock.now()
         val qty = quantity.takeIf { it > 0 } ?: 1.0
         val summary = if (items.isEmpty()) ServiceSummary(qty, unit.trim(), unitPriceCents, clientServiceTotals(qty, unitPriceCents)) else summarize(items)
         val service = ClientService(
+            id = id,
             tenantId = tenantId,
             clientId = clientId,
             name = name.trim(),
@@ -83,6 +89,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             performedAt = performedAt,
             createdAt = now,
             updatedAt = now,
+            employeeId = employeeId,
         )
         collection.insertOne(service.toDocument())
         events.append(tenantId, DomainEventTypes.SERVICE_CREATED, SubjectRef.of(SubjectTypes.SERVICE, service.id), EventPayloads.service(service), service.relatedRefs())
@@ -93,6 +100,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         SubjectRef.of(SubjectTypes.CLIENT, clientId),
         bookingId?.let { SubjectRef.of(SubjectTypes.BOOKING, it) },
         invoiceId?.let { SubjectRef.of(SubjectTypes.INVOICE, it) },
+        employeeId?.let { SubjectRef.of(SubjectTypes.EMPLOYEE, it) },
     )
 
     /**
@@ -191,6 +199,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         performedAt = getString("performedAt")?.takeIf { it.isNotBlank() }?.let { LocalDate.parse(it) },
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
+        employeeId = get("employeeId", ObjectId::class.java),
     )
 
     private fun ClientService.toDocument() = Document("_id", id)
@@ -211,6 +220,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         .append("performedAt", performedAt?.toString())
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+        .apply { employeeId?.let { append("employeeId", it) } }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }

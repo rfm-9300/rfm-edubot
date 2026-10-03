@@ -155,16 +155,18 @@ internal fun Route.dashboardRoutes(
             get("/me") {
                 val ctx = call.dashboardContext() ?: return@get
                 val companies = tenantRepository.findCompanies(ctx.tenant.primaryTenantId)
+                val employee = ctx.employee
                 call.respond(
                     MeDto(
-                        tenant = ctx.tenant.dto(),
+                        tenant = ctx.tenant.dto().let { if (employee != null) it.copy(channels = emptyList()) else it },
                         user = ctx.user?.dto(),
-                        modules = DashboardModules.effectiveFor(ctx.tenant),
+                        modules = if (employee != null) listOf(EmployeePortal.MODULE) else DashboardModules.effectiveFor(ctx.tenant),
                         principalType = ctx.principalType,
                         companies = companies
                             .filter { DashboardAccessPolicy.allows(it, ctx.user, ctx.principalType) }
                             .map { CompanyMeDto(it.id.toHexString(), it.name, it.slug, primary = it.parentTenantId == null) },
-                        companyLimit = companies.companyLimit(ctx.tenant),
+                        companyLimit = if (employee != null) 1 else companies.companyLimit(ctx.tenant),
+                        employee = employee?.let { EmployeeMeDto(it.id.toHexString(), it.number, it.name) },
                     ),
                 )
             }
@@ -579,7 +581,7 @@ internal fun Route.dashboardRoutes(
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
             dashboardAssistantRoutes(mongo, aiClient, assistantExtension)
-            crmRoutes(mongo, runtimeConfig)
+            crmRoutes(mongo, runtimeConfig, dashboardUsers)
             installBookingRoutes {
                 val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
                     ?: run {
@@ -620,12 +622,15 @@ fun Route.dashboardImpersonationRoute(
                 call.respond(HttpStatusCode.BadRequest, mapOf("error" to "email and password are required"))
                 return@post
             }
+            // An employee's sign-in belongs to their employee record, so it is only given from that record in /app.
+            val role = DashboardUserRole.entries.firstOrNull { it.name == request.role && it != DashboardUserRole.TENANT_EMPLOYEE }
+                ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_role"))
             val now = SystemClock.now()
             val user = DashboardUser(
                 tenantId = tenant.primaryTenantId,
                 email = request.email.trim().lowercase(),
                 passwordHash = BCrypt.withDefaults().hashToString(12, request.password.toCharArray()),
-                role = DashboardUserRole.valueOf(request.role),
+                role = role,
                 createdAt = now,
             )
             call.respond(HttpStatusCode.Created, dashboardUsers.create(user).dto())
@@ -654,7 +659,7 @@ fun Route.dashboardImpersonationRoute(
     }
 }
 
-private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
+private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, dashboardUsers: DashboardUserRepository) {
     fun tenantDeps(ctx: DashboardContext): CrmDeps = CrmDeps(
         clients = ClientRepository(mongo, ctx.tenant.id),
         quotes = QuoteRepository(mongo, ctx.tenant.id),
@@ -989,7 +994,10 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig) {
             } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(employee.dto())
         }
-        removableDirectory("employees", DashboardModules.EMPLOYEES, { tenantDeps(it) }, { employees.delete(it) }) { id, archived ->
+        // A deleted employee's sign-in goes too; an archived one's stays, refused until the record is restored.
+        removableDirectory("employees", DashboardModules.EMPLOYEES, { tenantDeps(it) }, { id ->
+            employees.delete(id).also { if (it == DirectoryDelete.DELETED) dashboardUsers.deleteByEmployee(id) }
+        }) { id, archived ->
             employees.setArchived(id, archived)?.let { ArchiveStateDto(it.archivedAt?.toString()) }
         }
         get("/payments") {
@@ -1302,7 +1310,7 @@ private fun logoExtension(filename: String): String? = when (filename.substringA
 internal fun dashboardToken(config: AppConfig.AdminConfig, user: DashboardUser, typ: String, expiryHours: Int): String = JWT.create()
     .withIssuer(config.jwtIssuer)
     .withSubject(user.id.toHexString())
-    .withClaim("tenantId", user.tenantId.toHexString())
+    .withClaim("tenantId", user.homeTenantId.toHexString())
     .withClaim("role", user.role.name)
     .withClaim("typ", typ)
     .withExpiresAt(Date(System.currentTimeMillis() + expiryHours * 60L * 60L * 1000L))
@@ -1381,7 +1389,10 @@ private suspend fun runPersonaTest(
     /** The tenant's companies this session can switch to, the current one included. */
     val companies: List<CompanyMeDto>,
     val companyLimit: Int,
+    /** Set for an employee's sign-in, whose only page is [EmployeePortal.MODULE]. */
+    val employee: EmployeeMeDto? = null,
 )
+@Serializable private data class EmployeeMeDto(val id: String, val number: String, val name: String)
 @Serializable private data class CompanyMeDto(val id: String, val name: String, val slug: String, val primary: Boolean)
 @Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
 @Serializable private data class ChannelMeDto(

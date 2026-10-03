@@ -8,6 +8,9 @@ let state = {
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterSupplierType: '',
+  // pendingSubmissions: services employees registered that wait for the team (Employees page, nav count).
+  // portal: an employee's own session — their submissions and what they pick from.
+  pendingSubmissions: [], portal: { submissions: [], clients: [], catalog: [] }, filterSubmissionStatus: '',
   bookings: [], bookingUpcoming: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: '', bookingStatusFilter: '',
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -22,7 +25,7 @@ let state = {
   whatsAppSignup: { enabled: false },
   // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
   integrations: null, email: null,
-  fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false },
+  fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false },
 };
 let personaChatBusy = false;
 let assistantBusy = false;
@@ -34,6 +37,13 @@ const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const GOOGLE = I18N.section('app.integrations.google');
+// An employee's own sign-in (EmployeePortal on the server) has a single page: the services they register.
+const PORTAL_TAB = 'my-services';
+const PORTAL = I18N.section('app.portal');
+const SUB = I18N.section('admin.submissions');
+const isPortal = () => !!state.me?.employee;
+// Registered services become Serviços rows, so the team reviews them with both modules on.
+const submissionsOn = () => hasModule('employees') && hasModule('services');
 const googleText = (key, params) => I18N.t(`app.integrations.google.${key}`, params);
 // Server error keys the catalog doesn't know read as the fallback.
 const googleTextOr = (key, fallback) => {
@@ -557,7 +567,7 @@ function openAccountPassword() {
 // parts (kind + params); the text is written here in the reader's language.
 const NOTIFY = I18N.section('app.notifications');
 const NOTIFICATIONS_POLL_MS = 60000;
-const NOTIFICATION_TONES = { agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad' };
+const NOTIFICATION_TONES = { agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad', service_submitted: 'warn' };
 let notifications = { items: [], unread: 0 };
 let notificationsAt = 0;
 let notificationsTimer = null;
@@ -626,6 +636,7 @@ function notificationText(n) {
       const name = I18N.t(key) === key ? p.integration || '' : I18N.t(key);
       return { title: I18N.t('app.notifications.kinds.integration_reconnect', { name }), detail: line(p.account, NOTIFY.reconnectDetail) };
     }
+    case 'service_submitted': return { title: kind('service_submitted'), detail: line(p.service, p.client) };
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
 }
@@ -712,6 +723,10 @@ async function markAllNotificationsRead(btn) {
 function openNotification(n) {
   markNotificationRead(n);
   const back = { key: 'notifications', label: NOTIFY.title, open: () => openNotifications() };
+  if (n.ref?.startsWith('submission:')) {
+    if (submissionsOn()) openFrom(back, () => openSubmissionDetail(n.ref.slice('submission:'.length)));
+    return;
+  }
   if (n.ref && hasModule('agents') && window.AgentsUI) {
     if (n.ref !== 'inbox') return window.AgentsUI.openRef(n.ref, back);
     closeDrawer({ dismissed: true });
@@ -848,10 +863,14 @@ async function bootAuthed() {
   const accountBtn = $('#btn-account');
   accountBtn.hidden = !(state.me.user && state.me.principalType === 'tenant');
   accountBtn.textContent = accountInitials(state.me.user?.email);
-  startNotifications();
+  // An employee's session reaches only its own pages: no bell, no Home figures.
+  if (!isPortal()) startNotifications();
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
+  // The address may still name the previous session's page, or one this session can't open.
+  const hashTab = (location.hash || '').replace('#', '');
+  if (hashTab && hashTab !== state.active) history.replaceState(null, '', `#${state.active}`);
   renderNav();
-  if (state.active !== 'overview') {
+  if (state.active !== 'overview' && !isPortal()) {
     state.overview = await api('/app/api/overview').catch(() => state.overview);
   }
   await loadModule(state.active);
@@ -875,6 +894,9 @@ function renderNav() {
   const overduePay = state.fetched.payments
     ? state.payments.filter(p => p.status === 'OVERDUE').length
     : (o.payments?.overdueCount || 0);
+  const toApprove = state.fetched.submissions
+    ? state.pendingSubmissions.length
+    : (o.employees?.pendingSubmissions || 0);
   const counts = {
     contacts: state.contacts.length || o.inbox?.contacts || 0,
     conversations: waiting || state.conversations.length || o.inbox?.conversations || 0,
@@ -884,16 +906,17 @@ function renderNav() {
     catalog: state.catalog.length || o.catalog?.items || 0,
     services: (state.clientServices.filter(s => s.status === 'OPEN').length) || o.services?.openCount || 0,
     suppliers: state.suppliers.length || o.suppliers?.total || 0,
-    employees: state.employees.length || o.employees?.total || 0,
+    employees: toApprove || state.employees.length || o.employees?.total || 0,
     payments: overduePay || state.payments.length || o.payments?.paymentCount || 0,
     bookings: pendingBookings || (state.fetched.bookings ? weekBookings().filter(b => b.status !== 'CANCELLED').length : o.calendar?.thisWeek) || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
+    [PORTAL_TAB]: state.portal.submissions.filter(s => s.status === 'PENDING').length,
   };
   const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
   if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
-  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
+  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, employees: toApprove > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
   const groups = [
-    { id: 'home', items: ['overview'] },
+    { id: 'home', items: ['overview', PORTAL_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
@@ -917,6 +940,7 @@ function renderNav() {
 }
 
 async function setActive(tab) {
+  if (isPortal()) tab = PORTAL_TAB;
   if (tab !== 'conversations') stopInboxPolling();
   state.active = tab;
   location.hash = tab;
@@ -937,6 +961,7 @@ async function setActive(tab) {
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
   state.filterSupplierType = '';
+  state.filterSubmissionStatus = '';
   state.archivedView = '';
   try {
     await loadModule(tab);
@@ -959,7 +984,23 @@ async function loadModule(tab) {
   }
   if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
   if (tab === 'suppliers') state.suppliers = await api('/app/api/crm/suppliers');
-  if (tab === 'employees') state.employees = await api('/app/api/crm/employees');
+  if (tab === 'employees') {
+    const [employees, pending] = await Promise.all([
+      api('/app/api/crm/employees'),
+      submissionsOn() ? api('/app/api/crm/service-submissions?status=PENDING').catch(() => null) : Promise.resolve([]),
+    ]);
+    state.employees = employees;
+    if (pending) state.pendingSubmissions = pending;
+    state.fetched.submissions = submissionsOn() && !!pending;
+  }
+  if (tab === PORTAL_TAB) {
+    const [submissions, clients, catalog] = await Promise.all([
+      api('/app/api/portal/services'),
+      api('/app/api/portal/clients'),
+      api('/app/api/portal/catalog').catch(() => state.portal.catalog),
+    ]);
+    state.portal = { submissions, clients, catalog };
+  }
   if (tab === 'payments') {
     const [payments, suppliers, employees] = await Promise.all([
       api('/app/api/crm/payments'),
@@ -1046,12 +1087,12 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings', 'agents'].includes(state.active)
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB].includes(state.active)
     || (state.active === 'agents' && !window.AgentsUI?.canManage());
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
-    agents: I18N.t('app.agents.newAgent'),
+    agents: I18N.t('app.agents.newAgent'), [PORTAL_TAB]: PORTAL.newTitle,
   };
   $('#btn-new .btn__label').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -1072,6 +1113,7 @@ function render() {
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
+  if (state.active === PORTAL_TAB) return renderMyServices(root);
   renderSettings(root);
 }
 
@@ -1199,6 +1241,14 @@ function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, empty
 function updateSidebarKpis() {
   const label1 = $('#kpi-1-label') || $$('.kpi__label')[0];
   const label2 = $('#kpi-2-label') || $$('.kpi__label')[1];
+  if (isPortal()) {
+    const mine = state.portal.submissions;
+    if (label1) label1.textContent = SUB.status.PENDING;
+    if (label2) label2.textContent = PORTAL.statApprovedMonth;
+    $('#kpi-messages').textContent = mine.filter(s => s.status === 'PENDING').length;
+    $('#kpi-users').textContent = approvedThisMonth(mine).length;
+    return;
+  }
   const o = state.overview || {};
   if (o.cash) {
     if (label1) label1.textContent = CRM.kpiReceivable;
@@ -1257,6 +1307,7 @@ function attentionTitle(item) {
     agent_approval: STR.agentApproval,
     agent_failed: STR.agentFailed,
     integration_reconnect: STR.integrationReconnect,
+    service_submission: STR.serviceSubmission,
   };
   return map[item.kind] || item.kind;
 }
@@ -1272,7 +1323,7 @@ function attentionPill(kind) {
     overdue_payment: 'pill--bad', due_soon_payment: 'pill--warn',
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
     assistant_action: 'pill--info', agent_approval: 'pill--warn', agent_task_due: 'pill--info', agent_failed: 'pill--bad',
-    integration_reconnect: 'pill--bad',
+    integration_reconnect: 'pill--bad', service_submission: 'pill--warn',
   };
   return map[kind] || '';
 }
@@ -1297,7 +1348,7 @@ function attentionIcon(kind) {
     overdue_payment: '💸', due_soon_payment: '⏰',
     pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
     assistant_action: '✨', agent_approval: '🤖', agent_task_due: '📋', agent_failed: '⚠️',
-    integration_reconnect: '✉️',
+    integration_reconnect: '✉️', service_submission: '🧾',
   };
   return map[kind] || '•';
 }
@@ -1885,7 +1936,7 @@ function renderOverviewMinimal(root) {
       const detail = n.aggregate && n.kind === 'overdue_invoice'
         ? (o.cash?.topOverdue || []).map(t => t.name).filter(Boolean).join(', ')
         : (n.kind === 'assistant_action' ? '' : n.detail || '');
-      const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking'].includes(n.kind);
+      const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking', 'service_submission'].includes(n.kind);
       const agentRef = AGENT_ATTENTION_REFS[n.kind] && n.id ? `${AGENT_ATTENTION_REFS[n.kind]}:${n.id}` : '';
       return worklistRow({
         tone: n.kind === 'agent_task_due' && agentTaskLate(n) ? 'late' : attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
@@ -1924,7 +1975,9 @@ function renderOverviewMinimal(root) {
     o.customers && !hidden.has('customers') && !inKpis.has('clients') ? ['clients', STR.snapCustomers, o.customers.total, plus(o.customers.newThisMonth)] : null,
     o.services && !hidden.has('services') ? ['services', STR.servicesOpen, o.services.openCount, wholeCentsEUR(o.services.openCents)] : null,
     o.suppliers && !hidden.has('suppliers') ? ['suppliers', STR.snapSuppliers, o.suppliers.total, plus(o.suppliers.newThisMonth)] : null,
-    o.employees && !hidden.has('employees') ? ['employees', STR.snapEmployees, o.employees.total, plus(o.employees.newThisMonth)] : null,
+    o.employees && !hidden.has('employees')
+      ? ['employees', STR.snapEmployees, o.employees.total, o.employees.pendingSubmissions ? SUB.toApproveN({ n: o.employees.pendingSubmissions }) : plus(o.employees.newThisMonth)]
+      : null,
     o.catalog && !hidden.has('catalog') ? ['catalog', STR.snapCatalog, o.catalog.items, STR.catalogItems] : null,
     o.social && !hidden.has('social') ? ['instagram', STR.snapSocial, o.social.unreplied, o.social.connected ? STR.hl_instagram_unreplied : STR.notConnected] : null,
     o.assistant && !hidden.has('assistant') ? ['ai-assistant', STR.snapAssistant, o.assistant.pendingActions, STR.assistantPending] : null,
@@ -1977,6 +2030,7 @@ async function dashGo(el) {
   if (go === 'payments') return openPaymentDetail(open);
   if (go === 'clients') return openClientDrawer(open);
   if (go === 'bookings') return openBookingById(open);
+  if (go === 'employees') return openSubmissionDetail(open);
 }
 
 async function dashCreate(module) {
@@ -3294,14 +3348,18 @@ function renderEmployees(root) {
   const archived = state.archivedView === 'employees';
   const source = archived ? state.archivedRows : (state.employees || []);
   const q = state.search.toLowerCase();
+  const toApprove = new Map();
+  for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
+  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
   const rows = source
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
-    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
+    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}${pendingPill(e.id)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
     .join('');
   const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
     { label: t.total, value: (state.employees || []).length },
     { label: t.new30, value: new30 },
+    ...(state.fetched.submissions ? [{ label: SUB.kpiToApprove, value: state.pendingSubmissions.length }] : []),
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
@@ -3548,9 +3606,10 @@ async function openServiceDetail(ref) {
   const known = (typeof ref === 'object' && ref) || (state.clientServices || []).find(s => s.id === id) || null;
   const service = await api(`/app/api/crm/services/${encodeURIComponent(id)}`).catch(() => known);
   if (!service) return toast(STR.loadFailed);
-  const [invoice, booking] = await Promise.all([
+  const [invoice, booking, doneBy] = await Promise.all([
     service.invoiceId && hasModule('invoices') ? api(`/app/api/crm/invoices/${encodeURIComponent(service.invoiceId)}`).catch(() => null) : null,
     service.bookingId && hasModule('bookings') ? api(`/app/api/bookings/${encodeURIComponent(service.bookingId)}`).catch(() => null) : null,
+    service.employeeId && hasModule('employees') ? api(`/app/api/crm/employees/${encodeURIComponent(service.employeeId)}`).catch(() => null) : null,
   ]);
   const here = serviceTrailEntry(service);
   const isOpen = service.status === 'OPEN';
@@ -3567,6 +3626,7 @@ async function openServiceDetail(ref) {
       lines.length > 1 ? null : { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
       booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
       invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
+      doneBy ? { label: SUB.doneBy, value: doneBy.name } : null,
       { label: STR.detailCreated, value: fmtDay(service.createdAt) },
     ])}
     ${showLines ? itemsTable(lines) : ''}
@@ -3578,6 +3638,7 @@ async function openServiceDetail(ref) {
       ${service.status === 'CANCELLED' && !service.bookingId ? `<button class="btn btn--sm" type="button" data-svc-reopen>${escapeHTML(t.reopen)}</button>` : ''}
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
       ${booking && !linksBackTo(`booking:${booking.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-booking>${escapeHTML(t.openBooking)}</button>` : ''}
+      ${doneBy && !linksBackTo(`employee:${doneBy.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-employee>${escapeHTML(SUB.openEmployee({ name: doneBy.name }))}</button>` : ''}
       ${isOpen ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-cancel>${escapeHTML(t.cancel)}</button>` : ''}
       ${service.status !== 'INVOICED' ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-delete>${escapeHTML(t.delete)}</button>` : ''}
     </div>`;
@@ -3589,6 +3650,7 @@ async function openServiceDetail(ref) {
   }));
   $('[data-svc-open-invoice]', body)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
   $('[data-svc-open-booking]', body)?.addEventListener('click', () => openFrom(here, () => openBookingDetail(booking)));
+  $('[data-svc-open-employee]', body)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer('employee', doneBy)));
   $('[data-svc-cancel]', body)?.addEventListener('click', () => cancelClientService(service));
   $('[data-svc-delete]', body)?.addEventListener('click', () => deleteClientService(service));
   $('[data-svc-reopen]', body)?.addEventListener('click', async e => {
@@ -4459,13 +4521,16 @@ async function openPayeeDrawer(kind, ref) {
   const eyebrow = p => [cfg.eyebrow(), p?.number].filter(Boolean).join(' · ');
   const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
   const q = encodeURIComponent(id);
-  const [payee, payments] = await Promise.all([
+  const work = kind === 'employee' && submissionsOn();
+  const [payee, payments, submissions, access] = await Promise.all([
     api(`/app/api/crm/${cfg.path}/${q}`).catch(() => known),
     hasModule('payments') ? api(`/app/api/crm/payments?${cfg.filter}=${q}`).catch(() => []) : Promise.resolve([]),
+    work ? api(`/app/api/crm/service-submissions?employeeId=${q}`).catch(() => []) : Promise.resolve([]),
+    work ? api(`/app/api/crm/employees/${q}/access`).catch(() => null) : Promise.resolve(null),
   ]);
   if (gen !== drawerGen) return;
   if (!payee) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
-  payeeRecord = { kind, payee, payments: payments || [], el: body };
+  payeeRecord = { kind, payee, payments: payments || [], submissions: submissions || [], access, el: body };
   $('#drawer-title').textContent = payee.name;
   renderDrawerEyebrow(eyebrow(payee));
   renderPayeeRecord();
@@ -4495,12 +4560,22 @@ function renderPayeeRecord() {
     p.birthDate ? `<span class="record-card__line">${escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))}</span>` : '',
     p.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: p.taxId }))}</span>` : '',
   ].filter(Boolean).join('');
+  const subs = r.submissions || [];
+  const pendingSubs = subs.filter(s => s.status === 'PENDING');
+  const work = kind === 'employee' && submissionsOn();
   const since = [
     cfg.since(fmtDay(p.createdAt)),
     live.length ? STR.payeePayments({ n: live.length }) : '',
+    subs.length ? SUB.registeredN({ n: subs.length }) : '',
     lastPaid ? STR.payeeLastPaid({ when: relTime(lastPaid) }) : '',
   ].filter(Boolean).join(' · ');
-  const cells = !hasModule('payments') ? [] : [
+  const workCells = !work ? [] : [{
+    label: SUB.kpiToApprove,
+    value: String(pendingSubs.length),
+    sub: pendingSubs.length ? fmtEUR(sumBy(pendingSubs, 'totalEur')) : SUB.kpiNothingToApprove,
+    tone: pendingSubs.length ? 'warn' : '',
+  }];
+  const cells = [...workCells, ...(!hasModule('payments') ? [] : [
     {
       label: STR.payeeKpiToPay,
       value: fmtEUR(sumBy(unpaid, 'totalEur')),
@@ -4514,11 +4589,15 @@ function renderPayeeRecord() {
       sub: next ? `${fmtEUR(next.totalEur)} · ${next.number}` : STR.payeeKpiNoneDue,
     },
     { label: STR.payeeKpiPaid, value: fmtEUR(sumBy(paid, 'totalEur')), sub: STR.payeePayments({ n: paid.length }) },
-  ];
+  ])];
   const soon = addDayKey(today, 7);
   const attention = [
     ...overdue.map(x => ({
       tone: 'bad', title: STR.payeeAttnOverdue({ number: x.number }), detail: dueWhenText(x.dueDate, true), amount: x.totalEur, open: `payment:${x.id}`,
+    })),
+    ...pendingSubs.map(s => ({
+      tone: 'warn', title: SUB.attnPending({ name: s.name }), detail: [s.clientName, fmtDay(s.performedAt)].filter(Boolean).join(' · '),
+      amount: s.totalEur, open: `submission:${s.id}`,
     })),
     ...unpaid.filter(x => !isPastDue(x, today) && x.dueDate.slice(0, 10) <= soon).map(x => ({
       tone: 'warn', title: STR.clientAttnDueSoon({ number: x.number }), detail: dueWhenText(x.dueDate, false), amount: x.totalEur, open: `payment:${x.id}`,
@@ -4539,23 +4618,26 @@ function renderPayeeRecord() {
     ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
     ${recordKpisHtml(cells)}
     ${recordAttentionHtml(attention)}
+    ${work ? employeeAccessHtml(p, r.access) : ''}
+    ${work ? employeeWorkHtml(subs, r.access) : ''}
     ${payments}
     ${hasModule('payments') && !p.archivedAt ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
   const here = () => payeeTrailEntry(kind, p);
   $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
   const setArchivedAt = archivedAt => { r.payee = { ...p, archivedAt }; renderPayeeRecord(); refreshDirectory(cfg.path); };
   $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord(cfg.path, p, {
-    inUse: r.payments.length > 0,
-    archiveBody: STR.payeeArchiveBody,
+    inUse: r.payments.length > 0 || subs.length > 0,
+    archiveBody: subs.length ? SUB.employeeArchiveBody : STR.payeeArchiveBody,
     onDeleted: () => { closeDrawer({ dismissed: true }); refreshDirectory(cfg.path); },
     onArchived: setArchivedAt,
   }));
   $('[data-record-restore]', body)?.addEventListener('click', () => restoreDirectoryRecord(cfg.path, p, () => setArchivedAt(null)));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => {
-    const id = el.dataset.recordOpen.split(':')[1];
-    openFrom(here(), () => openPaymentDetail(id));
+    const [type, id] = el.dataset.recordOpen.split(':');
+    openFrom(here(), () => (type === 'submission' ? openSubmissionDetail(id) : openPaymentDetail(id)));
   }));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => cfg.pay(p))));
+  $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
 }
 
 async function openSupplierForm(supplier) {
@@ -4658,6 +4740,347 @@ async function openEmployeeForm(employee) {
     }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
+}
+
+// ── Registered services: employees sign in, register the work they did, the team approves it ──────
+// An approved submission becomes an ordinary Serviços row "done by" the employee; a rejected one keeps
+// its reason for the employee to read. Both sides open the same detail, with their own actions.
+const submissionTone = status => ({ PENDING: 'warn', APPROVED: 'ok', REJECTED: 'bad' }[status] || '');
+function submissionPill(status) {
+  const tone = submissionTone(status);
+  return `<span class="pill ${tone ? `pill--${tone}` : ''}">${escapeHTML((SUB.status || {})[status] || status)}</span>`;
+}
+const SUBMISSION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'];
+const submissionTrailEntry = s => ({ key: `submission:${s.id}`, label: s.name, open: () => openSubmissionDetail(s.id) });
+const approvedThisMonth = list => list.filter(s => s.status === 'APPROVED' && periodKey(s.performedAt, 'month') === currentPeriodKey('month'));
+// The i18n proxy answers a missing key with its own path, so check for that before trusting it.
+const catalogTextOr = (section, prefix, key, fallback) => (key && section[key] !== `${prefix}.${key}` ? section[key] : fallback);
+const submissionErrorText = err => catalogTextOr(SUB, 'admin.submissions', err?.code ? `err_${err.code}` : '', SUB.saveFailed);
+const accessErrorText = err => catalogTextOr(SUB, 'admin.submissions', err?.code ? `accessErr_${err.code}` : '', SUB.accessFailed);
+
+// Approving or rejecting changes the counts on Home, the Employees list and the nav, and adds a Serviços row.
+async function afterSubmissionDecision() {
+  const pending = await api('/app/api/crm/service-submissions?status=PENDING').catch(() => null);
+  if (pending) {
+    state.pendingSubmissions = pending;
+    state.fetched.submissions = true;
+  }
+  if (['overview', 'services'].includes(state.active)) await loadModule(state.active).catch(() => {});
+  render();
+}
+
+function employeeAccessHtml(p, access) {
+  if (!access) return '';
+  const has = !!access.email;
+  const on = has && access.active && !p.archivedAt;
+  const detail = !has ? SUB.accessNoneDetail({ name: p.name })
+    : p.archivedAt ? SUB.accessArchived
+    : !access.active ? SUB.accessOffDetail
+    : access.lastLoginAt ? SUB.accessLastSignIn({ when: relTime(access.lastLoginAt) }) : SUB.accessNeverSignedIn;
+  const pill = has ? `<span class="worklist__meta"><span class="pill ${on ? 'pill--ok' : 'pill--warn'}">${escapeHTML(on ? SUB.accessOn : SUB.accessOff)}</span></span>` : '';
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(SUB.accessTitle)}</h2></header>
+      <ul class="worklist"><li><button class="worklist__item" type="button" data-employee-access data-tone="${on ? 'ok' : has ? 'warn' : 'neutral'}"${access.canManage ? '' : ' disabled'}>
+        <span class="worklist__dot" aria-hidden="true"></span>
+        <span class="worklist__main"><span class="worklist__title">${escapeHTML(has ? access.email : SUB.accessNone)}</span><span class="worklist__detail">${escapeHTML(detail)}</span></span>
+        <span class="worklist__side">${pill}</span>
+      </button></li></ul>
+    </section>
+    ${access.canManage ? '' : `<p class="hint">${escapeHTML(SUB.accessAdminOnly)}</p>`}`;
+}
+
+function employeeWorkHtml(subs, access) {
+  if (!subs.length) return access?.email ? recordEmpty(SUB.noneYet, null, '') : '';
+  const marker = { APPROVED: ' is-paid', REJECTED: ' is-draft' };
+  const rows = subs.map(s => `<tr class="conversation-row${marker[s.status] || ''}" data-record-open="submission:${escapeHTML(s.id)}">
+      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td><td class="name">${escapeHTML(s.clientName)}</td><td>${escapeHTML(s.name)}</td>
+      <td>${submissionPill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
+  return recordTable([[SUB.thWhen], [SUB.thClient], [SUB.thService], [SUB.thStatus], [SUB.thTotal, 'right']], rows, { title: SUB.registeredTitle, count: subs.length });
+}
+
+// A random password to hand over: no look-alike characters, 12 of them.
+function suggestPassword() {
+  const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  return [...crypto.getRandomValues(new Uint32Array(12))].map(n => chars[n % chars.length]).join('');
+}
+
+// Admins give an employee their own sign-in from the employee's record, and change or remove it here.
+function openEmployeeAccessForm(employee, access) {
+  const has = !!access?.email;
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(has ? SUB.accessEditIntro : SUB.accessGiveIntro({ name: employee.name }))}</p>
+    <div class="form__row form__row--full"><label class="lbl" for="ea-email">${escapeHTML(SUB.accessEmail)} <span class="req">●</span></label>
+      <input class="inp" id="ea-email" type="email" autocomplete="off" maxlength="254" required value="${escapeHTML(access?.email || '')}" /></div>
+    <div class="form__row form__row--full"><label class="lbl" for="ea-password">${escapeHTML(has ? SUB.accessNewPassword : STR.accountNewPassword)}${has ? ` <span class="opt">${escapeHTML(STR.optional)}</span>` : ' <span class="req">●</span>'}</label>
+      <input class="inp inp--mono" id="ea-password" type="text" autocomplete="off" spellcheck="false" maxlength="72"${has ? '' : ' required'} />
+      <p class="hint">${escapeHTML(has ? SUB.accessNewPasswordHint : SUB.accessPasswordHint)}</p>
+      <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-suggest-password>${escapeHTML(SUB.accessSuggest)}</button></div></div>
+    ${has ? `<div class="form__row form__row--full"><label class="form__check"><input type="checkbox" id="ea-active"${access.active ? ' checked' : ''} /> ${escapeHTML(SUB.accessCanSignIn)}</label></div>` : ''}
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(has ? STR.clientSaveChanges : SUB.accessGive)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+      ${has ? `<button class="btn btn--ghost" type="button" data-access-remove>${escapeHTML(SUB.accessRemove)}</button>` : ''}
+    </div>`;
+  const password = $('#ea-password', form);
+  $('[data-suggest-password]', form).addEventListener('click', () => { password.value = suggestPassword(); password.focus(); password.select(); });
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  const path = `/app/api/crm/employees/${encodeURIComponent(employee.id)}/access`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = $('#ea-email', form).value.trim();
+    const secret = password.value;
+    if (!EMAIL_SHAPE.test(email)) return toast(SUB.accessErr_invalid_email);
+    if ((!has || secret) && secret.length < 8) return toast(SUB.accessErr_password_too_short);
+    const body = has ? { email, active: $('#ea-active', form).checked, ...(secret ? { password: secret } : {}) } : { email, password: secret };
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api(path, { method: has ? 'PATCH' : 'POST', body: JSON.stringify(body) });
+      toast(has ? SUB.accessSaved : SUB.accessGiven({ email }));
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      if (err?.message !== 'unauthorized') toast(accessErrorText(err));
+    }
+  });
+  $('[data-access-remove]', form)?.addEventListener('click', async () => {
+    if (!await confirmDialog({ title: SUB.accessRemoveTitle({ name: employee.name }), body: SUB.accessRemoveBody, okLabel: SUB.accessRemove })) return;
+    try {
+      await api(path, { method: 'DELETE' });
+      toast(SUB.accessRemoved);
+      closeDrawer();
+    } catch (err) { if (err?.message !== 'unauthorized') toast(SUB.accessFailed); }
+  });
+  openDrawer(has ? SUB.accessEditTitle : SUB.accessGiveTitle, form);
+}
+
+// An employee's own page: what they registered and where it stands.
+function renderMyServices(root) {
+  const all = state.portal.submissions || [];
+  const q = state.search.trim().toLowerCase();
+  const filter = state.filterSubmissionStatus || '';
+  const count = status => all.filter(s => s.status === status).length;
+  const rows = all
+    .filter(s => !filter || s.status === filter)
+    .filter(s => !q || `${s.name} ${s.clientName}`.toLowerCase().includes(q))
+    .map(s => `<tr class="conversation-row" data-submission="${escapeHTML(s.id)}">
+        <td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td><td class="name">${escapeHTML(s.clientName)}</td><td>${escapeHTML(s.name)}</td>
+        <td class="num">${fmtEUR(s.totalEur)}</td><td>${submissionPill(s.status)}</td></tr>`).join('');
+  const approved = approvedThisMonth(all);
+  const chips = `<button class="chip ${filter ? '' : 'is-on'}" type="button" data-filter-submission="">${escapeHTML(SUB.filterAll)}</button>`
+    + SUBMISSION_STATUSES.map(s => `<button class="chip ${filter === s ? 'is-on' : ''}" type="button" data-filter-submission="${s}">${escapeHTML(SUB.status[s])}<span class="chip__count">${count(s)}</span></button>`).join('');
+  const filtered = Boolean(filter || q);
+  root.innerHTML = hero(labels[PORTAL_TAB], PORTAL.desc, statCards([
+    { label: SUB.status.PENDING, value: count('PENDING') },
+    { label: SUB.status.REJECTED, value: count('REJECTED') },
+    { label: PORTAL.statApprovedMonth, value: `${approved.length} · ${fmtEUR(sumEur(approved))}` },
+  ])) + crmPanel({
+    title: PORTAL.listTitle,
+    tag: all.length,
+    tools: chips,
+    head: `<tr><th>${escapeHTML(SUB.thWhen)}</th><th>${escapeHTML(SUB.thClient)}</th><th>${escapeHTML(SUB.thService)}</th><th class="right">${escapeHTML(SUB.thTotal)}</th><th>${escapeHTML(SUB.thStatus)}</th></tr>`,
+    rows,
+    empty: filtered ? PORTAL.emptyFiltered : PORTAL.emptyTitle,
+    emptyDesc: filtered ? PORTAL.emptyFilteredDesc : PORTAL.emptyDesc,
+  });
+  $$('[data-filter-submission]', root).forEach(b => b.addEventListener('click', () => { state.filterSubmissionStatus = b.dataset.filterSubmission; render(); }));
+  $$('[data-submission]', root).forEach(r => r.addEventListener('click', () => openSubmissionDetail(r.dataset.submission)));
+}
+
+// One form for an employee registering or changing their work and for the team changing it while approving
+// (`review`). Same shape as the Serviços form: client, day, optional name, lines, notes.
+async function openSubmissionForm(submission = null, { review = false } = {}) {
+  const t = CRM.services;
+  const editing = submission?.id ? submission : null;
+  let clients;
+  let catalog;
+  if (review) {
+    if (!state.clients.length && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
+    if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
+    if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
+    clients = withClient(state.clients, { id: submission.clientId, name: submission.clientName });
+    catalog = serviceCatalog();
+  } else {
+    clients = state.portal.clients;
+    catalog = (state.portal.catalog || []).map(c => (c.type === 'servico' ? { ...c, type: 'service' } : c));
+  }
+  const li = lineItemsField(catalog);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__grid">
+      ${clientSelect(clients, editing?.clientId || '')}
+      <div class="form__row"><label class="lbl" for="sub-when">${escapeHTML(t.when)} <span class="req">●</span></label>
+        <input class="inp" id="sub-when" type="date" required${review ? '' : ` max="${todayKey()}"`} value="${escapeHTML((editing?.performedAt || todayKey()).slice(0, 10))}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="sub-name">${escapeHTML(t.name)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <input class="inp" id="sub-name" maxlength="160" autocomplete="off" placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" />
+        <p class="hint">${escapeHTML(t.nameHint)}</p></div>
+    </div>
+    ${li.html}
+    <div class="form__row form__row--full"><label class="lbl" for="sub-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <textarea class="txt" id="sub-notes" maxlength="4000"${review ? '' : ` placeholder="${escapeHTML(PORTAL.notesPh)}"`}>${escapeHTML(editing?.notes || '')}</textarea></div>
+    <p class="hint">${escapeHTML(review ? SUB.changeHint({ name: submission.employeeName }) : PORTAL.formHint)}</p>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(review ? SUB.saveAndApprove : editing ? STR.clientSaveChanges : PORTAL.submit)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+    </div>`;
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  const nameInput = $('#sub-name', form);
+  li.wire(form, {
+    initial: editing?.items || [],
+    onChange: () => { nameInput.placeholder = serviceNameFrom(li.collect(form)) || t.namePh; },
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const clientId = $('#f-client', form)?.value;
+    if (!clientId) return toast(t.validate);
+    const performedAt = $('#sub-when', form).value;
+    if (!performedAt) return toast(SUB.err_date_required);
+    const items = li.collect(form);
+    if (!items.length) return toast(t.addLine);
+    if (items.some(it => !(it.quantity > 0))) return toast(t.lineQty);
+    const payload = {
+      clientId,
+      performedAt,
+      name: nameInput.value.trim() || serviceNameFrom(items),
+      notes: $('#sub-notes', form).value.trim() || null,
+      items,
+      catalogItemId: $('.line[data-catalog]', form)?.dataset.catalog || null,
+    };
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      if (review) {
+        await api(`/app/api/crm/service-submissions/${encodeURIComponent(submission.id)}/approve`, { method: 'POST', body: JSON.stringify({ changes: payload }) });
+        toast(SUB.approvedToast);
+        afterSubmissionDecision();
+        closeDrawer();
+        return;
+      }
+      if (editing) await api(`/app/api/portal/services/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
+      else await api('/app/api/portal/services', { method: 'POST', body: JSON.stringify(payload) });
+      await loadModule(PORTAL_TAB);
+      render();
+      closeDrawer();
+      toast(editing ? PORTAL.updated : PORTAL.created);
+    } catch (err) {
+      btn.disabled = false;
+      if (err?.message !== 'unauthorized') toast(submissionErrorText(err));
+    }
+  });
+  openDrawer(review ? SUB.changeTitle : editing ? PORTAL.editTitle : PORTAL.newTitle, form, true);
+}
+
+// The employee sees their own submission (change or withdraw it while pending); the team sees whose it is
+// and approves it as sent, changes it first, or rejects it.
+async function openSubmissionDetail(ref) {
+  const id = typeof ref === 'string' ? ref : ref?.id;
+  if (!id) return;
+  const portal = isPortal();
+  const s = portal
+    ? (state.portal.submissions || []).find(x => x.id === id)
+    : await api(`/app/api/crm/service-submissions/${encodeURIComponent(id)}`).catch(() => (typeof ref === 'object' ? ref : null));
+  if (!s) return toast(STR.loadFailed);
+  const pending = s.status === 'PENDING';
+  const here = submissionTrailEntry(s);
+  const clientLink = !portal && hasModule('clients') && !linksBackTo(`client:${s.clientId}`);
+  const reviewed = s.reviewedAt
+    ? { label: s.status === 'APPROVED' ? SUB.approvedOn : SUB.rejectedOn, value: [fmtDate(s.reviewedAt), portal ? '' : s.reviewedBy].filter(Boolean).join(' · ') }
+    : null;
+  const outcome = s.status === 'REJECTED'
+    ? `<div class="notice notice--warn" role="status"><span>${escapeHTML(s.rejectionReason ? SUB.rejectedBecause({ reason: s.rejectionReason }) : SUB.rejectedNoReason)}</span></div>`
+    : `<p class="hint">${escapeHTML(s.status === 'APPROVED' ? (s.adjusted ? SUB.approvedAdjusted : SUB.approvedHint) : portal ? PORTAL.pendingHint : SUB.pendingHint({ name: s.employeeName }))}</p>`;
+  const actions = portal
+    ? [
+      pending ? `<button class="btn btn--sm" type="button" data-sub-edit>${escapeHTML(STR.clientEditAction)}</button>` : '',
+      pending ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-withdraw>${escapeHTML(PORTAL.withdraw)}</button>` : '',
+    ]
+    : [
+      pending ? `<button class="btn btn--sm btn--accent" type="button" data-sub-approve>${escapeHTML(SUB.approve)}</button>` : '',
+      pending ? `<button class="btn btn--sm" type="button" data-sub-change>${escapeHTML(SUB.changeAndApprove)}</button>` : '',
+      s.serviceId && hasModule('services') && !linksBackTo(`service:${s.serviceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-service>${escapeHTML(SUB.openService)}</button>` : '',
+      !linksBackTo(`employee:${s.employeeId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-employee>${escapeHTML(SUB.openEmployee({ name: s.employeeName }))}</button>` : '',
+      pending ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-reject>${escapeHTML(SUB.reject)}</button>` : '',
+    ];
+  const tone = submissionTone(s.status);
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `
+    ${detailHead(s.clientName, submissionPill(s.status), s.totalEur, tone === 'bad' ? '' : tone, clientLink)}
+    ${detailMeta([
+      portal ? null : { label: SUB.doneBy, value: s.employeeName },
+      { label: CRM.services.when, value: fmtDay(s.performedAt) },
+      { label: SUB.submittedOn, value: fmtDate(s.createdAt) },
+      reviewed,
+    ])}
+    ${itemsTable(s.items)}
+    ${s.notes ? `<p class="hint">${escapeHTML(s.notes)}</p>` : ''}
+    ${outcome}
+    ${actions.some(Boolean) ? `<div class="detail__foot">${actions.join('')}</div>` : ''}`;
+  $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(s.clientId)));
+  $('[data-sub-edit]', body)?.addEventListener('click', () => openFrom(here, () => openSubmissionForm(s)));
+  $('[data-sub-withdraw]', body)?.addEventListener('click', async () => {
+    if (!await confirmDialog({ title: PORTAL.withdrawTitle, body: PORTAL.withdrawBody({ name: s.name }), okLabel: PORTAL.withdraw })) return;
+    try {
+      await api(`/app/api/portal/services/${encodeURIComponent(s.id)}`, { method: 'DELETE' });
+      closeDrawer({ dismissed: true });
+      await loadModule(PORTAL_TAB);
+      render();
+      toast(PORTAL.withdrawn);
+    } catch (err) { if (err?.message !== 'unauthorized') toast(submissionErrorText(err)); }
+  });
+  $('[data-sub-approve]', body)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      await api(`/app/api/crm/service-submissions/${encodeURIComponent(s.id)}/approve`, { method: 'POST', body: '{}' });
+      toast(SUB.approvedToast);
+      afterSubmissionDecision();
+      openSubmissionDetail(s.id);
+    } catch (err) {
+      btn.disabled = false;
+      if (err?.message === 'unauthorized') return;
+      toast(submissionErrorText(err));
+      if (err?.code === 'not_pending') openSubmissionDetail(s.id);
+    }
+  });
+  $('[data-sub-change]', body)?.addEventListener('click', () => openFrom(here, () => openSubmissionForm(s, { review: true })));
+  $('[data-sub-reject]', body)?.addEventListener('click', () => openFrom(here, () => openRejectForm(s)));
+  $('[data-sub-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(s.serviceId)));
+  $('[data-sub-employee]', body)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer('employee', s.employeeId)));
+  openDrawer(s.name, body, false, { eyebrow: SUB.eyebrow });
+}
+
+function openRejectForm(s) {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(SUB.rejectIntro({ name: s.employeeName }))}</p>
+    <div class="form__row form__row--full"><label class="lbl" for="sub-reason">${escapeHTML(SUB.rejectReason)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <textarea class="txt" id="sub-reason" maxlength="500" placeholder="${escapeHTML(SUB.rejectReasonPh)}"></textarea></div>
+    <div class="actions">
+      <button class="btn btn--danger" type="submit">${escapeHTML(SUB.reject)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+    </div>`;
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api(`/app/api/crm/service-submissions/${encodeURIComponent(s.id)}/reject`, {
+        method: 'POST', body: JSON.stringify({ reason: $('#sub-reason', form).value.trim() || null }),
+      });
+      toast(SUB.rejectedToast);
+      afterSubmissionDecision();
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      if (err?.message !== 'unauthorized') toast(submissionErrorText(err));
+    }
+  });
+  openDrawer(SUB.rejectTitle({ name: s.name }), form);
 }
 
 function openCatalogForm(itemId) {
@@ -7837,6 +8260,7 @@ async function init(relayed = false) {
   $('#brand').addEventListener('click', () => { drawerTrail = []; openCompanySwitcher(); });
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
+    if (state.active === PORTAL_TAB) return openSubmissionForm();
     if (state.active === 'clients') return openClientForm();
     if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined);
     if (state.active === 'catalog') return openCatalogForm();

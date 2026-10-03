@@ -27,7 +27,11 @@ import org.slf4j.LoggerFactory
  * Decides which dashboard user a verified Google account signs in as: the user it is linked to, or
  * else the user with the same (verified) email, whose account then gets linked automatically.
  */
-internal class DashboardGoogleSignIn(private val users: DashboardUserRepository, private val tenants: TenantRepository) {
+internal class DashboardGoogleSignIn(
+    private val users: DashboardUserRepository,
+    private val tenants: TenantRepository,
+    private val employees: EmployeeLookup = noEmployeeLookup,
+) {
 
     sealed interface Outcome {
         data class SignedIn(val user: DashboardUser, val linkedNow: Boolean) : Outcome
@@ -39,10 +43,7 @@ internal class DashboardGoogleSignIn(private val users: DashboardUserRepository,
         val user = linked ?: users.findByEmail(email) ?: return Outcome.Refused(NO_ACCOUNT)
         // Once a user links a Google account, only that account signs them in.
         if (linked == null && user.googleUid != null) return Outcome.Refused(OTHER_GOOGLE_ACCOUNT)
-        val tenant = tenants.findById(user.tenantId)
-        if (tenant == null || !DashboardAccessPolicy.allows(tenant, user, DashboardAccessPolicy.TENANT_USER)) {
-            return Outcome.Refused(ACCOUNT_INACTIVE)
-        }
+        signInCompany(user, tenants, employees) ?: return Outcome.Refused(ACCOUNT_INACTIVE)
         if (linked == null || linked.googleEmail != email) {
             if (users.linkGoogle(user.id, uid, email) != DashboardUserRepository.LinkResult.LINKED) return Outcome.Refused(OTHER_GOOGLE_ACCOUNT)
         }
@@ -81,8 +82,9 @@ fun Route.dashboardAccountRoutes(
     dashboardUsers: DashboardUserRepository,
     runtimeConfig: RuntimeConfig,
     googleVerifier: FirebaseIdTokenVerifier = FirebaseIdTokenVerifier(),
+    employees: EmployeeLookup = noEmployeeLookup,
 ) {
-    val googleSignIn = DashboardGoogleSignIn(dashboardUsers, tenantRepository)
+    val googleSignIn = DashboardGoogleSignIn(dashboardUsers, tenantRepository, employees)
     fun googleConfig(): AppConfig.GoogleSignInConfig? = runtimeConfig.get().admin.googleSignIn.takeIf { it.webConfigured }
 
     get("/app/auth/config") {
@@ -97,10 +99,8 @@ fun Route.dashboardAccountRoutes(
         if (user == null || user.status != DashboardUserStatus.ACTIVE || !user.passwordMatches(request.password)) {
             return@post call.respond(HttpStatusCode.Unauthorized, mapOf("error" to "invalid credentials"))
         }
-        val tenant = tenantRepository.findById(user.tenantId)
-        if (tenant == null || !DashboardAccessPolicy.allows(tenant, user, DashboardAccessPolicy.TENANT_USER)) {
-            return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "account inactive"))
-        }
+        signInCompany(user, tenantRepository, employees)
+            ?: return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "account inactive"))
         dashboardUsers.markLogin(user.id, SystemClock.now())
         val admin = runtimeConfig.get().admin
         call.respond(DashboardTokenResponse(token = dashboardToken(admin, user, DashboardAccessPolicy.TENANT_USER, admin.jwtExpiryHours)))

@@ -43,6 +43,8 @@ object NotificationKinds {
     const val AGENT_TASK = "agent_task"
     const val AGENT_NOTICE = "agent_notice"
     const val INTEGRATION_RECONNECT = "integration_reconnect"
+    /** An employee registered a service; its `ref` is `submission:ID`. */
+    const val SERVICE_SUBMITTED = "service_submitted"
 }
 
 class NotificationRepository(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {

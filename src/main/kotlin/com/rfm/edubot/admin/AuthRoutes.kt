@@ -8,8 +8,11 @@ import com.auth0.jwt.interfaces.JWTVerifier
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.DashboardUserRepository
+import com.rfm.edubot.dashboard.EmployeeLookup
+import com.rfm.edubot.dashboard.EmployeePortal
 import com.rfm.edubot.dashboard.actor
 import com.rfm.edubot.dashboard.attachDashboardContext
+import com.rfm.edubot.dashboard.noEmployeeLookup
 import com.rfm.edubot.dashboard.resolveDashboardContext
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorType
@@ -23,6 +26,7 @@ import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.jwt.JWTPrincipal
 import io.ktor.server.auth.jwt.jwt
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -35,7 +39,12 @@ import kotlinx.serialization.Serializable
 import org.slf4j.LoggerFactory
 import java.util.Date
 
-fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantRepository, dashboardUsers: DashboardUserRepository) {
+fun Application.configureAdminAuth(
+    runtime: RuntimeConfig,
+    tenants: TenantRepository,
+    dashboardUsers: DashboardUserRepository,
+    employees: EmployeeLookup = noEmployeeLookup,
+) {
     val dynamicVerifier = object : JWTVerifier {
         override fun verify(token: String): DecodedJWT = verifierFor(runtime.get().admin).verify(token)
         override fun verify(jwt: DecodedJWT): DecodedJWT = verifierFor(runtime.get().admin).verify(jwt)
@@ -60,7 +69,8 @@ fun Application.configureAdminAuth(runtime: RuntimeConfig, tenants: TenantReposi
         jwt("dashboard") {
             verifier(dynamicVerifier)
             validate { credential ->
-                val context = resolveDashboardContext(credential.payload, tenants, dashboardUsers) ?: return@validate null
+                val context = resolveDashboardContext(credential.payload, tenants, dashboardUsers, employees) ?: return@validate null
+                if (context.employee != null && !EmployeePortal.allowsPath(request.path())) return@validate null
                 attachDashboardContext(context)
                 rememberRequestActor(context.actor())
                 JWTPrincipal(credential.payload)

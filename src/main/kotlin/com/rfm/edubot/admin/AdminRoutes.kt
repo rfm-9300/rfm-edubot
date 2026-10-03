@@ -415,6 +415,8 @@ internal data class ClientServiceDto(
     val bookingId: String? = null,
     val performedAt: String? = null,
     val createdAt: String,
+    /** Who did the work, when the row came from an employee's registered service. */
+    val employeeId: String? = null,
 )
 
 /** Without [items] the row is the one line [name], [quantity], [unit] and [unitPriceEur] describe. */
@@ -481,6 +483,7 @@ internal fun com.rfm.edubot.crm.model.ClientService.dto(client: Client?) = Clien
     bookingId = bookingId?.toHexString(),
     performedAt = performedAt?.toString(),
     createdAt = createdAt.toString(),
+    employeeId = employeeId?.toHexString(),
 )
 
 internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = InvoiceDto(

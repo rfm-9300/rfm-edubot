@@ -17,6 +17,8 @@ import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.UserRole
+import com.rfm.edubot.crm.ServiceSubmissionRepository
+import com.rfm.edubot.crm.model.ServiceSubmissionStatus
 import com.rfm.edubot.instagram.InstagramCommentRepository
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationConnectionRepository
@@ -80,7 +82,9 @@ class OverviewService(private val mongo: MongoModule) {
         }
         val services = async { if (DashboardModules.SERVICES in modules) services(tenant.id, window) else null }
         val suppliers = async { if (DashboardModules.SUPPLIERS in modules) suppliers(tenant.id, window) else null }
-        val employees = async { if (DashboardModules.EMPLOYEES in modules) employees(tenant.id, window) else null }
+        val employees = async {
+            if (DashboardModules.EMPLOYEES in modules) employees(tenant.id, window, submissions = DashboardModules.SERVICES in modules) else null
+        }
         val payments = async { if (DashboardModules.PAYMENTS in modules) payments(tenant.id, window) else null }
         val assistant = async {
             if (DashboardModules.AI_ASSISTANT in modules) {
@@ -141,7 +145,7 @@ class OverviewService(private val mongo: MongoModule) {
 
         val waiting = waitingList.await()
         val reconnectList = reconnects.await()
-        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList)
+        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList, employeesDto)
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -159,6 +163,7 @@ class OverviewService(private val mongo: MongoModule) {
             pendingAssistant = assistantDto?.pendingActions ?: 0,
             agentAttention = agentsBlock?.let { (it.dto.pendingApprovals + it.dto.tasksDue).toInt() + it.failed.size } ?: 0,
             reconnects = reconnectList.size,
+            pendingSubmissions = (employeesDto?.pendingSubmissions ?: 0).toInt(),
         )
         OverviewHomeLayout.apply(
             OverviewDto(
@@ -469,9 +474,9 @@ class OverviewService(private val mongo: MongoModule) {
         )
     }
 
-    private suspend fun employees(tenantId: ObjectId, window: OverviewMath.Window): OverviewSuppliersDto {
+    private suspend fun employees(tenantId: ObjectId, window: OverviewMath.Window, submissions: Boolean): OverviewEmployeesDto {
         val tenantFilter = Filters.eq("tenantId", tenantId)
-        return OverviewSuppliersDto(
+        return OverviewEmployeesDto(
             total = coll("crm.employees").countDocuments(Filters.and(tenantFilter, Filters.eq("archivedAt", null))),
             newThisMonth = coll("crm.employees").countDocuments(
                 Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.monthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.nextMonthStart.toEpochMilliseconds()))),
@@ -479,6 +484,11 @@ class OverviewService(private val mongo: MongoModule) {
             newLastMonth = coll("crm.employees").countDocuments(
                 Filters.and(tenantFilter, Filters.gte("createdAt", Date(window.lastMonthStart.toEpochMilliseconds())), Filters.lt("createdAt", Date(window.monthStart.toEpochMilliseconds()))),
             ),
+            pendingSubmissions = if (submissions) {
+                coll(ServiceSubmissionRepository.COLLECTION).countDocuments(Filters.and(tenantFilter, Filters.eq("status", ServiceSubmissionStatus.PENDING.name)))
+            } else {
+                0
+            },
         )
     }
 
@@ -652,8 +662,27 @@ class OverviewService(private val mongo: MongoModule) {
         agents: AgentsBlock?,
         waiting: List<WaitingConversation>,
         reconnects: List<IntegrationConnection>,
+        employees: OverviewEmployeesDto?,
     ): List<OverviewAttentionItemDto> {
         val items = mutableListOf<OverviewAttentionItemDto>()
+        if ((employees?.pendingSubmissions ?: 0) > 0) {
+            // The ones waiting longest first.
+            val pending = coll(ServiceSubmissionRepository.COLLECTION).find(
+                Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("status", ServiceSubmissionStatus.PENDING.name)),
+            ).sort(Document("createdAt", 1)).limit(5).toList()
+            val staff = employeeNames(tenantId, pending.mapNotNull { it.getObjectIdOrNull("employeeId") })
+            pending.forEach { doc ->
+                val who = doc.getObjectIdOrNull("employeeId")?.let { staff[it] }.orEmpty()
+                items += OverviewAttentionItemDto(
+                    kind = OverviewMath.KIND_SERVICE_SUBMISSION,
+                    tab = DashboardModules.EMPLOYEES,
+                    id = doc.getObjectId("_id").toHexString(),
+                    detail = listOf(who, doc.getString("name").orEmpty()).filter { it.isNotBlank() }.joinToString(" · "),
+                    amountCents = doc.get("totalCents").asLong(),
+                    at = doc.getDate("createdAt")?.let { Instant.fromEpochMilliseconds(it.time).toString() },
+                )
+            }
+        }
         if (DashboardModules.INVOICES in modules && cash != null) {
             val open = coll("crm.invoices").find(
                 Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("status", listOf("PENDING", "OVERDUE"))),
@@ -839,6 +868,7 @@ class OverviewService(private val mongo: MongoModule) {
             OverviewMath.KIND_WAITING_CHAT,
             OverviewMath.KIND_INTEGRATION_RECONNECT,
             OverviewMath.KIND_AGENT_APPROVAL,
+            OverviewMath.KIND_SERVICE_SUBMISSION,
             OverviewMath.KIND_PENDING_BOOKING,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
             OverviewMath.KIND_AGENT_TASK_DUE,
