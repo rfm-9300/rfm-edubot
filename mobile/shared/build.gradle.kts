@@ -8,19 +8,12 @@ kotlin {
             baseName = "EduBotShared"
             isStatic = true
             binaryOption("bundleId", "com.rfm.edubot.shared")
+            export(project(":core:common"))
+            export(project(":core:data"))
+            export(project(":core:localization"))
             export(project(":core:model"))
             export(project(":core:network"))
-            export(project(":core:common"))
-            export(project(":core:localization"))
             export(project(":core:ui"))
-            export(project(":feature:auth"))
-            export(project(":feature:overview"))
-            export(project(":feature:inbox"))
-            export(project(":feature:contacts"))
-            export(project(":feature:assistant"))
-            export(project(":feature:crm"))
-            export(project(":feature:persona"))
-            export(project(":feature:settings"))
             export(libs.coroutines.core.get())
             transitiveExport = false
         }
@@ -28,19 +21,25 @@ kotlin {
 
     sourceSets {
         commonMain.dependencies {
+            api(project(":core:common"))
+            api(project(":core:data"))
+            api(project(":core:localization"))
             api(project(":core:model"))
             api(project(":core:network"))
-            api(project(":core:common"))
-            api(project(":core:localization"))
             api(project(":core:ui"))
-            api(project(":feature:auth"))
-            api(project(":feature:overview"))
-            api(project(":feature:inbox"))
-            api(project(":feature:contacts"))
-            api(project(":feature:assistant"))
-            api(project(":feature:crm"))
-            api(project(":feature:persona"))
-            api(project(":feature:settings"))
+            // The feature modules are an implementation detail of the shell: Swift and Kotlin/JVM
+            // callers only need DashboardApp and MobileGraph.
+            implementation(project(":feature:agents"))
+            implementation(project(":feature:assistant"))
+            implementation(project(":feature:auth"))
+            implementation(project(":feature:bookings"))
+            implementation(project(":feature:contacts"))
+            implementation(project(":feature:crm"))
+            implementation(project(":feature:inbox"))
+            implementation(project(":feature:notifications"))
+            implementation(project(":feature:overview"))
+            implementation(project(":feature:persona"))
+            implementation(project(":feature:settings"))
             api(libs.coroutines.core)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

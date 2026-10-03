@@ -11,32 +11,81 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.rfm.edubot.mobile.core.localization.MobileCopy
-import com.rfm.edubot.mobile.core.network.DashboardApi
-import com.rfm.edubot.mobile.core.ui.BotColor
+import com.rfm.edubot.mobile.core.common.TenantClock
+import com.rfm.edubot.mobile.core.data.InboxRepository
+import com.rfm.edubot.mobile.core.localization.Strings
+import com.rfm.edubot.mobile.core.localization.Txt
+import com.rfm.edubot.mobile.core.ui.BotColors
+import com.rfm.edubot.mobile.core.ui.EmptyState
 import com.rfm.edubot.mobile.core.ui.ErrorPanel
+import com.rfm.edubot.mobile.core.ui.InfoPanel
 import com.rfm.edubot.mobile.core.ui.ListRow
 import com.rfm.edubot.mobile.core.ui.LoadingScreen
+import com.rfm.edubot.mobile.core.ui.RefreshBar
 import com.rfm.edubot.mobile.core.ui.ScreenHeader
+import com.rfm.edubot.mobile.core.ui.Tone
 
 @Composable
-fun ContactsScreen(api: DashboardApi, token: String, strings: MobileCopy, padding: PaddingValues) {
-    val vm = viewModel<ContactsViewModel>(key = "contacts:$token", factory = viewModelFactory { initializer { ContactsViewModel(api, token) } })
-    val contacts by vm.state.collectAsState()
+fun ContactsScreen(
+    repository: InboxRepository,
+    strings: Strings,
+    clock: TenantClock,
+    padding: PaddingValues,
+) {
+    val vm = viewModel<ContactsViewModel>(
+        key = "contacts",
+        factory = viewModelFactory { initializer { ContactsViewModel(repository) } },
+    )
+    val state by vm.contacts.collectAsState()
+    val pending by vm.pending.collectAsState()
+    val failure by vm.failure.collectAsState()
     LaunchedEffect(vm) { vm.load() }
+
+    val contacts = state.value.orEmpty()
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 20.dp)) {
-        item { ScreenHeader(strings.contacts.uppercase(), strings.contacts) { TextButton(onClick = vm::load) { Text(strings.refresh, color = BotColor.Accent) } } }
-        contacts.error?.let { item { ErrorPanel(strings.error(it)) } }
-        if (contacts.loading) item { LoadingScreen() }
-        items(contacts.contacts, key = { it.id }) { contact ->
-            ListRow(contact.displayName ?: contact.waId, "${contact.channel} · ${contact.lastSeenAt}", contact.status) {
-                vm.toggleStatus(contact)
+        item {
+            ScreenHeader(strings[Txt.NAV_GROUP_INBOX], strings[Txt.CONTACTS_TITLE]) {
+                TextButton(onClick = { vm.refresh() }, enabled = !state.loading) {
+                    Text(strings[Txt.ACTION_REFRESH], color = BotColors.accentDeep)
+                }
+            }
+            RefreshBar(state.loading && state.hasValue)
+        }
+        (failure ?: state.error)?.let { error ->
+            item {
+                ErrorPanel(
+                    message = strings.error(error),
+                    retryLabel = strings[Txt.ACTION_RETRY],
+                    onRetry = { vm.refresh() },
+                )
+            }
+        }
+        if (state.fromCache) {
+            item { InfoPanel(strings[Txt.OFFLINE_SNAPSHOT], tone = Tone.Info) }
+        }
+        when {
+            contacts.isEmpty() && state.loading -> item { LoadingScreen() }
+            contacts.isEmpty() -> item { EmptyState(strings[Txt.EMPTY_TITLE], strings[Txt.CONTACTS_EMPTY]) }
+            else -> items(contacts, key = { it.id }) { contact ->
+                ListRow(
+                    title = contact.displayName ?: contact.waId,
+                    detail = listOf(
+                        contact.channel,
+                        strings.format(Txt.CONTACTS_LAST_SEEN, "time" to clock.listStamp(contact.lastSeenAt)),
+                    ).joinToString(" · "),
+                    leading = contact.displayName ?: contact.waId,
+                    status = contact.status,
+                    statusLabel = strings.status(contact.status),
+                    trailingLabel = strings[
+                        if (contact.blocked) Txt.CONTACTS_UNBLOCK else Txt.CONTACTS_BLOCK,
+                    ].takeIf { pending != contact.id },
+                    onClick = { vm.toggleBlocked(contact) },
+                )
             }
         }
     }

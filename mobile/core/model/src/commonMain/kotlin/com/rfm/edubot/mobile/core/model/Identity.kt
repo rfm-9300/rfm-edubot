@@ -5,13 +5,28 @@ import kotlinx.serialization.Serializable
 @Serializable
 data class Session(val token: String)
 
+/** `GET /app/api/me`. [user] is null while an operator is impersonating the tenant. */
 @Serializable
 data class DashboardIdentity(
     val tenant: Tenant,
     val user: DashboardUser? = null,
-    val modules: List<String>,
-    val principalType: String,
-)
+    val modules: List<String> = emptyList(),
+    val principalType: String = PRINCIPAL_TENANT,
+    val companies: List<Company> = emptyList(),
+    val companyLimit: Int = 1,
+) {
+    val isOperator: Boolean get() = principalType != PRINCIPAL_TENANT
+
+    val isAdmin: Boolean get() = isOperator || user?.role == ROLE_ADMIN
+
+    /** Whether the account can hold more than the company it is signed in to. */
+    val canSwitchCompany: Boolean get() = companies.size > 1
+
+    companion object {
+        const val PRINCIPAL_TENANT = "tenant"
+        const val ROLE_ADMIN = "TENANT_ADMIN"
+    }
+}
 
 @Serializable
 data class Tenant(
@@ -19,6 +34,8 @@ data class Tenant(
     val slug: String,
     val name: String,
     val locale: String,
+    /** IANA zone the backend renders its own dates in; the app formats instants with it too. */
+    val timezone: String = "Europe/Lisbon",
     val channels: List<ChannelAsset> = emptyList(),
 )
 
@@ -27,7 +44,14 @@ data class ChannelAsset(
     val platform: String,
     val externalId: String,
     val displayName: String? = null,
-)
+    val commentsEnabled: Boolean = false,
+) {
+    companion object {
+        const val WHATSAPP = "WHATSAPP"
+        const val INSTAGRAM = "INSTAGRAM"
+        const val WEB = "WEB"
+    }
+}
 
 @Serializable
 data class DashboardUser(
@@ -38,53 +62,22 @@ data class DashboardUser(
 )
 
 @Serializable
-data class Overview(
-    val users: Long,
-    val conversations: Long,
-    val messages: Long,
-    val messagesToday: Long,
-    val quotes: Long,
-    val invoices: Long,
-    val instagramUnreplied: Long = 0,
-    val attentionCount: Int = 0,
-    val health: String = "ok",
-    val cash: OverviewCash? = null,
-    val pipeline: OverviewPipeline? = null,
-    val inbox: OverviewInbox? = null,
-    val calendar: OverviewCalendar? = null,
-    val customers: OverviewCustomers? = null,
+data class Company(
+    val id: String,
+    val name: String,
+    val slug: String,
+    val primary: Boolean = false,
 )
 
 @Serializable
-data class OverviewCash(
-    val collectedThisMonthCents: Long = 0,
-    val outstandingCents: Long = 0,
-    val overdueCents: Long = 0,
-    val overdueCount: Int = 0,
-)
+data class SwitchedCompany(val token: String)
 
+/** `GET /app/api/account`. */
 @Serializable
-data class OverviewPipeline(
-    val openCents: Long = 0,
-    val winRatePct: Int = 0,
-    val quoteCount: Int = 0,
-)
-
-@Serializable
-data class OverviewInbox(
-    val waiting: Int = 0,
-    val messagesToday: Long = 0,
-    val contacts: Long = 0,
-)
-
-@Serializable
-data class OverviewCalendar(
-    val today: Int = 0,
-    val pending: Int = 0,
-)
-
-@Serializable
-data class OverviewCustomers(
-    val total: Long = 0,
-    val newThisMonth: Long = 0,
+data class Account(
+    val email: String,
+    val role: String,
+    val passwordEnabled: Boolean = false,
+    val googleEmail: String? = null,
+    val googleAvailable: Boolean = false,
 )
