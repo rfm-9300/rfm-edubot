@@ -21,7 +21,7 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 ## Must not
 
 - Do not add a second stylesheet for admin / app / backoffice.
-- Do not hardcode hex, `oklch()`, or `rgb()` in component rules. Add a token on `:root` (and `html[data-theme="dark"]` if the dark value differs; on the `/app` skin, in both minimal blocks).
+- Do not hardcode hex, `oklch()`, or `rgb()` in component rules. Add a token on `:root` (and `html[data-theme="dark"]` if the dark value differs; for the minimal skin, in both minimal blocks).
 - Do not introduce a new font family. Stack is Outfit + Nunito + JetBrains Mono.
 - Do not hardcode Portuguese (or any locale) in markup or JS render functions.
 - Do not copy widget (`.tbl-*`) styles into the dashboards, or dashboard classes into the widget.
@@ -29,8 +29,8 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 - Do not use inline `style=""` for colors, type, or spacing that tokens already cover.
 - Do not invent a new button / pill / modal primitive when `.btn`, `.pill`, `.drawer`, `.confirm` exist.
 - Do not skip the dark-theme check. If a rule assumes light (shadow, border, SVG stroke), add an `html[data-theme="dark"]` override.
-- Do not skip the skin check: `/app` always runs `html[data-layout="minimal"]` (check light and dark); the backoffice stays classic. Prefer tokens so the skin restyles for free; add a `html[data-layout="minimal"]` rule only for what tokens cannot express, and keep it emoji-free. Do not bring back a layout switch.
-- Do not color text or thin lines with `--accent` on `/app`: in light it is yellow on white. Use `--accent-deep` or `--ink` for text on tints, and yellow only as a fill (actions, selections, small highlights).
+- Do not skip the skin check: `/app` and `/backoffice` always run `html[data-layout="minimal"]` (check light and dark); no page shows the classic rules on their own. Prefer tokens so the skin restyles for free; add a `html[data-layout="minimal"]` rule only for what tokens cannot express, and keep it emoji-free. Do not bring back a layout switch.
+- Do not color text or thin lines with `--accent` on `/app` or `/backoffice`: in light it is yellow on white. Use `--accent-deep` or `--ink` for text on tints, and yellow only as a fill (actions, selections, small highlights).
 
 ## Decision tree
 
@@ -54,7 +54,7 @@ Need copy?
 
 - [ ] Reused shared classes; no one-off palette
 - [ ] Light and dark both readable (contrast on pills, buttons, empty states, tables)
-- [ ] `/app` screens checked in the minimal skin, light and dark
+- [ ] `/app` and `/backoffice` screens checked in the minimal skin, light and dark
 - [ ] `max-width: 920px` does not overflow the shell
 - [ ] Strings in all three catalogs; no raw UI literals in JS/HTML
 - [ ] Dynamic text escaped

@@ -31,7 +31,7 @@ Head assets (order matters):
 5. `/admin/i18n.js`
 6. Page script `defer` at end of `<body>`
 
-`/app` declares `<html data-layout="minimal">`, its fixed skin ([tokens.md](tokens.md#layout-skins-htmldata-layout)); there is no layout switch. `/backoffice` declares nothing and stays classic. Every `/app` screen must read well in the minimal skin in both themes. The sidebar foot ends with the "Powered by The Bots Lab" credit ([components.md](components.md#sidebar-kpis)).
+`/app` and `/backoffice` both declare `<html data-layout="minimal">`, their fixed skin ([tokens.md](tokens.md#layout-skins-htmldata-layout)); there is no layout switch. Every screen of either must read well in the minimal skin in both themes. `/app`'s sidebar foot ends with the "Powered by The Bots Lab" credit ([components.md](components.md#sidebar-kpis)); the backoffice, The Bots Lab's own tool, leaves it out.
 
 ## List module (default screen)
 
@@ -54,7 +54,7 @@ Used by clients, quotes, invoices, catalog, tenants:
 5. Focus first input after open. A drawer that leads with status and keeps its fields further down (the backoffice agents drawer) passes `autofocus: false` and focuses its close button instead, so it opens at the top
 6. Close via `[data-close]`, scrim, and Escape; trap Tab inside the panel; restore focus on close
 7. Wide (`.drawer__panel--wide`) for line-item editors
-8. Quote / invoice rows open the drawer for status, convert, or edit; a client row opens the client record — not a new page
+8. Quote / invoice rows open the drawer for status, convert, or edit; a client row opens the client record, a backoffice tenant row the tenant record — not a new page
 
 ## Login
 
@@ -131,6 +131,16 @@ Drawers opened from the record show `← client` and return to it (same tab, fre
 
 Pausing a client's automations is any member's brake for a client who asked not to be contacted: agents neither start nor carry on anything on the client or its documents until someone resumes (runs already waiting end as cancelled). The card says so, and the Automations tab shows a `.notice--warn` with Resume in place of the pause button and the run row.
 
+## Tenants (backoffice directory + record)
+
+The backoffice's Tenants view is the directory recipe with All / Active / Suspended / Deleted chips. A row shows the name (a `.tbl__open` button) over its slug and company line, the channels as stacked pills (`.tbl__pills`), status, messages, and the last activity as date over time. Its only action is Open dashboard (Restore under Deleted). A click anywhere else on the row, or Enter on the name, opens the tenant **record** in the drawer ([components.md](components.md#record)):
+
+1. Profile card: initials, slug and status pill, then one line with the company relation, language, model and modules in use. Edit, Suspend (Activate when suspended) and Delete sit in the head; a deleted tenant has Restore (or "comes back with …") and a "Deleted on …" warning line instead. Then Open dashboard, Users (first companies only), Agents (with Agents on) and Reload pipeline, all plain buttons, so yellow only marks Activate and Restore.
+2. Four `.record-kpi`s: messages, last activity (date, time under it), rate per hour, rate per day.
+3. A Channels panel: `dl.dash-facts` with each platform's account and id, and a "No access token" pill where one is missing.
+
+Edit, Users and Agents open with `← tenant` and come back to the record after saving. Suspend, Activate and Restore show the record fresh after their confirm; Delete closes the drawer. A new tenant opens its record once created. Closing returns focus to the row's name. Escape closes a confirm on its own and leaves the drawer behind it.
+
 ## Invoices
 
 `/app` Invoices uses the same `.panel__views` switch over a `.panel__filters` row of status chips, and the same `.period-nav` above the hero stats. **By week** and **By month** replace the hero with the selected period: paid, pending, overdue, and total, with a vs-previous hint on the total. The table is the history (`.is-total`, then one row per issued period). The row matching the nav's selected period uses `.is-current`. Cancelled rows stay out of the money columns. The list view hero stays all-time.
@@ -190,7 +200,7 @@ Optional `agents` module, grouped with Persona and the AI assistant. `app/agents
 6. **Activity**: a runs table with In progress / Needs attention / Finished chips and a "Show tests" check. The run drawer shows the trigger, an outcome `.notice` and each step's result on `ol.flow`, with Retry or Cancel. An AI task's step lists its fields in `dl.dash-facts`, then each action it took on its own line, then (when drafted) what it would have done, with the same preview an approval shows. An AI text shows in a `.wa-preview` bubble.
 7. **Settings**: the company defaults form (read-only for non-admins) beside a usage `dl.dash-facts` of platform limits.
 
-The backoffice manages a company's agents from the tenants table: with Agents on, the row actions get a ghost **Agents** that opens a drawer on that company. Strings live under `backoffice.agents.*`; status labels reuse `app.agents.status.*`.
+The backoffice manages a company's agents from its tenant record ([Tenants](#tenants-backoffice-directory--record)): with Agents on, the record's action row gets an **Agents** button that opens a drawer on that company, with the way back to the record. Strings live under `backoffice.agents.*`; status labels reuse `app.agents.status.*`.
 
 1. A `.notice` on the pause state: plain while agents run, `--warn` while the platform or the company paused them. Its one action is Pause agents (`.btn--danger`, through the confirm) or, once the platform paused them, Resume agents (`.btn--accent`). A company's own pause is only described: its admins lift it in Settings, and pausing here as well keeps the agents paused.
 2. A "Last 7 days" panel: `dl.dash-facts` of runs, succeeded, failed or waiting for review, waiting or in progress, and approvals waiting now.

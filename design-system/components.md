@@ -26,7 +26,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
 - `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
-- In the `/app` skin (`html[data-layout="minimal"]`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
+- In the minimal skin (`html[data-layout="minimal"]`, `/app` and `/backoffice`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
 ## Brand
@@ -41,7 +41,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 </div>
 ```
 
-Mark is 40×40, gradient, display font. Surfaces: CRM SVG house, app `"AI"`, backoffice `"BO"`. Keep that 2-letter / SVG convention.
+Mark is 40×40, gradient, display font (in the minimal skin a 32×32 solid yellow square). Surfaces: CRM SVG house, app `"AI"`, backoffice `"BO"`. Keep that 2-letter / SVG convention. The backoffice's name and eyebrow come from `backoffice.brandName` / `backoffice.brandSub`.
 
 `/app` renders the brand as the company switcher: `button.brand.brand--switch` with `span` children and a `.brand__chevron`. It stays `disabled` (looks exactly like the plain brand, no chevron) until the tenant holds more than one company; enabled, it hovers on `--surface-2` and opens the "Switch company" drawer, a `.record` > `.panel` > `.worklist` of companies (current one `data-tone="ok"` with a "Current" pill). Settings → Companies reuses the same rows.
 
@@ -62,9 +62,9 @@ Mark is 40×40, gradient, display font. Surfaces: CRM SVG house, app `"AI"`, bac
 
 Wrap related items in `.nav__group`. The first group (Home) may omit `.nav__group-label`. `.nav__count.is-alert` is for waiting chats, overdue invoices, overdue payments, or pending bookings.
 
-Active = `.is-active`. New tabs **must** get a `data-tab` (or `href`) rule in `style.css` for `--tab` color and `.nav__dot::after` emoji (classic: backoffice), and a `--nav-icon` outline mask in the minimal block (`/app`). Copy an existing tab block. Dark theme remaps overview/tenants to yellow.
+Active = `.is-active`. New tabs **must** get a `--nav-icon` outline mask in the minimal block, keyed on `data-tab` (`/app`) or `href` (backoffice: `#tenants`, `#admins`, `#backups`, `#settings`; Settings shares `/app`'s gear). Copy an existing tab block. The classic `--tab` colors and `.nav__dot::after` emoji are the base layer under the skin; no page shows them.
 
-In the `/app` skin the active item is a `--accent-soft` fill with a 3px `--accent` bar on the left (`box-shadow: inset 3px 0 0`), `--ink` text at weight 700 and a dark icon; icons follow the label color. Group labels are small sentence-case `--ink-mute` text. Items are 32px tall; the sidebar scrolls when the nav outgrows the window.
+In the minimal skin the active item is a `--accent-soft` fill with a 3px `--accent` bar on the left (`box-shadow: inset 3px 0 0`), `--ink` text at weight 700 and a dark icon; icons follow the label color. Group labels are small sentence-case `--ink-mute` text. Items are 32px tall; the sidebar scrolls when the nav outgrows the window.
 
 ## Topbar
 
@@ -89,9 +89,11 @@ In the `/app` skin the active item is a `--accent-soft` fill with a 3px `--accen
 
 Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
 
-`/app` has no layout switch: its skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label="app.searchPlaceholder"`.
+Neither `/app` nor `/backoffice` has a layout switch: the skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label` (`app.searchPlaceholder`, `backoffice.searchPlaceholder`).
 
-On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
+The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it.
+
+On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
 ## View hero + stats
 
@@ -112,7 +114,7 @@ On `/app` the actions are: theme · notifications bell (`#btn-notifications`) ·
 
 Stats cycle personality colors by `nth-child` (accent, mint, coral, sky, sun, grape). Numeric values use `.stat__value`; tinted emphasis uses `.stat__value--accent`. Optional `.stat__hint` under the value is for a vs-last-period delta — add `.delta--up` / `.delta--down` to it when the delta has a direction. `.stat--lg` is a bigger spotlight variant (Home's highlights only); don't use it on list-page stat rows (clients, services, quotes, invoices, catalog).
 
-In the `/app` skin `.view__stats` is one white card (hairline border, `--r-lg`, `--shadow-sm`) whose cells are split by inset hairlines; it is a grid of equal columns and drops to two columns under 700px.
+In the minimal skin `.view__stats` is one white card (hairline border, `--r-lg`, `--shadow-sm`) whose cells are split by inset hairlines; it is a grid of equal columns and drops to two columns under 700px.
 
 A stat can lead with an icon well — pass `icon` in the `statCards` item:
 
@@ -268,7 +270,9 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 
 Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
-In the `/app` skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
+A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill.
+
+In the minimal skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
 
 Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda.
 
@@ -281,7 +285,7 @@ Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` 
 </div>
 ```
 
-Place inside a table cell with `colspan`, or in a panel body. The generic glyph is CSS (`::before`: a wand in classic, a line tray in the `/app` skin).
+Place inside a table cell with `colspan`, or in a panel body. The generic glyph is CSS (`::before`: a wand in classic, a line tray in the minimal skin).
 
 A module may replace it with its own small line illustration: `crmPanel({ …, emptyArt })` renders `div.empty.empty--art` with the inline SVG first:
 
@@ -334,9 +338,11 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 
 - Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans.
 - Fields: `.inp` `.sel` `.txt`. Money/IDs: `.inp--mono` `.inp--right`.
-- Labels: `.lbl` uppercase. Required: `.req`. Optional: `.opt`.
+- Labels: `.lbl` (sentence case in the minimal skin; uppercase only in the classic layer). Required: `.req`. Optional: `.opt`.
 - Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
+- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
+- A field label with its own tools on the same line (All / None, Add channel): `.form__row-head` > `.lbl` + `.actions`.
 
 ### Suggestions under a field
 
@@ -360,7 +366,9 @@ A list long enough to scroll takes `.suggest--scroll`. Headings inside it are `.
 
 Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, payment and Serviços editors (`lineItemsField()` in `app.js`), wrapped in `.lines-field` with the section `.lbl`. Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description cell (`.line__desc`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
 
-The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo (the backoffice channels table has no foot) keeps clipping as before.
+The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo keeps clipping as before.
+
+The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings and the same four columns on phones. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head. In the minimal skin `.lines__head` is sentence case like table heads.
 
 ```html
 <div class="line">
@@ -405,9 +413,13 @@ Wide editor: `.drawer__panel--wide`. Footer:
 </div>
 ```
 
+The footer is sticky and is the last thing in the body, directly or inside the drawer's `<form>`. A `.drawer__body` that holds one drops its bottom padding: sticky offsets are measured inside the scroller's padding, so with it the stuck footer would cover the end of the content when scrolled to the bottom.
+
 Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
 `openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from another drawer (a record, an invoice…) through `openFrom(back, open)` stacks its opener on a trail and replaces the eyebrow with `.drawer__back` (the opener's name; the ← glyph is CSS). Back pops one step, and a drawer that closes itself after an action (save, mark paid, convert) reopens its opener with fresh data. Closing by hand (×, scrim, Escape) clears the trail and leaves.
+
+The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer.
 
 ```html
 <div class="drawer__eyebrow"><button class="drawer__back" type="button" aria-label="Back to Ana Ribeiro">Ana Ribeiro</button></div>
@@ -417,7 +429,7 @@ In a detail drawer (quote, invoice, payment, booking), the name in `.detail__hea
 
 ## Record
 
-Clients, suppliers and employees open as a record, not a form ([patterns.md](patterns.md#clients-directory--record)):
+Clients, suppliers and employees (and the backoffice's tenants, [patterns.md](patterns.md#tenants-backoffice-directory--record)) open as a record, not a form ([patterns.md](patterns.md#clients-directory--record)):
 
 ```html
 <div class="record">
@@ -811,7 +823,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 
 | Block | Role |
 |---|---|
-| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume. Not a toast, not a modal |
+| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume, the backoffice's setup warnings (Google sign-in not configured, backup runner stopped) at the top of a `.settings-stack`. Not a toast, not a modal |
 | `.agent-icon` (`--lg`) | 32px (44px) line icon on the accent tint; the SVG comes from the agent's `icon` key |
 | `.agent-cell` (`__text` `__name` `__sub`) | Agents table first column: icon, name, and a `.recipe` under it |
 | `.recipe` > `.recipe__part` (`--when`) + `.recipe__arrow` | "When → step → step" chips; the trigger part is tinted; long parts truncate |

@@ -2,7 +2,7 @@
    Loaded synchronously in <head> so the theme applies before first paint.
    Preference persists per browser in localStorage ("light" | "dark").
    If the user has never chosen, follow prefers-color-scheme. Changes fire ui:theme.
-   The page's skin is fixed in markup (/app declares <html data-layout="minimal">). */
+   The page's skin is fixed in markup (/app and /backoffice declare <html data-layout="minimal">). */
 (function () {
   const KEY = 'uiTheme';
   const root = document.documentElement;

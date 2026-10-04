@@ -59,6 +59,15 @@ async function api(path, options = {}) {
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 const slugify = s => (s || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 const fmtDate = iso => iso ? new Date(iso).toLocaleString(I18N.locale(), { dateStyle: 'short', timeStyle: 'short' }) : '—';
+const fmtDay = d => d.toLocaleDateString(I18N.locale(), { dateStyle: 'short' });
+const fmtTime = d => d.toLocaleTimeString(I18N.locale(), { timeStyle: 'short' });
+// Time under the date: tenant rows already run two lines (name over slug), and the column stays narrow.
+const dateCell = iso => (iso ? `${escapeHTML(fmtDay(new Date(iso)))}<div class="sub">${escapeHTML(fmtTime(new Date(iso)))}</div>` : '—');
+// Channel platforms and dashboard roles reuse the /app catalog labels; an unknown value shows as sent.
+const labelOr = (key, raw) => { const label = I18N.t(key); return label === key ? raw : label; };
+const platformLabel = platform => labelOr(`app.channel_${platform}`, platform);
+const roleLabel = role => labelOr(`app.accountRole${role}`, role);
+const warnNoticeHtml = text => `<div class="notice notice--warn" role="status"><div class="notice__text"><span>${escapeHTML(text)}</span></div></div>`;
 
 let toastTimer;
 function toast(msg) {
@@ -92,23 +101,48 @@ function confirmDialog({ title, body, okLabel = T.confirm, danger = true }) {
   });
 }
 
-function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true }) {
+let drawerOpener = null;
+
+function closeDrawer() {
   const root = $('#drawer');
+  if (root.hidden) return;
+  root.hidden = true;
+  if (drawerOpener?.isConnected) drawerOpener.focus();
+  drawerOpener = null;
+}
+
+// `back` ({ label, open }) is the tenant record this drawer was opened from: the eyebrow links back to it,
+// and a save reopens it with fresh data instead of closing. `onSave` may return false to stay open, or a
+// function that opens the next drawer. Without `onSave` there is no footer.
+function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true, back = null }) {
+  const root = $('#drawer');
+  if (root.hidden) drawerOpener = document.activeElement;
   $('#drawer-title').textContent = title;
+  const eyebrow = $('#drawer-eyebrow');
+  if (back) {
+    eyebrow.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(T.record.backTo({ name: back.label }))}">${escapeHTML(back.label)}</button>`;
+    $('.drawer__back', eyebrow).addEventListener('click', () => back.open());
+  } else {
+    eyebrow.textContent = T.drawerEyebrow;
+  }
   const host = $('#drawer-body');
   host.innerHTML = '';
   host.appendChild(body);
-  const foot = document.createElement('div');
-  foot.className = 'drawer__foot';
-  foot.innerHTML = `<button class="btn btn--ghost" data-close>${escapeHTML(T.cancel)}</button><button class="btn btn--accent" id="drawer-save">${escapeHTML(saveLabel)}</button>`;
-  host.appendChild(foot);
+  if (onSave) {
+    const foot = document.createElement('div');
+    foot.className = 'drawer__foot';
+    foot.innerHTML = `<button class="btn btn--ghost" type="button" data-close>${escapeHTML(T.cancel)}</button><button class="btn btn--accent" type="button" id="drawer-save">${escapeHTML(saveLabel)}</button>`;
+    host.appendChild(foot);
+    $('#drawer-save').addEventListener('click', async () => {
+      const next = await onSave();
+      if (next === false) return;
+      if (typeof next === 'function') next();
+      else if (back) back.open();
+      else closeDrawer();
+    });
+  }
+  $$('[data-close]', root).forEach(b => { b.onclick = closeDrawer; });
   root.hidden = false;
-  const close = () => { root.hidden = true; $$('[data-close]', root).forEach(b => b.removeEventListener('click', close)); };
-  $$('[data-close]', root).forEach(b => b.addEventListener('click', close));
-  $('#drawer-save').addEventListener('click', async () => {
-    const ok = await onSave?.();
-    if (ok !== false) close();
-  });
   setTimeout(() => (autofocus ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
 }
 
@@ -274,7 +308,7 @@ async function renderAdmins() {
   $('#view').innerHTML = `
     <div class="view__hero"><div><h1 class="view__title">${escapeHTML(A.title)}</h1><p class="view__desc">${escapeHTML(A.desc)}</p></div></div>
     <div class="settings-stack">
-      ${data.googleReady ? '' : `<p class="hint hint--warn">${escapeHTML(A.googleNotReady)}</p>`}
+      ${data.googleReady ? '' : warnNoticeHtml(A.googleNotReady)}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.listTitle)} <span class="tag">${data.admins.length}</span></h2></div>
         <div class="tbl-wrap"><table class="tbl"><thead><tr>
@@ -285,8 +319,7 @@ async function renderAdmins() {
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.addTitle)}</h2></div>
         <div class="panel__body">
           <form class="form" id="admin-form" novalidate>
-            <div class="form__row"><label class="lbl" for="admin-email">${escapeHTML(A.emailLabel)}</label><input class="inp" id="admin-email" type="email" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(A.emailPlaceholder)}" /></div>
-            <p class="hint">${escapeHTML(A.addHint)}</p>
+            <div class="form__row"><label class="lbl" for="admin-email">${escapeHTML(A.emailLabel)}</label><input class="inp" id="admin-email" type="email" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(A.emailPlaceholder)}" /><div class="hint">${escapeHTML(A.addHint)}</div></div>
             <div class="actions"><button class="btn btn--primary" type="submit">${escapeHTML(A.add)}</button></div>
           </form>
         </div>
@@ -377,7 +410,7 @@ async function renderBackups() {
   const busy = !!run && (run.state === 'requested' || run.state === 'running');
   announceBackupOutcome(run);
   const hero = `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(B.title)}</h1><p class="view__desc">${escapeHTML(B.desc)}</p></div>
-    ${data.available ? `<div class="row"><button class="btn btn--primary" type="button" id="backup-now" ${busy ? 'disabled' : ''}>${escapeHTML(busy ? B.inProgress : B.backupNow)}</button></div>` : ''}</div>`;
+    ${data.available ? `<div class="actions"><button class="btn btn--primary" type="button" id="backup-now" ${busy ? 'disabled' : ''}>${escapeHTML(busy ? B.inProgress : B.backupNow)}</button></div>` : ''}</div>`;
   if (!data.available) {
     $('#view').innerHTML = `${hero}<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(B.unavailableTitle)}</p><p class="empty__desc">${escapeHTML(B.unavailableDesc)}</p></div></div>`;
     return;
@@ -413,8 +446,7 @@ function announceBackupOutcome(run) {
 
 function runnerNoticeHtml(runner) {
   if (runner?.online) return '';
-  const text = runner?.lastSeenAt ? T.backups.runnerOffline({ at: fmtDate(runner.lastSeenAt) }) : T.backups.runnerMissing;
-  return `<p class="hint hint--warn">${escapeHTML(text)}</p>`;
+  return warnNoticeHtml(runner?.lastSeenAt ? T.backups.runnerOffline({ at: fmtDate(runner.lastSeenAt) }) : T.backups.runnerMissing);
 }
 
 function backupRunHtml(run) {
@@ -496,13 +528,13 @@ async function renderPlatformSettings() {
         <h1 class="view__title">${escapeHTML(T.platformSettings.title)}</h1>
         <p class="view__desc">${escapeHTML(T.platformSettings.desc)}</p>
       </div>
-      <div class="row" style="gap:8px; flex-wrap:wrap">
+      <div class="actions">
         <button class="btn btn--ghost" id="ps-reload" type="button">${escapeHTML(T.platformSettings.reload)}</button>
         <button class="btn btn--primary" id="ps-save" type="button">${escapeHTML(T.platformSettings.save)}</button>
       </div>
     </div>
-    <p class="hint" style="margin:0 0 12px">${escapeHTML(formatUpdatedAt(platformSettings.updatedAt))}</p>
     <div class="settings-stack">
+      <p class="hint">${escapeHTML(formatUpdatedAt(platformSettings.updatedAt))}</p>
       ${categories.length === 0 ? `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(T.platformSettings.empty)}</p></div></div>` : categories.map(cat => `
         <div class="panel">
           <div class="panel__head"><h2 class="panel__title">${escapeHTML(categoryLabel(cat))}</h2></div>
@@ -609,18 +641,27 @@ const companiesOf = primaryId => state.tenants.filter(t => t.parentTenantId === 
 const companiesDeletedWith = primary => state.tenants.filter(c =>
   c.parentTenantId === primary.id && c.status === 'DELETED' && (c.deletedAt || null) === (primary.deletedAt || null));
 
-function tenantCompanyLine(t) {
+function tenantCompanyText(t) {
   if (t.parentTenantId) {
     const primary = state.tenants.find(p => p.id === t.parentTenantId);
-    return `<div class="muted">${escapeHTML(T.companyOf({ name: primary?.name || t.parentTenantId }))}</div>`;
+    return T.companyOf({ name: primary?.name || t.parentTenantId });
   }
   if (t.status === 'DELETED') {
     const n = companiesDeletedWith(t).length;
-    return n ? `<div class="muted">${escapeHTML(T.deletedWith({ n }))}</div>` : '';
+    return n ? T.deletedWith({ n }) : '';
   }
   const used = 1 + companiesOf(t.id).length;
-  return used > 1 || t.maxCompanies > 1 ? `<div class="muted">${escapeHTML(T.companiesTag({ used, limit: t.maxCompanies }))}</div>` : '';
+  return used > 1 || t.maxCompanies > 1 ? T.companiesTag({ used, limit: t.maxCompanies }) : '';
 }
+
+function tenantCompanyLine(t) {
+  const text = tenantCompanyText(t);
+  return text ? `<div class="muted">${escapeHTML(text)}</div>` : '';
+}
+
+// Tenants from before channel bindings only carry their WhatsApp number as phoneNumberId.
+const tenantChannels = t => (t.channels?.length ? t.channels
+  : t.phoneNumberId ? [{ platform: 'WHATSAPP', externalId: t.phoneNumberId, hasAccessToken: true }] : []);
 
 const STATUS_FILTERS = ['all', 'ACTIVE', 'SUSPENDED', 'DELETED'];
 const STATUS_PILLS = { ACTIVE: 'pill--ok', SUSPENDED: 'pill--warn', DELETED: 'pill--bad' };
@@ -645,9 +686,9 @@ function renderTenants() {
         ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
       </div></div>
       <div class="tbl-wrap"><table class="tbl"><thead><tr>
-        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thSlug)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(state.filter === 'DELETED' ? T.thDeletedAt : T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
+        <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(state.filter === 'DELETED' ? T.thDeletedAt : T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
-      ${rows.length === 0 ? `<tr><td colspan="7">${tenantsEmptyHtml(q, counts)}</td></tr>` : rows.map(tenantRowHtml).join('')}
+      ${rows.length === 0 ? `<tr><td colspan="6">${tenantsEmptyHtml(q, counts)}</td></tr>` : rows.map(tenantRowHtml).join('')}
       </tbody></table></div></div>`;
   bindTenantActions();
 }
@@ -655,27 +696,14 @@ function renderTenants() {
 function tenantRowHtml(t) {
   const s = state.stats[t.slug] || {};
   const deleted = t.status === 'DELETED';
-  return `<tr>
-    <td class="name">${escapeHTML(t.name)}${tenantCompanyLine(t)}</td>
-    <td class="id">${escapeHTML(t.slug)}</td>
+  return `<tr data-tenant="${escapeHTML(t.slug)}">
+    <td class="name"><button class="tbl__open" type="button">${escapeHTML(t.name)}</button><div class="sub mono">${escapeHTML(t.slug)}</div>${tenantCompanyLine(t)}</td>
     <td>${channelBadges(t.channels)}</td>
     <td><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></td>
     <td class="num">${s.messages ?? '—'}</td>
-    <td class="mono muted">${fmtDate(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
-    <td class="right"><div class="actions">${deleted ? deletedTenantActions(t) : liveTenantActions(t)}</div></td>
+    <td class="mono muted">${dateCell(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
+    <td class="right"><div class="actions">${deleted ? deletedTenantActions(t) : `<button class="btn btn--sm" type="button" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>`}</div></td>
   </tr>`;
-}
-
-function liveTenantActions(t) {
-  const slug = escapeHTML(t.slug);
-  return `
-    <button class="btn btn--sm" data-open-dashboard="${slug}">${escapeHTML(T.openDashboard)}</button>
-    ${t.parentTenantId ? '' : `<button class="btn btn--sm btn--ghost" data-users="${slug}">${escapeHTML(T.users)}</button>`}
-    ${(t.enabledModules || []).includes('agents') ? `<button class="btn btn--sm btn--ghost" data-agents="${slug}">${escapeHTML(T.agents.action)}</button>` : ''}
-    <button class="btn btn--sm btn--ghost" data-edit="${slug}">${escapeHTML(T.edit)}</button>
-    ${t.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-suspend="${slug}">${escapeHTML(T.suspend)}</button>` : `<button class="btn btn--sm btn--accent" data-activate="${slug}">${escapeHTML(T.activate)}</button>`}
-    <button class="btn btn--sm btn--ghost" data-reload="${slug}">${escapeHTML(T.reload)}</button>
-    <button class="iconbtn iconbtn--danger" data-delete="${slug}" aria-label="${escapeHTML(T.delete)}" title="${escapeHTML(T.delete)}">×</button>`;
 }
 
 // A deleted company can't come back while its first company is deleted: it either returns with it or waits for it.
@@ -714,25 +742,24 @@ async function setTenantFilter(filter) {
 
 function channelBadges(channels = []) {
   if (!channels.length) return '<span class="muted">—</span>';
-  return `<div class="row" style="gap:6px; flex-wrap:wrap">${channels.map(c => {
+  return `<div class="tbl__pills">${channels.map(c => {
     const cls = c.platform === 'INSTAGRAM' ? 'pill--accent' : 'pill--info';
     const token = c.hasAccessToken ? T.token : T.noToken;
-    const label = c.displayName ? `${c.platform} · ${c.platform === 'INSTAGRAM' ? '@' : ''}${c.displayName}` : c.platform;
+    const label = c.displayName ? `${platformLabel(c.platform)} · ${c.platform === 'INSTAGRAM' ? '@' : ''}${c.displayName}` : platformLabel(c.platform);
     return `<span class="pill ${cls}" title="${escapeHTML(c.externalId)} · ${token}">${escapeHTML(label)}</span>`;
   }).join('')}</div>`;
 }
 
 function bindTenantActions() {
-  $$('[data-open-dashboard]').forEach(b => b.addEventListener('click', () => openDashboard(b.dataset.openDashboard)));
-  $$('[data-users]').forEach(b => b.addEventListener('click', () => usersDrawer(b.dataset.users)));
-  $$('[data-agents]').forEach(b => b.addEventListener('click', () => agentsDrawer(b.dataset.agents)));
-  $$('[data-edit]').forEach(b => b.addEventListener('click', () => tenantForm(state.tenants.find(t => t.slug === b.dataset.edit))));
-  $$('[data-suspend]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.suspend, 'suspend', T.suspendTitle, T.suspend)));
-  $$('[data-activate]').forEach(b => b.addEventListener('click', () => lifecycle(b.dataset.activate, 'activate', T.activateTitle, T.activate, false)));
-  $$('[data-reload]').forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(b.dataset.reload)}/reload`, { method: 'POST' }); toast(T.pipelineReloaded); }));
-  $$('[data-delete]').forEach(b => b.addEventListener('click', () => deleteTenant(b.dataset.delete)));
-  $$('[data-restore]').forEach(b => b.addEventListener('click', () => restoreTenant(b.dataset.restore)));
-  $$('[data-status-filter]').forEach(b => b.addEventListener('click', () => setTenantFilter(b.dataset.statusFilter)));
+  const view = $('#view');
+  $$('[data-open-dashboard]', view).forEach(b => b.addEventListener('click', () => openDashboard(b.dataset.openDashboard)));
+  $$('[data-restore]', view).forEach(b => b.addEventListener('click', () => restoreTenant(b.dataset.restore)));
+  $$('[data-status-filter]', view).forEach(b => b.addEventListener('click', () => setTenantFilter(b.dataset.statusFilter)));
+  $$('tr[data-tenant]', view).forEach(tr => tr.addEventListener('click', e => {
+    if (e.target.closest('button, a') && !e.target.closest('.tbl__open')) return;
+    $('.tbl__open', tr).focus();
+    tenantDrawer(tr.dataset.tenant);
+  }));
 }
 
 async function openDashboard(slug) {
@@ -743,29 +770,110 @@ async function openDashboard(slug) {
   } catch (e) { toast(T.error({ msg: e.message })); }
 }
 
-async function usersDrawer(slug) {
+async function reloadPipeline(slug) {
+  try {
+    await api(`/admin/api/tenants/${encodeURIComponent(slug)}/reload`, { method: 'POST' });
+    toast(T.pipelineReloaded);
+  } catch (e) { toast(T.error({ msg: e.message })); }
+}
+
+// A tenant opens as a record, like a client in /app. Edit, Users and Agents open from it with a way back.
+async function tenantDrawer(slug) {
+  const t = state.tenants.find(x => x.slug === slug);
+  if (!t) { closeDrawer(); return; }
+  if (!state.stats[slug]) Object.assign(state.stats, await statsFor([t]));
+  const R = T.record;
+  const s = state.stats[slug] || {};
+  const deleted = t.status === 'DELETED';
+  const num = new Intl.NumberFormat(I18N.locale());
+  const count = v => (v == null ? '—' : num.format(v));
+  const last = s.lastMessageAt ? new Date(s.lastMessageAt) : null;
+  const channels = tenantChannels(t);
+  const initials = (t.name || t.slug).split(/\s+/).filter(Boolean).slice(0, 2).map(w => w[0]).join('').toUpperCase();
+  const since = [
+    tenantCompanyText(t),
+    I18N.LANG_NAMES[t.locale] || t.locale,
+    t.openrouterModel ? R.model({ model: t.openrouterModel }) : R.defaultModel,
+    R.modulesCount({ on: selectedModulesFor(t).length, total: MODULES.length }),
+  ].filter(Boolean).join(' · ');
+  const kpi = (label, value, sub = '') => `<div class="record-kpi"><span class="record-kpi__label">${escapeHTML(label)}</span><span class="record-kpi__value">${escapeHTML(value)}</span>${sub ? `<span class="record-kpi__sub">${escapeHTML(sub)}</span>` : ''}</div>`;
+  const channelText = c => [c.displayName ? `${c.platform === 'INSTAGRAM' ? '@' : ''}${c.displayName}` : '', c.externalId].filter(Boolean).join(' · ');
+  const wrap = document.createElement('div');
+  wrap.className = 'record';
+  wrap.innerHTML = `
+    <section class="record-card">
+      <div class="record-card__head">
+        <span class="record-card__avatar" aria-hidden="true">${escapeHTML(initials)}</span>
+        <div class="record-card__who">
+          <div class="record-card__lines"><span class="record-card__line mono">${escapeHTML(t.slug)}</span><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></div>
+          <p class="record-card__since">${escapeHTML(since)}</p>
+        </div>
+        <div class="actions">${deleted ? deletedTenantActions(t) : `
+          <button class="btn btn--sm btn--ghost" type="button" data-act="edit">${escapeHTML(T.edit)}</button>
+          ${t.status === 'ACTIVE'
+            ? `<button class="btn btn--sm btn--ghost" type="button" data-act="suspend">${escapeHTML(T.suspend)}</button>`
+            : `<button class="btn btn--sm btn--accent" type="button" data-act="activate">${escapeHTML(T.activate)}</button>`}
+          <button class="btn btn--sm btn--ghost" type="button" data-act="delete">${escapeHTML(T.delete)}</button>`}
+        </div>
+      </div>
+      ${deleted ? `<p class="hint hint--warn">${escapeHTML(R.deletedOn({ date: fmtDate(t.deletedAt || t.updatedAt) }))}</p>` : `
+      <div class="record-card__contact">
+        <button class="btn btn--sm" type="button" data-act="dashboard">${escapeHTML(T.openDashboard)}</button>
+        ${t.parentTenantId ? '' : `<button class="btn btn--sm" type="button" data-act="users">${escapeHTML(T.users)}</button>`}
+        ${(t.enabledModules || []).includes('agents') ? `<button class="btn btn--sm" type="button" data-act="agents">${escapeHTML(T.agents.action)}</button>` : ''}
+        <button class="btn btn--sm btn--ghost" type="button" data-act="reload">${escapeHTML(R.reloadPipeline)}</button>
+      </div>`}
+    </section>
+    <div class="record-kpis" data-count="4">
+      ${kpi(T.kpiMessages, count(s.messages))}
+      ${kpi(T.thLastActivity, last ? fmtDay(last) : '—', last ? fmtTime(last) : '')}
+      ${kpi(T.ratePerHour, count(t.rateLimitPerHour))}
+      ${kpi(T.ratePerDay, count(t.rateLimitPerDay))}
+    </div>
+    <section class="panel">
+      <header class="panel__head"><h3 class="panel__title">${escapeHTML(T.channelsLabel)} <span class="tag">${channels.length}</span></h3></header>
+      <div class="panel__body">${channels.length
+        ? `<dl class="dash-facts">${channels.map(c => `<div><dt>${escapeHTML(platformLabel(c.platform))}</dt><dd>${escapeHTML(channelText(c))}${c.hasAccessToken ? '' : ` <span class="pill pill--warn">${escapeHTML(R.noToken)}</span>`}</dd></div>`).join('')}</dl>`
+        : `<p class="dash-empty">${escapeHTML(T.noChannels)}</p>`}</div>
+    </section>`;
+  const back = { label: t.name, open: () => tenantDrawer(slug) };
+  const on = (act, fn) => $(`[data-act="${act}"]`, wrap)?.addEventListener('click', fn);
+  on('edit', () => tenantForm(t, back));
+  on('users', () => usersDrawer(slug, back));
+  on('agents', () => agentsDrawer(slug, back));
+  on('dashboard', () => openDashboard(slug));
+  on('reload', () => reloadPipeline(slug));
+  on('suspend', async () => { if (await lifecycle(slug, 'suspend', T.suspendTitle, T.suspend)) tenantDrawer(slug); });
+  on('activate', async () => { if (await lifecycle(slug, 'activate', T.activateTitle, T.activate, false)) tenantDrawer(slug); });
+  on('delete', async () => { if (await deleteTenant(slug)) closeDrawer(); });
+  $('[data-restore]', wrap)?.addEventListener('click', async () => { if (await restoreTenant(slug)) tenantDrawer(slug); });
+  openDrawer({ title: t.name, body: wrap, autofocus: false });
+}
+
+async function usersDrawer(slug, back = null) {
   const users = await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users`);
   const tenant = state.tenants.find(t => t.slug === slug);
   const severalCompanies = tenant && (tenant.maxCompanies > 1 || companiesOf(tenant.id).length > 0);
   const wrap = document.createElement('div');
   wrap.className = 'form';
   wrap.innerHTML = `
-    ${severalCompanies ? `<p class="hint">${escapeHTML(T.usersAllCompanies)}</p>` : ''}
+    ${severalCompanies ? `<div class="hint">${escapeHTML(T.usersAllCompanies)}</div>` : ''}
     <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
       ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
-        <td class="name">${escapeHTML(u.email)}</td><td>${escapeHTML(u.role)}</td><td>${escapeHTML(u.status)}</td>
+        <td class="name">${escapeHTML(u.email)}</td><td>${escapeHTML(roleLabel(u.role))}</td><td><span class="pill ${u.status === 'ACTIVE' ? 'pill--ok' : ''}">${escapeHTML(T.userStatus[u.status] || u.status)}</span></td>
         <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">${escapeHTML(T.disable)}</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">${escapeHTML(T.activate)}</button>`}</td>
       </tr>`).join('')}
     </tbody></table></div></div>
     <div class="form__grid">
-      <div class="form__row"><label class="lbl">${escapeHTML(T.emailLabel)}</label><input class="inp" id="u-email" type="email" /></div>
-      <div class="form__row"><label class="lbl">${escapeHTML(T.tempPassword)}</label><input class="inp" id="u-password" type="password" /></div>
-      <div class="form__row"><label class="lbl">${escapeHTML(T.roleLabel)}</label><select class="sel" id="u-role"><option>TENANT_ADMIN</option><option>TENANT_MEMBER</option></select></div>
+      <div class="form__row"><label class="lbl" for="u-email">${escapeHTML(T.emailLabel)}</label><input class="inp" id="u-email" type="email" /></div>
+      <div class="form__row"><label class="lbl" for="u-password">${escapeHTML(T.tempPassword)}</label><input class="inp" id="u-password" type="password" /></div>
+      <div class="form__row"><label class="lbl" for="u-role">${escapeHTML(T.roleLabel)}</label><select class="sel" id="u-role">${['TENANT_ADMIN', 'TENANT_MEMBER'].map(r => `<option value="${r}">${escapeHTML(roleLabel(r))}</option>`).join('')}</select></div>
     </div>`;
   openDrawer({
     title: T.usersTitle({ slug }),
     body: wrap,
     saveLabel: T.createUser,
+    back,
     async onSave() {
       const email = $('#u-email', wrap).value.trim();
       const password = $('#u-password', wrap).value;
@@ -775,8 +883,8 @@ async function usersDrawer(slug) {
       toast(T.userCreated);
     },
   });
-  $$('[data-disable-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.disableUser}/disable`, { method: 'POST' }); toast(T.userDisabled); usersDrawer(slug); }));
-  $$('[data-activate-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.activateUser}/activate`, { method: 'POST' }); toast(T.userActivated); usersDrawer(slug); }));
+  $$('[data-disable-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.disableUser}/disable`, { method: 'POST' }); toast(T.userDisabled); usersDrawer(slug, back); }));
+  $$('[data-activate-user]', wrap).forEach(b => b.addEventListener('click', async () => { await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users/${b.dataset.activateUser}/activate`, { method: 'POST' }); toast(T.userActivated); usersDrawer(slug, back); }));
 }
 
 const AGENT_PILLS = { ACTIVE: 'pill--ok', PAUSED: 'pill--warn' };
@@ -793,7 +901,7 @@ function agentAdminRowHtml(a, num) {
   </tr>`;
 }
 
-async function agentsDrawer(slug) {
+async function agentsDrawer(slug, back = null) {
   const A = T.agents;
   const name = state.tenants.find(t => t.slug === slug)?.name || slug;
   const base = `/admin/api/tenants/${encodeURIComponent(slug)}/agents`;
@@ -840,6 +948,7 @@ async function agentsDrawer(slug) {
     body: wrap,
     saveLabel: A.saveLimits,
     autofocus: false,
+    back,
     async onSave() {
       // A cleared field keeps its limit: an empty input must not read as 0, which allows none.
       const limit = id => {
@@ -860,12 +969,12 @@ async function agentsDrawer(slug) {
     try {
       await api(`${base}/${pausing ? 'pause' : 'resume'}`, { method: 'POST' });
       toast(pausing ? A.pausedToast({ name }) : A.resumedToast({ name }));
-      agentsDrawer(slug);
+      agentsDrawer(slug, back);
     } catch (e) { toast(T.error({ msg: e.message })); }
   });
 }
 
-function tenantForm(editing) {
+function tenantForm(editing, back = null) {
   const wrap = document.createElement('form');
   wrap.className = 'form';
   wrap.innerHTML = `
@@ -879,33 +988,33 @@ function tenantForm(editing) {
       ${editing?.parentTenantId ? '' : `<div class="form__row form__row--full"><label class="lbl" for="t-companies">${escapeHTML(T.maxCompaniesLabel)}</label><input class="inp inp--mono" id="t-companies" type="number" min="1" max="20" value="${editing?.maxCompanies || 1}" /><div class="hint">${escapeHTML(T.maxCompaniesHint)}</div></div>`}
     </div>
     <div class="form__row">
-      <div class="row" style="justify-content:space-between">
-        <label class="lbl">${escapeHTML(T.modulesLabel)}</label>
-        <div class="row" style="gap:6px">
+      <div class="form__row-head">
+        <span class="lbl" id="modules-label">${escapeHTML(T.modulesLabel)}</span>
+        <div class="actions">
           <button class="btn btn--sm btn--ghost" type="button" id="modules-all">${escapeHTML(T.selectAllModules)}</button>
           <button class="btn btn--sm btn--ghost" type="button" id="modules-none">${escapeHTML(T.selectNoModules)}</button>
         </div>
       </div>
-      <div class="panel" style="padding:12px" id="modules-box"></div>
+      <div class="panel"><div class="panel__body"><div class="form__checks" id="modules-box" role="group" aria-labelledby="modules-label"></div></div></div>
       <div class="hint">${escapeHTML(T.modulesHint)}</div>
     </div>
     <div class="form__row">
-      <div class="row" style="justify-content:space-between">
-        <label class="lbl">${escapeHTML(T.channelsLabel)}</label>
-        <div class="row" style="gap:6px">
+      <div class="form__row-head">
+        <span class="lbl">${escapeHTML(T.channelsLabel)}</span>
+        <div class="actions">
           ${editing && state.whatsAppSignup.enabled ? `<button class="btn btn--sm btn--ghost" type="button" id="wa-connect">${escapeHTML(T.connectWhatsApp)}</button>` : ''}
           ${editing ? `<button class="btn btn--sm btn--ghost" type="button" id="ig-connect">${escapeHTML(T.connectInstagram)}</button>` : ''}
           <button class="btn btn--sm btn--ghost" type="button" id="add-channel">${escapeHTML(T.addChannel)}</button>
         </div>
       </div>
-      <div class="lines" id="channels-box">
-        <div class="lines__head" style="grid-template-columns:130px 1fr 1fr 32px"><span>${escapeHTML(T.colPlatform)}</span><span>${escapeHTML(T.colExternalId)}</span><span>${escapeHTML(T.colAccessToken)}</span><span></span></div>
+      <div class="lines lines--channels" id="channels-box">
+        <div class="lines__head"><span>${escapeHTML(T.colPlatform)}</span><span>${escapeHTML(T.colExternalId)}</span><span>${escapeHTML(T.colAccessToken)}</span><span></span></div>
         <div id="channels-body"></div>
       </div>
       <div class="hint">${escapeHTML(T.channelsHint)}</div>
     </div>`;
   // A new tenant starts with no channel row: bindings are optional and can be connected later.
-  const existingChannels = editing?.channels?.length ? editing.channels : (editing?.phoneNumberId ? [{ platform: 'WHATSAPP', externalId: editing.phoneNumberId, hasAccessToken: true }] : []);
+  const existingChannels = editing ? tenantChannels(editing) : [];
   existingChannels.forEach(c => addChannelRow(wrap, c));
   renderChannelsEmpty(wrap);
   renderModulesBox(wrap, editing);
@@ -923,6 +1032,7 @@ function tenantForm(editing) {
     title: editing ? T.editTenant({ slug: editing.slug }) : T.newTenant,
     body: wrap,
     saveLabel: editing ? T.saveChanges : T.createTenant,
+    back,
     async onSave() {
       const payload = {
         name: $('#t-name', wrap).value.trim(),
@@ -938,15 +1048,18 @@ function tenantForm(editing) {
       if (!payload.name) { toast(T.nameRequired); return false; }
       if (payload.channels.some(c => c.platform === 'INSTAGRAM' && !editing && !c.accessToken)) { toast(T.igNeedsToken); return false; }
       try {
+        let created = null;
         if (editing) {
           await api(`/admin/api/tenants/${encodeURIComponent(editing.slug)}`, { method: 'PUT', body: JSON.stringify(payload) });
           toast(T.tenantUpdated);
         } else {
-          await api('/admin/api/tenants', { method: 'POST', body: JSON.stringify({ ...payload, slug: $('#t-slug', wrap).value.trim() }) });
+          const slug = $('#t-slug', wrap).value.trim();
+          created = (await api('/admin/api/tenants', { method: 'POST', body: JSON.stringify({ ...payload, slug }) }))?.slug || slug;
           toast(T.botCreated);
         }
         await loadAll();
         renderTenants();
+        if (created) return () => tenantDrawer(created);
       } catch (e) {
         const slug = $('#t-slug', wrap).value.trim();
         if (e.code === 'slug_taken') toast(e.detail === 'DELETED' ? T.slugTakenDeleted({ slug }) : T.slugTaken({ slug }));
@@ -964,11 +1077,9 @@ function selectedModulesFor(editing) {
 
 function renderModulesBox(root, editing) {
   const selected = new Set(selectedModulesFor(editing));
-  $('#modules-box', root).innerHTML = `<div class="row" style="gap:10px; flex-wrap:wrap">
-    ${MODULES.map(m => `<label class="pill ${m.always ? 'pill--ok' : 'pill--info'}" style="cursor:${m.always ? 'not-allowed' : 'pointer'}">
+  $('#modules-box', root).innerHTML = MODULES.map(m => `<label class="form__check">
       <input type="checkbox" data-module="${m.id}" ${selected.has(m.id) ? 'checked' : ''} ${m.always ? 'disabled' : ''} /> ${escapeHTML(I18N.t('common.nav.' + m.id))}
-    </label>`).join('')}
-  </div>`;
+    </label>`).join('');
 }
 
 function collectModules(root) {
@@ -987,8 +1098,7 @@ function renderChannelsEmpty(root) {
   if (empty) return;
   const el = document.createElement('div');
   el.id = 'channels-empty';
-  el.className = 'muted';
-  el.style.padding = '10px 12px';
+  el.className = 'lines__empty';
   el.textContent = T.noChannels;
   body.parentElement.appendChild(el);
 }
@@ -996,14 +1106,12 @@ function renderChannelsEmpty(root) {
 function addChannelRow(root, channel = { platform: 'WHATSAPP', externalId: '', hasAccessToken: false }) {
   const row = document.createElement('div');
   row.className = 'line channel-row';
-  row.style.gridTemplateColumns = '130px 1fr 1fr 32px';
   row.innerHTML = `
-    <select class="sel" data-channel-platform>
-      <option value="WHATSAPP" ${channel.platform === 'WHATSAPP' ? 'selected' : ''}>WHATSAPP</option>
-      <option value="INSTAGRAM" ${channel.platform === 'INSTAGRAM' ? 'selected' : ''}>INSTAGRAM</option>
+    <select class="sel" data-channel-platform aria-label="${escapeHTML(T.colPlatform)}">
+      ${['WHATSAPP', 'INSTAGRAM'].map(p => `<option value="${p}" ${channel.platform === p ? 'selected' : ''}>${escapeHTML(platformLabel(p))}</option>`).join('')}
     </select>
-    <input class="inp inp--mono" data-channel-external value="${escapeHTML(channel.externalId || '')}" placeholder="${escapeHTML(T.chExternalPlaceholder)}" />
-    <input class="inp inp--mono" data-channel-token type="password" placeholder="${channel.hasAccessToken ? escapeHTML(T.chTokenUnchanged) : escapeHTML(T.chTokenPlaceholder)}" />
+    <input class="mono" data-channel-external value="${escapeHTML(channel.externalId || '')}" placeholder="${escapeHTML(T.chExternalPlaceholder)}" aria-label="${escapeHTML(T.colExternalId)}" />
+    <input class="mono" data-channel-token type="password" placeholder="${channel.hasAccessToken ? escapeHTML(T.chTokenUnchanged) : escapeHTML(T.chTokenPlaceholder)}" aria-label="${escapeHTML(T.colAccessToken)}" />
     <button class="l-rm" type="button" aria-label="${escapeHTML(T.removeChannel)}">×</button>
   `;
   row.querySelector('.l-rm').addEventListener('click', () => { row.remove(); renderChannelsEmpty(root); });
@@ -1155,8 +1263,9 @@ function otherCompaniesNote(slug) {
   return n > 0 ? ` ${T.cascadeNote({ n })}` : '';
 }
 
+// Resolves false when the confirm is cancelled; after that the list is refreshed either way.
 async function lifecycle(slug, action, title, okLabel, danger = true) {
-  if (!await confirmDialog({ title, body: T.tenantLine({ slug }) + otherCompaniesNote(slug), okLabel, danger })) return;
+  if (!await confirmDialog({ title, body: T.tenantLine({ slug }) + otherCompaniesNote(slug), okLabel, danger })) return false;
   try {
     await api(`/admin/api/tenants/${encodeURIComponent(slug)}/${action}`, { method: 'POST' });
   } catch (e) {
@@ -1164,30 +1273,37 @@ async function lifecycle(slug, action, title, okLabel, danger = true) {
   }
   await loadAll();
   renderTenants();
+  return true;
 }
 
+// Resolves true only when the tenant was deleted.
 async function deleteTenant(slug) {
   const name = state.tenants.find(t => t.slug === slug)?.name || slug;
-  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ name, slug }) + otherCompaniesNote(slug), okLabel: T.delete })) return;
+  if (!await confirmDialog({ title: T.deleteTitle, body: T.deleteBody({ name, slug }) + otherCompaniesNote(slug), okLabel: T.delete })) return false;
+  let ok = false;
   try {
     await api(`/admin/api/tenants/${encodeURIComponent(slug)}`, { method: 'DELETE' });
     toast(T.deleted({ name }));
+    ok = true;
   } catch (e) {
     toast(T.error({ msg: e.message }));
   }
   await loadAll();
   renderTenants();
+  return ok;
 }
 
 async function restoreTenant(slug) {
   const tenant = state.tenants.find(t => t.slug === slug);
-  if (!tenant) return;
+  if (!tenant) return false;
   const n = tenant.parentTenantId ? 0 : companiesDeletedWith(tenant).length;
   const body = T.restoreBody({ name: tenant.name, slug }) + (n ? ` ${T.restoreCompaniesNote({ n })}` : '');
-  if (!await confirmDialog({ title: T.restoreTitle, body, okLabel: T.restore, danger: false })) return;
+  if (!await confirmDialog({ title: T.restoreTitle, body, okLabel: T.restore, danger: false })) return false;
+  let ok = false;
   try {
     await api(`/admin/api/tenants/${encodeURIComponent(slug)}/restore`, { method: 'POST' });
     toast(T.restored({ name: tenant.name }));
+    ok = true;
   } catch (e) {
     const primary = state.tenants.find(p => p.id === tenant.parentTenantId);
     const messages = {
@@ -1199,6 +1315,7 @@ async function restoreTenant(slug) {
   }
   await loadAll();
   renderTenants();
+  return ok;
 }
 
 async function init() {
@@ -1221,7 +1338,12 @@ async function init() {
       e.preventDefault();
       $('#search').focus();
     }
-    if (e.key === 'Escape') { $('#drawer').hidden = true; $('#confirm').hidden = true; }
+    // A confirm opened from a drawer closes alone, as a cancel, so the drawer behind it stays.
+    if (e.key === 'Escape') {
+      const confirm = $('#confirm');
+      if (!confirm.hidden) $('[data-confirm-cancel]', confirm).click();
+      else closeDrawer();
+    }
   });
   if (!token) return renderLogin();
   try {

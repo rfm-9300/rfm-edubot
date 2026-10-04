@@ -65,9 +65,9 @@ Status `*-soft` values on dark are `rgba(color, 0.12)`.
 
 ## Layout skins (`html[data-layout]`)
 
-A second axis next to the theme. `classic` is everything above and is what the backoffice and `/admin` use. `minimal` is the `/app` skin (the "Clean Ops" look for tenants such as Family Clean): light-gray canvas, white cards, near-black text, yellow only for actions, selections and small highlights; no gradients, glow, textures or emoji.
+A second axis next to the theme. `classic` is everything above: the base layer. `minimal` is the skin of both product surfaces, `/app` and `/backoffice` (the "Clean Ops" look first made for tenants such as Family Clean): light-gray canvas, white cards, near-black text, yellow only for actions, selections and small highlights; no gradients, glow, textures or emoji.
 
-- The skin is fixed in markup: `/app/index.html` declares `<html data-layout="minimal">`; other pages declare nothing and stay classic. There is no layout switch (`theme.js` only handles the theme and fires `ui:theme`); an old `localStorage.uiLayout` value is ignored.
+- The skin is fixed in markup: `/app/index.html` and `/backoffice/index.html` declare `<html data-layout="minimal">` (the backoffice since 2026-10-04). `/admin` only redirects, so no page shows the classic layer on its own; change it only as the base the skin builds on. There is no layout switch (`theme.js` only handles the theme and fires `ui:theme`); an old `localStorage.uiLayout` value is ignored.
 - Minimal overrides tokens on `html[data-layout="minimal"]` (light) and `html[data-layout="minimal"][data-theme="dark"]`. The dark block must redeclare **every** color the light block sets — both selectors otherwise tie with `html[data-theme="dark"]` and the later one wins.
 
 | Token | Minimal light | Minimal dark |
@@ -122,7 +122,7 @@ Body: `14px / 1.5`, antialiased. Do not add a fourth family.
 | Uppercase label (`.lbl`, `.panel__title`, th) | 10.5–12px | 800 | sans, `letter-spacing: 0.05–0.08em`, uppercase |
 | KPI / ID / money | 12–13px | 500–600 | mono, `font-variant-numeric: tabular-nums` |
 
-The `/app` skin retunes a few roles: page title 30px / 700 (26px under 920px), stat value 20px / 700, panel title 15px / 600 display, nav item 13.5px / 600 (active 700), buttons 600, and sentence-case labels instead of uppercase. Sidebar money values use sans 700.
+The minimal skin retunes a few roles: page title 30px / 700 (26px under 920px), stat value 20px / 700, panel title 15px / 600 display, nav item 13.5px / 600 (active 700), buttons 600, and sentence-case labels instead of uppercase. Sidebar money values use sans 700.
 
 ## Radius
 
@@ -192,4 +192,4 @@ Classic resolves the tokens to `--accent` / `0 0 0 4px var(--accent-soft)`. The 
 - Light: three pastel radial blobs on `body::before` (violet, mint, coral).
 - Dark: 32px terminal grid from `--line-soft`, masked so it fades at top/bottom.
 
-Do not replace these with a solid fill unless removing texture on a specific inner surface (chat log already uses `--surface-2` / `--bg-deep`). The `/app` skin is the exception: it hides `body::before` and keeps a solid `--bg`.
+Do not replace these with a solid fill unless removing texture on a specific inner surface (chat log already uses `--surface-2` / `--bg-deep`). The minimal skin (`/app`, `/backoffice`) is the exception: it hides `body::before` and keeps a solid `--bg`.
