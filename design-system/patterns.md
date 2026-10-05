@@ -270,6 +270,10 @@ At `max-width: 920px`:
 
 Do not hide primary CTAs or the search field at this breakpoint.
 
+Phones:
+
+- At `700px` a `.tbl--stack` table shows one card per row, each value under its `data-label`, instead of scrolling sideways. Give every list table on a page people open from a phone `.tbl--stack` and label its cells.
+
 ## Widget (not the dashboard)
 
 `widget.css` / `widget.js` is an embed on third-party sites:

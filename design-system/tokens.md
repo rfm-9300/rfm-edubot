@@ -186,6 +186,7 @@ Classic resolves the tokens to `--accent` / `0 0 0 4px var(--accent-soft)`. The 
 | Body grid | `grid-template-columns: var(--sidebar) 1fr` |
 | Main breakpoint | `max-width: 920px` → single column, horizontal nav |
 | Secondary | `860px` settings rows, `760px` assistant, `620px` chat/asset picker |
+| Phone tables | `700px` `.tbl--stack` rows become cards (four columns of values, two under `560px`) |
 
 ## Background texture
 

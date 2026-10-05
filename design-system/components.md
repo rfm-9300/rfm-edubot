@@ -272,6 +272,22 @@ Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
 A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill.
 
+A table that has to read on a phone takes `.tbl--stack` (every backoffice table does) instead of scrolling sideways. Under 700px the head is hidden and each row becomes a card. A cell with `data-label` (its column heading, from the same catalog key as the `th`) shows that label above its value, and those cells share a grid of four columns, two under 560px. A cell without `data-label` spans the card: the row's name comes first, its actions last (left-aligned), and an empty state sits in the `colspan` cell. A long `.id` (a file name) spans too, an empty cell (no action on this row) disappears, and numbers align left.
+
+```html
+<table class="tbl tbl--stack">
+  <thead><tr><th>Name</th><th>Status</th><th class="right">Msgs</th><th class="right">Actions</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="name"><button class="tbl__open" type="button">Padaria Central</button><div class="sub mono">padaria-central</div></td>
+      <td data-label="Status"><span class="pill pill--ok">Active</span></td>
+      <td class="num" data-label="Msgs">12</td>
+      <td class="right"><div class="actions"><button class="btn btn--sm" type="button">Open dashboard</button></div></td>
+    </tr>
+  </tbody>
+</table>
+```
+
 In the minimal skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
 
 Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda.

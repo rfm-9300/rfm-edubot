@@ -56,6 +56,7 @@ Need copy?
 - [ ] Light and dark both readable (contrast on pills, buttons, empty states, tables)
 - [ ] `/app` and `/backoffice` screens checked in the minimal skin, light and dark
 - [ ] `max-width: 920px` does not overflow the shell
+- [ ] A 375px phone shows nothing that scrolls sideways (list tables take `.tbl--stack` and `data-label`)
 - [ ] Strings in all three catalogs; no raw UI literals in JS/HTML
 - [ ] Dynamic text escaped
 - [ ] Focus states use `border-color: var(--focus-border)` + `box-shadow: var(--focus-ring)`
