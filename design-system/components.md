@@ -352,7 +352,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 </form>
 ```
 
-- Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans.
+- Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans. Both are one column under 560px.
 - Fields: `.inp` `.sel` `.txt`. Money/IDs: `.inp--mono` `.inp--right`.
 - Labels: `.lbl` (sentence case in the minimal skin; uppercase only in the classic layer). Required: `.req`. Optional: `.opt`.
 - Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
@@ -384,7 +384,7 @@ Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, pay
 
 The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo keeps clipping as before.
 
-The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings and the same four columns on phones. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head. In the minimal skin `.lines__head` is sentence case like table heads.
+The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings. Under 560px a channel takes two lines, platform and external id over the access token, with remove beside both; the head follows the same grid, so "Access token" sits on its second line. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head. In the minimal skin `.lines__head` is sentence case like table heads.
 
 ```html
 <div class="line">
@@ -433,9 +433,11 @@ The footer is sticky and is the last thing in the body, directly or inside the d
 
 Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
+Under 920px the panel takes the full width with square corners; under 560px its head, body and footer use 16px side padding.
+
 `openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from another drawer (a record, an invoice…) through `openFrom(back, open)` stacks its opener on a trail and replaces the eyebrow with `.drawer__back` (the opener's name; the ← glyph is CSS). Back pops one step, and a drawer that closes itself after an action (save, mark paid, convert) reopens its opener with fresh data. Closing by hand (×, scrim, Escape) clears the trail and leaves.
 
-The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer.
+The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer. On a touch screen (`pointer: coarse`) it focuses × instead of the first field, so the keyboard doesn't open over the drawer. A long name in `.drawer__back` wraps left-aligned, the ← on its first line.
 
 ```html
 <div class="drawer__eyebrow"><button class="drawer__back" type="button" aria-label="Back to Ana Ribeiro">Ana Ribeiro</button></div>
@@ -522,7 +524,7 @@ Clients, suppliers and employees (and the backoffice's tenants, [patterns.md](pa
 </div>
 ```
 
-One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts.
+One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts. Under 560px a long toast wraps at the screen's width less 16px a side; centred from `left: 50%`, it would otherwise wrap at half the screen.
 
 ## Auth card
 

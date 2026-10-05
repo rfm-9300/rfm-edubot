@@ -145,7 +145,9 @@ function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true,
   }
   $$('[data-close]', root).forEach(b => { b.onclick = closeDrawer; });
   root.hidden = false;
-  setTimeout(() => (autofocus ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
+  // On a touch screen a focused field opens the keyboard over the drawer, so focus goes to × instead.
+  const intoField = autofocus && !matchMedia('(pointer: coarse)').matches;
+  setTimeout(() => (intoField ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
 }
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';

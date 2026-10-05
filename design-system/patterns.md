@@ -273,6 +273,8 @@ Do not hide primary CTAs or the search field at this breakpoint.
 Phones:
 
 - At `700px` a `.tbl--stack` table shows one card per row, each value under its `data-label`, instead of scrolling sideways. Give every list table on a page people open from a phone `.tbl--stack` and label its cells.
+- At `560px` forms drop to one column, the drawer's padding to 16px, line items and channel rows stack, and a long toast uses the screen's width.
+- On touch screens fields are 16px, so iOS doesn't zoom in on focus, and the backoffice opens a drawer with focus on × rather than in a field, so the keyboard stays closed.
 
 ## Widget (not the dashboard)
 
