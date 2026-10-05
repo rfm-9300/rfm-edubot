@@ -439,7 +439,9 @@ body.nav-open .nav-scrim {
 /* Last column, so the actions stay at the right edge when the search is hidden (backoffice views without a list). */
 .topbar__actions { display: flex; align-items: center; gap: 8px; grid-column: -2; }
 .topbar__search[hidden],
+.topbar #btn-nav[hidden],
 .topbar #btn-new[hidden],
+.topbar #btn-logout[hidden],
 .topbar #btn-notifications[hidden],
 .topbar #btn-account[hidden] { display: none; }
 

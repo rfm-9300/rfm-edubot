@@ -167,14 +167,28 @@ function prepareGoogleSignIn(config) {
   return googleSignIn;
 }
 
+// Signed out, the top bar keeps only the theme switch: the menu, search, New and Log out all need a session.
+// Signed in, setView shows search and New on the views that use them.
+function showSessionControls(on) {
+  $('#btn-nav').hidden = !on;
+  $('#btn-logout').hidden = !on;
+  if (!on) {
+    $('.topbar__search').hidden = true;
+    $('#btn-new').hidden = true;
+  }
+}
+
 async function startSession(newToken) {
   token = newToken;
   localStorage.setItem('adminToken', token);
   await loadAll();
-  renderTenants();
+  showSessionControls(true);
+  setView(location.hash.replace(/^#/, '') || 'tenants');
 }
 
 async function renderLogin() {
+  closeDrawer();
+  showSessionControls(false);
   const config = await fetch('/admin/auth/config').then(r => (r.ok ? r.json() : null)).catch(() => null);
   const google = config?.google || null;
   const passwordEnabled = config ? config.passwordEnabled : true;
@@ -277,6 +291,7 @@ async function loadPlatformSettings() {
 const VIEWS = ['tenants', 'admins', 'backups', 'settings'];
 
 function setView(view) {
+  if (!token) return;
   currentView = VIEWS.includes(view) ? view : 'tenants';
   stopBackupPolling();
   if (location.hash !== `#${currentView}`) location.hash = currentView;

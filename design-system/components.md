@@ -87,11 +87,11 @@ In the minimal skin the active item is a `--accent-soft` fill with a 3px `--acce
 </header>
 ```
 
-Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
+Order: crumb · search · actions. Theme button is always in actions. Below 920px search takes its own row under the crumb and actions.
 
 Neither `/app` nor `/backoffice` has a layout switch: the skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label` (`app.searchPlaceholder`, `backoffice.searchPlaceholder`).
 
-The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it.
+The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it. Signed out, it also hides the menu button (`#btn-nav`), Log out and New: only the theme switch stays.
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
