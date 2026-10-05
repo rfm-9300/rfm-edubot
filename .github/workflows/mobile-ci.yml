@@ -26,7 +26,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       # Kotlin/Native-only naming rules that the JVM and Android accept, so without this they are
       # only caught by the macOS job minutes later. Runs before the tests because it takes a second.
       - run: ./scripts/check-native-test-names.sh
@@ -43,7 +43,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       # Every module's unit tests, not a hand-kept list of three: a new feature module is covered
       # the moment it has a test.
       - run: ./gradlew testDebugUnitTest :androidApp:assembleDebug
@@ -59,5 +59,5 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
       - run: ./gradlew iosSimulatorArm64Test :shared:linkDebugFrameworkIosSimulatorArm64
