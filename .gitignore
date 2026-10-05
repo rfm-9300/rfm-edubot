@@ -16,6 +16,8 @@ mobile/.kotlin
 .claude
 .opencode
 /deploy.sh
-data/
+# Anchored: the local Mongo and PDF volumes live at the repo root. Unanchored, this also matched
+# mobile/core/data and silently kept that module out of every commit.
+/data/
 .playwright-mcp
 /src/main/resources/pdf/*

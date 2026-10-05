@@ -2,51 +2,46 @@ package com.rfm.edubot.mobile.feature.contacts
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.common.AppError
+import com.rfm.edubot.mobile.core.common.Outcome
+import com.rfm.edubot.mobile.core.data.InboxRepository
+import com.rfm.edubot.mobile.core.data.ResourceState
 import com.rfm.edubot.mobile.core.model.Contact
-import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
-data class ContactsUiState(
-    val contacts: List<Contact> = emptyList(),
-    val loading: Boolean = false,
-    val updatingId: String? = null,
-    val error: String? = null,
-)
-
 class ContactsViewModel(
-    private val api: DashboardApi,
-    private val token: String,
+    private val repository: InboxRepository,
     scopeOverride: CoroutineScope? = null,
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
-    private val mutableState = MutableStateFlow(ContactsUiState())
-    val state: StateFlow<ContactsUiState> = mutableState.asStateFlow()
 
-    fun load() = scope.launch {
-        mutableState.value = mutableState.value.copy(loading = true, error = null)
-        try {
-            mutableState.value = mutableState.value.copy(contacts = api.contacts(token), loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = "load")
-        }
+    val contacts: StateFlow<ResourceState<List<Contact>>> = repository.contacts.state
+
+    /** The contact whose block state is in flight, so its row can stop offering the action twice. */
+    private val mutablePending = MutableStateFlow<String?>(null)
+    val pending: StateFlow<String?> = mutablePending.asStateFlow()
+
+    /** A failed block, kept apart from a failed list load so one does not hide the other. */
+    private val mutableFailure = MutableStateFlow<AppError?>(null)
+    val failure: StateFlow<AppError?> = mutableFailure.asStateFlow()
+
+    fun load() = scope.launch { repository.contacts.load() }
+
+    fun refresh() = scope.launch {
+        mutableFailure.value = null
+        repository.contacts.refresh()
     }
 
-    fun toggleStatus(contact: Contact) = scope.launch {
-        if (mutableState.value.updatingId != null) return@launch
-        val next = if (contact.status == "BLOCKED") "ACTIVE" else "BLOCKED"
-        mutableState.value = mutableState.value.copy(updatingId = contact.id, error = null)
-        try {
-            val updated = api.updateContactStatus(token, contact.id, next)
-            mutableState.value = mutableState.value.copy(
-                contacts = mutableState.value.contacts.map { if (it.id == updated.id) updated else it },
-                updatingId = null,
-            )
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(updatingId = null, error = "update")
-        }
+    fun toggleBlocked(contact: Contact) = scope.launch {
+        if (mutablePending.value != null) return@launch
+        mutablePending.value = contact.id
+        mutableFailure.value = null
+        val result = repository.setContactStatus(contact, blocked = !contact.blocked)
+        mutablePending.value = null
+        if (result is Outcome.Failure) mutableFailure.value = result.error
     }
 }

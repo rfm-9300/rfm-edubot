@@ -5,13 +5,16 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            api(project(":core:common"))
             api(project(":core:model"))
             implementation(libs.coroutines.core)
             implementation(libs.ktor.client.core)
-            implementation(libs.ktor.client.auth)
             implementation(libs.ktor.client.content.negotiation)
-            implementation(libs.ktor.client.logging)
             implementation(libs.ktor.serialization.json)
+            implementation(libs.kotlinx.serialization.json)
+        }
+        commonTest.dependencies {
+            implementation(libs.ktor.client.mock)
             implementation(libs.kotlinx.serialization.json)
         }
         androidMain.dependencies {

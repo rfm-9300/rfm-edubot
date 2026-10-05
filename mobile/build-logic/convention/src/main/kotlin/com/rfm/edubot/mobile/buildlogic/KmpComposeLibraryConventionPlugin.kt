@@ -1,26 +1,59 @@
 package com.rfm.edubot.mobile.buildlogic
 
+import com.android.build.gradle.LibraryExtension
+import org.gradle.api.JavaVersion
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.artifacts.VersionCatalogsExtension
 import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 
+/**
+ * Compose Multiplatform library. Unlike [KmpLibraryConventionPlugin] it has no JVM target: nothing
+ * ships a desktop app, and a Compose JVM variant would only add resolution work to every consumer.
+ */
 class KmpComposeLibraryConventionPlugin : Plugin<Project> {
     override fun apply(target: Project) = with(target) {
         val libs = extensions.getByType<VersionCatalogsExtension>().named("libs")
         with(pluginManager) {
-            apply("edubot.kmp.library")
+            apply("com.android.library")
+            apply("org.jetbrains.kotlin.multiplatform")
+            apply("org.jetbrains.kotlin.plugin.serialization")
             apply("org.jetbrains.compose")
             apply("org.jetbrains.kotlin.plugin.compose")
         }
         extensions.configure<KotlinMultiplatformExtension> {
+            androidTarget {
+                compilerOptions {
+                    jvmTarget.set(JvmTarget.JVM_17)
+                }
+            }
+            iosArm64()
+            iosSimulatorArm64()
             sourceSets.named("commonMain") {
                 dependencies {
                     implementation(libs.findLibrary("lifecycle-viewmodel").get())
                     implementation(libs.findLibrary("lifecycle-viewmodel-compose").get())
                 }
+            }
+            sourceSets.named("commonTest") {
+                dependencies {
+                    implementation(kotlin("test"))
+                    implementation(libs.findLibrary("coroutines-test").get())
+                }
+            }
+        }
+        extensions.configure<LibraryExtension> {
+            namespace = "com.rfm.edubot.mobile" + target.path.replace(":", ".")
+            compileSdk = libs.findVersion("android-compileSdk").get().requiredVersion.toInt()
+            defaultConfig {
+                minSdk = libs.findVersion("android-minSdk").get().requiredVersion.toInt()
+            }
+            compileOptions {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
             }
         }
     }

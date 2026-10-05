@@ -1,14 +1,16 @@
 package com.rfm.edubot.mobile.feature.assistant
 
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.rfm.edubot.mobile.core.common.AppError
+import com.rfm.edubot.mobile.core.common.Outcome
 import com.rfm.edubot.mobile.core.common.VoiceInput
 import com.rfm.edubot.mobile.core.common.VoiceInputError
 import com.rfm.edubot.mobile.core.common.VoiceInputState
+import com.rfm.edubot.mobile.core.data.AssistantRepository
 import com.rfm.edubot.mobile.core.model.AssistantMessage
 import com.rfm.edubot.mobile.core.model.AssistantThread
 import com.rfm.edubot.mobile.core.model.AssistantThreadDetail
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import com.rfm.edubot.mobile.core.network.DashboardApi
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -22,15 +24,14 @@ data class AssistantUiState(
     val detail: AssistantThreadDetail? = null,
     val loading: Boolean = false,
     val busy: Boolean = false,
-    val error: Boolean = false,
+    val error: AppError? = null,
     val draft: String = "",
     val voiceState: VoiceInputState = VoiceInputState.Idle,
     val voiceError: VoiceInputError? = null,
 )
 
 class AssistantViewModel(
-    private val api: DashboardApi,
-    private val token: String,
+    private val repository: AssistantRepository,
     private val locale: String,
     private val voiceInput: VoiceInput,
     scopeOverride: CoroutineScope? = null,
@@ -64,31 +65,42 @@ class AssistantViewModel(
     }
 
     fun load() = scope.launch {
-        mutableState.value = mutableState.value.copy(loading = true, error = false)
-        try {
-            val threads = api.assistantThreads(token)
-            val detail = threads.firstOrNull()?.let { api.assistantThread(token, it.id) }
-            mutableState.value = AssistantUiState(threads = threads, detail = detail)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = true)
+        mutableState.update { it.copy(loading = true, error = null) }
+        when (val threads = repository.threads()) {
+            is Outcome.Failure -> mutableState.update { it.copy(loading = false, error = threads.error) }
+            is Outcome.Success -> {
+                val first = threads.value.firstOrNull()
+                val detail = first?.let { repository.thread(it.id).valueOrNull }
+                mutableState.value = AssistantUiState(threads = threads.value, detail = detail)
+            }
         }
     }
 
-    fun createThread() = scope.launch {
+    fun selectThread(thread: AssistantThread) = scope.launch {
+        if (mutableState.value.detail?.thread?.id == thread.id) return@launch
         voiceInput.cancel()
-        mutableState.value = mutableState.value.copy(busy = true)
-        try {
-            val thread = api.createAssistantThread(token, "New conversation")
-            mutableState.value = mutableState.value.copy(
-                threads = listOf(thread) + mutableState.value.threads,
-                detail = AssistantThreadDetail(thread, emptyList()),
-                busy = false,
-                draft = "",
-                voiceState = VoiceInputState.Idle,
-                voiceError = null,
-            )
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(busy = false, error = true)
+        mutableState.update { it.copy(loading = true, error = null, draft = "") }
+        when (val detail = repository.thread(thread.id)) {
+            is Outcome.Success -> mutableState.update { it.copy(detail = detail.value, loading = false) }
+            is Outcome.Failure -> mutableState.update { it.copy(loading = false, error = detail.error) }
+        }
+    }
+
+    fun createThread(title: String) = scope.launch {
+        voiceInput.cancel()
+        mutableState.update { it.copy(busy = true, error = null) }
+        when (val thread = repository.createThread(title)) {
+            is Outcome.Success -> mutableState.update {
+                it.copy(
+                    threads = listOf(thread.value) + it.threads,
+                    detail = AssistantThreadDetail(thread.value, emptyList()),
+                    busy = false,
+                    draft = "",
+                    voiceState = VoiceInputState.Idle,
+                    voiceError = null,
+                )
+            }
+            is Outcome.Failure -> mutableState.update { it.copy(busy = false, error = thread.error) }
         }
     }
 
@@ -103,7 +115,7 @@ class AssistantViewModel(
             voiceInput.stop()
         } else {
             voiceDraftPrefix = mutableState.value.draft
-            mutableState.value = mutableState.value.copy(voiceError = null)
+            mutableState.update { it.copy(voiceError = null) }
             voiceInput.start(locale)
         }
     }
@@ -112,6 +124,7 @@ class AssistantViewModel(
         val detail = mutableState.value.detail ?: return@launch
         val content = mutableState.value.draft.trim()
         if (content.isBlank() || mutableState.value.busy) return@launch
+        // Shown immediately so the question does not vanish while the model thinks.
         val optimistic = AssistantMessage(
             id = "local-${Random.nextLong()}",
             role = "user",
@@ -121,37 +134,29 @@ class AssistantViewModel(
         mutableState.update {
             it.copy(
                 busy = true,
-                error = false,
+                error = null,
                 draft = "",
                 voiceState = VoiceInputState.Idle,
                 voiceError = null,
-                detail = (it.detail ?: detail).copy(messages = (it.detail ?: detail).messages + optimistic),
+                detail = (it.detail ?: detail).let { live -> live.copy(messages = live.messages + optimistic) },
             )
         }
         voiceInput.cancel()
-        try {
-            val sent = api.sendAssistantMessage(token, detail.thread.id, content)
-            mutableState.update { it.copy(detail = sent, busy = false) }
-        } catch (_: Exception) {
-            mutableState.update {
-                it.copy(
-                    detail = detail,
-                    draft = content,
-                    busy = false,
-                    error = true,
-                )
+        when (val sent = repository.send(detail.thread.id, content)) {
+            is Outcome.Success -> mutableState.update { it.copy(detail = sent.value, busy = false) }
+            is Outcome.Failure -> mutableState.update {
+                it.copy(detail = detail, draft = content, busy = false, error = sent.error)
             }
         }
     }
 
-    fun decide(actionId: String, decision: String) = scope.launch {
+    fun decide(actionId: String, confirm: Boolean) = scope.launch {
         val detail = mutableState.value.detail ?: return@launch
         if (mutableState.value.busy) return@launch
-        mutableState.value = mutableState.value.copy(busy = true)
-        try {
-            mutableState.value = mutableState.value.copy(detail = api.decideAssistantAction(token, detail.thread.id, actionId, decision), busy = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(busy = false, error = true)
+        mutableState.update { it.copy(busy = true, error = null) }
+        when (val decided = repository.decide(detail.thread.id, actionId, confirm)) {
+            is Outcome.Success -> mutableState.update { it.copy(detail = decided.value, busy = false) }
+            is Outcome.Failure -> mutableState.update { it.copy(busy = false, error = decided.error) }
         }
     }
 

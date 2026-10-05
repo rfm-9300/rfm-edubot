@@ -8,11 +8,14 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
@@ -33,68 +36,169 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.rfm.edubot.mobile.core.common.VoiceInput
 import com.rfm.edubot.mobile.core.common.VoiceInputState
-import com.rfm.edubot.mobile.core.localization.MobileCopy
-import com.rfm.edubot.mobile.core.network.DashboardApi
-import com.rfm.edubot.mobile.core.ui.BotColor
+import com.rfm.edubot.mobile.core.data.AssistantRepository
+import com.rfm.edubot.mobile.core.localization.Strings
+import com.rfm.edubot.mobile.core.localization.Txt
+import com.rfm.edubot.mobile.core.model.AssistantAction
+import com.rfm.edubot.mobile.core.ui.Badge
+import com.rfm.edubot.mobile.core.ui.BotColors
 import com.rfm.edubot.mobile.core.ui.BotField
+import com.rfm.edubot.mobile.core.ui.BotSpace
+import com.rfm.edubot.mobile.core.ui.Chip
+import com.rfm.edubot.mobile.core.ui.EmptyState
 import com.rfm.edubot.mobile.core.ui.ErrorPanel
-import com.rfm.edubot.mobile.core.ui.InfoPanel
 import com.rfm.edubot.mobile.core.ui.LoadingScreen
 import com.rfm.edubot.mobile.core.ui.MessageBubble
+import com.rfm.edubot.mobile.core.ui.Panel
 import com.rfm.edubot.mobile.core.ui.PrimaryButton
 import com.rfm.edubot.mobile.core.ui.ScreenHeader
 import com.rfm.edubot.mobile.core.ui.SecondaryButton
-import com.rfm.edubot.mobile.core.ui.StatusLabel
+import com.rfm.edubot.mobile.core.ui.Tone
+import com.rfm.edubot.mobile.core.ui.toneForStatus
 
+/**
+ * The AI assistant.
+ *
+ * Adds a thread switcher: the screen only ever showed the newest thread, so earlier conversations
+ * were unreachable from the phone even though the backend keeps them.
+ */
 @Composable
-fun AssistantScreen(api: DashboardApi, voiceInput: VoiceInput, token: String, locale: String, strings: MobileCopy, padding: PaddingValues) {
-    val vm = viewModel<AssistantViewModel>(key = "assistant:$token:$locale", factory = viewModelFactory { initializer { AssistantViewModel(api, token, locale, voiceInput) } })
+fun AssistantScreen(
+    repository: AssistantRepository,
+    voiceInput: VoiceInput,
+    strings: Strings,
+    locale: String,
+    padding: PaddingValues,
+) {
+    val vm = viewModel<AssistantViewModel>(
+        key = "assistant:$locale",
+        factory = viewModelFactory { initializer { AssistantViewModel(repository, locale, voiceInput) } },
+    )
     val assistant by vm.state.collectAsState()
     LaunchedEffect(vm) { vm.load() }
-    Column(Modifier.fillMaxSize().padding(padding)) {
-        ScreenHeader(strings.assistant.uppercase(), strings.assistant) { PrimaryButton("+ ${strings.newConversation}", vm::createThread, enabled = !assistant.busy) }
-        val detail = assistant.detail
-        if (detail == null) {
-            if (assistant.loading) LoadingScreen() else InfoPanel(strings.noAssistantThreads, strings.startAssistantThread)
-        } else {
-            LazyColumn(Modifier.weight(1f).padding(horizontal = 20.dp), verticalArrangement = Arrangement.spacedBy(10.dp), contentPadding = PaddingValues(vertical = 16.dp)) {
-                items(detail.messages, key = { it.id }) { message ->
-                    MessageBubble(message.role == "user", message.content, message.createdAt)
-                    message.action?.let { action ->
-                        Surface(color = BotColor.Panel, shape = RoundedCornerShape(12.dp), border = BorderStroke(1.dp, BotColor.Border)) {
-                            Column(Modifier.padding(14.dp)) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(action.toolName, style = MaterialTheme.typography.titleMedium)
-                                    StatusLabel(action.status, if (action.status == "PENDING") BotColor.Warning else BotColor.Success)
-                                }
-                                if (action.status == "PENDING") Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    SecondaryButton(strings.cancel, { vm.decide(action.id, "cancel") }, !assistant.busy)
-                                    PrimaryButton(strings.confirm, { vm.decide(action.id, "confirm") }, enabled = !assistant.busy)
-                                }
-                            }
-                        }
-                    }
+
+    val detail = assistant.detail
+    val listState = rememberLazyListState()
+    LaunchedEffect(detail?.messages?.size) {
+        val count = detail?.messages?.size ?: 0
+        if (count > 0) listState.animateScrollToItem(count - 1)
+    }
+
+    Column(Modifier.fillMaxSize().padding(padding).imePadding()) {
+        ScreenHeader(strings[Txt.NAV_GROUP_AUTOMATION], strings[Txt.ASSISTANT_TITLE]) {
+            PrimaryButton(
+                text = strings[Txt.ACTION_NEW],
+                onClick = { vm.createThread(strings[Txt.ASSISTANT_NEW_THREAD]) },
+                enabled = !assistant.busy,
+            )
+        }
+        if (assistant.threads.size > 1) {
+            LazyRow(
+                Modifier.padding(horizontal = BotSpace.xl, vertical = BotSpace.sm),
+                horizontalArrangement = Arrangement.spacedBy(BotSpace.sm),
+            ) {
+                items(assistant.threads, key = { it.id }) { thread ->
+                    Chip(
+                        label = thread.title.ifBlank { strings[Txt.LABEL_UNTITLED] },
+                        selected = detail?.thread?.id == thread.id,
+                        onClick = { vm.selectThread(thread) },
+                    )
                 }
             }
-            assistant.voiceError?.let { ErrorPanel(strings.voiceError(it)) }
-            AssistantComposer(
-                draft = assistant.draft,
-                onDraft = vm::updateDraft,
-                strings = strings,
-                sending = assistant.busy,
-                voiceState = assistant.voiceState,
-                onVoice = vm::toggleVoice,
-                onSend = vm::send,
+        }
+        assistant.error?.let { ErrorPanel(strings.error(it)) }
+
+        if (detail == null) {
+            if (assistant.loading) {
+                LoadingScreen()
+            } else {
+                EmptyState(strings[Txt.ASSISTANT_EMPTY], strings[Txt.ASSISTANT_START_THREAD])
+            }
+            return@Column
+        }
+
+        LazyColumn(
+            Modifier.weight(1f).padding(horizontal = BotSpace.xl),
+            state = listState,
+            verticalArrangement = Arrangement.spacedBy(BotSpace.sm),
+            contentPadding = PaddingValues(vertical = BotSpace.lg),
+        ) {
+            items(detail.messages, key = { it.id }) { message ->
+                MessageBubble(
+                    text = message.content,
+                    stamp = message.createdAt,
+                    fromCustomer = message.role == "user",
+                )
+                message.action?.let { action ->
+                    Spacer(Modifier.height(BotSpace.sm))
+                    ActionCard(action, strings, assistant.busy, vm::decide)
+                }
+            }
+        }
+        assistant.voiceError?.let { ErrorPanel(strings.voiceError(it)) }
+        Composer(
+            draft = assistant.draft,
+            onDraft = vm::updateDraft,
+            strings = strings,
+            sending = assistant.busy,
+            voiceState = assistant.voiceState,
+            onVoice = vm::toggleVoice,
+            onSend = vm::send,
+        )
+    }
+}
+
+/** A tool call the assistant proposed. Nothing happens until somebody confirms it. */
+@Composable
+private fun ActionCard(
+    action: AssistantAction,
+    strings: Strings,
+    busy: Boolean,
+    onDecide: (String, Boolean) -> Unit,
+) = Panel(tone = if (action.pending) Tone.Warn else Tone.Neutral) {
+    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        Text(
+            action.toolName,
+            Modifier.weight(1f),
+            style = MaterialTheme.typography.titleSmall,
+            color = BotColors.ink,
+        )
+        Badge(strings.status(action.status), toneForStatus(action.status))
+    }
+    action.preview?.takeIf { it.isNotBlank() }?.let {
+        Spacer(Modifier.height(BotSpace.xs))
+        Text(it, style = MaterialTheme.typography.bodySmall, color = BotColors.inkSecondary)
+    }
+    if (action.pending) {
+        Spacer(Modifier.height(BotSpace.md))
+        Text(
+            strings[Txt.ASSISTANT_ACTION_PENDING],
+            style = MaterialTheme.typography.bodySmall,
+            color = BotColors.warnInk,
+        )
+        Spacer(Modifier.height(BotSpace.sm))
+        Row(horizontalArrangement = Arrangement.spacedBy(BotSpace.sm)) {
+            PrimaryButton(
+                text = strings[Txt.ACTION_CONFIRM],
+                onClick = { onDecide(action.id, true) },
+                modifier = Modifier.weight(1f),
+                enabled = !busy,
+            )
+            SecondaryButton(
+                text = strings[Txt.ACTION_CANCEL],
+                onClick = { onDecide(action.id, false) },
+                modifier = Modifier.weight(1f),
+                enabled = !busy,
             )
         }
     }
 }
 
 @Composable
-private fun AssistantComposer(
+private fun Composer(
     draft: String,
     onDraft: (String) -> Unit,
-    strings: MobileCopy,
+    strings: Strings,
     sending: Boolean,
     voiceState: VoiceInputState,
     onVoice: () -> Unit,
@@ -102,19 +206,45 @@ private fun AssistantComposer(
 ) {
     val listening = voiceState is VoiceInputState.Listening
     val requestingPermission = voiceState is VoiceInputState.RequestingPermission
-    Surface(color = BotColor.Surface, border = BorderStroke(1.dp, BotColor.Border)) {
-        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            BotField(draft, onDraft, strings.message, Modifier.fillMaxWidth(), singleLine = false)
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+    Surface(color = BotColors.surface, border = BorderStroke(1.dp, BotColors.line)) {
+        Column(
+            Modifier.fillMaxWidth().padding(BotSpace.md),
+            verticalArrangement = Arrangement.spacedBy(BotSpace.sm),
+        ) {
+            BotField(
+                value = draft,
+                onValueChange = onDraft,
+                label = strings[Txt.ASSISTANT_PROMPT_PLACEHOLDER],
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = false,
+            )
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                if (listening) {
+                    Text(
+                        strings[Txt.VOICE_LISTENING],
+                        style = MaterialTheme.typography.labelMedium,
+                        color = BotColors.badInk,
+                    )
+                    Spacer(Modifier.width(BotSpace.sm))
+                }
                 IconButton(onClick = onVoice, enabled = !sending && !requestingPermission) {
                     Icon(
                         imageVector = if (listening) Icons.Filled.Stop else Icons.Filled.Mic,
-                        contentDescription = if (listening) strings.stopListening else strings.voice,
-                        tint = if (listening) BotColor.Danger else BotColor.Accent,
+                        contentDescription = strings[if (listening) Txt.VOICE_STOP else Txt.VOICE_START],
+                        tint = if (listening) BotColors.bad else BotColors.accentDeep,
                     )
                 }
-                Spacer(Modifier.width(8.dp))
-                PrimaryButton(strings.send, onSend, enabled = draft.isNotBlank() && !sending && !listening)
+                Spacer(Modifier.width(BotSpace.sm))
+                PrimaryButton(
+                    text = strings[Txt.ACTION_SEND],
+                    onClick = onSend,
+                    enabled = draft.isNotBlank() && !listening,
+                    busy = sending,
+                )
             }
         }
     }

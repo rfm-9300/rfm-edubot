@@ -1,203 +1,299 @@
 package com.rfm.edubot.mobile.core.network
 
+import com.rfm.edubot.mobile.core.model.Account
+import com.rfm.edubot.mobile.core.model.Agent
+import com.rfm.edubot.mobile.core.model.AgentApproval
+import com.rfm.edubot.mobile.core.model.AgentRun
+import com.rfm.edubot.mobile.core.model.AgentTask
+import com.rfm.edubot.mobile.core.model.AgentsOverview
+import com.rfm.edubot.mobile.core.model.ApproveAction
+import com.rfm.edubot.mobile.core.model.AssistantPrompt
 import com.rfm.edubot.mobile.core.model.AssistantThread
 import com.rfm.edubot.mobile.core.model.AssistantThreadDetail
+import com.rfm.edubot.mobile.core.model.AvailabilityRule
+import com.rfm.edubot.mobile.core.model.Booking
+import com.rfm.edubot.mobile.core.model.BookingService
 import com.rfm.edubot.mobile.core.model.CatalogItem
+import com.rfm.edubot.mobile.core.model.ClientService
 import com.rfm.edubot.mobile.core.model.Contact
 import com.rfm.edubot.mobile.core.model.Conversation
+import com.rfm.edubot.mobile.core.model.ConvertQuote
+import com.rfm.edubot.mobile.core.model.CreateBooking
 import com.rfm.edubot.mobile.core.model.CreateInvoice
 import com.rfm.edubot.mobile.core.model.CreateQuote
 import com.rfm.edubot.mobile.core.model.CrmClient
 import com.rfm.edubot.mobile.core.model.DashboardIdentity
+import com.rfm.edubot.mobile.core.model.Employee
 import com.rfm.edubot.mobile.core.model.Invoice
+import com.rfm.edubot.mobile.core.model.InvoiceClientServices
+import com.rfm.edubot.mobile.core.model.LocaleChange
+import com.rfm.edubot.mobile.core.model.NewAssistantThread
+import com.rfm.edubot.mobile.core.model.Notifications
 import com.rfm.edubot.mobile.core.model.Overview
+import com.rfm.edubot.mobile.core.model.Payment
 import com.rfm.edubot.mobile.core.model.Persona
+import com.rfm.edubot.mobile.core.model.PersonaReply
+import com.rfm.edubot.mobile.core.model.PersonaSourceText
+import com.rfm.edubot.mobile.core.model.PersonaTest
+import com.rfm.edubot.mobile.core.model.PersonaUpdate
 import com.rfm.edubot.mobile.core.model.Quote
+import com.rfm.edubot.mobile.core.model.QuoteStatusChange
+import com.rfm.edubot.mobile.core.model.RejectAction
+import com.rfm.edubot.mobile.core.model.SaveCatalogItem
+import com.rfm.edubot.mobile.core.model.SaveClient
+import com.rfm.edubot.mobile.core.model.SaveTask
 import com.rfm.edubot.mobile.core.model.Session
+import com.rfm.edubot.mobile.core.model.StartedConversation
+import com.rfm.edubot.mobile.core.model.Supplier
+import com.rfm.edubot.mobile.core.model.SwitchedCompany
 import com.rfm.edubot.mobile.core.model.ThreadMessage
+import com.rfm.edubot.mobile.core.model.ThreadUpdates
+import com.rfm.edubot.mobile.core.model.TimeSlot
+import com.rfm.edubot.mobile.core.model.UpdateBooking
 import com.rfm.edubot.mobile.core.model.WebWidget
-import io.ktor.client.HttpClient
-import io.ktor.client.call.body
-import io.ktor.client.plugins.contentnegotiation.ContentNegotiation
-import io.ktor.client.request.bearerAuth
-import io.ktor.client.request.get
-import io.ktor.client.request.patch
-import io.ktor.client.request.post
-import io.ktor.client.request.put
-import io.ktor.client.request.setBody
-import io.ktor.client.statement.HttpResponse
-import io.ktor.client.statement.bodyAsText
-import io.ktor.http.ContentType
-import io.ktor.http.contentType
-import io.ktor.http.isSuccess
-import io.ktor.serialization.kotlinx.json.json
+import com.rfm.edubot.mobile.core.model.WhatsAppTemplate
+import io.ktor.http.HttpMethod
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
 
-class KtorDashboardApi(
-    private val baseUrl: String,
-) : DashboardApi {
-    private val client = HttpClient {
-        install(ContentNegotiation) {
-            json(Json { ignoreUnknownKeys = true; explicitNulls = false })
-        }
-    }
-    override suspend fun login(email: String, password: String): Session = request {
-        client.post("${baseUrl.trimEnd('/')}/app/auth/login") {
-            contentType(ContentType.Application.Json)
-            setBody(LoginRequest(email.trim(), password))
-        }
-    }
+private const val APP = "app/api"
 
-    override suspend fun me(token: String): DashboardIdentity = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/me") {
-            bearerAuth(token)
-        }
-    }
+class KtorSessionApi(private val http: DashboardHttpClient) : SessionApi {
+    override suspend fun login(email: String, password: String): Session =
+        http.postUnauthenticated("app/auth/login", LoginRequest(email.trim(), password))
 
-    override suspend fun overview(token: String): Overview = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/overview") {
-            bearerAuth(token)
-        }
-    }
+    override suspend fun me(): DashboardIdentity = http.get("$APP/me")
 
-    override suspend fun contacts(token: String): List<Contact> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/contacts") { bearerAuth(token) }
-    }
+    override suspend fun switchCompany(companyId: String): SwitchedCompany =
+        http.post("$APP/companies/$companyId/switch")
+}
 
-    override suspend fun updateContactStatus(token: String, contactId: String, status: String): Contact = request {
-        client.patch("${baseUrl.trimEnd('/')}/app/api/contacts/$contactId/status") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(ContactStatusRequest(status))
-        }
-    }
+class KtorOverviewApi(private val http: DashboardHttpClient) : OverviewApi {
+    override suspend fun overview(extended: Boolean): Overview =
+        http.get("$APP/overview", "extended" to if (extended) "1" else null)
+}
 
-    override suspend fun conversations(token: String): List<Conversation> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/conversations") { bearerAuth(token) }
-    }
+class KtorInboxApi(private val http: DashboardHttpClient) : InboxApi {
+    override suspend fun conversations(query: String?): List<Conversation> =
+        http.get("$APP/conversations", "q" to query?.takeIf { it.isNotBlank() })
 
-    override suspend fun messages(token: String, conversationId: String): List<ThreadMessage> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/conversations/$conversationId/messages") { bearerAuth(token) }
-    }
+    override suspend fun messages(conversationId: String): List<ThreadMessage> =
+        http.get("$APP/conversations/$conversationId/messages")
 
-    override suspend fun sendMessage(token: String, conversationId: String, text: String, assetExternalId: String): ThreadMessage = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/conversations/$conversationId/messages") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(OutboundMessageRequest(text, assetExternalId))
-        }
-    }
+    override suspend fun updates(conversationId: String, since: String?): ThreadUpdates =
+        http.get("$APP/conversations/$conversationId/updates", "since" to since)
 
-    override suspend fun assistantThreads(token: String): List<AssistantThread> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/assistant/threads") { bearerAuth(token) }
-    }
+    override suspend fun markRead(conversationId: String): Conversation =
+        http.post("$APP/conversations/$conversationId/read")
 
-    override suspend fun createAssistantThread(token: String, title: String): AssistantThread = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/assistant/threads") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(CreateAssistantThreadRequest(title))
-        }
-    }
+    override suspend fun setAutoReply(conversationId: String, enabled: Boolean): Conversation =
+        http.patch("$APP/conversations/$conversationId/auto-reply", AutoReplyRequest(enabled))
 
-    override suspend fun assistantThread(token: String, threadId: String): AssistantThreadDetail = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/assistant/threads/$threadId") { bearerAuth(token) }
-    }
+    override suspend fun sendMessage(conversationId: String, text: String, assetExternalId: String?): ThreadMessage =
+        http.post("$APP/conversations/$conversationId/messages", OutboundMessageRequest(text, assetExternalId))
 
-    override suspend fun sendAssistantMessage(token: String, threadId: String, content: String): AssistantThreadDetail = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/assistant/threads/$threadId/messages") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(AssistantMessageRequest(content))
-        }
-    }
+    override suspend fun retryMessage(conversationId: String, messageId: String): ThreadMessage =
+        http.post("$APP/conversations/$conversationId/messages/$messageId/retry")
 
-    override suspend fun decideAssistantAction(token: String, threadId: String, actionId: String, decision: String): AssistantThreadDetail = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/assistant/threads/$threadId/actions/$actionId/$decision") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(emptyMap<String, String>())
-        }
+    override suspend fun sendTemplate(
+        conversationId: String,
+        name: String,
+        language: String,
+        params: Map<String, String>,
+    ): ThreadMessage = http.post("$APP/conversations/$conversationId/template", TemplateSendRequest(name, language, params))
+
+    override suspend fun startConversation(
+        phone: String,
+        name: String,
+        language: String,
+        params: Map<String, String>,
+    ): StartedConversation = http.post("$APP/conversations/start", StartConversationRequest(phone, name, language, params))
+
+    override suspend fun templates(sendableOnly: Boolean): List<WhatsAppTemplate> =
+        http.get<List<WhatsAppTemplate>>("$APP/whatsapp/templates", "all" to if (sendableOnly) null else "1")
+            .filter { !sendableOnly || it.sendable }
+
+    override suspend fun contacts(query: String?): List<Contact> =
+        http.get("$APP/contacts", "q" to query?.takeIf { it.isNotBlank() })
+
+    override suspend fun setContactStatus(contactId: String, status: String): Contact =
+        http.patch("$APP/contacts/$contactId/status", ContactStatusRequest(status))
+}
+
+class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
+    override suspend fun clients(query: String?, archived: Boolean): List<CrmClient> = http.get(
+        "$APP/crm/clients",
+        "q" to query?.takeIf { it.isNotBlank() },
+        "archived" to if (archived) "1" else null,
+    )
+
+    override suspend fun client(id: String): CrmClient = http.get("$APP/crm/clients/$id")
+
+    override suspend fun createClient(request: SaveClient): CrmClient = http.post("$APP/crm/clients", request)
+
+    override suspend fun updateClient(id: String, request: SaveClient): CrmClient =
+        http.patch("$APP/crm/clients/$id", request)
+
+    override suspend fun archiveClient(id: String, archived: Boolean) {
+        http.send(HttpMethod.Post, "$APP/crm/clients/$id/${if (archived) "archive" else "restore"}")
     }
 
-    override suspend fun clients(token: String): List<CrmClient> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/crm/clients") { bearerAuth(token) }
+    override suspend fun quotes(clientId: String?, status: String?): List<Quote> =
+        http.get("$APP/crm/quotes", "clientId" to clientId, "status" to status)
+
+    override suspend fun quote(id: String): Quote = http.get("$APP/crm/quotes/$id")
+
+    override suspend fun createQuote(request: CreateQuote): Quote = http.post("$APP/crm/quotes", request)
+
+    override suspend fun setQuoteStatus(id: String, status: String): Quote =
+        http.patch("$APP/crm/quotes/$id", QuoteStatusChange(status))
+
+    override suspend fun convertQuote(id: String, request: ConvertQuote): Invoice =
+        http.post("$APP/crm/quotes/$id/invoice", request)
+
+    override suspend fun invoices(clientId: String?, status: String?): List<Invoice> =
+        http.get("$APP/crm/invoices", "clientId" to clientId, "status" to status)
+
+    override suspend fun invoice(id: String): Invoice = http.get("$APP/crm/invoices/$id")
+
+    override suspend fun createInvoice(request: CreateInvoice): Invoice = http.post("$APP/crm/invoices", request)
+
+    override suspend fun markInvoicePaid(id: String): Invoice = http.patch("$APP/crm/invoices/$id/paid")
+
+    override suspend fun catalog(query: String?): List<CatalogItem> =
+        http.get("$APP/crm/standard-items", "q" to query?.takeIf { it.isNotBlank() })
+
+    override suspend fun saveCatalogItem(request: SaveCatalogItem, id: String?): CatalogItem =
+        http.post(if (id == null) "$APP/crm/standard-items" else "$APP/crm/standard-items/$id", request)
+
+    override suspend fun deleteCatalogItem(id: String) {
+        http.send(HttpMethod.Delete, "$APP/crm/standard-items/$id")
     }
 
-    override suspend fun createClient(token: String, name: String, phone: String, address: String?): CrmClient = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/crm/clients") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(CreateClientRequest(name, phone, address))
-        }
+    override suspend fun services(clientId: String?, status: String?): List<ClientService> =
+        http.get("$APP/crm/services", "clientId" to clientId, "status" to status)
+
+    override suspend fun invoiceServices(request: InvoiceClientServices): Invoice =
+        http.post("$APP/crm/services/invoice", request)
+
+    override suspend fun suppliers(archived: Boolean): List<Supplier> =
+        http.get("$APP/crm/suppliers", "archived" to if (archived) "1" else null)
+
+    override suspend fun employees(archived: Boolean): List<Employee> =
+        http.get("$APP/crm/employees", "archived" to if (archived) "1" else null)
+
+    override suspend fun payments(status: String?): List<Payment> =
+        http.get("$APP/crm/payments", "status" to status)
+
+    override suspend fun markPaymentPaid(id: String): Payment = http.patch("$APP/crm/payments/$id/paid")
+}
+
+class KtorBookingsApi(private val http: DashboardHttpClient) : BookingsApi {
+    override suspend fun bookings(from: String?, to: String?, status: String?): List<Booking> =
+        http.get("$APP/bookings", "from" to from, "to" to to, "status" to status)
+
+    override suspend fun booking(id: String): Booking = http.get("$APP/bookings/$id")
+
+    override suspend fun createBooking(request: CreateBooking): Booking = http.post("$APP/bookings", request)
+
+    // The dashboard updates a booking with POST, not PATCH.
+    override suspend fun updateBooking(id: String, request: UpdateBooking): Booking =
+        http.post("$APP/bookings/$id", request)
+
+    override suspend fun services(activeOnly: Boolean): List<BookingService> =
+        http.get("$APP/bookings/services", "active" to if (activeOnly) "true" else null)
+
+    override suspend fun availability(): List<AvailabilityRule> = http.get("$APP/bookings/availability")
+
+    override suspend fun slots(serviceId: String, from: String, to: String): List<TimeSlot> =
+        http.get("$APP/bookings/slots", "serviceId" to serviceId, "from" to from, "to" to to)
+}
+
+class KtorAgentsApi(private val http: DashboardHttpClient) : AgentsApi {
+    override suspend fun overview(): AgentsOverview = http.get("$APP/agents/overview")
+
+    override suspend fun agents(archived: Boolean): List<Agent> =
+        http.get("$APP/agents", "archived" to if (archived) "1" else null)
+
+    override suspend fun pauseAgent(id: String): Agent = http.post("$APP/agents/$id/pause")
+
+    override suspend fun activateAgent(id: String): Agent = http.post("$APP/agents/$id/activate")
+
+    override suspend fun approvals(status: String?): List<AgentApproval> =
+        http.get("$APP/agents/approvals", "status" to status)
+
+    override suspend fun approve(id: String): AgentApproval =
+        http.post("$APP/agents/approvals/$id/approve", ApproveAction())
+
+    override suspend fun reject(id: String, reason: String?): AgentApproval =
+        http.post("$APP/agents/approvals/$id/reject", RejectAction(reason))
+
+    override suspend fun tasks(status: String?, mine: Boolean): List<AgentTask> =
+        http.get("$APP/agents/tasks", "status" to status, "mine" to if (mine) "1" else null)
+
+    override suspend fun saveTask(request: SaveTask, id: String?): AgentTask =
+        if (id == null) http.post("$APP/agents/tasks", request) else http.patch("$APP/agents/tasks/$id", request)
+
+    override suspend fun runs(agentId: String?, limit: Int): List<AgentRun> =
+        http.get("$APP/agents/runs", "agentId" to agentId, "limit" to limit.toString())
+}
+
+class KtorAssistantApi(private val http: DashboardHttpClient) : AssistantApi {
+    override suspend fun threads(): List<AssistantThread> = http.get("$APP/assistant/threads")
+
+    override suspend fun createThread(title: String): AssistantThread =
+        http.post("$APP/assistant/threads", NewAssistantThread(title))
+
+    override suspend fun thread(threadId: String): AssistantThreadDetail =
+        http.get("$APP/assistant/threads/$threadId")
+
+    override suspend fun sendMessage(threadId: String, content: String): AssistantThreadDetail =
+        http.post("$APP/assistant/threads/$threadId/messages", AssistantPrompt(content))
+
+    override suspend fun confirmAction(threadId: String, actionId: String): AssistantThreadDetail =
+        http.post("$APP/assistant/threads/$threadId/actions/$actionId/confirm")
+
+    override suspend fun cancelAction(threadId: String, actionId: String): AssistantThreadDetail =
+        http.post("$APP/assistant/threads/$threadId/actions/$actionId/cancel")
+}
+
+class KtorPersonaApi(private val http: DashboardHttpClient) : PersonaApi {
+    override suspend fun persona(): Persona = http.get("$APP/persona")
+
+    override suspend fun updatePersona(compiledInstructions: String): Persona =
+        http.put("$APP/persona", PersonaUpdate(compiledInstructions))
+
+    override suspend fun addSource(content: String): Persona =
+        http.post("$APP/persona/sources", PersonaSourceText(content))
+
+    override suspend fun deleteSource(id: String) {
+        http.send(HttpMethod.Delete, "$APP/persona/sources/$id")
     }
 
-    override suspend fun quotes(token: String): List<Quote> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/crm/quotes") { bearerAuth(token) }
+    override suspend fun rebuild(): Persona = http.post("$APP/persona/rebuild")
+
+    override suspend fun test(request: PersonaTest): String =
+        http.post<PersonaReply>("$APP/persona/test", request).reply
+}
+
+class KtorNotificationsApi(private val http: DashboardHttpClient) : NotificationsApi {
+    override suspend fun notifications(): Notifications = http.get("$APP/notifications")
+
+    override suspend fun markRead(id: String) {
+        http.send(HttpMethod.Post, "$APP/notifications/$id/read")
     }
 
-    override suspend fun invoices(token: String): List<Invoice> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/crm/invoices") { bearerAuth(token) }
+    override suspend fun markAllRead() {
+        http.send(HttpMethod.Post, "$APP/notifications/read-all")
     }
+}
 
-    override suspend fun catalog(token: String): List<CatalogItem> = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/crm/standard-items") { bearerAuth(token) }
-    }
+class KtorSettingsApi(private val http: DashboardHttpClient) : SettingsApi {
+    override suspend fun webWidget(): WebWidget = http.get("$APP/web-widget")
 
-    override suspend fun createCatalogItem(token: String, item: CatalogItem): CatalogItem = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/crm/standard-items") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(item)
-        }
-    }
+    override suspend fun updateLocale(locale: String): String =
+        http.post<LocaleChange>("$APP/settings/locale", LocaleChange(locale)).locale
 
-    override suspend fun createQuote(token: String, request: CreateQuote): Quote = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/crm/quotes") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(request)
-        }
-    }
-
-    override suspend fun createInvoice(token: String, request: CreateInvoice): Invoice = request {
-        client.post("${baseUrl.trimEnd('/')}/app/api/crm/invoices") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(request)
-        }
-    }
-
-    override suspend fun persona(token: String): Persona = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/persona") { bearerAuth(token) }
-    }
-
-    override suspend fun updatePersona(token: String, compiledInstructions: String): Persona = request {
-        client.put("${baseUrl.trimEnd('/')}/app/api/persona") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(PersonaUpdateRequest(compiledInstructions))
-        }
-    }
-
-    override suspend fun webWidget(token: String): WebWidget = request {
-        client.get("${baseUrl.trimEnd('/')}/app/api/web-widget") { bearerAuth(token) }
-    }
-
-    override suspend fun updateLocale(token: String, locale: String): String = request<LocaleResponse> {
-        client.post("${baseUrl.trimEnd('/')}/app/api/settings/locale") {
-            bearerAuth(token)
-            contentType(ContentType.Application.Json)
-            setBody(LocaleRequest(locale))
-        }
-    }.locale
-
-    private suspend inline fun <reified T> request(block: suspend () -> HttpResponse): T {
-        val response = block()
-        if (!response.status.isSuccess()) throw DashboardApiException(response.status.value, response.bodyAsText())
-        return response.body()
-    }
+    override suspend fun account(): Account = http.get("$APP/account")
 }
 
 @Serializable
@@ -207,22 +303,22 @@ private data class LoginRequest(val email: String, val password: String)
 private data class ContactStatusRequest(val status: String)
 
 @Serializable
-private data class OutboundMessageRequest(val text: String, val assetExternalId: String)
+private data class OutboundMessageRequest(val text: String, val assetExternalId: String? = null)
 
 @Serializable
-private data class CreateAssistantThreadRequest(val title: String)
+private data class AutoReplyRequest(val enabled: Boolean)
 
 @Serializable
-private data class AssistantMessageRequest(val content: String)
+private data class TemplateSendRequest(
+    val name: String,
+    val language: String,
+    val params: Map<String, String> = emptyMap(),
+)
 
 @Serializable
-private data class PersonaUpdateRequest(val compiledInstructions: String)
-
-@Serializable
-private data class LocaleRequest(val locale: String)
-
-@Serializable
-private data class LocaleResponse(val locale: String)
-
-@Serializable
-private data class CreateClientRequest(val name: String, val phone: String, val address: String? = null)
+private data class StartConversationRequest(
+    val phone: String,
+    val name: String,
+    val language: String,
+    val params: Map<String, String> = emptyMap(),
+)

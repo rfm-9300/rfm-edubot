@@ -24,11 +24,19 @@ class KmpLibraryConventionPlugin : Plugin<Project> {
                     jvmTarget.set(JvmTarget.JVM_17)
                 }
             }
+            // A JVM target the apps never ship: it lets the pure-Kotlin modules run their tests on
+            // `jvmTest`, with no Android SDK and no iOS simulator. Compose modules stay off it.
+            jvm {
+                compilerOptions {
+                    jvmTarget.set(JvmTarget.JVM_17)
+                }
+            }
             iosArm64()
             iosSimulatorArm64()
             sourceSets.named("commonTest") {
                 dependencies {
                     implementation(kotlin("test"))
+                    implementation(libs.findLibrary("coroutines-test").get())
                 }
             }
         }
