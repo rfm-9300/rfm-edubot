@@ -6,6 +6,7 @@ import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.CustomFields
 import com.rfm.edubot.crm.InvoiceInstallments
 import com.rfm.edubot.crm.eurToCents
+import com.rfm.edubot.crm.isCatalogCode
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Employee
@@ -206,12 +207,13 @@ internal data class StandardItemRequest(
     val code: String? = null,
 ) {
     private val titleText: String get() = title?.trim()?.takeIf { it.isNotBlank() } ?: description.trim()
-    private val codeText: String? get() = code?.trim()?.takeIf { it.isNotBlank() }
+    private val codeText: String? get() = code?.trim()?.uppercase()?.takeIf { it.isNotBlank() }
 
     /** Stable error code for the first invalid field, or null. */
     fun error(): String? = when {
         titleText.isBlank() -> "title_required"
         (codeText?.length ?: 0) > MAX_CODE -> "code_too_long"
+        codeText?.let(::isCatalogCode) == false -> "code_invalid"
         else -> null
     }
 

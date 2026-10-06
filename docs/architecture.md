@@ -341,16 +341,18 @@ payments, Serviços rows and bookings pick from. Each item has:
   rows and bookings point at; it never changes;
 - a `code` the tenant sees and may change: left empty, it is numbered per type (`SRV-nnn`,
   `MAT-nnn`, counters in `crm.sequences`, skipping codes typed by hand); unique per tenant, a clash
-  answers `409 code_taken`;
+  answers `409 code_taken`. A typed code must be three letters, a dash and digits (`TBL-8`; lowercase
+  is saved in capitals), otherwise `400 code_invalid`;
 - a `title` (the name in lists, pickers and bookings) and an optional `description`. An item without a
   description stores its title there, so readers that predate titles still get a name; the API and the
   dashboard treat a description equal to the title as none.
 
 Adding an item to a document line writes the title, then the description after " - ", which the
 classic PDF prints under the title. `CatalogItemBackfill` runs at startup and gives items saved before
-titles and codes their description as title and the next free code, in creation order; it only writes
-missing fields. `POST /app/api/crm/standard-items` (and the backoffice twin) still accepts the older
-body without `title`, `code` or `id`.
+titles and codes their description as title and the next free code, in creation order; a code typed
+before the three-letters-dash-digits rule is replaced the same way (each replacement is logged). It
+only writes those fields. `POST /app/api/crm/standard-items` (and the backoffice twin) still accepts
+the older body without `title`, `code` or `id`.
 
 ### Suppliers and payments
 

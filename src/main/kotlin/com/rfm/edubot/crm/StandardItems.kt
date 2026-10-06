@@ -17,7 +17,7 @@ data class StandardItem(
     val durationMinutes: Int? = null,
     val bookable: Boolean = false,
     val title: String,
-    /** Reference the tenant sees and may change (`SRV-001`, `MAT-001` or their own), unique per tenant. Null until the item is saved. */
+    /** Reference the tenant sees and may change (`SRV-001`, `MAT-001` or their own, see [isCatalogCode]), unique per tenant. Null until the item is saved. */
     val code: String? = null,
 )
 
@@ -34,6 +34,13 @@ fun StandardItem.details(): String = description.takeUnless { it == title }.orEm
 
 /** Prefix of the codes the catalog hands out by itself. */
 fun catalogCodePrefix(type: String): String = if (isServiceType(type)) "SRV" else "MAT"
+
+/** The only shape a catalog code may have: three capital letters, a dash and digits (`SRV-001`, `TBL-8`). */
+const val CATALOG_CODE_PATTERN = "^[A-Z]{3}-[0-9]+$"
+
+private val catalogCode = Regex(CATALOG_CODE_PATTERN)
+
+fun isCatalogCode(code: String?): Boolean = code != null && catalogCode.matches(code)
 
 fun catalogSlug(text: String): String =
     Normalizer.normalize(text, Normalizer.Form.NFD)

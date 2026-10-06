@@ -51,11 +51,12 @@ class CatalogItemsTest {
     private suspend fun StandardItemRepository.add(title: String, type: String = "service", code: String? = null, description: String = "") =
         create(StandardItem(freeId(title, type), type, "Pintura", description, "m2", 10.0, title = title, code = code))
 
-    /** An item as releases before titles and codes saved it. */
-    private suspend fun insertLegacy(id: String, type: String, description: String, tenant: ObjectId = tenantId) {
+    /** An item as releases before titles and codes saved it, or, with a [code], as one typed before codes had a fixed shape. */
+    private suspend fun insertLegacy(id: String, type: String, description: String, tenant: ObjectId = tenantId, code: String? = null) {
         mongoModule.database.getCollection<Document>("crm.standard_items").insertOne(
             Document("id", id).append("tenantId", tenant).append("type", type).append("category", "Limpeza")
-                .append("description", description).append("unit", "un").append("defaultUnitPriceEur", 20.0),
+                .append("description", description).append("unit", "un").append("defaultUnitPriceEur", 20.0)
+                .apply { code?.let { append("code", it).append("title", description) } },
         )
     }
 
@@ -70,7 +71,7 @@ class CatalogItemsTest {
         assertEquals("MAT-001", items.add("Tinta acrílica", type = "material").code)
         assertEquals("SRV-002", items.add("Lavagem de fachada", code = "SRV-002").code)
         assertEquals("SRV-003", items.add("Impermeabilização").code, "a number typed by hand is not handed out again")
-        assertEquals("PINT-01", items.add("Pintura exterior", code = "PINT-01").code)
+        assertEquals("PIN-01", items.add("Pintura exterior", code = "PIN-01").code)
         assertEquals("SRV-001", StandardItemRepository(mongoModule, ObjectId()).add("Pintura interior").code, "each tenant numbers its own catalog")
     }
 
@@ -123,6 +124,27 @@ class CatalogItemsTest {
     }
 
     @Test
+    fun `the backfill renumbers codes that aren't three letters, a dash and digits, and keeps the rest`() = runBlocking<Unit> {
+        val items = StandardItemRepository(mongoModule, tenantId)
+        val first = items.add("Limpeza T2")
+        insertLegacy("srv-clean-std-t0", "service", "Limpeza normal T0", code = "CLEAN_STD_T0")
+        insertLegacy("mat-kit-double", "material", "Kit de toalhas double", code = "KIT_DOUBLE")
+        insertLegacy("srv-sofa-2", "service", "Limpeza de sofá", code = "sofa-2")
+        insertLegacy("srv-odoo", "service", "Integração Odoo", code = "TBL-008")
+
+        CatalogItemBackfill(mongoModule).run()
+
+        assertEquals(
+            listOf("SRV-001", "SRV-002", "MAT-001", "SRV-003", "TBL-008"),
+            listOf(first.id, "srv-clean-std-t0", "mat-kit-double", "srv-sofa-2", "srv-odoo").map { stored(it).getString("code") },
+        )
+        assertEquals("Limpeza normal T0", stored("srv-clean-std-t0").getString("title"))
+        assertEquals(0, CatalogItemBackfill(mongoModule).run(), "a second start finds nothing to renumber")
+        assertEquals("SRV-004", items.add("Jardinagem").code)
+        assertEquals("MAT-002", items.add("Lençol casal", type = "material").code)
+    }
+
+    @Test
     fun `renaming a bookable service keeps its own description`() = runBlocking<Unit> {
         val items = StandardItemRepository(mongoModule, tenantId)
         val services = BookableServiceRepository(mongoModule, tenantId)
@@ -154,5 +176,16 @@ class CatalogItemsTest {
         assertEquals("title_required", StandardItemRequest(type = "service", category = "Bem-estar", unit = "un", defaultUnitPriceEur = 1.0).error())
         assertEquals("code_too_long", edit.copy(code = "X".repeat(StandardItemRequest.MAX_CODE + 1)).error())
         assertNull(edit.error())
+    }
+
+    @Test
+    fun `a typed code must be three letters, a dash and digits, and is saved in capitals`() {
+        val request = StandardItemRequest(type = "service", category = "Limpeza", unit = "un", defaultUnitPriceEur = 30.0, title = "Limpeza T2")
+        listOf("SRV-001", "MAT-23", " tbl-8 ").forEach { assertNull(request.copy(code = it).error(), it) }
+        assertEquals("TBL-8", request.copy(code = " tbl-8 ").toStandardItem("srv-x").code)
+        assertNull(request.copy(code = " ").error(), "a blank code is numbered automatically")
+        listOf("CLEAN_STD_T0", "SRV001", "SR-001", "SRVX-001", "SRV-", "SRV-01A", "SRV - 001", "ÇÃO-001").forEach {
+            assertEquals("code_invalid", request.copy(code = it).error(), it)
+        }
     }
 }

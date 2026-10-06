@@ -5417,13 +5417,15 @@ function openCatalogForm(itemId) {
   const form = document.createElement('form');
   form.className = 'form';
   const typeValue = editing?.type === 'material' ? 'material' : 'service';
-  const codePlaceholder = type => t.phCode({ prefix: type === 'material' ? 'MAT' : 'SRV' });
+  const codePrefix = type => type === 'material' ? 'MAT' : 'SRV';
+  const codePlaceholder = type => t.phCode({ prefix: codePrefix(type) });
   form.innerHTML = `
     <div class="form__grid">
       <div class="form__row form__row--full"><label class="lbl" for="cat-title">${escapeHTML(t.titleLabel)} <span class="req">●</span></label>
         <input class="inp" id="cat-title" required placeholder="${escapeHTML(t.phTitle)}" value="${escapeHTML(editing?.title || '')}" /></div>
       <div class="form__row"><label class="lbl" for="cat-code">${escapeHTML(t.codeLabel)}${editing ? ' <span class="req">●</span>' : ''}</label>
-        <input class="inp inp--mono" id="cat-code" maxlength="40" autocomplete="off" ${editing ? 'required' : ''} placeholder="${escapeHTML(codePlaceholder(typeValue))}" value="${escapeHTML(editing?.code || '')}" /></div>
+        <input class="inp inp--mono" id="cat-code" maxlength="40" autocomplete="off" spellcheck="false" ${editing ? 'required' : ''} placeholder="${escapeHTML(codePlaceholder(typeValue))}" value="${escapeHTML(editing?.code || '')}" aria-describedby="cat-code-hint" />
+        <p class="hint" id="cat-code-hint">${escapeHTML(t.codeHint({ prefix: codePrefix(typeValue) }))}</p></div>
       <div class="form__row"><label class="lbl" for="cat-type">${escapeHTML(t.typeLabel)} <span class="req">●</span></label>
         <select class="sel" id="cat-type" required>
           <option value="service" ${typeValue === 'service' ? 'selected' : ''}>${escapeHTML(t.service)}</option>
@@ -5449,12 +5451,14 @@ function openCatalogForm(itemId) {
   typeEl.addEventListener('change', () => {
     $$('[data-booking-fields]', form).forEach(row => { row.hidden = typeEl.value !== 'service'; });
     codeEl.placeholder = codePlaceholder(typeEl.value);
+    $('#cat-code-hint', form).textContent = t.codeHint({ prefix: codePrefix(typeEl.value) });
   });
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const title = titleEl.value.trim(), code = codeEl.value.trim(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
+    const title = titleEl.value.trim(), code = codeEl.value.trim().toUpperCase(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
     const type = typeEl.value, defaultUnitPriceEur = Number($('#cat-price', form).value || 0);
     if (!title || !category || !unit || (editing && !code)) return toast(t.fillRequired);
+    if (code && !/^[A-Z]{3}-[0-9]+$/.test(code)) return toast(t.codeInvalid);
     const booking = $('#cat-bookable', form)
       ? { bookable: type === 'service' && $('#cat-bookable', form).checked, durationMinutes: Math.max(5, Number($('#cat-duration', form).value || 30)) }
       : {};
@@ -5468,7 +5472,7 @@ function openCatalogForm(itemId) {
       render();
       const ref = saved?.code || title;
       toast(editing ? t.updated({ code: ref }) : t.created({ code: ref }));
-    } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : STR.catalogCreateFailed); }
+    } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : err?.code === 'code_invalid' ? t.codeInvalid : STR.catalogCreateFailed); }
   });
   openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form);
 }
