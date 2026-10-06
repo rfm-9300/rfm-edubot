@@ -87,11 +87,11 @@ In the minimal skin the active item is a `--accent-soft` fill with a 3px `--acce
 </header>
 ```
 
-Order: crumb · search · actions. Theme button is always in actions. Search hides below 920px.
+Order: crumb · search · actions. Theme button is always in actions. Below 920px search takes its own row under the crumb and actions.
 
 Neither `/app` nor `/backoffice` has a layout switch: the skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label` (`app.searchPlaceholder`, `backoffice.searchPlaceholder`).
 
-The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it.
+The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it. Signed out, it also hides the menu button (`#btn-nav`), Log out and New: only the theme switch stays.
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
@@ -272,6 +272,22 @@ Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
 
 A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill.
 
+A table that has to read on a phone takes `.tbl--stack` (every backoffice table does) instead of scrolling sideways. Under 700px the head is hidden and each row becomes a card. A cell with `data-label` (its column heading, from the same catalog key as the `th`) shows that label above its value, and those cells share a grid of four columns, two under 560px. A cell without `data-label` spans the card: the row's name comes first, its actions last (left-aligned), and an empty state sits in the `colspan` cell. A long `.id` (a file name) spans too, an empty cell (no action on this row) disappears, and numbers align left.
+
+```html
+<table class="tbl tbl--stack">
+  <thead><tr><th>Name</th><th>Status</th><th class="right">Msgs</th><th class="right">Actions</th></tr></thead>
+  <tbody>
+    <tr>
+      <td class="name"><button class="tbl__open" type="button">Padaria Central</button><div class="sub mono">padaria-central</div></td>
+      <td data-label="Status"><span class="pill pill--ok">Active</span></td>
+      <td class="num" data-label="Msgs">12</td>
+      <td class="right"><div class="actions"><button class="btn btn--sm" type="button">Open dashboard</button></div></td>
+    </tr>
+  </tbody>
+</table>
+```
+
 In the minimal skin the list page's directory card — the `.panel` straight under `.view` — uses 20px side padding for its head, filters and cells (16px under 920px), a 58px head and a lightly tinted `--surface-2` header row. Panels inside drawers and Home cards keep the compact 16px spacing.
 
 Row markers (left inset bar): `.is-overdue` (bad), `.is-paid` (ok), `.is-draft` (faint), `.is-current` (accent, the period that contains today). `.is-total` is the compiled totals row (surface background, heavier weight). `.is-day` is a full-width group header row (one `td colspan`) for date-grouped lists such as the bookings agenda.
@@ -336,12 +352,12 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 </form>
 ```
 
-- Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans.
+- Grid: `.form__grid` (2 col), `.form__grid--3` (3 col), `.form__row--full` spans. Both are one column under 560px.
 - Fields: `.inp` `.sel` `.txt`. Money/IDs: `.inp--mono` `.inp--right`.
 - Labels: `.lbl` (sentence case in the minimal skin; uppercase only in the classic layer). Required: `.req`. Optional: `.opt`.
 - Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
-- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
+- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns and one column on a phone. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
 - A field label with its own tools on the same line (All / None, Add channel): `.form__row-head` > `.lbl` + `.actions`.
 
 ### Suggestions under a field
@@ -368,9 +384,9 @@ Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, pay
 
 The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo keeps clipping as before.
 
-The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings and the same four columns on phones. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head (`hidden` hides it). In the minimal skin `.lines__head` is sentence case like table heads.
+The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings. Under 560px a channel takes two lines, platform and external id over the access token, with remove beside both; the head follows the same grid, so "Access token" sits on its second line. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head (`hidden` hides it). In the minimal skin `.lines__head` is sentence case like table heads.
 
-Two more variants follow the channels rules (bare inputs with `aria-label`s, no catalog combobox):
+Two more variants keep the channels' bare inputs with `aria-label`s, without a catalog combobox:
 
 - `.lines--services`: a supplier's usual services, as description, unit, usual price and `.l-rm`. On phones the description takes its own row, like `.line__desc`.
 - `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
@@ -422,9 +438,11 @@ The footer is sticky and is the last thing in the body, directly or inside the d
 
 Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
+Under 920px the panel takes the full width with square corners; under 560px its head, body and footer use 16px side padding.
+
 `openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from another drawer (a record, an invoice…) through `openFrom(back, open)` stacks its opener on a trail and replaces the eyebrow with `.drawer__back` (the opener's name; the ← glyph is CSS). Back pops one step, and a drawer that closes itself after an action (save, mark paid, convert) reopens its opener with fresh data. Closing by hand (×, scrim, Escape) clears the trail and leaves.
 
-The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer.
+The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer. On a touch screen (`pointer: coarse`) it focuses × instead of the first field, so the keyboard doesn't open over the drawer. A long name in `.drawer__back` wraps left-aligned, the ← on its first line.
 
 ```html
 <div class="drawer__eyebrow"><button class="drawer__back" type="button" aria-label="Back to Ana Ribeiro">Ana Ribeiro</button></div>
@@ -511,7 +529,7 @@ Clients, suppliers and employees (and the backoffice's tenants, [patterns.md](pa
 </div>
 ```
 
-One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts.
+One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts. Under 560px a long toast wraps at the screen's width less 16px a side; centred from `left: 50%`, it would otherwise wrap at half the screen.
 
 ## Auth card
 
