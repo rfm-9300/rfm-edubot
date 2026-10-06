@@ -407,6 +407,43 @@ still found by id (documents, record drawer) and by phone: it keeps its phone nu
 tenant), the client form warns about it, and a booking or the AI's `create_client` with that phone
 restores the client instead of failing on the duplicate.
 
+### Client fields
+
+Each company shapes its Clients directory: which standard fields staff must fill in, and fields of
+its own. The settings live on the tenant (`Tenant.directoryFields`, stored as
+`tenants.directoryFields.clients`); the values on the client (`crm.clients.customFields`).
+
+```mermaid
+flowchart LR
+    Admin["Company admin<br/>/app Clients → Fields"] -->|"PUT /app/api/crm/clients/fields"| Rules["CustomFields.change<br/>(crm/CustomFields.kt)"]
+    Rules --> Tenant[("tenants.directoryFields.clients<br/>required + custom definitions")]
+    Staff["Staff saving a client"] -->|"POST / PATCH /app/api/crm/clients"| Check["requiredError + CustomFields.values"]
+    Tenant --> Check
+    Check -->|"400 {error, detail: fieldKey}"| Staff
+    Check --> Client[("crm.clients.customFields<br/>{ cf_xxxxxxxx: value }")]
+    Bot["Bot, bookings, agents"] -->|"name + phone only"| Client
+```
+
+- **Standard fields**: name and phone are always required (lists show the name; bookings and the bot
+  find a client by phone). NIF, email, contact person, address, postal code and city can be made
+  required; a company that never chose keeps NIF and address (`ClientFields.DEFAULT`). Missing ones
+  answer `400 tax_id_required`, `email_required`, `contact_person_required`, `address_required`,
+  `postal_code_required` or `city_required`.
+- **Own fields** (up to 20): text, number, date, choice (with options) or yes/no, each optionally
+  required and shown as a list column. The server generates the key (`cf_` + 8 characters), so a rename
+  keeps the values, and the type is fixed once created. Removing a field hides it but keeps the stored
+  values. Values are stored typed: a string (text, `yyyy-MM-dd` date, choice), a number, or `true` (an
+  unticked box clears the value).
+- **Saving a client** (dashboard and backoffice): `customFields` maps keys to values; keys of no field
+  are ignored, fields left out keep their value, null or blank clears one, and a value sent back as
+  stored is kept even if it no longer fits (a choice since removed). Errors are
+  `custom_field_required`, `custom_field_invalid` or `custom_field_too_long` with the field key as
+  `detail`. The bot, bookings and agents create clients without custom values and skip these rules.
+- **Reading**: everyone with the Clients module reads `GET /app/api/crm/clients/fields` (standard
+  fields with `required`/`locked`, own fields, `canEdit`); only company admins and operators change
+  it (`403 not_allowed`). `GET /app/api/crm/clients?q=` also matches text and choice values. Custom
+  values are staff-only, like notes: not in the employee portal, the bot's CRM tools or event payloads.
+
 ### Bookings
 
 Optional `bookings` module: weekly opening hours, conflict-checked appointments, and the CRM links
@@ -540,7 +577,7 @@ sequenceDiagram
 | `conversations` | One conversation per user: summary, token totals, `autoReplyEnabled` (+ who paused it), `lastInboundAt`, `unreadCount` | unique on `userId` |
 | `messages` | Full message history (user + assistant turns, text, templates and customer media by Meta media id); outbound rows carry `author`, `waMessageId`, delivery `status`/`statusAt` and Meta's error | `conversationId`, `createdAt`; unique partial `(tenantId, waMessageId)` |
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
-| `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
+| `crm.clients` | Client records created from WhatsApp/admin workflows; `customFields` holds the values of the company's own fields by key ([Client fields](#client-fields)) | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
 | `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
@@ -752,7 +789,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
 - **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, and i18n. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
 - **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar. The backoffice declares the same skin in `backoffice/index.html` (since 2026-10-04, without the credit). Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. The older classic Home code in `app.js` is no longer reachable. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
-- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs a NIF and an address (`400 tax_id_required` / `address_required`; a `PATCH` that omits the NIF keeps the stored one); bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
+- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs the standard fields its company requires, NIF and address unless the company chose otherwise, plus its required own fields ([Client fields](#client-fields)); a `PATCH` that omits a detail keeps the stored one. Bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
