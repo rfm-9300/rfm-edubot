@@ -51,5 +51,5 @@ Theme is a token swap. Components consume CSS variables. Do not hardcode hex in 
 1. Read [AGENTS.md](AGENTS.md).
 2. Reuse an existing component from [components.md](components.md). Add CSS only if nothing fits.
 3. Put user-facing copy through i18n ([i18n.md](i18n.md)).
-4. Verify light **and** dark, plus the `920px` breakpoint.
+4. Verify light **and** dark, plus the `920px` breakpoint and a 375px phone.
 5. If you add a token or component, update this folder in the same change.

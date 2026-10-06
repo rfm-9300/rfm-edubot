@@ -107,7 +107,7 @@ Nunito:400;600;700;800
 JetBrains Mono:400;500;600
 ```
 
-Body: `14px / 1.5`, antialiased. Do not add a fourth family.
+Body: `14px / 1.5`, antialiased. Do not add a fourth family. On touch screens (`pointer: coarse`) `.inp`, `.sel`, `.txt`, the top bar search and line-item fields are 16px: iOS zooms the page into a focused field under 16px.
 
 | Role | Size | Weight | Font |
 |---|---|---|---|
@@ -186,6 +186,8 @@ Classic resolves the tokens to `--accent` / `0 0 0 4px var(--accent-soft)`. The 
 | Body grid | `grid-template-columns: var(--sidebar) 1fr` |
 | Main breakpoint | `max-width: 920px` → single column, horizontal nav |
 | Secondary | `860px` settings rows, `760px` assistant, `620px` chat/asset picker |
+| Phone tables | `700px` `.tbl--stack` rows become cards (four columns of values, two under `560px`) |
+| Phones | `560px` one-column forms, 16px drawer padding, stacked line items and channel rows, full-width toast |
 
 ## Background texture
 

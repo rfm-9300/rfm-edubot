@@ -63,6 +63,8 @@ const fmtDay = d => d.toLocaleDateString(I18N.locale(), { dateStyle: 'short' });
 const fmtTime = d => d.toLocaleTimeString(I18N.locale(), { timeStyle: 'short' });
 // Time under the date: tenant rows already run two lines (name over slug), and the column stays narrow.
 const dateCell = iso => (iso ? `${escapeHTML(fmtDay(new Date(iso)))}<div class="sub">${escapeHTML(fmtTime(new Date(iso)))}</div>` : '—');
+// A cell's column heading, shown above its value when a .tbl--stack table turns its rows into cards on phones.
+const dataLabel = text => `data-label="${escapeHTML(text)}"`;
 // Channel platforms and dashboard roles reuse the /app catalog labels; an unknown value shows as sent.
 const labelOr = (key, raw) => { const label = I18N.t(key); return label === key ? raw : label; };
 const platformLabel = platform => labelOr(`app.channel_${platform}`, platform);
@@ -143,7 +145,9 @@ function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true,
   }
   $$('[data-close]', root).forEach(b => { b.onclick = closeDrawer; });
   root.hidden = false;
-  setTimeout(() => (autofocus ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
+  // On a touch screen a focused field opens the keyboard over the drawer, so focus goes to × instead.
+  const intoField = autofocus && !matchMedia('(pointer: coarse)').matches;
+  setTimeout(() => (intoField ? host.querySelector('input,select,textarea') : $('.drawer__head [data-close]', root))?.focus(), 50);
 }
 
 const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
@@ -165,14 +169,28 @@ function prepareGoogleSignIn(config) {
   return googleSignIn;
 }
 
+// Signed out, the top bar keeps only the theme switch: the menu, search, New and Log out all need a session.
+// Signed in, setView shows search and New on the views that use them.
+function showSessionControls(on) {
+  $('#btn-nav').hidden = !on;
+  $('#btn-logout').hidden = !on;
+  if (!on) {
+    $('.topbar__search').hidden = true;
+    $('#btn-new').hidden = true;
+  }
+}
+
 async function startSession(newToken) {
   token = newToken;
   localStorage.setItem('adminToken', token);
   await loadAll();
-  renderTenants();
+  showSessionControls(true);
+  setView(location.hash.replace(/^#/, '') || 'tenants');
 }
 
 async function renderLogin() {
+  closeDrawer();
+  showSessionControls(false);
   const config = await fetch('/admin/auth/config').then(r => (r.ok ? r.json() : null)).catch(() => null);
   const google = config?.google || null;
   const passwordEnabled = config ? config.passwordEnabled : true;
@@ -275,6 +293,7 @@ async function loadPlatformSettings() {
 const VIEWS = ['tenants', 'admins', 'backups', 'settings'];
 
 function setView(view) {
+  if (!token) return;
   currentView = VIEWS.includes(view) ? view : 'tenants';
   stopBackupPolling();
   if (location.hash !== `#${currentView}`) location.hash = currentView;
@@ -311,7 +330,7 @@ async function renderAdmins() {
       ${data.googleReady ? '' : warnNoticeHtml(A.googleNotReady)}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.listTitle)} <span class="tag">${data.admins.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
           <th>${escapeHTML(A.thEmail)}</th><th>${escapeHTML(A.thSource)}</th><th>${escapeHTML(A.thAdded)}</th><th class="right">${escapeHTML(T.thActions)}</th>
         </tr></thead><tbody>${data.admins.map(a => adminRowHtml(a, data.me)).join('')}</tbody></table></div>
       </div>
@@ -336,8 +355,8 @@ function adminRowHtml(a, me) {
     : self ? '' : `<button class="btn btn--sm btn--ghost" type="button" data-remove-admin="${escapeHTML(a.email)}">${escapeHTML(A.remove)}</button>`;
   return `<tr>
     <td class="name">${escapeHTML(a.email)}${self ? `<span class="muted"> · ${escapeHTML(A.you)}</span>` : ''}</td>
-    <td><span class="pill ${fromEnv ? 'pill--info' : 'pill--accent'}">${escapeHTML(fromEnv ? A.sourceEnv : A.sourceBackoffice)}</span></td>
-    <td class="muted">${a.addedAt ? escapeHTML(A.addedBy({ date: fmtDate(a.addedAt), by: a.addedBy })) : '—'}</td>
+    <td ${dataLabel(A.thSource)}><span class="pill ${fromEnv ? 'pill--info' : 'pill--accent'}">${escapeHTML(fromEnv ? A.sourceEnv : A.sourceBackoffice)}</span></td>
+    <td class="muted" ${dataLabel(A.thAdded)}>${a.addedAt ? escapeHTML(A.addedBy({ date: fmtDate(a.addedAt), by: a.addedBy })) : '—'}</td>
     <td class="right">${action}</td>
   </tr>`;
 }
@@ -421,7 +440,7 @@ async function renderBackups() {
       ${run ? backupRunHtml(run) : ''}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.listTitle)} <span class="tag">${data.archives.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
           <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
         </tr></thead><tbody>
         ${data.archives.length ? data.archives.map(backupArchiveRowHtml).join('')
@@ -469,11 +488,12 @@ function backupRunHtml(run) {
 }
 
 function backupArchiveRowHtml(a) {
+  const B = T.backups;
   return `<tr>
     <td>${escapeHTML(fmtDate(a.createdAt))}</td>
-    <td class="id">${escapeHTML(a.name)}</td>
-    <td class="num">${escapeHTML(formatBytes(a.sizeBytes))}</td>
-    <td>${a.uploaded ? `<span class="pill pill--ok">${escapeHTML(T.backups.copied)}</span>` : `<span class="muted">${escapeHTML(T.backups.notCopied)}</span>`}</td>
+    <td class="id" ${dataLabel(B.thFile)}>${escapeHTML(a.name)}</td>
+    <td class="num" ${dataLabel(B.thSize)}>${escapeHTML(formatBytes(a.sizeBytes))}</td>
+    <td ${dataLabel(B.thOffsite)}>${a.uploaded ? `<span class="pill pill--ok">${escapeHTML(B.copied)}</span>` : `<span class="muted">${escapeHTML(B.notCopied)}</span>`}</td>
   </tr>`;
 }
 
@@ -685,7 +705,7 @@ function renderTenants() {
       <div class="panel__tools" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
         ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
       </div></div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr>
+      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
         <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(state.filter === 'DELETED' ? T.thDeletedAt : T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
       ${rows.length === 0 ? `<tr><td colspan="6">${tenantsEmptyHtml(q, counts)}</td></tr>` : rows.map(tenantRowHtml).join('')}
@@ -698,10 +718,10 @@ function tenantRowHtml(t) {
   const deleted = t.status === 'DELETED';
   return `<tr data-tenant="${escapeHTML(t.slug)}">
     <td class="name"><button class="tbl__open" type="button">${escapeHTML(t.name)}</button><div class="sub mono">${escapeHTML(t.slug)}</div>${tenantCompanyLine(t)}</td>
-    <td>${channelBadges(t.channels)}</td>
-    <td><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></td>
-    <td class="num">${s.messages ?? '—'}</td>
-    <td class="mono muted">${dateCell(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
+    <td ${dataLabel(T.thChannels)}>${channelBadges(t.channels)}</td>
+    <td ${dataLabel(T.thStatus)}><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></td>
+    <td class="num" ${dataLabel(T.thMsgs)}>${s.messages ?? '—'}</td>
+    <td class="mono muted" ${dataLabel(deleted ? T.thDeletedAt : T.thLastActivity)}>${dateCell(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
     <td class="right"><div class="actions">${deleted ? deletedTenantActions(t) : `<button class="btn btn--sm" type="button" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>`}</div></td>
   </tr>`;
 }
@@ -858,9 +878,9 @@ async function usersDrawer(slug, back = null) {
   wrap.className = 'form';
   wrap.innerHTML = `
     ${severalCompanies ? `<div class="hint">${escapeHTML(T.usersAllCompanies)}</div>` : ''}
-    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
       ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
-        <td class="name">${escapeHTML(u.email)}</td><td>${escapeHTML(roleLabel(u.role))}</td><td><span class="pill ${u.status === 'ACTIVE' ? 'pill--ok' : ''}">${escapeHTML(T.userStatus[u.status] || u.status)}</span></td>
+        <td class="name">${escapeHTML(u.email)}</td><td ${dataLabel(T.thRole)}>${escapeHTML(roleLabel(u.role))}</td><td ${dataLabel(T.thStatus)}><span class="pill ${u.status === 'ACTIVE' ? 'pill--ok' : ''}">${escapeHTML(T.userStatus[u.status] || u.status)}</span></td>
         <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">${escapeHTML(T.disable)}</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">${escapeHTML(T.activate)}</button>`}</td>
       </tr>`).join('')}
     </tbody></table></div></div>
@@ -891,13 +911,14 @@ const AGENT_PILLS = { ACTIVE: 'pill--ok', PAUSED: 'pill--warn' };
 const RUN_GROUPS = { succeeded: ['SUCCEEDED'], failed: ['FAILED', 'NEEDS_REVIEW'], open: ['QUEUED', 'RUNNING', 'WAITING', 'AWAITING_APPROVAL'] };
 
 function agentAdminRowHtml(a, num) {
-  const reason = a.status === 'PAUSED' && a.pausedReason ? T.agents.pausedReasons[a.pausedReason] || '' : '';
+  const A = T.agents;
+  const reason = a.status === 'PAUSED' && a.pausedReason ? A.pausedReasons[a.pausedReason] || '' : '';
   return `<tr>
     <td class="name">${escapeHTML(a.name)}${reason ? `<div class="muted">${escapeHTML(reason)}</div>` : ''}</td>
-    <td><span class="pill ${AGENT_PILLS[a.status] || ''}">${escapeHTML(I18N.t(`app.agents.status.${a.status}`))}</span></td>
-    <td class="num">${num.format(a.stats?.runs || 0)}</td>
-    <td class="num">${num.format(a.stats?.failed || 0)}</td>
-    <td class="mono muted">${fmtDate(a.stats?.lastRunAt)}</td>
+    <td ${dataLabel(A.thStatus)}><span class="pill ${AGENT_PILLS[a.status] || ''}">${escapeHTML(I18N.t(`app.agents.status.${a.status}`))}</span></td>
+    <td class="num" ${dataLabel(A.thRuns)}>${num.format(a.stats?.runs || 0)}</td>
+    <td class="num" ${dataLabel(A.thFailed)}>${num.format(a.stats?.failed || 0)}</td>
+    <td class="mono muted" ${dataLabel(A.thLastRun)}>${fmtDate(a.stats?.lastRunAt)}</td>
   </tr>`;
 }
 
@@ -928,7 +949,7 @@ async function agentsDrawer(slug, back = null) {
         <div><dt>${escapeHTML(A.pendingApprovals)}</dt><dd>${num.format(data.pendingApprovals || 0)}</dd></div>
       </dl></div>
     </section>
-    <div class="panel"><div class="tbl-wrap"><table class="tbl"><thead><tr>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
       <th>${escapeHTML(A.thAgent)}</th><th>${escapeHTML(A.thStatus)}</th><th class="right">${escapeHTML(A.thRuns)}</th><th class="right">${escapeHTML(A.thFailed)}</th><th>${escapeHTML(A.thLastRun)}</th>
     </tr></thead><tbody>
       ${data.agents.length === 0 ? `<tr><td colspan="5"><div class="empty"><p class="empty__title">${escapeHTML(A.noAgents)}</p></div></td></tr>` : data.agents.map(a => agentAdminRowHtml(a, num)).join('')}
