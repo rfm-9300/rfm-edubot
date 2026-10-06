@@ -330,7 +330,14 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.INVOICES) ?: return@post
                     val request = call.receive<CreateInvoiceRequest>()
                     if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
-                    val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
+                    request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    val invoice = deps.invoices.create(
+                        ObjectId(request.clientId),
+                        request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) },
+                        request.items.map { it.toLineItem() },
+                        LocalDate.parse(request.dueDate),
+                        request.taxOfficeCode,
+                    )
                     val client = deps.clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
                     call.respond(HttpStatusCode.Created, invoice.dto(client))
                 }

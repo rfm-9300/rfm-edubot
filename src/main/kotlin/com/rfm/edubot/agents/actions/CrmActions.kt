@@ -23,6 +23,7 @@ import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.ClientServiceStatus
+import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.dashboard.DashboardModules
@@ -178,7 +179,7 @@ object InvoiceFromQuoteAction : AgentAction {
         val quotes = QuoteRepository(ctx.services.mongo, ctx.tenant.id)
         val invoices = InvoiceRepository(ctx.services.mongo, ctx.tenant.id)
         val quote = quotes.findById(id) ?: return ActionResult.Failed("quote_not_found")
-        invoices.list(quote.clientId).firstOrNull { it.quoteId == quote.id }?.let {
+        invoices.list(quote.clientId).firstOrNull { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED }?.let {
             return ActionResult.Done(buildJsonObject { put("invoiceId", it.id.toHexString()); put("number", it.number) }, note = "already_invoiced")
         }
         val percent = (input.int("depositPercent") ?: 100).coerceIn(1, 100)

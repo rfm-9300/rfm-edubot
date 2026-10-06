@@ -156,13 +156,50 @@ function serviceRollup(items) {
 }
 function invoiceRollup(items) {
   const live = items.filter(inv => inv.status !== 'CANCELLED');
+  const owed = list => list.reduce((sum, inv) => sum + invoiceOutstandingEur(inv), 0);
   return {
     count: live.length,
-    paid: sumEur(live.filter(inv => inv.status === 'PAID')),
-    pending: sumEur(live.filter(inv => inv.status === 'PENDING')),
-    overdue: sumEur(live.filter(inv => inv.status === 'OVERDUE')),
+    paid: live.reduce((sum, inv) => sum + invoicePaidEur(inv), 0),
+    pending: owed(live.filter(inv => inv.status === 'PENDING')),
+    overdue: owed(live.filter(inv => inv.status === 'OVERDUE')),
     total: sumEur(live),
   };
+}
+// An invoice paid in installments owes each part by its own date. The server keeps `dueDate` on the next
+// unpaid part and sends what was received (`paidEur`) and what is still owed (`outstandingEur`).
+const invoiceParts = inv => inv.installments || [];
+const invoicePaidEur = inv => Number(inv.paidEur ?? (inv.status === 'PAID' ? inv.totalEur : 0)) || 0;
+const invoiceOutstandingEur = inv => Number(inv.outstandingEur ?? (inv.status === 'PENDING' || inv.status === 'OVERDUE' ? inv.totalEur : 0)) || 0;
+const sumParts = parts => parts.reduce((sum, p) => sum + Number(p.amountEur || 0), 0);
+// Overdue by [today]: the unpaid parts past their date, or all still owed once the invoice is past due.
+function invoiceOverdueEur(inv, today = todayKey()) {
+  if (!isPastDue(inv, today)) return 0;
+  const open = invoiceParts(inv).filter(p => !p.paidAt);
+  if (!open.length || inv.status === 'OVERDUE') return invoiceOutstandingEur(inv);
+  return sumParts(open.filter(p => p.dueDate.slice(0, 10) < today));
+}
+// What the next due date asks for: the parts due that day, or all still owed.
+function invoiceNextDueEur(inv) {
+  const open = invoiceParts(inv).filter(p => !p.paidAt);
+  if (!open.length) return invoiceOutstandingEur(inv);
+  return sumParts(open.filter(p => p.dueDate.slice(0, 10) === String(inv.dueDate || '').slice(0, 10)));
+}
+// Money received and when: each received part, numbered, or the total once paid in one go.
+function invoiceReceipts(inv) {
+  const parts = invoiceParts(inv);
+  if (!parts.length) return inv.status === 'PAID' && inv.paidAt ? [{ at: inv.paidAt, totalEur: Number(inv.totalEur || 0) }] : [];
+  return parts
+    .map((p, i) => ({ at: p.paidAt || (inv.status === 'PAID' ? inv.paidAt : null), totalEur: Number(p.amountEur || 0), part: i + 1, of: parts.length }))
+    .filter(r => r.at);
+}
+// The total, and under it how an invoice paid in installments stands.
+function invoiceTotalCell(inv) {
+  const parts = invoiceParts(inv);
+  const open = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const note = !parts.length || !open ? ''
+    : invoicePaidEur(inv) > 0 ? STR.invoiceLeftToPay({ amount: fmtEUR(invoiceOutstandingEur(inv)) })
+    : STR.invoiceInParts({ n: parts.length });
+  return note ? `<div class="col"><span>${fmtEUR(inv.totalEur)}</span><span class="sub">${escapeHTML(note)}</span></div>` : fmtEUR(inv.totalEur);
 }
 const quoteStatusLabel = code => (CRM.quoteStatus && CRM.quoteStatus[code]) || code;
 const invoiceStatusLabel = code => (CRM.invoiceStatus && CRM.invoiceStatus[code]) || code;
@@ -3324,10 +3361,15 @@ function renderSuppliers(root) {
   const types = supplierTypes(source);
   const typeKey = supplierTypeKey(state.filterSupplierType);
   if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
+  const serviceNames = s => (s.services || []).map(x => x.description).join(', ');
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''}`.toLowerCase().includes(q))
-    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${escapeHTML(s.name)}</td><td class="muted">${escapeHTML(s.type || '')}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`)
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${serviceNames(s)}`.toLowerCase().includes(q))
+    .map(s => {
+      const services = serviceNames(s);
+      const name = services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
+      return `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${name}</td><td class="muted">${escapeHTML(s.type || '')}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`;
+    })
     .join('');
   const typeFilter = types.length
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
@@ -3808,11 +3850,11 @@ function clientMoney(r) {
   const openQuotes = r.quotes.filter(q => q.status === 'PENDENTE' || q.status === 'SENT');
   return {
     billed: sumBy(live, 'totalEur'),
-    paid: sumBy(live.filter(i => i.status === 'PAID'), 'totalEur'),
+    paid: live.reduce((t, i) => t + invoicePaidEur(i), 0),
     unpaid,
-    outstanding: sumBy(unpaid, 'totalEur'),
+    outstanding: unpaid.reduce((t, i) => t + invoiceOutstandingEur(i), 0),
     overdue,
-    overdueTotal: sumBy(overdue, 'totalEur'),
+    overdueTotal: overdue.reduce((t, i) => t + invoiceOverdueEur(i, today), 0),
     openWork,
     openWorkTotal: sumBy(openWork, 'totalEur'),
     openQuotes,
@@ -3841,7 +3883,7 @@ function clientLastActivity(r) {
     ...r.bookings.filter(b => b.status !== 'CANCELLED').map(b => b.startAt),
     ...r.services.map(s => s.performedAt || s.createdAt),
     ...r.quotes.map(q => q.createdAt),
-    ...r.invoices.flatMap(i => [i.createdAt, i.paidAt]),
+    ...r.invoices.flatMap(i => [i.createdAt, ...invoiceReceipts(i).map(x => x.at)]),
     r.conversation?.lastMessageAt,
   ].filter(s => s && new Date(s).getTime() <= now).sort().pop() || null;
 }
@@ -4053,7 +4095,7 @@ function clientAttention(r, m, bk) {
   const items = [];
   m.overdue.forEach(i => items.push({
     tone: 'bad', title: STR.clientAttnOverdue({ number: i.number }), detail: STR.clientAttnOverdueDetail({ when: relDay(i.dueDate) }),
-    amount: i.totalEur, open: `invoice:${i.id}`,
+    amount: invoiceOverdueEur(i, today), open: `invoice:${i.id}`,
   }));
   bk.unclosed.forEach(b => items.push({
     tone: 'late', title: STR.clientAttnUnclosed, detail: [bookingWhen(b), bookingServiceName(b)].filter(Boolean).join(' · '), open: `booking:${b.id}`,
@@ -4081,7 +4123,7 @@ function clientAttention(r, m, bk) {
   const soon = addDayKey(today, 7);
   m.unpaid.filter(i => !isPastDue(i, today) && i.dueDate && i.dueDate.slice(0, 10) <= soon).forEach(i => items.push({
     tone: 'warn', title: STR.clientAttnDueSoon({ number: i.number }), detail: STR.clientDueWhen({ when: relDay(i.dueDate) }),
-    amount: i.totalEur, open: `invoice:${i.id}`,
+    amount: invoiceNextDueEur(i), open: `invoice:${i.id}`,
   }));
   return items;
 }
@@ -4111,11 +4153,10 @@ function clientActivity(r, bk) {
       at: i.createdAt, tone: invoiceTone(status) || 'muted', title: STR.clientEvtInvoice({ number: i.number }),
       detail: STR.clientIssuedOn({ date: fmtDay(i.createdAt) }), pill: invoicePill(status), amount: i.totalEur, open: `invoice:${i.id}`,
     });
-    if (i.status === 'PAID' && i.paidAt) {
-      past.push({
-        at: i.paidAt, tone: 'ok', title: STR.clientEvtPaid({ number: i.number }), detail: fmtDay(i.paidAt), amount: i.totalEur, open: `invoice:${i.id}`,
-      });
-    }
+    invoiceReceipts(i).forEach(x => past.push({
+      at: x.at, tone: 'ok', detail: fmtDay(x.at), amount: x.totalEur, open: `invoice:${i.id}`,
+      title: x.of ? STR.clientEvtInstallmentPaid({ number: i.number, n: x.part, of: x.of }) : STR.clientEvtPaid({ number: i.number }),
+    }));
   });
   if (r.conversation) {
     past.push({
@@ -4240,7 +4281,7 @@ function clientPaneHtml(r, m, bk) {
       const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
       return `<tr class="conversation-row${marker}" data-record-open="invoice:${escapeHTML(i.id)}">
         <td class="id">${escapeHTML(i.number)}</td><td class="mono">${escapeHTML(fmtDay(i.createdAt))}</td>
-        <td class="mono muted">${escapeHTML(fmtDay(i.dueDate))}</td><td>${invoicePill(status)}</td><td class="num right">${fmtEUR(i.totalEur)}</td></tr>`;
+        <td class="mono muted">${escapeHTML(fmtDay(i.dueDate))}</td><td>${invoicePill(status)}</td><td class="num right">${invoiceTotalCell(i)}</td></tr>`;
     }).join('');
     return recordTable([[t.thNumber], [STR.clientThDate], [t.thDueDate], [t.thStatus], [t.thTotal, 'right']], rows);
   }
@@ -4837,6 +4878,7 @@ function renderPayeeRecord() {
     ${recordAttentionHtml(attention)}
     ${work ? employeeAccessHtml(p, r.access) : ''}
     ${work ? employeeWorkHtml(subs, r.access) : ''}
+    ${kind === 'supplier' ? supplierServicesPanel(p) : ''}
     ${payments}
     ${hasModule('payments') && !p.archivedAt ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
   const here = () => payeeTrailEntry(kind, p);
@@ -4853,13 +4895,74 @@ function renderPayeeRecord() {
     const [type, id] = el.dataset.recordOpen.split(':');
     openFrom(here(), () => (type === 'submission' ? openSubmissionDetail(id) : openPaymentDetail(id)));
   }));
-  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => cfg.pay(p))));
+  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => (b.dataset.recordAct === 'services' ? cfg.edit(p) : cfg.pay(p)))));
   $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
+}
+
+// A supplier's usual services, which a new payment to them offers as lines.
+function supplierServicesPanel(p) {
+  const t = CRM.suppliers;
+  const list = p.services || [];
+  if (!list.length) return p.archivedAt ? '' : recordEmpty(t.servicesEmpty, 'services', t.servicesAddFromRecord);
+  const rows = list.map(s => `<tr>
+    <td class="name">${escapeHTML(s.description)}</td>
+    <td class="mono muted">${escapeHTML(s.unit || '')}</td>
+    <td class="num right">${s.unitPriceEur == null ? `<span class="muted">${escapeHTML(t.servicePriceVaries)}</span>` : fmtEUR(s.unitPriceEur)}</td>
+  </tr>`).join('');
+  return recordTable([[t.serviceCol], [STR.lineColUnit], [t.servicePriceCol, 'right']], rows, { title: t.servicesLabel, count: list.length });
+}
+
+// The services a supplier usually does: description, unit and price (empty when it changes from job to
+// job). A new payment to the supplier offers them as lines.
+function supplierServicesField(services) {
+  const t = CRM.suppliers;
+  const removeIcon = '<svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  const html = `
+    <div class="lines-field">
+      <div class="lbl" id="sf-services-label">${escapeHTML(t.servicesLabel)} <span class="opt">${escapeHTML(STR.optional)}</span></div>
+      <div class="lines lines--services" role="group" aria-labelledby="sf-services-label">
+        <div class="lines__head"><span>${escapeHTML(t.serviceCol)}</span><span>${escapeHTML(STR.lineColUnit)}</span><span>${escapeHTML(t.servicePriceCol)}</span><span></span></div>
+        <div id="sf-services"></div>
+        <p class="lines__empty" id="sf-services-empty">${escapeHTML(t.servicesEmpty)}</p>
+        <div class="lines__foot"><button class="btn btn--sm btn--ghost" type="button" id="sf-add-service">${escapeHTML(t.serviceAdd)}</button></div>
+      </div>
+      <p class="hint">${escapeHTML(t.servicesHint)}</p>
+    </div>`;
+  const collect = form => $$('#sf-services .line', form).map(row => {
+    const price = $('[data-k="unitPriceEur"]', row).value;
+    return {
+      description: $('[data-k="description"]', row).value.trim(),
+      unit: $('[data-k="unit"]', row).value.trim(),
+      unitPriceEur: price === '' ? null : Number(price),
+    };
+  }).filter(s => s.description);
+  const wire = form => {
+    const body = $('#sf-services', form);
+    const empty = () => { $('#sf-services-empty', form).hidden = !!body.children.length; };
+    const addRow = (s = {}) => {
+      const row = document.createElement('div');
+      row.className = 'line';
+      row.innerHTML = `
+        <input type="text" data-k="description" maxlength="200" autocomplete="off" aria-label="${escapeHTML(t.serviceCol)}" placeholder="${escapeHTML(t.servicePh)}" value="${escapeHTML(s.description || '')}" />
+        <input type="text" data-k="unit" class="num" maxlength="20" aria-label="${escapeHTML(STR.lineColUnit)}" placeholder="${escapeHTML(STR.lineUnitPh)}" value="${escapeHTML(s.unit || '')}" />
+        <input type="number" data-k="unitPriceEur" class="num" min="0" step="0.01" aria-label="${escapeHTML(t.servicePriceCol)}" placeholder="${escapeHTML(t.servicePricePh)}" value="${s.unitPriceEur ?? ''}" />
+        <button type="button" class="l-rm" title="${escapeHTML(STR.lineRemove)}" aria-label="${escapeHTML(STR.lineRemove)}">${removeIcon}</button>`;
+      $('.l-rm', row).addEventListener('click', () => { row.remove(); empty(); });
+      body.appendChild(row);
+      empty();
+      return row;
+    };
+    (services || []).forEach(addRow);
+    empty();
+    $('#sf-add-service', form).addEventListener('click', () => $('[data-k="description"]', addRow()).focus());
+  };
+  return { html, wire, collect };
 }
 
 async function openSupplierForm(supplier) {
   const t = CRM.suppliers;
   const editing = supplier && supplier.id ? supplier : null;
+  const services = supplierServicesField(editing?.services);
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
@@ -4872,10 +4975,12 @@ async function openSupplierForm(supplier) {
       <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
       <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+    ${services.html}
     <div class="actions">
       <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
       ${editing ? `<button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>` : ''}
     </div>`;
+  services.wire(form);
   $('[data-form-cancel]', form)?.addEventListener('click', () => closeDrawer());
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -4884,17 +4989,19 @@ async function openSupplierForm(supplier) {
     const address = $('#sf-address', form).value.trim() || undefined;
     const type = $('#sf-type', form).value.trim();
     if (!name || !phone) return toast(t.validate);
+    const payload = { name, phone, address, type, services: services.collect(form) };
+    if (payload.services.some(s => !(s.unitPriceEur == null || s.unitPriceEur >= 0))) return toast(t.err_service_price_invalid);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
       if (editing) {
-        await api(`/app/api/crm/suppliers/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify({ name, phone, address, type }) });
+        await api(`/app/api/crm/suppliers/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
         closeDrawer();
         await loadModule('suppliers');
         render();
         toast(t.updated);
       } else {
-        const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify({ name, phone, address, type }) });
+        const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify(payload) });
         closeDrawer();
         await loadModule('suppliers');
         toast(t.created);
@@ -4902,7 +5009,11 @@ async function openSupplierForm(supplier) {
         render();
         openPayeeDrawer('supplier', created);
       }
-    } catch (err) { btn.disabled = false; toast(err?.code === 'phone_taken' ? STR.supplierPhoneTaken : t.saveFailed); }
+    } catch (err) {
+      btn.disabled = false;
+      // `t` is the catalog's own object, so an unknown key reads as undefined.
+      toast(err?.code === 'phone_taken' ? STR.supplierPhoneTaken : (err?.code && t[`err_${err.code}`]) || t.saveFailed);
+    }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);
 }
@@ -5589,6 +5700,7 @@ function lineItemsField(catalog) {
     if (initial.length) initial.forEach(addRow);
     else addRow();
     $('#add-line', form).addEventListener('click', () => $('[data-k="description"]', addRow()).focus());
+    return { addRow, recalc };
   };
   return { html, wire, collect };
 }
@@ -5687,8 +5799,10 @@ async function openInvoiceForm(opts = {}) {
       ${clientSelect(withClient(clients, opts.client), opts.client?.id)}
       <div class="form__row"><label class="lbl" for="i-due">${escapeHTML(STR.invoiceDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="i-due" type="date" required /></div>
-      <div class="form__row form__row--full"><label class="lbl" for="i-quote">${escapeHTML(STR.invoiceQuoteId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <div class="form__row"><label class="lbl" for="i-quote">${escapeHTML(STR.invoiceQuoteId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <input class="inp inp--mono" id="i-quote" placeholder="${escapeHTML(STR.invoiceQuoteIdPh)}" /></div>
+      <div class="form__row"><label class="lbl" for="i-taxcode">${escapeHTML(STR.invoiceTaxCode)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+        <input class="inp inp--mono" id="i-taxcode" maxlength="80" autocomplete="off" placeholder="${escapeHTML(STR.invoiceTaxCodePh)}" /></div>
     </div>
     ${li.html}
     <button class="btn btn--primary" type="submit">${escapeHTML(STR.invoiceSave)}</button>`;
@@ -5704,12 +5818,13 @@ async function openInvoiceForm(opts = {}) {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      await api('/app/api/crm/invoices', { method: 'POST', body: JSON.stringify({ clientId, quoteId: $('#i-quote', form).value.trim() || null, items, dueDate }) });
+      const taxOfficeCode = $('#i-taxcode', form).value.trim() || null;
+      await api('/app/api/crm/invoices', { method: 'POST', body: JSON.stringify({ clientId, quoteId: $('#i-quote', form).value.trim() || null, items, dueDate, taxOfficeCode }) });
       closeDrawer();
       await loadModule('invoices');
       render();
       toast(STR.invoiceCreated);
-    } catch { btn.disabled = false; toast(STR.invoiceCreateFailed); }
+    } catch (err) { btn.disabled = false; toast(invoiceErrorText(err, STR.invoiceCreateFailed)); }
   });
   openDrawer(STR.invoiceFormTitle, form, true);
 }
@@ -5752,23 +5867,63 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
       ${clientsOn ? paymentClientSelect(clients, presetClient?.id || '') : ''}
+      <div class="form__row form__row--full" id="payee-services" hidden></div>
     </div>
     <div id="payment-lines">${li.html}</div>
     ${employeesOn ? generalPaymentFields() : ''}
     <div class="form__row form__row--full"><label class="lbl" for="p-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
       <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}"></textarea></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
+  // The picked supplier's usual services, as ticks. A ticked service adds a line tagged with it, so
+  // unticking removes that line and removing the line unticks it.
+  let lines = null;
+  const supplierServices = () => (payee === 'supplier' ? suppliers.find(s => s.id === ($('#f-supplier', form)?.value || ''))?.services || [] : []);
+  const paymentLines = () => $$('#payment-lines .line', form);
+  const syncServices = () => $$('[data-supplier-service]', form).forEach(box => {
+    box.checked = paymentLines().some(row => row.dataset.fromService === box.dataset.supplierService);
+  });
+  const blankLine = row => ['description', 'quantity', 'unitPriceEur'].every(k => !$(`[data-k="${k}"]`, row).value.trim());
+  const toggleService = (i, on) => {
+    const s = supplierServices()[i];
+    if (!lines || !s) return;
+    if (on) {
+      const preset = { description: s.description, quantity: 1, unit: s.unit || '', unitPriceEur: s.unitPriceEur ?? '' };
+      let row = paymentLines().find(blankLine);
+      if (row) Object.entries(preset).forEach(([k, v]) => { $(`[data-k="${k}"]`, row).value = v; });
+      else row = lines.addRow(preset);
+      row.dataset.fromService = String(i);
+    } else {
+      paymentLines().filter(row => row.dataset.fromService === String(i)).forEach(row => row.remove());
+      if (!paymentLines().length) lines.addRow();
+    }
+    lines.recalc();
+  };
+  const renderServices = () => {
+    const row = $('#payee-services', form);
+    const list = supplierServices();
+    row.hidden = !list.length;
+    row.innerHTML = !list.length ? '' : `
+      <span class="lbl" id="ps-label">${escapeHTML(t.supplierServices)}</span>
+      <div class="form__checks form__checks--wide" role="group" aria-labelledby="ps-label">
+        ${list.map((s, i) => `<label class="form__check"><input type="checkbox" data-supplier-service="${i}" />
+          <span>${escapeHTML(s.description)}${s.unitPriceEur != null ? ` <span class="muted mono">${escapeHTML(fmtEUR(s.unitPriceEur))}${s.unit ? `/${escapeHTML(s.unit)}` : ''}</span>` : ''}</span></label>`).join('')}
+      </div>
+      <p class="hint">${escapeHTML(t.supplierServicesHint)}</p>`;
+    $$('[data-supplier-service]', row).forEach(box => box.addEventListener('change', () => toggleService(Number(box.dataset.supplierService), box.checked)));
+    syncServices();
+  };
   const showPayee = kind => {
     payee = kind;
     const supplierRow = $('#payee-supplier', form);
     const employeeRow = $('#payee-employee', form);
-    const lines = $('#payment-lines', form);
+    const lineBox = $('#payment-lines', form);
     const general = $('#payment-general', form);
     if (supplierRow) supplierRow.hidden = kind !== 'supplier';
     if (employeeRow) employeeRow.hidden = kind !== 'employee';
-    if (lines) lines.hidden = kind === 'employee';
+    if (lineBox) lineBox.hidden = kind === 'employee';
     if (general) general.hidden = kind !== 'employee';
     $$('[data-payee]', form).forEach(btn => btn.classList.toggle('is-on', btn.dataset.payee === kind));
+    renderServices();
   };
   showPayee(payee);
   $$('[data-payee]', form).forEach(btn => btn.addEventListener('click', () => {
@@ -5779,7 +5934,14 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     }
     showPayee(btn.dataset.payee);
   }));
-  li.wire(form);
+  lines = li.wire(form, { onChange: syncServices });
+  // Lines the previous supplier's services added go with it.
+  $('#f-supplier', form)?.addEventListener('change', () => {
+    paymentLines().filter(row => row.dataset.fromService).forEach(row => row.remove());
+    if (!paymentLines().length) lines.addRow();
+    lines.recalc();
+    renderServices();
+  });
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const dueDate = $('#p-due', form).value;
@@ -5883,9 +6045,11 @@ async function openQuoteDetail(id) {
   catch { /* keep list row */ }
   if (!quote) return;
   const canEmail = !!(await email)?.configured && quote.status !== 'CANCELLED';
-  // Converting marks the quote accepted; its invoice is the one that points back at it.
+  // Converting marks the quote accepted; its invoice is the one that points back at it. A cancelled one
+  // frees the quote to be converted again.
   const invoice = hasModule('invoices') && quote.status === 'ACEITO'
-    ? (await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).catch(() => [])).find(i => i.quoteId === quote.id) || null
+    ? (await api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).catch(() => []))
+      .find(i => i.quoteId === quote.id && i.status !== 'CANCELLED') || null
     : null;
   const here = { key: `quote:${quote.id}`, label: quote.number, open: () => openQuoteDetail(quote.id) };
   const isOpen = quote.status === 'PENDENTE' || quote.status === 'SENT';
@@ -5956,31 +6120,34 @@ async function openQuoteDetail(id) {
 function renderInvoices(root) {
   const t = CRM.invoices;
   const q = state.search.toLowerCase();
+  const matches = inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)} ${inv.taxOfficeCode || ''}`.toLowerCase().includes(q);
   const rows = state.invoices
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
-    .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)}`.toLowerCase().includes(q))
+    .filter(matches)
     .map(inv => {
       const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+      // An invoice paid in installments receives its next part from the row instead.
+      const nextPart = canMarkPaid ? invoiceParts(inv).findIndex(p => !p.paidAt) : -1;
       const rowClass = inv.status === 'PAID' ? 'is-paid' : inv.status === 'OVERDUE' ? 'is-overdue' : inv.status === 'CANCELLED' ? 'is-draft' : '';
       return `<tr class="conversation-row ${rowClass}" data-invoice="${escapeHTML(inv.id)}">
         <td class="id">${escapeHTML(inv.number)}</td>
         <td class="name">${escapeHTML(inv.clientName || '')}</td>
         <td>${invoicePill(inv.status)}</td>
         <td class="mono muted">${fmtDay(inv.dueDate)}</td>
-        <td class="num">${fmtEUR(inv.totalEur)}</td>
+        <td class="num">${invoiceTotalCell(inv)}</td>
         <td class="right"><div class="actions">
-          ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-paid="${escapeHTML(inv.id)}">${escapeHTML(STR.markPaid)}</button>` : ''}
+          ${nextPart >= 0
+            ? `<button class="btn btn--sm btn--accent" type="button" data-receive-invoice="${escapeHTML(inv.id)}" data-part="${nextPart}">${escapeHTML(STR.installmentReceiveShort)}</button>`
+            : canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-paid="${escapeHTML(inv.id)}">${escapeHTML(STR.markPaid)}</button>` : ''}
           ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
         </div></td>
       </tr>`;
     }).join('');
-  const paid = state.invoices.filter(i => i.status === 'PAID').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
-  const pending = state.invoices.filter(i => i.status === 'PENDING').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
-  const overdue = state.invoices.filter(i => i.status === 'OVERDUE').reduce((sum, i) => sum + Number(i.totalEur || 0), 0);
+  const { paid, pending, overdue } = invoiceRollup(state.invoices);
   const period = state.filterInvoicePeriod || '';
   const listed = state.invoices
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
-    .filter(inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)}`.toLowerCase().includes(q));
+    .filter(matches);
   const invoiceGroups = period ? groupByPeriod(listed, period, inv => inv.createdAt || inv.dueDate) : [];
   const nowKey = period ? (state.filterInvoicePeriodKey || currentPeriodKey(period)) : '';
   const nowRoll = invoiceRollup(groupItems(invoiceGroups, nowKey));
@@ -6035,8 +6202,13 @@ function renderInvoices(root) {
     e.stopPropagation();
     markInvoicePaid(btn.dataset.markPaid);
   }));
+  $$('[data-receive-invoice]', root).forEach(btn => btn.addEventListener('click', e => {
+    e.stopPropagation();
+    const inv = state.invoices.find(i => i.id === btn.dataset.receiveInvoice);
+    if (inv) receiveInvoiceInstallment(inv, Number(btn.dataset.part));
+  }));
   $$('[data-invoice]', root).forEach(r => r.addEventListener('click', e => {
-    if (e.target.closest('[data-pdf-url], [data-mark-paid]')) return;
+    if (e.target.closest('[data-pdf-url], [data-mark-paid], [data-receive-invoice]')) return;
     openInvoiceDetail(r.dataset.invoice);
   }));
 }
@@ -6045,29 +6217,35 @@ function renderFinanceiro(root) {
   const t = CRM.financeiro;
   const period = state.filterFinanceiroPeriod || '';
   const typeFilter = state.filterFinanceiroType || '';
-  const everyPaidInvoice = hasModule('invoices') ? state.invoices.filter(i => i.status === 'PAID' && i.paidAt) : [];
+  // Money in: each invoice paid in one go, and each installment received on an invoice paid in parts.
+  const everyReceipt = hasModule('invoices')
+    ? state.invoices.filter(i => i.status !== 'CANCELLED').flatMap(i => invoiceReceipts(i).map(r => ({ ...r, inv: i, clientId: i.clientId, clientName: i.clientName })))
+    : [];
   const everyPaidPayment = hasModule('payments') ? state.payments.filter(p => p.status === 'PAID' && p.paidAt) : [];
   // A payment counts for a client only when it is linked to that client.
   const clientNames = new Map();
-  for (const m of [...everyPaidInvoice, ...everyPaidPayment]) {
+  for (const m of [...everyReceipt, ...everyPaidPayment]) {
     if (m.clientId && !clientNames.has(m.clientId)) clientNames.set(m.clientId, m.clientName || m.clientId);
   }
   if (state.filterFinanceiroClient && !clientNames.has(state.filterFinanceiroClient)) state.filterFinanceiroClient = '';
   const clientId = state.filterFinanceiroClient || '';
-  const paidInvoices = clientId ? everyPaidInvoice.filter(i => i.clientId === clientId) : everyPaidInvoice;
+  const receipts = clientId ? everyReceipt.filter(r => r.clientId === clientId) : everyReceipt;
   const paidPayments = clientId ? everyPaidPayment.filter(p => p.clientId === clientId) : everyPaidPayment;
-  const receivedAll = sumEur(paidInvoices);
+  const receivedAll = sumEur(receipts);
   const spentAll = sumEur(paidPayments);
 
   const ledgerAll = [
-    ...paidInvoices.map(i => ({ kind: 'in', date: i.paidAt, amount: i.totalEur, who: i.clientName || '—', ref: i.number, open: `invoice:${i.id}` })),
+    ...receipts.map(r => ({
+      kind: 'in', date: r.at, amount: r.totalEur, who: r.inv.clientName || '—', open: `invoice:${r.inv.id}`,
+      ref: r.of ? STR.installmentRef({ number: r.inv.number, n: r.part, of: r.of }) : r.inv.number,
+    })),
     ...paidPayments.map(p => ({
       kind: 'out', date: p.paidAt, amount: p.totalEur, who: payeeName(p) || '—', whoFor: clientId ? '' : p.clientName || '', ref: p.number, open: `payment:${p.id}`,
     })),
   ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
   const ledger = ledgerAll.filter(m => !typeFilter || m.kind === typeFilter);
 
-  const inGroups = period ? groupByPeriod(paidInvoices, period, i => i.paidAt) : [];
+  const inGroups = period ? groupByPeriod(receipts, period, r => r.at) : [];
   const outGroups = period ? groupByPeriod(paidPayments, period, p => p.paidAt) : [];
   const periodKeys = [...new Set([...inGroups.map(([k]) => k), ...outGroups.map(([k]) => k)])].sort((a, b) => b.localeCompare(a));
   const rollupFor = key => {
@@ -6210,10 +6388,11 @@ function renderPayments(root) {
   }));
 }
 
-async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id)?.number || '') {
+// [rest] is what an invoice paid in installments still owes: marking it paid receives all of that today.
+async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id)?.number || '', rest = null) {
   const ok = await confirmDialog({
     title: STR.markPaidConfirmTitle,
-    body: STR.markPaidConfirmBody({ number }),
+    body: rest == null ? STR.markPaidConfirmBody({ number }) : STR.markPaidConfirmBodyRest({ number, amount: fmtEUR(rest) }),
     okLabel: STR.markPaid,
     danger: false,
   });
@@ -6227,6 +6406,85 @@ async function markInvoicePaid(id, number = state.invoices.find(i => i.id === id
   } catch { toast(STR.markPaidFailed); }
 }
 
+// The i18n proxy answers a missing key with its own path, so `catalogTextOr` checks for that.
+const invoiceErrorText = (err, fallback = STR.invoiceActionFailed) => catalogTextOr(STR, 'app', err?.code ? `invoiceErr_${err.code}` : '', fallback);
+
+// After an invoice changes: its list, and the page behind the drawer when that page counts invoice money
+// (cancelling or deleting one also reopens the Serviços rows it billed).
+async function reloadAfterInvoiceChange() {
+  await loadModule('invoices').catch(() => {});
+  if (['services', 'financeiro', 'overview'].includes(state.active)) await loadModule(state.active).catch(() => {});
+  render();
+}
+
+async function receiveInvoiceInstallment(inv, index, reopen = false) {
+  const parts = invoiceParts(inv);
+  const part = parts[index];
+  if (!part) return;
+  const last = parts.filter(p => !p.paidAt).length === 1;
+  const ok = await confirmDialog({
+    title: STR.installmentReceiveTitle,
+    body: STR.installmentReceiveBody({ n: index + 1, of: parts.length, amount: fmtEUR(part.amountEur), number: inv.number, last }),
+    okLabel: STR.installmentReceiveShort,
+    danger: false,
+  });
+  if (!ok) return;
+  try {
+    const updated = await api(`/app/api/crm/invoices/${encodeURIComponent(inv.id)}/installments/${index}/paid`, { method: 'PATCH' });
+    toast(updated.status === 'PAID' ? STR.markedPaid({ number: inv.number }) : STR.installmentReceived({ n: index + 1, of: parts.length, number: inv.number }));
+    await reloadAfterInvoiceChange();
+    if (reopen) openInvoiceDetail(inv.id);
+  } catch (err) { if (err?.message !== 'unauthorized') toast(invoiceErrorText(err)); }
+}
+
+async function cancelInvoice(inv) {
+  const ok = await confirmDialog({ title: STR.invoiceCancelTitle({ number: inv.number }), body: STR.invoiceCancelBody, okLabel: STR.invoiceCancel });
+  if (!ok) return;
+  try {
+    await api(`/app/api/crm/invoices/${encodeURIComponent(inv.id)}/cancel`, { method: 'POST' });
+    closeDrawer();
+    toast(STR.invoiceCancelled({ number: inv.number }));
+    await reloadAfterInvoiceChange();
+  } catch (err) { if (err?.message !== 'unauthorized') toast(invoiceErrorText(err)); }
+}
+
+async function deleteInvoice(inv) {
+  const body = invoicePaidEur(inv) > 0 ? STR.invoiceDeleteBodyPaid({ amount: fmtEUR(invoicePaidEur(inv)) }) : STR.invoiceDeleteBody;
+  const ok = await confirmDialog({ title: STR.invoiceDeleteTitle({ number: inv.number }), body, okLabel: STR.invoiceDelete });
+  if (!ok) return;
+  try {
+    await api(`/app/api/crm/invoices/${encodeURIComponent(inv.id)}`, { method: 'DELETE' });
+    closeDrawer();
+    toast(STR.invoiceDeleted({ number: inv.number }));
+    await reloadAfterInvoiceChange();
+  } catch (err) { if (err?.message !== 'unauthorized') toast(invoiceErrorText(err)); }
+}
+
+// The parts of an invoice paid in installments, each received on its own. Two columns, so a phone
+// shows the amount and its action without scrolling: the action wraps under the amount.
+function installmentsPanel(inv) {
+  const parts = invoiceParts(inv);
+  const today = todayKey();
+  const open = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const rows = parts.map((p, i) => {
+    const paid = !!p.paidAt || inv.status === 'PAID';
+    const late = !paid && open && p.dueDate.slice(0, 10) < today;
+    const when = paid ? (p.paidAt ? STR.installmentPaidOn({ date: fmtDay(p.paidAt) }) : STR.installmentPaid)
+      : open ? dueWhenText(p.dueDate, late) : invoiceStatusLabel(inv.status);
+    const side = paid ? `<span class="pill pill--ok">${escapeHTML(STR.installmentPaid)}</span>`
+      : open ? `<button class="btn btn--sm btn--accent" type="button" data-receive-part="${i}">${escapeHTML(STR.installmentReceiveShort)}</button>` : '';
+    return `<tr class="${paid ? 'is-paid' : late ? 'is-overdue' : ''}">
+      <td><div class="col"><span class="mono">${escapeHTML(fmtDay(p.dueDate))}</span><span class="sub">${escapeHTML(`${i + 1}/${parts.length} · ${when}`)}</span></div></td>
+      <td class="right"><div class="actions"><strong class="mono">${fmtEUR(p.amountEur)}</strong>${side}</div></td>
+    </tr>`;
+  }).join('');
+  return `<section class="panel">
+    <header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.installmentsTitle)} <span class="tag">${parts.length}</span></h2>
+      <span class="panel__meta">${escapeHTML(STR.installmentsReceivedOf({ paid: fmtEUR(invoicePaidEur(inv)), total: fmtEUR(inv.totalEur) }))}</span></header>
+    <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(STR.installmentsColDue)}</th><th class="right">${escapeHTML(STR.installmentsColAmount)}</th></tr></thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
+
 async function openInvoiceDetail(id) {
   let inv = state.invoices.find(i => i.id === id);
   const email = emailStatus();
@@ -6236,6 +6494,8 @@ async function openInvoiceDetail(id) {
   const canEmail = !!(await email)?.configured && inv.status !== 'CANCELLED';
   const status = effectiveStatus(inv);
   const unpaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+  const parts = invoiceParts(inv);
+  const received = invoicePaidEur(inv);
   const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
   const clientLink = hasModule('clients') && !!inv.clientId && !linksBackTo(`client:${inv.clientId}`);
   const quoteLink = hasModule('quotes') && !!inv.quoteId && !linksBackTo(`quote:${inv.quoteId}`);
@@ -6245,24 +6505,189 @@ async function openInvoiceDetail(id) {
     ${detailHead(inv.clientName, invoicePill(status), inv.totalEur, invoiceTone(status), clientLink)}
     ${detailMeta([
       { label: STR.detailIssued, value: fmtDay(inv.createdAt) },
-      { label: STR.thDueDate, value: unpaid ? `${fmtDay(inv.dueDate)} · ${dueWhenText(inv.dueDate, status === 'OVERDUE')}` : fmtDay(inv.dueDate) },
+      {
+        label: unpaid && parts.length ? STR.invoiceNextDue : STR.thDueDate,
+        value: unpaid ? `${fmtDay(inv.dueDate)} · ${dueWhenText(inv.dueDate, status === 'OVERDUE')}` : fmtDay(inv.dueDate),
+      },
       inv.status === 'PAID' && inv.paidAt ? { label: STR.paidOnLabel, value: fmtDay(inv.paidAt) } : null,
+      unpaid && received > 0 ? { label: STR.invoiceReceived, value: fmtEUR(received) } : null,
+      unpaid && received > 0 ? { label: STR.invoiceStillOwed, value: fmtEUR(invoiceOutstandingEur(inv)) } : null,
+      inv.taxOfficeCode ? { label: STR.invoiceTaxCode, value: inv.taxOfficeCode } : null,
     ])}
     ${inv.quoteNumber && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
     ${itemsTable(inv.items)}
+    ${parts.length ? installmentsPanel(inv) : ''}
     <div class="detail__foot">
       ${unpaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
+      ${unpaid ? `<button class="btn btn--sm" type="button" data-inv-parts>${escapeHTML(parts.length ? STR.installmentsChange : STR.installmentsSplit)}</button>` : ''}
       ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
+      <button class="btn btn--sm btn--ghost" type="button" data-inv-taxcode>${escapeHTML(inv.taxOfficeCode ? STR.invoiceTaxCodeChange : STR.invoiceTaxCodeAdd)}</button>
+      ${unpaid && received === 0 ? `<button class="btn btn--sm btn--ghost" type="button" data-inv-cancel>${escapeHTML(STR.invoiceCancel)}</button>` : ''}
+      <button class="btn btn--sm btn--ghost" type="button" data-inv-delete>${escapeHTML(STR.invoiceDelete)}</button>
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
   $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
-  $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number));
+  $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number, parts.length ? invoiceOutstandingEur(inv) : null));
+  $('[data-inv-parts]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceInstallmentsForm(inv)));
+  $$('[data-receive-part]', form).forEach(b => b.addEventListener('click', () => receiveInvoiceInstallment(inv, Number(b.dataset.receivePart), true)));
+  $('[data-inv-taxcode]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceTaxCodeForm(inv)));
+  $('[data-inv-cancel]', form)?.addEventListener('click', () => cancelInvoice(inv));
+  $('[data-inv-delete]', form)?.addEventListener('click', () => deleteInvoice(inv));
   $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
   openDrawer(inv.number, form);
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
+}
+
+// "Same day next month" for installment dates; the 31st becomes the month's last day.
+function addMonthsKey(key, n) {
+  const [y, m, d] = key.split('-').map(Number);
+  const last = new Date(Date.UTC(y, m + n, 0)).getUTCDate();
+  return new Date(Date.UTC(y, m - 1 + n, Math.min(d, last))).toISOString().slice(0, 10);
+}
+
+// [cents] in [n] equal parts a month apart from [firstKey]; leftover cents go to the first parts.
+function splitInstallments(cents, n, firstKey) {
+  const base = Math.floor(cents / n);
+  return Array.from({ length: n }, (_, i) => ({
+    amountEur: (base + (i < cents - base * n ? 1 : 0)) / 100,
+    dueDate: addMonthsKey(firstKey, i),
+  }));
+}
+
+// Splits what an invoice still owes into installments, each with its own amount and date. Parts already
+// received stay as they are; leaving a single part pays the invoice in one go again, by that date.
+function openInvoiceInstallmentsForm(inv) {
+  const parts = invoiceParts(inv);
+  const received = parts.filter(p => p.paidAt);
+  const owedCents = Math.round(Number(inv.totalEur || 0) * 100) - Math.round(sumParts(received) * 100);
+  const open = parts.filter(p => !p.paidAt).map(p => ({ amountEur: p.amountEur, dueDate: p.dueDate.slice(0, 10) }));
+  const initial = open.length ? open : splitInstallments(owedCents, 2, todayKey());
+  const removeIcon = '<svg width="12" height="12" viewBox="0 0 16 16"><path d="M3 3 L13 13 M13 3 L3 13" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML([
+      STR.installmentsIntro({ amount: fmtEUR(owedCents / 100) }),
+      received.length ? STR.installmentsKeepReceived({ n: received.length, amount: fmtEUR(sumParts(received)) }) : '',
+    ].filter(Boolean).join(' '))}</p>
+    <div class="lines-field">
+      <div class="form__row-head">
+        <span class="lbl" id="ip-label">${escapeHTML(STR.installmentsTitle)}</span>
+        <div class="actions"><span class="hint">${escapeHTML(STR.installmentsSplitEvenly)}</span>
+          ${[2, 3, 4, 6, 12].map(n => `<button class="btn btn--sm btn--ghost" type="button" data-ip-split="${n}" aria-label="${escapeHTML(STR.installmentsSplitAria({ n }))}">${escapeHTML(STR.installmentsSplitShort({ n }))}</button>`).join('')}
+        </div>
+      </div>
+      <div class="lines lines--installments" role="group" aria-labelledby="ip-label">
+        <div class="lines__head"><span>${escapeHTML(STR.installmentsColPart)}</span><span>${escapeHTML(STR.installmentsColAmount)}</span><span>${escapeHTML(STR.installmentsColDue)}</span><span></span></div>
+        <div id="ip-body"></div>
+        <div class="lines__foot">
+          <button class="btn btn--sm btn--ghost" type="button" id="ip-add">${escapeHTML(STR.installmentsAdd)}</button>
+          <div class="lines__total"><span class="muted" id="ip-sum-label"></span><span class="v" id="ip-sum"></span></div>
+        </div>
+      </div>
+      <p class="hint" id="ip-check" role="status"></p>
+    </div>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(STR.installmentsSave)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+    </div>`;
+  const body = $('#ip-body', form);
+  const rows = () => $$('.line', body).map(row => ({
+    cents: Math.round(Number($('[data-k="amountEur"]', row).value || 0) * 100),
+    dueDate: $('[data-k="dueDate"]', row).value,
+  }));
+  // The sum against what is still owed, and the first thing to fix before saving.
+  const check = () => {
+    const list = rows();
+    $$('.line__index', body).forEach((el, i) => { el.textContent = String(received.length + i + 1); });
+    const diff = owedCents - list.reduce((t, r) => t + r.cents, 0);
+    $('#ip-sum-label', form).textContent = diff > 0 ? STR.installmentsMissing : diff < 0 ? STR.installmentsOver : STR.lineTotal;
+    $('#ip-sum', form).textContent = fmtEUR(Math.abs(diff ? diff : owedCents) / 100);
+    const problem = !list.length ? STR.installmentsNeedOne
+      : list.some(r => r.cents <= 0) ? STR.installmentsNeedAmounts
+        : list.some(r => !r.dueDate) ? STR.installmentsNeedDates
+          : diff !== 0 ? STR.installmentsMustAddUp({ amount: fmtEUR(owedCents / 100) })
+            : list.length === 1 && !received.length ? STR.installmentsSingle : '';
+    const hint = $('#ip-check', form);
+    hint.textContent = problem;
+    hint.classList.toggle('hint--warn', !!problem && problem !== STR.installmentsSingle);
+    return problem === STR.installmentsSingle ? '' : problem;
+  };
+  const addRow = (preset = {}) => {
+    const row = document.createElement('div');
+    row.className = 'line';
+    row.innerHTML = `
+      <span class="line__index mono"></span>
+      <input type="number" data-k="amountEur" class="num" min="0" step="0.01" placeholder="0.00" aria-label="${escapeHTML(STR.installmentsColAmount)}" value="${preset.amountEur ?? ''}" />
+      <input type="date" data-k="dueDate" class="mono" aria-label="${escapeHTML(STR.installmentsColDue)}" value="${escapeHTML(preset.dueDate || '')}" />
+      <button type="button" class="l-rm" title="${escapeHTML(STR.installmentsRemove)}" aria-label="${escapeHTML(STR.installmentsRemove)}">${removeIcon}</button>`;
+    row.querySelectorAll('input').forEach(i => i.addEventListener('input', check));
+    $('.l-rm', row).addEventListener('click', () => { row.remove(); check(); });
+    body.appendChild(row);
+    return row;
+  };
+  const fill = list => { body.innerHTML = ''; list.forEach(addRow); check(); };
+  fill(initial);
+  $$('[data-ip-split]', form).forEach(b => b.addEventListener('click', () => {
+    const first = rows()[0]?.dueDate || todayKey();
+    fill(splitInstallments(owedCents, Number(b.dataset.ipSplit), first));
+  }));
+  $('#ip-add', form).addEventListener('click', () => {
+    const list = rows();
+    const left = owedCents - list.reduce((t, r) => t + r.cents, 0);
+    const last = list[list.length - 1]?.dueDate;
+    const row = addRow({ amountEur: left > 0 ? left / 100 : '', dueDate: last ? addMonthsKey(last, 1) : todayKey() });
+    check();
+    $('[data-k="amountEur"]', row).focus();
+  });
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const problem = check();
+    if (problem) return toast(problem);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const installments = rows().map(r => ({ amountEur: r.cents / 100, dueDate: r.dueDate }));
+      await api(`/app/api/crm/invoices/${encodeURIComponent(inv.id)}/installments`, { method: 'PUT', body: JSON.stringify({ installments }) });
+      closeDrawer();
+      toast(STR.installmentsSaved);
+      await reloadAfterInvoiceChange();
+    } catch (err) { btn.disabled = false; if (err?.message !== 'unauthorized') toast(invoiceErrorText(err)); }
+  });
+  openDrawer(parts.length ? STR.installmentsChangeTitle({ number: inv.number }) : STR.installmentsSplitTitle({ number: inv.number }), form);
+}
+
+// The code the tax office gave the invoice (the ATCUD in Portugal). It usually arrives after the invoice
+// was made, so it is added or changed here; the PDF prints it.
+function openInvoiceTaxCodeForm(inv) {
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row"><label class="lbl" for="it-code">${escapeHTML(STR.invoiceTaxCode)}</label>
+      <input class="inp inp--mono" id="it-code" maxlength="80" autocomplete="off" placeholder="${escapeHTML(STR.invoiceTaxCodePh)}" value="${escapeHTML(inv.taxOfficeCode || '')}" />
+      <p class="hint">${escapeHTML(STR.invoiceTaxCodeHint)}</p></div>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(STR.invoiceTaxCodeSave)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+    </div>`;
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    const taxOfficeCode = $('#it-code', form).value.trim();
+    try {
+      await api(`/app/api/crm/invoices/${encodeURIComponent(inv.id)}/tax-office-code`, { method: 'PATCH', body: JSON.stringify({ taxOfficeCode }) });
+      closeDrawer();
+      toast(taxOfficeCode ? STR.invoiceTaxCodeSaved : STR.invoiceTaxCodeCleared);
+      await reloadAfterInvoiceChange();
+    } catch (err) { btn.disabled = false; if (err?.message !== 'unauthorized') toast(invoiceErrorText(err)); }
+  });
+  openDrawer(STR.invoiceTaxCodeTitle({ number: inv.number }), form);
 }
 
 const newRequestId = () => (window.crypto?.randomUUID ? crypto.randomUUID() : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`);
@@ -6401,6 +6826,38 @@ async function markPaymentPaid(id, number = state.payments.find(p => p.id === id
   } catch { toast(t.markPaidFailed); }
 }
 
+// `CRM.payments` is the catalog's own object, so an unknown key reads as undefined.
+const paymentErrorText = err => (err?.code && CRM.payments[`err_${err.code}`]) || CRM.payments.actionFailed;
+
+async function reloadAfterPaymentChange() {
+  await loadModule('payments').catch(() => {});
+  if (state.active === 'overview') await loadModule('overview').catch(() => {});
+  render();
+}
+
+async function cancelPayment(pay) {
+  const t = CRM.payments;
+  if (!await confirmDialog({ title: t.cancelTitle({ number: pay.number }), body: t.cancelBody, okLabel: t.cancel })) return;
+  try {
+    await api(`/app/api/crm/payments/${encodeURIComponent(pay.id)}/cancel`, { method: 'POST' });
+    closeDrawer();
+    toast(t.cancelled({ number: pay.number }));
+    await reloadAfterPaymentChange();
+  } catch (err) { if (err?.message !== 'unauthorized') toast(paymentErrorText(err)); }
+}
+
+async function deletePayment(pay) {
+  const t = CRM.payments;
+  const body = pay.status === 'PAID' ? t.deleteBodyPaid({ amount: fmtEUR(pay.totalEur) }) : t.deleteBody;
+  if (!await confirmDialog({ title: t.deleteTitle({ number: pay.number }), body, okLabel: t.delete })) return;
+  try {
+    await api(`/app/api/crm/payments/${encodeURIComponent(pay.id)}`, { method: 'DELETE' });
+    closeDrawer();
+    toast(t.deleted({ number: pay.number }));
+    await reloadAfterPaymentChange();
+  } catch (err) { if (err?.message !== 'unauthorized') toast(paymentErrorText(err)); }
+}
+
 async function openPaymentDetail(id) {
   const t = CRM.payments;
   let pay = state.payments.find(p => p.id === id);
@@ -6432,11 +6889,15 @@ async function openPaymentDetail(id) {
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
       ${clientLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-client>${escapeHTML(STR.detailOpenRecordAria({ name: pay.clientName || '' }))}</button>` : ''}
       ${clientsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-client>${escapeHTML(pay.clientId ? t.changeClient : t.linkClient)}</button>` : ''}
+      ${canMarkPaid ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-cancel>${escapeHTML(t.cancel)}</button>` : ''}
+      <button class="btn btn--sm btn--ghost" type="button" data-pay-delete>${escapeHTML(t.delete)}</button>
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer(kind, payeeId(pay))));
   $('[data-open-client]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(pay.clientId)));
   $('[data-pay-client]', form)?.addEventListener('click', () => openFrom(here, () => openPaymentClientForm(pay)));
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
+  $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
+  $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
   openDrawer(pay.number, form);
 }
 

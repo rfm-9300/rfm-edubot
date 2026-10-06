@@ -339,6 +339,10 @@ const quotes = [
   },
 ];
 
+// FAT-002 is paid in two installments, the first one already received; its due date is the second one's.
+const invoice2Total = quote1Items.reduce((sum, item) => sum + item.totalCents, 0);
+const invoice2Half = Math.round(invoice2Total / 2);
+
 const invoices = [
   {
     _id: ids.invoices.i1,
@@ -353,6 +357,7 @@ const invoices = [
     pdfPath: null,
     createdAt: date("2026-05-15T14:05:00.000Z"),
     updatedAt: date("2026-05-18T12:00:00.000Z"),
+    taxOfficeCode: "JJ4XTRK3-1",
   },
   {
     _id: ids.invoices.i2,
@@ -363,10 +368,15 @@ const invoices = [
     status: "PENDING",
     dueDate: "2026-06-10",
     paidAt: null,
-    totalCents: quote1Items.reduce((sum, item) => sum + item.totalCents, 0),
+    totalCents: invoice2Total,
     pdfPath: null,
     createdAt: date("2026-05-20T11:00:00.000Z"),
     updatedAt: now,
+    taxOfficeCode: "JJ4XTRK3-2",
+    installments: [
+      { amountCents: invoice2Half, dueDate: "2026-05-20", paidAt: date("2026-05-20T11:30:00.000Z") },
+      { amountCents: invoice2Total - invoice2Half, dueDate: "2026-06-10" },
+    ],
   },
   {
     _id: ids.invoices.i3,
@@ -384,9 +394,25 @@ const invoices = [
   },
 ];
 
+// Usual services: the payment form offers them as lines once the supplier is picked. No price when it varies.
 const suppliers = [
-  { _id: ids.suppliers.tintas, number: "FOR-001", name: "Tintas Norte, Lda.", phone: "+351220100001", address: "Zona Industrial, Porto", type: "Materiais", createdAt: date("2026-05-03T09:00:00.000Z"), updatedAt: now },
-  { _id: ids.suppliers.andaimes, number: "FOR-002", name: "Andaimes & Cia", phone: "+351220100002", address: "Rua do Ferro 8, 2400-100 Leiria", type: "Equipamento", createdAt: date("2026-05-08T11:00:00.000Z"), updatedAt: now },
+  {
+    _id: ids.suppliers.tintas, number: "FOR-001", name: "Tintas Norte, Lda.", phone: "+351220100001", address: "Zona Industrial, Porto", type: "Materiais",
+    services: [
+      { description: "Tinta plástica branca 15 L", unit: "un", unitPriceCents: cents(54.9) },
+      { description: "Primário aquoso 5 L", unit: "un", unitPriceCents: cents(21.5) },
+      { description: "Transporte de material", unit: "" },
+    ],
+    createdAt: date("2026-05-03T09:00:00.000Z"), updatedAt: now,
+  },
+  {
+    _id: ids.suppliers.andaimes, number: "FOR-002", name: "Andaimes & Cia", phone: "+351220100002", address: "Rua do Ferro 8, 2400-100 Leiria", type: "Equipamento",
+    services: [
+      { description: "Aluguer de andaime", unit: "semana", unitPriceCents: cents(120) },
+      { description: "Montagem e desmontagem", unit: "" },
+    ],
+    createdAt: date("2026-05-08T11:00:00.000Z"), updatedAt: now,
+  },
 ];
 
 const employees = [

@@ -19,6 +19,7 @@ import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.crm.ServiceSubmissionRepository
 import com.rfm.edubot.crm.model.ServiceSubmissionStatus
+import com.rfm.edubot.crm.paidPartExpression
 import com.rfm.edubot.instagram.InstagramCommentRepository
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationConnectionRepository
@@ -209,7 +210,13 @@ class OverviewService(private val mongo: MongoModule) {
         val keys = OverviewMath.trendMonthKeys(window.today)
         val from = OverviewMath.monthsBackStart(window.today, window.zone, keys.size)
         val received = async {
-            if (DashboardModules.INVOICES in modules) paidByMonth("crm.invoices", tenantId, from, window.nextMonthStart, window.zone) else emptyMap()
+            if (DashboardModules.INVOICES in modules) {
+                invoiceReceipts(tenantId, from, window.nextMonthStart)
+                    .groupBy({ (at, _) -> OverviewMath.monthKey(at, window.zone) }, { (_, cents) -> cents })
+                    .mapValues { (_, cents) -> cents.sum() }
+            } else {
+                emptyMap()
+            }
         }
         val spent = async {
             if (DashboardModules.PAYMENTS in modules) paidByMonth("crm.payments", tenantId, from, window.nextMonthStart, window.zone) else emptyMap()
@@ -261,7 +268,6 @@ class OverviewService(private val mongo: MongoModule) {
 
     private suspend fun topClients(tenantId: ObjectId, window: OverviewMath.Window): List<OverviewTopClientDto> {
         val from = OverviewMath.monthsBackStart(window.today, window.zone, OverviewMath.TOP_CLIENT_MONTHS)
-        val paidOnly = Document("\$cond", listOf(Document("\$eq", listOf("\$status", "PAID")), "\$totalCents", 0L))
         val pipeline = listOf(
             Document(
                 "\$match",
@@ -269,11 +275,12 @@ class OverviewService(private val mongo: MongoModule) {
                     .append("status", Document("\$ne", "CANCELLED"))
                     .append("createdAt", Document("\$gte", Date(from.toEpochMilliseconds()))),
             ),
+            Document("\$addFields", Document("paidPart", paidPartExpression())),
             Document(
                 "\$group",
                 Document("_id", "\$clientId")
                     .append("billed", Document("\$sum", "\$totalCents"))
-                    .append("paid", Document("\$sum", paidOnly))
+                    .append("paid", Document("\$sum", "\$paidPart"))
                     .append("count", Document("\$sum", 1)),
             ),
             Document("\$sort", Document("billed", -1).append("_id", 1)),
@@ -353,8 +360,8 @@ class OverviewService(private val mongo: MongoModule) {
 
     private suspend fun cash(tenantId: ObjectId, window: OverviewMath.Window): OverviewCashDto {
         val byStatus = sumByStatus("crm.invoices", tenantId)
-        val collectedThisMonth = sumPaid("crm.invoices", tenantId, window.monthStart, window.nextMonthStart)
-        val collectedLastMonth = sumPaid("crm.invoices", tenantId, window.lastMonthStart, window.monthStart)
+        val collectedThisMonth = invoiceReceipts(tenantId, window.monthStart, window.nextMonthStart)
+        val collectedLastMonth = invoiceReceipts(tenantId, window.lastMonthStart, window.monthStart)
         val issuedThisMonth = sumCreated("crm.invoices", tenantId, window.monthStart, window.nextMonthStart)
         val open = coll("crm.invoices").find(
             Filters.and(
@@ -371,32 +378,40 @@ class OverviewService(private val mongo: MongoModule) {
         var agingWeek = 0L
         var agingMonth = 0L
         var agingOld = 0L
-        val overdueDocs = mutableListOf<Document>()
+        val overdueDocs = mutableListOf<Pair<Document, Long>>()
         for (doc in open) {
-            val cents = doc.get("totalCents").asLong()
-            val due = doc.localDate("dueDate")
             val status = doc.getString("status") ?: "PENDING"
-            when (OverviewMath.agingBucket(due ?: window.today, window.today)) {
-                OverviewMath.AgingBucket.CURRENT -> agingCurrent += cents
-                OverviewMath.AgingBucket.WEEK -> agingWeek += cents
-                OverviewMath.AgingBucket.MONTH -> agingMonth += cents
-                OverviewMath.AgingBucket.OLD -> agingOld += cents
+            var overdueHere = 0L
+            var dueSoonHere = 0L
+            // Each unpaid installment ages, falls overdue and comes due on its own date.
+            for ((due, cents) in doc.openParts()) {
+                when (OverviewMath.agingBucket(due ?: window.today, window.today)) {
+                    OverviewMath.AgingBucket.CURRENT -> agingCurrent += cents
+                    OverviewMath.AgingBucket.WEEK -> agingWeek += cents
+                    OverviewMath.AgingBucket.MONTH -> agingMonth += cents
+                    OverviewMath.AgingBucket.OLD -> agingOld += cents
+                }
+                if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
+                    overdueHere += cents
+                } else if (status == "PENDING" && due != null && due >= window.today && due <= window.dueSoonEnd) {
+                    dueSoonHere += cents
+                }
             }
-            if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
-                overdueCents += cents
+            if (overdueHere > 0) {
+                overdueCents += overdueHere
                 overdueCount += 1
-                overdueDocs += doc
-            } else if (status == "PENDING" && due != null && due >= window.today && due <= window.dueSoonEnd) {
-                dueSoonCents += cents
+                overdueDocs += doc to overdueHere
+            } else if (dueSoonHere > 0) {
+                dueSoonCents += dueSoonHere
                 dueSoonCount += 1
             }
         }
-        val outstanding = (byStatus["PENDING"]?.cents ?: 0L) + (byStatus["OVERDUE"]?.cents ?: 0L)
-        val top = overdueDocs.sortedByDescending { it.get("totalCents").asLong() }.take(3)
-        val names = clientNames(tenantId, top.mapNotNull { it.getObjectIdOrNull("clientId") })
+        val outstanding = (byStatus["PENDING"]?.cents ?: 0L) + (byStatus["OVERDUE"]?.cents ?: 0L) - receivedOnOpenInvoices(tenantId)
+        val top = overdueDocs.sortedByDescending { it.second }.take(3)
+        val names = clientNames(tenantId, top.mapNotNull { it.first.getObjectIdOrNull("clientId") })
         return OverviewCashDto(
-            collectedThisMonthCents = collectedThisMonth.first,
-            collectedLastMonthCents = collectedLastMonth.first,
+            collectedThisMonthCents = collectedThisMonth.sumOf { it.second },
+            collectedLastMonthCents = collectedLastMonth.sumOf { it.second },
             issuedThisMonthCents = issuedThisMonth,
             outstandingCents = outstanding,
             overdueCents = overdueCents,
@@ -404,21 +419,50 @@ class OverviewService(private val mongo: MongoModule) {
             dueSoonCents = dueSoonCents,
             dueSoonCount = dueSoonCount,
             invoiceCount = byStatus.values.sumOf { it.count },
-            paidCountThisMonth = collectedThisMonth.second,
+            paidCountThisMonth = collectedThisMonth.size,
             agingCurrentCents = agingCurrent,
             agingWeekCents = agingWeek,
             agingMonthCents = agingMonth,
             agingOldCents = agingOld,
-            topOverdue = top.map { doc ->
+            topOverdue = top.map { (doc, cents) ->
                 val clientId = doc.getObjectIdOrNull("clientId")
                 OverviewNamedAmountDto(
                     id = doc.getObjectId("_id").toHexString(),
                     name = clientId?.let { names[it] }.orEmpty().ifBlank { doc.getString("number") ?: "" },
-                    amountCents = doc.get("totalCents").asLong(),
+                    amountCents = cents,
                     number = doc.getString("number"),
                 )
             },
         )
+    }
+
+    /** Money invoices brought in during [from, to): each received installment, or an invoice's total on the day it was paid in one go. */
+    private suspend fun invoiceReceipts(tenantId: ObjectId, from: Instant, to: Instant): List<Pair<Instant, Long>> {
+        val receivedPart = Filters.elemMatch(
+            "installments",
+            Filters.and(Filters.gte("paidAt", Date(from.toEpochMilliseconds())), Filters.lt("paidAt", Date(to.toEpochMilliseconds()))),
+        )
+        return coll("crm.invoices").find(Filters.or(paidBetween(tenantId, from, to), Filters.and(Filters.eq("tenantId", tenantId), receivedPart)))
+            .projection(Projections.include("status", "totalCents", "paidAt", "updatedAt", "installments"))
+            .toList()
+            .flatMap { it.receipts() }
+            .filter { (at, _) -> at >= from && at < to }
+    }
+
+    /** Installments already received on invoices still open, which `totalCents` sums still count as owed. */
+    private suspend fun receivedOnOpenInvoices(tenantId: ObjectId): Long {
+        val pipeline = listOf(
+            Document(
+                "\$match",
+                Document("tenantId", tenantId)
+                    .append("status", Document("\$in", listOf("PENDING", "OVERDUE")))
+                    .append("installments.paidAt", Document("\$exists", true)),
+            ),
+            Document("\$unwind", "\$installments"),
+            Document("\$match", Document("installments.paidAt", Document("\$exists", true))),
+            Document("\$group", Document("_id", null).append("cents", Document("\$sum", "\$installments.amountCents"))),
+        )
+        return coll("crm.invoices").aggregate<Document>(pipeline).toList().firstOrNull()?.get("cents").asLong()
     }
 
     private suspend fun pipeline(tenantId: ObjectId, window: OverviewMath.Window): OverviewPipelineDto {
@@ -691,17 +735,18 @@ class OverviewService(private val mongo: MongoModule) {
             open.sortedBy { it.localDate("dueDate") ?: window.today }.forEach { doc ->
                 val due = doc.localDate("dueDate")
                 val status = doc.getString("status") ?: "PENDING"
-                val cents = doc.get("totalCents").asLong()
+                val parts = doc.openParts()
+                val overdue = parts.filter { (partDue, _) -> OverviewMath.isEffectivelyOverdue(status, partDue, window.today) }
                 val number = doc.getString("number") ?: ""
                 val name = doc.getObjectIdOrNull("clientId")?.let { names[it] }.orEmpty()
                 val detail = listOf(number, name).filter { it.isNotBlank() }.joinToString(" · ")
-                if (OverviewMath.isEffectivelyOverdue(status, due, window.today)) {
+                if (overdue.isNotEmpty()) {
                     items += OverviewAttentionItemDto(
                         kind = OverviewMath.KIND_OVERDUE_INVOICE,
                         tab = DashboardModules.INVOICES,
                         id = doc.getObjectId("_id").toHexString(),
                         detail = detail,
-                        amountCents = cents,
+                        amountCents = overdue.sumOf { it.second },
                         at = due?.toString(),
                     )
                 } else if (status == "PENDING" && due != null && due >= window.today && due <= window.dueSoonEnd && items.count { it.kind == OverviewMath.KIND_DUE_SOON_INVOICE } < 3) {
@@ -710,7 +755,7 @@ class OverviewService(private val mongo: MongoModule) {
                         tab = DashboardModules.INVOICES,
                         id = doc.getObjectId("_id").toHexString(),
                         detail = detail,
-                        amountCents = cents,
+                        amountCents = parts.filter { it.first == due }.sumOf { it.second },
                         at = due.toString(),
                     )
                 }
@@ -986,3 +1031,24 @@ private fun Document.getObjectIdOrNull(field: String): ObjectId? = get(field, Ob
 
 private fun Document.localDate(field: String): LocalDate? =
     getString(field)?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+
+private fun Document.installments(): List<Document> = getList("installments", Document::class.java).orEmpty()
+
+/** An invoice's unpaid parts with their due dates: its unpaid installments, or the whole total when paid in one go. */
+private fun Document.openParts(): List<Pair<LocalDate?, Long>> {
+    val installments = installments()
+    if (installments.isEmpty()) return listOf(localDate("dueDate") to get("totalCents").asLong())
+    return installments.filter { it.getDate("paidAt") == null }.map { it.localDate("dueDate") to it.get("amountCents").asLong() }
+}
+
+/** Like `Invoice.receipts()`: legacy invoices paid without `paidAt` count on `updatedAt`. */
+private fun Document.receipts(): List<Pair<Instant, Long>> {
+    val paid = getString("status") == "PAID"
+    val paidAt = (getDate("paidAt") ?: getDate("updatedAt"))?.takeIf { paid }
+    val installments = installments()
+    if (installments.isEmpty()) return listOfNotNull(paidAt?.let { Instant.fromEpochMilliseconds(it.time) to get("totalCents").asLong() })
+    return installments.mapNotNull { part ->
+        val at = part.getDate("paidAt") ?: paidAt ?: return@mapNotNull null
+        Instant.fromEpochMilliseconds(at.time) to part.get("amountCents").asLong()
+    }
+}

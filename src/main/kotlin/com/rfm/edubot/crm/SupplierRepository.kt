@@ -5,6 +5,7 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.Supplier
+import com.rfm.edubot.crm.model.SupplierService
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -31,6 +32,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
                 Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("type", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("services.description", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
         val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
@@ -44,10 +46,17 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
     suspend fun setArchived(id: ObjectId, archived: Boolean): Supplier? = collection.setArchived(tenantId, id, archived)?.toSupplier()
 
     /**
-     * [address] is replaced as given (null clears it). [type] is only written when not null, so callers
-     * that don't send it keep the stored value; a blank string clears it.
+     * [address] is replaced as given (null clears it). [type] and [services] are only written when not null, so
+     * callers that don't send them keep the stored values; a blank type or an empty list clears them.
      */
-    suspend fun update(id: ObjectId, name: String, phone: String, address: String?, type: String? = null): Supplier? {
+    suspend fun update(
+        id: ObjectId,
+        name: String,
+        phone: String,
+        address: String?,
+        type: String? = null,
+        services: List<SupplierService>? = null,
+    ): Supplier? {
         val now = SystemClock.now()
         val updates = mutableListOf(
             Updates.set("name", name.trim()),
@@ -56,6 +65,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             Updates.set("updatedAt", now.toDate()),
         )
         type?.let { updates += Updates.set("type", it.cleaned()) }
+        services?.let { updates += Updates.set("services", it.map { service -> service.toDocument() }) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(updates),
@@ -64,7 +74,13 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         return doc?.toSupplier()
     }
 
-    suspend fun create(name: String, phone: String, address: String? = null, type: String? = null): Supplier {
+    suspend fun create(
+        name: String,
+        phone: String,
+        address: String? = null,
+        type: String? = null,
+        services: List<SupplierService> = emptyList(),
+    ): Supplier {
         val now = SystemClock.now()
         val number = "FOR-${sequences.next("supplier_number").toString().padStart(3, '0')}"
         val supplier = Supplier(
@@ -76,6 +92,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             type = type.cleaned(),
             createdAt = now,
             updatedAt = now,
+            services = services,
         )
         collection.insertOne(supplier.toDocument())
         return supplier
@@ -92,7 +109,18 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
+        services = getList("services", Document::class.java).orEmpty().map { it.toSupplierService() },
     )
+
+    private fun Document.toSupplierService() = SupplierService(
+        description = getString("description").orEmpty(),
+        unit = getString("unit").orEmpty(),
+        unitPriceCents = (get("unitPriceCents") as? Number)?.toLong(),
+    )
+
+    private fun SupplierService.toDocument() = Document("description", description)
+        .append("unit", unit)
+        .apply { unitPriceCents?.let { append("unitPriceCents", it) } }
 
     private fun String?.cleaned(): String? = this?.trim()?.takeIf { it.isNotBlank() }
 
@@ -105,6 +133,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         .append("type", type)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+        .append("services", services.map { it.toDocument() })
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }

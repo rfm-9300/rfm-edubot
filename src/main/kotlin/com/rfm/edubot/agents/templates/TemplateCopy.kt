@@ -9,10 +9,10 @@ import com.rfm.edubot.tenant.model.TenantLocales
 internal object TemplateCopy {
     private val en = mapOf(
         "invoice_due_reminder.name" to "Invoice due reminder",
-        "invoice_due_reminder.message" to "Hi {{client.firstName}}, a friendly reminder that invoice {{invoice.number}} ({{invoice.total}}) is due on {{invoice.dueDate}}. Thank you! {{company.name}}",
+        "invoice_due_reminder.message" to "Hi {{client.firstName}}, a friendly reminder that invoice {{invoice.number}} ({{invoice.amountDue}}) is due on {{invoice.dueDate}}. Thank you! {{company.name}}",
         "overdue_sequence.name" to "Overdue invoice follow-up",
-        "overdue_sequence.first" to "Hi {{client.firstName}}, invoice {{invoice.number}} ({{invoice.total}}) was due on {{invoice.dueDate}}. If you've already paid, please ignore this message. Thank you! {{company.name}}",
-        "overdue_sequence.second" to "Hi {{client.firstName}}, invoice {{invoice.number}} ({{invoice.total}}) is now {{invoice.daysOverdue}} days overdue. Could you let us know when we can expect payment? I'm sending the invoice again. {{company.name}}",
+        "overdue_sequence.first" to "Hi {{client.firstName}}, invoice {{invoice.number}} ({{invoice.amountDue}}) was due on {{invoice.dueDate}}. If you've already paid, please ignore this message. Thank you! {{company.name}}",
+        "overdue_sequence.second" to "Hi {{client.firstName}}, invoice {{invoice.number}} ({{invoice.amountDue}}) is now {{invoice.daysOverdue}} days overdue. Could you let us know when we can expect payment? I'm sending the invoice again. {{company.name}}",
         "overdue_sequence.task" to "Call {{client.name}} about invoice {{invoice.number}} ({{invoice.daysOverdue}} days overdue)",
         "payment_thank_you.name" to "Payment thank-you",
         "payment_thank_you.message" to "Hi {{client.firstName}}, we've received the payment for invoice {{invoice.number}}. Thank you for your trust! {{company.name}}",
@@ -76,10 +76,10 @@ internal object TemplateCopy {
 
     private val pt = mapOf(
         "invoice_due_reminder.name" to "Lembrete de fatura a vencer",
-        "invoice_due_reminder.message" to "Olá {{client.firstName}}, lembramos que a fatura {{invoice.number}} ({{invoice.total}}) vence a {{invoice.dueDate}}. Obrigado! {{company.name}}",
+        "invoice_due_reminder.message" to "Olá {{client.firstName}}, lembramos que a fatura {{invoice.number}} ({{invoice.amountDue}}) vence a {{invoice.dueDate}}. Obrigado! {{company.name}}",
         "overdue_sequence.name" to "Seguimento de faturas em atraso",
-        "overdue_sequence.first" to "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.total}}) venceu a {{invoice.dueDate}}. Se já pagou, ignore esta mensagem. Obrigado! {{company.name}}",
-        "overdue_sequence.second" to "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.total}}) está em atraso há {{invoice.daysOverdue}} dias. Pode indicar-nos quando conta pagar? Envio novamente a fatura. {{company.name}}",
+        "overdue_sequence.first" to "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.amountDue}}) venceu a {{invoice.dueDate}}. Se já pagou, ignore esta mensagem. Obrigado! {{company.name}}",
+        "overdue_sequence.second" to "Olá {{client.firstName}}, a fatura {{invoice.number}} ({{invoice.amountDue}}) está em atraso há {{invoice.daysOverdue}} dias. Pode indicar-nos quando conta pagar? Envio novamente a fatura. {{company.name}}",
         "overdue_sequence.task" to "Ligar a {{client.name}} sobre a fatura {{invoice.number}} ({{invoice.daysOverdue}} dias em atraso)",
         "payment_thank_you.name" to "Agradecimento de pagamento",
         "payment_thank_you.message" to "Olá {{client.firstName}}, recebemos o pagamento da fatura {{invoice.number}}. Obrigado pela confiança! {{company.name}}",
@@ -143,10 +143,10 @@ internal object TemplateCopy {
 
     private val es = mapOf(
         "invoice_due_reminder.name" to "Recordatorio de factura por vencer",
-        "invoice_due_reminder.message" to "Hola {{client.firstName}}, te recordamos que la factura {{invoice.number}} ({{invoice.total}}) vence el {{invoice.dueDate}}. ¡Gracias! {{company.name}}",
+        "invoice_due_reminder.message" to "Hola {{client.firstName}}, te recordamos que la factura {{invoice.number}} ({{invoice.amountDue}}) vence el {{invoice.dueDate}}. ¡Gracias! {{company.name}}",
         "overdue_sequence.name" to "Seguimiento de facturas vencidas",
-        "overdue_sequence.first" to "Hola {{client.firstName}}, la factura {{invoice.number}} ({{invoice.total}}) venció el {{invoice.dueDate}}. Si ya la pagaste, ignora este mensaje. ¡Gracias! {{company.name}}",
-        "overdue_sequence.second" to "Hola {{client.firstName}}, la factura {{invoice.number}} ({{invoice.total}}) lleva {{invoice.daysOverdue}} días vencida. ¿Nos indicas cuándo podrás pagarla? Te envío de nuevo la factura. {{company.name}}",
+        "overdue_sequence.first" to "Hola {{client.firstName}}, la factura {{invoice.number}} ({{invoice.amountDue}}) venció el {{invoice.dueDate}}. Si ya la pagaste, ignora este mensaje. ¡Gracias! {{company.name}}",
+        "overdue_sequence.second" to "Hola {{client.firstName}}, la factura {{invoice.number}} ({{invoice.amountDue}}) lleva {{invoice.daysOverdue}} días vencida. ¿Nos indicas cuándo podrás pagarla? Te envío de nuevo la factura. {{company.name}}",
         "overdue_sequence.task" to "Llamar a {{client.name}} por la factura {{invoice.number}} ({{invoice.daysOverdue}} días vencida)",
         "payment_thank_you.name" to "Agradecimiento de pago",
         "payment_thank_you.message" to "Hola {{client.firstName}}, hemos recibido el pago de la factura {{invoice.number}}. ¡Gracias por tu confianza! {{company.name}}",
