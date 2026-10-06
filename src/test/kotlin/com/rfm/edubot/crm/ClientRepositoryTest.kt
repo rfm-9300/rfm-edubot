@@ -3,6 +3,7 @@ package com.rfm.edubot.crm
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.persistence.MongoModule
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonPrimitive
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
@@ -110,6 +111,38 @@ class ClientRepositoryTest {
         assertEquals(listOf(ana.id), clients.search("911222333").map { it.id })
         assertEquals(listOf(ana.id), clients.search("911 222").map { it.id })
         assertEquals(2, clients.search("").size)
+    }
+
+    @Test
+    fun `custom values are stored by type, changed one by one, cleared with null and searchable`() = runBlocking {
+        val clients = repository()
+        val created = clients.create(
+            "Ana Ribeiro", "+351 911 222 333",
+            customFields = mapOf(
+                "cf_pet00001" to JsonPrimitive("Rex"),
+                "cf_vis00001" to JsonPrimitive(3.0),
+                "cf_new00001" to JsonPrimitive(true),
+                "bad.key" to JsonPrimitive("dropped"),
+            ),
+        )
+        val expected = mapOf("cf_pet00001" to JsonPrimitive("Rex"), "cf_vis00001" to JsonPrimitive(3.0), "cf_new00001" to JsonPrimitive(true))
+        assertEquals(expected, created.customFields)
+        assertEquals(expected, clients.findById(created.id)!!.customFields)
+
+        val changed = clients.update(
+            created.id, "Ana Ribeiro", "+351 911 222 333", null,
+            customFieldChanges = mapOf("cf_vis00001" to JsonPrimitive(4.5), "cf_new00001" to null, "cf_siz00001" to JsonPrimitive("Large")),
+        )!!
+        assertEquals(
+            mapOf("cf_pet00001" to JsonPrimitive("Rex"), "cf_vis00001" to JsonPrimitive(4.5), "cf_siz00001" to JsonPrimitive("Large")),
+            changed.customFields,
+        )
+        assertEquals(changed.customFields, clients.update(created.id, "Ana Ribeiro", "+351 911 222 333", null)!!.customFields)
+
+        clients.create("Bruno Esteves", "+351 922 333 444", customFields = mapOf("cf_pet00001" to JsonPrimitive("Bobby")))
+        assertEquals(emptyList(), clients.search("rex").map { it.id })
+        assertEquals(listOf(created.id), clients.search("rex", customKeys = listOf("cf_pet00001")).map { it.id })
+        assertEquals(listOf(created.id), clients.search("larg", customKeys = listOf("cf_pet00001", "cf_siz00001", "not a key")).map { it.id })
     }
 
     @Test

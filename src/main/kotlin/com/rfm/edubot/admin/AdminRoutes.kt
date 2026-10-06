@@ -2,6 +2,8 @@ package com.rfm.edubot.admin
 
 import com.mongodb.ErrorCategory
 import com.mongodb.MongoServerException
+import com.rfm.edubot.crm.ClientFields
+import com.rfm.edubot.crm.CustomFields
 import com.rfm.edubot.crm.InvoiceInstallments
 import com.rfm.edubot.crm.eurToCents
 import com.rfm.edubot.crm.lineItem
@@ -17,6 +19,7 @@ import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.lines
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.model.DirectoryFields
 import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.request.*
@@ -26,6 +29,8 @@ import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
 
 fun Route.adminRoutes() {
     // The old tenant CRM at /admin is retired. Clients use /app; you configure
@@ -64,15 +69,24 @@ internal data class CreateClientRequest(
     val postalCode: String? = null,
     val city: String? = null,
     val contactPerson: String? = null,
+    /** Values of the tenant's own fields by key; checked by [com.rfm.edubot.crm.CustomFields.values]. */
+    val customFields: Map<String, JsonElement>? = null,
 ) {
     /**
-     * Stable error code when staff save a client without its NIF or address, or null. On an update an
-     * omitted NIF keeps [existing]'s. Bookings and the bot still create clients from a name and phone.
+     * Stable error code for the first standard field [fields] requires that staff left empty, or null.
+     * On an update an omitted detail keeps [existing]'s (the address is always sent). Bookings and the bot
+     * still create clients from a name and phone.
      */
-    fun requiredError(existing: Client? = null): String? = when {
-        (taxId ?: existing?.taxId).isNullOrBlank() -> "tax_id_required"
-        address.isNullOrBlank() -> "address_required"
-        else -> null
+    fun requiredError(existing: Client? = null, fields: DirectoryFields = ClientFields.DEFAULT): String? {
+        val values = mapOf(
+            "taxId" to (taxId ?: existing?.taxId),
+            "email" to (email ?: existing?.email),
+            "contactPerson" to (contactPerson ?: existing?.contactPerson),
+            "address" to address,
+            "postalCode" to (postalCode ?: existing?.postalCode),
+            "city" to (city ?: existing?.city),
+        )
+        return ClientFields.REQUIRABLE.entries.firstOrNull { (key, _) -> key in fields.required && values[key].isNullOrBlank() }?.value
     }
 
     /** Stable error code for the first invalid optional field, or null. */
@@ -101,6 +115,23 @@ internal data class CreateClientRequest(
         private val EMAIL_SHAPE = Regex("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")
     }
 }
+
+/**
+ * The changes [request] makes to [existing]'s custom values (all of a new client's), or null once a 400
+ * went out with the error code and, as `detail`, the key of the field it is about.
+ */
+internal suspend fun ApplicationCall.customFieldChanges(
+    fields: DirectoryFields,
+    request: CreateClientRequest,
+    existing: Client? = null,
+): Map<String, JsonPrimitive?>? =
+    when (val checked = CustomFields.values(fields.custom, request.customFields, existing?.customFields.orEmpty())) {
+        is CustomFields.Values.Valid -> checked.changes
+        is CustomFields.Values.Invalid -> {
+            respond(HttpStatusCode.BadRequest, mapOf("error" to checked.error, "detail" to checked.field))
+            null
+        }
+    }
 
 @Serializable
 internal data class CreateQuoteRequest(
@@ -250,6 +281,7 @@ internal data class ClientDto(
     val updatedAt: String? = null,
     val archivedAt: String? = null,
     val automationPaused: Boolean = false,
+    val customFields: Map<String, JsonPrimitive> = emptyMap(),
 )
 
 @Serializable
@@ -443,6 +475,7 @@ internal fun Client.dto() = ClientDto(
     updatedAt = updatedAt.toString(),
     archivedAt = archivedAt?.toString(),
     automationPaused = automationPaused,
+    customFields = customFields,
 )
 
 internal fun Quote.dto(client: Client?) = QuoteDto(

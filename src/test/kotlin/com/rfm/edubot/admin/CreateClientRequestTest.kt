@@ -1,6 +1,7 @@
 package com.rfm.edubot.admin
 
 import com.rfm.edubot.crm.model.Client
+import com.rfm.edubot.tenant.model.DirectoryFields
 import kotlinx.datetime.Instant
 import org.bson.types.ObjectId
 import kotlin.test.Test
@@ -50,6 +51,31 @@ class CreateClientRequestTest {
         assertEquals("address_required", request(taxId = "245678901").requiredError())
         assertEquals("address_required", request(taxId = "245678901", address = "  ").requiredError())
         assertNull(request(taxId = "245678901", address = "Rua das Flores 12").requiredError())
+    }
+
+    @Test
+    fun `the tenant chooses which standard fields staff must fill in`() {
+        val none = DirectoryFields(required = emptySet())
+        assertNull(request().requiredError(fields = none))
+
+        val contact = DirectoryFields(required = setOf("email", "city", "postalCode", "contactPerson"))
+        assertEquals("email_required", request().requiredError(fields = contact))
+        assertEquals("contact_person_required", request(email = "ana@example.pt").requiredError(fields = contact))
+        assertEquals("postal_code_required", request(email = "ana@example.pt", contactPerson = "Ana").requiredError(fields = contact))
+        assertEquals("city_required", request(email = "ana@example.pt", contactPerson = "Ana", postalCode = "1200-001").requiredError(fields = contact))
+        assertNull(request(email = "ana@example.pt", contactPerson = "Ana", postalCode = "1200-001", city = "Lisboa").requiredError(fields = contact))
+    }
+
+    @Test
+    fun `an update that omits a required detail keeps the stored one`() {
+        val stored = Client(
+            tenantId = ObjectId(), number = "CLT-001", name = "Ana Ribeiro", phone = "+351 911 222 333",
+            email = "ana@example.pt", city = "Lisboa",
+            createdAt = Instant.fromEpochMilliseconds(0), updatedAt = Instant.fromEpochMilliseconds(0),
+        )
+        val fields = DirectoryFields(required = setOf("email", "city"))
+        assertNull(request().requiredError(stored, fields))
+        assertEquals("city_required", request(city = "").requiredError(stored, fields))
     }
 
     @Test

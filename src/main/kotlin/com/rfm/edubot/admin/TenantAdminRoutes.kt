@@ -6,6 +6,7 @@ import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.config.RuntimeConfig
+import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
@@ -22,6 +23,7 @@ import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.DirectoryFields
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
@@ -280,10 +282,12 @@ fun Route.tenantAdminRoutes(
                     val deps = call.crmDeps(mongo, tenantRepository, DashboardModules.CLIENTS) ?: return@post
                     val request = call.receive<CreateClientRequest>()
                     if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-                    (request.requiredError() ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    (request.requiredError(fields = deps.clientFields) ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    val custom = call.customFieldChanges(deps.clientFields, request) ?: return@post
                     val client = deps.clients.create(
                         request.name, request.phone, request.address, request.email, request.taxId, request.notes,
                         request.postalCode, request.city, request.contactPerson,
+                        customFields = custom.mapNotNull { (key, value) -> value?.let { key to it } }.toMap(),
                     )
                     call.respond(HttpStatusCode.Created, client.dto())
                 }
@@ -426,6 +430,7 @@ private suspend fun ApplicationCall.crmDeps(mongo: MongoModule, repo: TenantRepo
         standardItems = StandardItemRepository(mongo, tenant.id),
         pdfGenerator = PdfGenerator(),
         documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
+        clientFields = ClientFields.of(tenant),
     )
 }
 
@@ -436,6 +441,7 @@ private data class CrmDeps(
     val standardItems: StandardItemRepository,
     val pdfGenerator: PdfGenerator,
     val documentTemplate: DocumentTemplate,
+    val clientFields: DirectoryFields,
 )
 
 private suspend fun tenantStats(mongo: MongoModule, tenantId: ObjectId): TenantStatsDto {

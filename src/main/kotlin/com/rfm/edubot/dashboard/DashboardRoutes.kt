@@ -22,6 +22,7 @@ import com.rfm.edubot.admin.InvoiceInstallmentsRequest
 import com.rfm.edubot.admin.InvoiceTaxOfficeCodeRequest
 import com.rfm.edubot.admin.UpdateClientServiceRequest
 import com.rfm.edubot.admin.createStandardItem
+import com.rfm.edubot.admin.customFieldChanges
 import com.rfm.edubot.admin.dto
 import com.rfm.edubot.admin.respondGeneratedPdf
 import com.rfm.edubot.admin.serviceItemsError
@@ -37,6 +38,7 @@ import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.conversation.model.UserStatus
+import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.ClientServiceBilling
@@ -586,7 +588,7 @@ internal fun Route.dashboardRoutes(
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
             dashboardAssistantRoutes(mongo, aiClient, assistantExtension)
-            crmRoutes(mongo, runtimeConfig, dashboardUsers)
+            crmRoutes(mongo, runtimeConfig, dashboardUsers, tenantRepository)
             installBookingRoutes {
                 val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
                     ?: run {
@@ -664,7 +666,7 @@ fun Route.dashboardImpersonationRoute(
     }
 }
 
-private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, dashboardUsers: DashboardUserRepository) {
+private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, dashboardUsers: DashboardUserRepository, tenantRepository: TenantRepository) {
     fun tenantDeps(ctx: DashboardContext): CrmDeps = CrmDeps(
         clients = ClientRepository(mongo, ctx.tenant.id),
         quotes = QuoteRepository(mongo, ctx.tenant.id),
@@ -684,8 +686,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val deps = tenantDeps(ctx)
             val q = call.request.queryParameters["q"].orEmpty()
             val archived = call.request.queryParameters["archived"] == "1"
+            val customKeys = ClientFields.searchable(ClientFields.of(ctx.tenant))
             // The Clients page, and the client pickers in the quote/invoice forms, list the whole directory.
-            call.respond(deps.clients.search(q, limit = if (q.isBlank()) CLIENT_DIRECTORY_LIMIT else 50, archived = archived).map { it.dto() })
+            call.respond(deps.clients.search(q, limit = if (q.isBlank()) CLIENT_DIRECTORY_LIMIT else 50, archived = archived, customKeys = customKeys).map { it.dto() })
         }
         get("/clients/by-phone") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -699,11 +702,14 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
-            (request.requiredError() ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val fields = ClientFields.of(ctx.tenant)
+            (request.requiredError(fields = fields) ?: request.detailsError())?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val custom = call.customFieldChanges(fields, request) ?: return@post
             val client = call.uniquePhone {
                 deps.clients.create(
                     request.name, request.phone, request.address, request.email, request.taxId, request.notes,
                     request.postalCode, request.city, request.contactPerson,
+                    customFields = custom.mapNotNull { (key, value) -> value?.let { key to it } }.toMap(),
                 )
             } ?: return@post
             call.respond(HttpStatusCode.Created, client.value.dto())
@@ -715,15 +721,18 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<CreateClientRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             val existing = deps.clients.findById(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
-            (request.requiredError(existing) ?: request.detailsError())?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val fields = ClientFields.of(ctx.tenant)
+            (request.requiredError(existing, fields) ?: request.detailsError())?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val custom = call.customFieldChanges(fields, request, existing) ?: return@patch
             val client = (call.uniquePhone {
                 deps.clients.update(
                     id, request.name, request.phone, request.address, request.email, request.taxId, request.notes,
-                    request.postalCode, request.city, request.contactPerson,
+                    request.postalCode, request.city, request.contactPerson, customFieldChanges = custom,
                 )
             } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(client.dto())
         }
+        clientFieldRoutes(tenantRepository)
         get("/clients/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)

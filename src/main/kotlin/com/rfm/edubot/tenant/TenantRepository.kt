@@ -6,10 +6,14 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.ChannelBinding
+import com.rfm.edubot.tenant.model.CustomField
+import com.rfm.edubot.tenant.model.CustomFieldType
+import com.rfm.edubot.tenant.model.DirectoryFields
 import com.rfm.edubot.tenant.model.DocumentDesignStyle
 import com.rfm.edubot.tenant.model.DocumentLayoutBlock
 import com.rfm.edubot.tenant.model.DocumentLayouts
 import com.rfm.edubot.tenant.model.DocumentTemplate
+import com.rfm.edubot.tenant.model.FieldDirectory
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
@@ -125,6 +129,15 @@ class TenantRepository(mongoModule: MongoModule) {
             ),
         )
 
+    suspend fun setDirectoryFields(slug: String, directory: FieldDirectory, fields: DirectoryFields, updatedAt: Instant): Tenant? =
+        update(
+            slug,
+            Updates.combine(
+                Updates.set("directoryFields.${directory.key}", fields.toDocument()),
+                Updates.set("updatedAt", updatedAt.toDate()),
+            ),
+        )
+
     private fun Document.toTenant() = Tenant(
         id = getObjectId("_id"),
         slug = getString("slug"),
@@ -145,6 +158,7 @@ class TenantRepository(mongoModule: MongoModule) {
         documentTemplate = get("documentTemplate", Document::class.java)?.toDocumentTemplate() ?: DocumentTemplate(),
         savedDocumentTemplates = getList("savedDocumentTemplates", Document::class.java).orEmpty()
             .mapNotNull { it.toSavedDocumentTemplate() },
+        directoryFields = get("directoryFields", Document::class.java)?.toDirectoryFields().orEmpty(),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
     )
@@ -168,6 +182,9 @@ class TenantRepository(mongoModule: MongoModule) {
             .append("savedDocumentTemplates", savedDocumentTemplates.map { it.toDocument() })
             .append("createdAt", createdAt.toDate())
             .append("updatedAt", updatedAt.toDate())
+            .appendIfNotNull("directoryFields", directoryFields.takeIf { it.isNotEmpty() }?.let { all ->
+                Document(all.entries.associate { (directory, fields) -> directory.key to fields.toDocument() })
+            })
             .appendIfNotNull("parentTenantId", parentTenantId)
             .appendIfNotNull("deletedAt", deletedAt?.toDate())
         if (phoneNumberId.isNotBlank()) doc.append("phoneNumberId", phoneNumberId)
@@ -238,6 +255,41 @@ private fun Document.toSavedDocumentTemplate(): SavedDocumentTemplate? {
         ),
         createdAt = getDate("createdAt")?.let { Instant.fromEpochMilliseconds(it.time) } ?: Instant.fromEpochMilliseconds(0),
         style = DocumentDesignStyle.sanitize(getString("style")),
+    )
+}
+
+private fun DirectoryFields.toDocument(): Document = Document()
+    .append("required", required.toList())
+    .append("custom", custom.map { it.toDocument() })
+
+private fun CustomField.toDocument(): Document = Document()
+    .append("key", key)
+    .append("label", label)
+    .append("type", type.name)
+    .append("required", required)
+    .append("showInList", showInList)
+    .append("options", options)
+
+private fun Document.toDirectoryFields(): Map<FieldDirectory, DirectoryFields> =
+    FieldDirectory.entries.mapNotNull { directory ->
+        get(directory.key, Document::class.java)?.let { stored ->
+            directory to DirectoryFields(
+                required = stored.getList("required", String::class.java).orEmpty().toSet(),
+                custom = stored.getList("custom", Document::class.java).orEmpty().mapNotNull { it.toCustomField() },
+            )
+        }
+    }.toMap()
+
+private fun Document.toCustomField(): CustomField? {
+    val key = getString("key")?.takeIf { it.isNotBlank() } ?: return null
+    val type = CustomFieldType.parse(getString("type")) ?: return null
+    return CustomField(
+        key = key,
+        label = getString("label").orEmpty(),
+        type = type,
+        required = bool("required", false),
+        showInList = bool("showInList", false),
+        options = getList("options", String::class.java).orEmpty(),
     )
 }
 

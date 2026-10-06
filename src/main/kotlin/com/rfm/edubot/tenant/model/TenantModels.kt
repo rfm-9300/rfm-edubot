@@ -43,6 +43,8 @@ data class Tenant(
     val documentTemplate: DocumentTemplate = DocumentTemplate(),
     /** Named designs (accent/decor/layout only) the tenant saved for reuse across document templates. */
     val savedDocumentTemplates: List<SavedDocumentTemplate> = emptyList(),
+    /** Directories whose fields the tenant shaped. One left out uses that directory's defaults. */
+    val directoryFields: Map<FieldDirectory, DirectoryFields> = emptyMap(),
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {
