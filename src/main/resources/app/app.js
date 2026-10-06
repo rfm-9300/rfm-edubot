@@ -4473,7 +4473,7 @@ function customFieldInput(field, value) {
   const id = `cf-custom-${field.key}`;
   const attrs = `id="${id}" data-custom-field="${escapeHTML(field.key)}"${field.required ? ' required' : ''}`;
   if (field.type === 'CHECKBOX') {
-    return `<div class="form__row"><label class="form__check"><input type="checkbox" ${attrs}${value === true ? ' checked' : ''} /> ${escapeHTML(field.label)}</label></div>`;
+    return `<div class="form__row form__row--full"><label class="form__check"><input type="checkbox" ${attrs}${value === true ? ' checked' : ''} /> ${escapeHTML(field.label)}</label></div>`;
   }
   const label = `<label class="lbl" for="${id}">${escapeHTML(field.label)}${field.required ? ' <span class="req">●</span>' : ''}</label>`;
   const current = value == null ? '' : String(value);
