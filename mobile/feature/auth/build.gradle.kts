@@ -5,6 +5,8 @@ plugins {
 kotlin {
     sourceSets {
         commonMain.dependencies {
+            implementation(project(":core:common"))
+            implementation(project(":core:localization"))
             implementation(project(":core:ui"))
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

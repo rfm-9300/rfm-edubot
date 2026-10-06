@@ -22,5 +22,9 @@ gradlePlugin {
             id = "edubot.kmp.compose.library"
             implementationClass = "com.rfm.edubot.mobile.buildlogic.KmpComposeLibraryConventionPlugin"
         }
+        register("kmpFeature") {
+            id = "edubot.kmp.feature"
+            implementationClass = "com.rfm.edubot.mobile.buildlogic.KmpFeatureConventionPlugin"
+        }
     }
 }

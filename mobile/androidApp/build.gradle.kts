@@ -24,6 +24,11 @@ android {
         debug {
             buildConfigField("String", "DEBUG_LOGIN_EMAIL", "\"review@thebotslab.pt\"")
             buildConfigField("String", "DEBUG_LOGIN_PASSWORD", "\"review@thebotslab.pt\"")
+            // `./gradlew :androidApp:installDebug -PapiBaseUrl=http://10.0.2.2:8080` points a
+            // debug build at a backend on the host, so working on the app does not mean signing
+            // in to production. The debug manifest already allows cleartext for this.
+            val localApi = project.findProperty("apiBaseUrl") as String?
+            if (localApi != null) buildConfigField("String", "API_BASE_URL", "\"$localApi\"")
         }
     }
 

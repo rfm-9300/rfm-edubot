@@ -1,6 +1,7 @@
 package com.rfm.edubot.crm
 
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.persistence.MongoModule
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.LocalDate
@@ -12,9 +13,10 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertIs
 import kotlin.test.assertNull
 
-/** Linking payments (expenses) to the client they were for. */
+/** Linking payments (expenses) to the client they were for, cancelling and deleting them. */
 @Testcontainers
 class PaymentRepositoryTest {
 
@@ -76,5 +78,33 @@ class PaymentRepositoryTest {
 
         assertNull(PaymentRepository(mongoModule, ObjectId()).setClient(mine.id, ObjectId()))
         assertNull(PaymentRepository(mongoModule, tenantId).findById(mine.id)?.clientId)
+    }
+
+    @Test
+    fun `only an unpaid payment can be cancelled, and a cancelled one is never marked paid`() = runBlocking<Unit> {
+        val payments = PaymentRepository(mongoModule, tenantId)
+        val open = payments.bill("Tinta")
+        assertEquals(PaymentStatus.CANCELLED, assertIs<PaymentCancel.Done>(payments.cancel(open.id)).payment.status)
+        assertEquals("payment_cancelled", assertIs<PaymentCancel.Refused>(payments.cancel(open.id)).reason)
+        assertEquals(PaymentStatus.CANCELLED, payments.markPaid(open.id)?.status)
+
+        val paid = payments.bill("Andaimes")
+        val paidAt = payments.markPaid(paid.id)?.paidAt
+        assertEquals(paidAt, payments.markPaid(paid.id)?.paidAt, "marking paid again changes nothing")
+        assertEquals("payment_paid", assertIs<PaymentCancel.Refused>(payments.cancel(paid.id)).reason)
+        assertIs<PaymentCancel.NotFound>(payments.cancel(ObjectId()))
+        assertIs<PaymentCancel.NotFound>(PaymentRepository(mongoModule, ObjectId()).cancel(paid.id), "another tenant's payment")
+    }
+
+    @Test
+    fun `deleting removes a payment of any status, only for its own tenant`() = runBlocking<Unit> {
+        val payments = PaymentRepository(mongoModule, tenantId)
+        val paid = payments.bill("Tinta")
+        payments.markPaid(paid.id)
+
+        assertNull(PaymentRepository(mongoModule, ObjectId()).delete(paid.id))
+        assertEquals(paid.id, payments.delete(paid.id)?.id)
+        assertNull(payments.findById(paid.id))
+        assertNull(payments.delete(paid.id))
     }
 }

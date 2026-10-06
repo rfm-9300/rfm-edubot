@@ -46,6 +46,11 @@ Seeded collections:
 
 Bookings, agents, email and the employee's sign-in are seeded only when the database already has a tenant; they go to the first one. Start the app once before seeding a fresh database.
 
+Suppliers and invoices:
+
+- Both suppliers have usual services (Tintas Norte's paints and transport, Andaimes & Cia's scaffolding), so a new payment to either offers them as lines. The ones without a price vary from job to job.
+- FAT-001 and FAT-002 carry a tax office code (ATCUD). FAT-002 is paid in two installments: the first one is received, the second one sets its due date.
+
 Employee sign-in:
 
 - Ana Costa (`COL-001`) signs in to `/app` as `ana.costa@example.com` with the password `colaborador123`. Her session only shows My services.

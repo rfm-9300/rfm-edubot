@@ -13,7 +13,8 @@ struct EduBotApp: App {
 
 private struct ComposeRootView: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> UIViewController {
-        IosAppKt.MainViewController()
+        // The device language, so sign-in is readable before the tenant's own locale is known.
+        IosAppKt.MainViewController(deviceLocale: Locale.current.identifier)
     }
 
     func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}

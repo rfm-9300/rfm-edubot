@@ -116,6 +116,47 @@ class OverviewServiceTest {
         assertTrue(OverviewMath.RECENT_QUOTE_ACCEPTED in kinds)
     }
 
+    @Test
+    fun `installments count as owed, overdue and collected part by part`() = runBlocking<Unit> {
+        val now = SystemClock.now()
+        val window = OverviewMath.window(now, zoneId)
+        val tenant = Tenant(
+            slug = "overview-${ObjectId().toHexString()}", name = "Installments", channels = emptyList(), timezone = zoneId,
+            enabledModules = listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS, DashboardModules.INVOICES),
+            createdAt = now, updatedAt = now,
+        )
+        val t = tenant.id
+        val client = ObjectId()
+        val split = ObjectId()
+        val receivedAt = window.monthStart + 1.minutes
+        val overdueDay = window.today.minus(DatePeriod(days = 3)).toString()
+        insert("crm.clients", doc(t, client).append("number", "CLT-001").append("name", "Casa Martins").append("createdAt", date(now - 5.days)))
+        insert(
+            "crm.invoices",
+            invoice(t, client, "FAT-010", "PENDING", 400_00, created = now - 2.days, id = split)
+                .append("dueDate", overdueDay)
+                .append(
+                    "installments",
+                    listOf(
+                        Document("amountCents", 200_00L).append("dueDate", window.monthStart.toString().take(10)).append("paidAt", date(receivedAt)),
+                        Document("amountCents", 200_00L).append("dueDate", overdueDay),
+                    ),
+                ),
+            invoice(t, client, "FAT-011", "PENDING", 100_00, created = now - 1.days),
+        )
+
+        val overview = OverviewService(mongoModule).build(tenant, extended = true)
+        val cash = overview.cash!!
+        assertEquals(300_00, cash.outstandingCents, "the installment received is no longer owed")
+        assertEquals(200_00, cash.overdueCents, "only the part past its date is overdue")
+        assertEquals(1, cash.overdueCount)
+        assertEquals(200_00, cash.collectedThisMonthCents)
+        assertEquals(200_00, overview.cashFlow.last().inCents)
+        assertEquals(200_00, cash.topOverdue.single().amountCents)
+        assertEquals(200_00, overview.topClients.single().paidCents)
+        assertEquals(200_00, overview.attention.single { it.kind == OverviewMath.KIND_OVERDUE_INVOICE }.amountCents)
+    }
+
     private data class Seed(
         val tenant: Tenant,
         val window: OverviewMath.Window,

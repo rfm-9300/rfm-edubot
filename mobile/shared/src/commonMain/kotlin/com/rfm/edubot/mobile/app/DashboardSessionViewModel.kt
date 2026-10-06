@@ -1,104 +1,137 @@
 package com.rfm.edubot.mobile.app
 
-import com.rfm.edubot.mobile.core.common.SessionError
-import com.rfm.edubot.mobile.core.common.TokenStore
-import com.rfm.edubot.mobile.core.model.DashboardIdentity
-import com.rfm.edubot.mobile.core.model.Overview
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.rfm.edubot.mobile.core.network.DashboardApi
-import com.rfm.edubot.mobile.core.network.DashboardApiException
+import com.rfm.edubot.mobile.core.common.AppError
+import com.rfm.edubot.mobile.core.common.Outcome
+import com.rfm.edubot.mobile.core.common.SessionError
+import com.rfm.edubot.mobile.core.common.TenantClock
+import com.rfm.edubot.mobile.core.data.SessionRepository
+import com.rfm.edubot.mobile.core.localization.AppLocale
+import com.rfm.edubot.mobile.core.localization.Localization
+import com.rfm.edubot.mobile.core.localization.Strings
+import com.rfm.edubot.mobile.core.model.DashboardIdentity
+import com.rfm.edubot.mobile.core.ui.ThemeChoice
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.launch
+import kotlinx.datetime.Clock
 
-sealed interface DashboardSessionState {
-    data object Restoring : DashboardSessionState
-    data class SignedOut(val error: SessionError? = null) : DashboardSessionState
+sealed interface SessionState {
+    data object Restoring : SessionState
+
+    data class SignedOut(val error: SessionError? = null, val busy: Boolean = false) : SessionState
+
     data class SignedIn(
-        val token: String,
         val identity: DashboardIdentity,
-        val overview: Overview? = null,
-        val loadingOverview: Boolean = false,
-    ) : DashboardSessionState
+        val switchingCompany: Boolean = false,
+    ) : SessionState
 }
 
 class DashboardSessionViewModel(
-    private val api: DashboardApi,
-    private val tokenStore: TokenStore,
+    private val session: SessionRepository,
+    /** The device's language, used for sign-in copy before any tenant is known. */
+    private val deviceLocale: String? = null,
     scopeOverride: CoroutineScope? = null,
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
-    private val mutableState = MutableStateFlow<DashboardSessionState>(DashboardSessionState.Restoring)
-    val state: StateFlow<DashboardSessionState> = mutableState.asStateFlow()
+    private val mutable = MutableStateFlow<SessionState>(SessionState.Restoring)
+    val state: StateFlow<SessionState> = mutable.asStateFlow()
+
+    private val themePreference = MutableStateFlow(ThemeChoice.System)
+    val theme: StateFlow<ThemeChoice> = themePreference.asStateFlow()
+
+    private val localeOverride = MutableStateFlow<String?>(null)
+
+    init {
+        // Any screen's call can hit a 401. One observer signs out, rather than each screen deciding.
+        session.expired
+            .onEach { signedOut(SessionError.SESSION_EXPIRED) }
+            .launchIn(scope)
+    }
+
+    /**
+     * Copy for whoever is looking: the tenant's language once signed in, the device's before that.
+     * Sign-in errors used to always render in English regardless of either.
+     */
+    val strings: Strings
+        get() {
+            val signedIn = mutable.value as? SessionState.SignedIn
+            val tag = localeOverride.value ?: signedIn?.identity?.tenant?.locale ?: deviceLocale
+            return Localization.of(tag)
+        }
+
+    val locale: AppLocale get() = strings.locale
+
+    /** Formats instants in the tenant's timezone, so lists stop showing raw ISO strings. */
+    val clock: TenantClock
+        get() = TenantClock(
+            zoneId = (mutable.value as? SessionState.SignedIn)?.identity?.tenant?.timezone ?: "UTC",
+            now = Clock.System::now,
+        )
 
     fun restore() = scope.launch {
-        val token = tokenStore.read()
-        if (token == null) {
-            mutableState.value = DashboardSessionState.SignedOut()
+        if (!session.hasToken()) {
+            mutable.value = SessionState.SignedOut()
             return@launch
         }
-        loadIdentity(token, clearOnUnauthorized = true)
+        when (val identity = session.identity()) {
+            is Outcome.Success -> mutable.value = SessionState.SignedIn(identity.value)
+            is Outcome.Failure -> {
+                // A dead connection must not throw away a usable token; only a rejection does.
+                if (identity.error == AppError.Unauthorized) signedOut(SessionError.SESSION_EXPIRED)
+                else mutable.value = SessionState.SignedOut(SessionError.CONNECTION_FAILED)
+            }
+        }
     }
 
-    fun login(email: String, password: String) = scope.launch {
+    fun signIn(email: String, password: String) = scope.launch {
         if (email.isBlank() || password.isBlank()) {
-            mutableState.value = DashboardSessionState.SignedOut(SessionError.MISSING_CREDENTIALS)
+            mutable.value = SessionState.SignedOut(SessionError.MISSING_CREDENTIALS)
             return@launch
         }
-        mutableState.value = DashboardSessionState.Restoring
-        try {
-            val token = api.login(email, password).token
-            tokenStore.write(token)
-            loadIdentity(token, clearOnUnauthorized = true)
-        } catch (error: DashboardApiException) {
-            tokenStore.clear()
-            mutableState.value = DashboardSessionState.SignedOut(
-                if (error.status == 401 || error.status == 403) SessionError.INVALID_CREDENTIALS else SessionError.CONNECTION_FAILED,
-            )
-        } catch (_: Exception) {
-            mutableState.value = DashboardSessionState.SignedOut(SessionError.CONNECTION_FAILED)
+        mutable.value = SessionState.SignedOut(busy = true)
+        when (val identity = session.signIn(email, password)) {
+            is Outcome.Success -> mutable.value = SessionState.SignedIn(identity.value)
+            is Outcome.Failure -> mutable.value = SessionState.SignedOut(SessionError.ofLogin(identity.error))
         }
     }
 
-    fun refreshOverview() = scope.launch {
-        val signedIn = mutableState.value as? DashboardSessionState.SignedIn ?: return@launch
-        mutableState.value = signedIn.copy(loadingOverview = true)
-        try {
-            mutableState.value = signedIn.copy(overview = api.overview(signedIn.token), loadingOverview = false)
-        } catch (error: DashboardApiException) {
-            if (error.status == 401) signOut()
-            else mutableState.value = signedIn.copy(loadingOverview = false)
-        } catch (_: Exception) {
-            mutableState.value = signedIn.copy(loadingOverview = false)
+    fun switchCompany(companyId: String) = scope.launch {
+        val signedIn = mutable.value as? SessionState.SignedIn ?: return@launch
+        if (signedIn.switchingCompany) return@launch
+        mutable.value = signedIn.copy(switchingCompany = true)
+        when (val identity = session.switchCompany(companyId)) {
+            is Outcome.Success -> {
+                localeOverride.value = null
+                mutable.value = SessionState.SignedIn(identity.value)
+            }
+            is Outcome.Failure -> mutable.value = signedIn.copy(switchingCompany = false)
         }
     }
 
+    /** Reflects a locale the settings screen just saved, without re-fetching the identity. */
     fun applyLocale(locale: String) {
-        val signedIn = mutableState.value as? DashboardSessionState.SignedIn ?: return
-        mutableState.value = signedIn.copy(
+        localeOverride.value = locale
+        val signedIn = mutable.value as? SessionState.SignedIn ?: return
+        mutable.value = signedIn.copy(
             identity = signedIn.identity.copy(tenant = signedIn.identity.tenant.copy(locale = locale)),
         )
     }
 
-    fun signOut() = scope.launch {
-        tokenStore.clear()
-        mutableState.value = DashboardSessionState.SignedOut()
+    fun applyTheme(choice: ThemeChoice) {
+        themePreference.value = choice
     }
 
-    private suspend fun loadIdentity(token: String, clearOnUnauthorized: Boolean) {
-        try {
-            val identity = api.me(token)
-            mutableState.value = DashboardSessionState.SignedIn(token, identity, loadingOverview = true)
-            val overview = api.overview(token)
-            mutableState.value = DashboardSessionState.SignedIn(token, identity, overview)
-        } catch (error: DashboardApiException) {
-            if (clearOnUnauthorized && error.status == 401) tokenStore.clear()
-            mutableState.value = DashboardSessionState.SignedOut(SessionError.SESSION_EXPIRED)
-        } catch (_: Exception) {
-            mutableState.value = DashboardSessionState.SignedOut(SessionError.CONNECTION_FAILED)
-        }
+    fun signOut() = scope.launch { signedOut(null) }
+
+    private suspend fun signedOut(error: SessionError?) {
+        session.signOut()
+        localeOverride.value = null
+        mutable.value = SessionState.SignedOut(error)
     }
 }

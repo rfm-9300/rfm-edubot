@@ -1,69 +1,71 @@
 package com.rfm.edubot.mobile.feature.inbox
 
-import com.rfm.edubot.mobile.core.model.ChannelAsset
-import com.rfm.edubot.mobile.core.model.Conversation
-import com.rfm.edubot.mobile.core.model.ThreadMessage
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.rfm.edubot.mobile.core.network.DashboardApi
+import com.rfm.edubot.mobile.core.data.InboxRepository
+import com.rfm.edubot.mobile.core.data.ResourceState
+import com.rfm.edubot.mobile.core.model.Conversation
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
-data class InboxUiState(
-    val conversations: List<Conversation> = emptyList(),
-    val selectedConversation: Conversation? = null,
-    val messages: List<ThreadMessage> = emptyList(),
-    val loading: Boolean = false,
-    val sending: Boolean = false,
-    val error: String? = null,
-)
+enum class InboxFilter { All, NeedsReply, Unread, Paused }
 
 class InboxViewModel(
-    private val api: DashboardApi,
-    private val token: String,
-    private val channels: List<ChannelAsset>,
+    private val repository: InboxRepository,
+    private val pollMillis: Long = LIST_POLL_MILLIS,
     scopeOverride: CoroutineScope? = null,
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
-    private val mutableState = MutableStateFlow(InboxUiState())
-    val state: StateFlow<InboxUiState> = mutableState.asStateFlow()
 
-    fun load() = scope.launch {
-        mutableState.value = mutableState.value.copy(loading = true, error = null)
-        try {
-            mutableState.value = mutableState.value.copy(conversations = api.conversations(token), loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = "load")
+    val conversations: StateFlow<ResourceState<List<Conversation>>> = repository.conversations.state
+
+    private val mutableFilter = MutableStateFlow(InboxFilter.All)
+    val filter: StateFlow<InboxFilter> = mutableFilter.asStateFlow()
+
+    private var polling = false
+
+    /**
+     * Loads and then keeps the list fresh on the web dashboard's own 15-second cadence. Without
+     * this the app's inbox was only as current as the last manual pull.
+     */
+    fun start() {
+        if (polling) return
+        polling = true
+        scope.launch {
+            repository.conversations.load()
+            while (isActive) {
+                delay(pollMillis)
+                repository.conversations.refresh()
+            }
         }
     }
 
-    fun select(conversation: Conversation) = scope.launch {
-        mutableState.value = mutableState.value.copy(selectedConversation = conversation, messages = emptyList(), loading = true, error = null)
-        try {
-            mutableState.value = mutableState.value.copy(messages = api.messages(token, conversation.id), loading = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(loading = false, error = "thread")
-        }
+    fun refresh() = scope.launch { repository.conversations.refresh() }
+
+    fun setFilter(value: InboxFilter) {
+        mutableFilter.value = value
     }
 
-    fun clearSelection() {
-        mutableState.value = mutableState.value.copy(selectedConversation = null, messages = emptyList(), error = null)
-    }
+    fun visible(all: List<Conversation>, filter: InboxFilter): List<Conversation> = when (filter) {
+        InboxFilter.All -> all
+        InboxFilter.NeedsReply -> all.filter { it.waiting }
+        InboxFilter.Unread -> all.filter { it.unreadCount > 0 }
+        InboxFilter.Paused -> all.filterNot { it.autoReplyEnabled }
+    }.sortedByDescending { it.lastMessageAt }
 
-    fun send(text: String) = scope.launch {
-        val current = mutableState.value
-        val conversation = current.selectedConversation ?: return@launch
-        val asset = channels.firstOrNull { it.platform == conversation.channel } ?: return@launch
-        if (text.isBlank() || current.sending) return@launch
-        mutableState.value = current.copy(sending = true, error = null)
-        try {
-            val sent = api.sendMessage(token, conversation.id, text.trim(), asset.externalId)
-            mutableState.value = mutableState.value.copy(messages = mutableState.value.messages + sent, sending = false)
-        } catch (_: Exception) {
-            mutableState.value = mutableState.value.copy(sending = false, error = "send")
-        }
+    fun counts(all: List<Conversation>): Map<InboxFilter, Int> = mapOf(
+        InboxFilter.All to all.size,
+        InboxFilter.NeedsReply to all.count { it.waiting },
+        InboxFilter.Unread to all.count { it.unreadCount > 0 },
+        InboxFilter.Paused to all.count { !it.autoReplyEnabled },
+    )
+
+    companion object {
+        const val LIST_POLL_MILLIS = 15_000L
     }
 }

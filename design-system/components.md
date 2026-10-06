@@ -357,7 +357,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - Labels: `.lbl` (sentence case in the minimal skin; uppercase only in the classic layer). Required: `.req`. Optional: `.opt`.
 - Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
-- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
+- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns and one column on a phone. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
 - A field label with its own tools on the same line (All / None, Add channel): `.form__row-head` > `.lbl` + `.actions`.
 
 ### Suggestions under a field
@@ -384,7 +384,12 @@ Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, pay
 
 The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo keeps clipping as before.
 
-The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings. Under 560px a channel takes two lines, platform and external id over the access token, with remove beside both; the head follows the same grid, so "Access token" sits on its second line. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head. In the minimal skin `.lines__head` is sentence case like table heads.
+The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings. Under 560px a channel takes two lines, platform and external id over the access token, with remove beside both; the head follows the same grid, so "Access token" sits on its second line. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head (`hidden` hides it). In the minimal skin `.lines__head` is sentence case like table heads.
+
+Two more variants keep the channels' bare inputs with `aria-label`s, without a catalog combobox:
+
+- `.lines--services`: a supplier's usual services, as description, unit, usual price and `.l-rm`. On phones the description takes its own row, like `.line__desc`.
+- `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
 
 ```html
 <div class="line">

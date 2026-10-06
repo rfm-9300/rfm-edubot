@@ -287,6 +287,51 @@ returns `items` (an older row as its one line). The form names an unnamed servic
 ("Corte + Massagem"). A row approved from an employee's registered service carries `employeeId`, the
 employee who did the work; its detail shows "Done by" and links to the employee.
 
+### Invoices: tax office code, installments, cancel and delete
+
+An invoice can carry `taxOfficeCode`, the code the tax office gave it (the ATCUD in Portugal), at most
+80 characters: set on `POST /app/api/crm/invoices`, changed or cleared (empty string) with
+`PATCH /app/api/crm/invoices/{id}/tax-office-code`. The PDF prints it on the number line as `ATCUD:<code>`.
+
+An unpaid invoice can be paid in installments (`installments`: amount, due date, `paidAt` once received).
+`PUT /app/api/crm/invoices/{id}/installments` replaces the parts still to receive with the ones sent; they
+must add up to what is still owed, at most 24 in all, and the received ones stay as they are. A single
+part with nothing received yet removes the plan (the invoice is paid in one go by that date).
+`PATCH …/installments/{index}/paid` receives one part; the last one marks the invoice `PAID` and
+appends `invoice.paid`. `PATCH …/paid` (mark paid) receives every open part. The rules live in
+`InvoiceInstallments` (pure); `InvoiceRepository` applies them only while the stored status and parts are
+still the ones they were decided on, retrying otherwise.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: issued (one go)
+    Pending --> Split: PUT installments (2+ parts)
+    Split --> Split: part received, dueDate moves to the next open part
+    Split --> Pending: PUT one part, nothing received
+    Pending --> Paid: mark paid
+    Split --> Paid: last part received / mark paid
+    Pending --> Cancelled: cancel (nothing received)
+    Split --> Cancelled: cancel (nothing received)
+    Pending --> [*]: delete
+    Split --> [*]: delete
+    Paid --> [*]: delete
+    Cancelled --> [*]: delete
+```
+
+With a plan, `dueDate` is the next open part's date (the last part's once all are received), so the
+agents' due-date triggers, overdue flags, Home and the bot's tools follow the plan without knowing about
+it. Money is counted part by part: the API sends `paidEur` and `outstandingEur`; Home's outstanding
+subtracts received parts, overdue and aging count each open part by its own date, and collected and the
+cash-flow chart count each part in the month it was received (`Invoice.receipts()` and its Document twin
+in `OverviewService`). The agents get `invoice.amountDue` (the parts due by then, or all that is owed),
+which the reminder templates now print instead of the total.
+
+`POST /app/api/crm/invoices/{id}/cancel` keeps the invoice and its number as `CANCELLED`; only an invoice
+with no money received can be cancelled (`409 invoice_paid` / `installments_paid`). `DELETE …/{id}`
+removes it for good, whatever its state. Both reopen the Serviços rows it billed
+(`ClientServiceRepository.reopenInvoiced`), and a cancelled invoice no longer blocks converting its quote
+again. No domain event is written for either.
+
 ### Catalog
 
 Optional `catalog` module (`crm.standard_items`): the services and materials that quotes, invoices,
@@ -298,8 +343,8 @@ payments, Serviços rows and bookings pick from. Each item has:
   `MAT-nnn`, counters in `crm.sequences`, skipping codes typed by hand); unique per tenant, a clash
   answers `409 code_taken`;
 - a `title` (the name in lists, pickers and bookings) and an optional `description`. An item without a
-  description stores its title there, so readers that predate titles (the previous release, the mobile
-  app) still get a name; the API and the dashboard treat a description equal to the title as none.
+  description stores its title there, so readers that predate titles still get a name; the API and the
+  dashboard treat a description equal to the title as none.
 
 Adding an item to a document line writes the title, then the description after " - ", which the
 classic PDF prints under the title. `CatalogItemBackfill` runs at startup and gives items saved before
@@ -317,6 +362,16 @@ PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm
 A supplier has an optional free-text `type` (materials, subcontractor…): the form suggests the types
 already in use and the directory filters by it. `PATCH` keeps the type when omitted and clears it on
 an empty string.
+
+A supplier also has usual `services` (description, unit, and a usual price per unit, or none when it
+varies; at most 50). `POST`/`PATCH /app/api/crm/suppliers` replace them when the body sends a list (an
+empty one clears them) and keep them when it doesn't. Search matches them. The payment form offers the
+picked supplier's services as ticks, each adding a line to the bill; nothing on the payment points back
+at the service.
+
+`POST /app/api/crm/payments/{id}/cancel` keeps a payment and its number as `CANCELLED`, only while it is
+unpaid (`409 payment_paid` / `payment_cancelled`); `DELETE /app/api/crm/payments/{id}` removes one in any
+state. Mark paid leaves a paid or cancelled payment as it is. No domain event is written for either.
 
 A payment can also name the client it was spent on (`clientId`, optional): set it on
 `POST /app/api/crm/payments`, change or clear it with `PATCH /app/api/crm/payments/{id}/client`,
@@ -542,11 +597,11 @@ sequenceDiagram
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
-| `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
+| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments | unique on `number` |
 | `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
 | `crm.service_submissions` | Services employees registered from their own sign-in: client, day, lines, status (PENDING/APPROVED/REJECTED), the approved Serviços row (`serviceId`) or the rejection reason | `tenantId+employeeId+createdAt`; `tenantId+status+createdAt` |
 | `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
-| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` and usual `services` | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
@@ -778,34 +833,101 @@ thebotslab.eu → websites-thebots Caddy (TLS) → whatsapp-bot app :8080
 - **CI/CD**: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) tests, publishes `ghcr.io/rfm-9300/whatsapp-bot`, and SSHs `scripts/remote-deploy.sh`. Mobile stays on [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) (no store deploy). See [DEPLOYMENT_RUNBOOK.md](../DEPLOYMENT_RUNBOOK.md).
 - **Image**: multi-stage Dockerfile → fat JAR at `build/libs/app.jar`, distroless-style runtime
 
-## Mobile Frontend Foundation
+## Mobile Frontend
 
 The `mobile/` directory is an independent Kotlin Multiplatform build that consumes the tenant
 dashboard HTTP API. It deliberately remains separate from the server's Gradle build so the mobile
 toolchain can evolve independently of the Ktor runtime.
 
-The build is modularized nowinandroid-style. Dependency direction: `androidApp`/`iosApp` →
-`shared` → `feature:*` → `core:*`. Features never depend on each other; `core` modules only point
-downward.
+Dependency direction: `androidApp`/`iosApp` → `shared` → `feature:*` → `core:*`. Features never
+depend on each other; `core` modules only point downward. Features depend on `core:data`, **not**
+on `core:network` — that boundary is what keeps HTTP and bearer tokens out of the UI.
 
-- `mobile/build-logic` hosts Gradle convention plugins (`edubot.kmp.library`,
-  `edubot.kmp.compose.library`) that apply the shared KMP + Android library + Compose setup.
-- `mobile/core/*` holds the downward-only shared modules: `model` (dashboard DTOs), `network`
-  (`DashboardApi` + Ktor client), `common` (`TokenStore`, `VoiceInput`, `SessionError`),
-  `localization` (en/pt/es catalogs), `ui` (theme + shared Compose components), and `testing`
-  (fakes for `commonTest`).
-- `mobile/feature/*` holds one module per screen (`auth`, `overview`, `inbox`, `contacts`,
-  `assistant`, `crm`, `persona`, `settings`). Each stateful feature pairs a stateless composable
-  with an androidx.lifecycle `ViewModel` (KMP) exposing an immutable `StateFlow<UiState>`; screens
-  obtain it via keyed `viewModel(factory)` calls and take narrow state (token, tenant, strings)
-  instead of the session state machine.
-- `mobile/shared` is the app shell: `DashboardApp`, the `DashboardSessionViewModel` state
-  machine, and root navigation. `DashboardApp` also provides a fallback `ViewModelStoreOwner` for
-  iOS (Android uses the activity-scoped owner). The module is also the iOS umbrella, exporting all
-  core/feature modules as the static `EduBotShared` framework (bundle ID `com.rfm.edubot.shared`)
-  for the Xcode host app.
-- `mobile/androidApp` is the thin Android entry point (`com.rfm.edubot`) and persists the dashboard
-  access token using Android Keystore-backed encrypted preferences.
-- The app supports tenant login, secure token restoration, dynamic module navigation from
-  `GET /app/api/me`, overview, inbox with operator replies, contacts with block/unblock, the AI
-  assistant with voice input, CRM, persona, and settings — all on the tenant-scoped API contract.
+```mermaid
+flowchart TD
+  android[androidApp] --> shared
+  ios[iosApp] --> shared
+  shared --> features["feature:* (11 modules)"]
+  features --> data["core:data — repositories + cache"]
+  features --> ui["core:ui — tokens, theme, components"]
+  features --> l10n["core:localization — Txt + 3 catalogs"]
+  data --> network["core:network — DashboardHttpClient + per-area APIs"]
+  network --> model["core:model — DTOs"]
+  data --> common["core:common — Outcome, AppError, SnapshotStore, TenantClock"]
+```
+
+### Modules
+
+- `mobile/build-logic` hosts the Gradle convention plugins. `edubot.kmp.library` adds a **JVM
+  target** alongside Android and iOS so the pure-Kotlin modules test without the Android SDK or a
+  simulator; `edubot.kmp.compose.library` is the Compose variant (no JVM target — nothing ships a
+  desktop app); `edubot.kmp.feature` adds the four core modules every screen needs.
+- `mobile/core/common` — `Outcome<T>`, `AppError`, `TokenStore`, `SnapshotStore`, `VoiceInput`, and
+  `TenantClock` (renders instants in the tenant's own timezone) plus euro formatting.
+- `mobile/core/model` — the dashboard DTOs, field-for-field with the server's.
+- `mobile/core/network` — `DashboardHttpClient` and one API interface per dashboard area
+  (`SessionApi`, `InboxApi`, `CrmApi`, `BookingsApi`, `AgentsApi`, …). **No method takes a token.**
+- `mobile/core/data` — the repositories, plus `CachedResource` and `SnapshotCache`.
+- `mobile/core/localization` — compile-checked keys in `Txt` and three catalogs (en, pt-PT, es),
+  with tests asserting the key sets match and placeholders are preserved.
+- `mobile/core/ui` — the design tokens, light and dark themes, and the shared components.
+- `mobile/core/testing` — `Samples` (representative records) and `FakeVoiceInput`.
+- `mobile/feature/*` — one module per area: `auth`, `overview`, `inbox`, `contacts`, `crm`,
+  `bookings`, `agents`, `notifications`, `assistant`, `persona`, `settings`. Each pairs a stateless
+  composable with a KMP `ViewModel` exposing an immutable `StateFlow`.
+- `mobile/shared` — the shell: `MobileGraph` (the object graph), `Navigator` (the back stack),
+  `ModuleRegistry` (the nav model), `DashboardSessionViewModel`, and `DashboardApp`. It is also the
+  iOS umbrella, exporting the core modules as the static `EduBotShared` framework.
+- `mobile/androidApp` / `mobile/iosApp` — the entry points. Each supplies a `TokenStore` (encrypted
+  on Android, user defaults on iOS), a `SnapshotStore`, a `VoiceInput`, and the device locale.
+
+A debug build can be pointed at a backend other than production:
+
+```bash
+cd mobile && ./gradlew :androidApp:installDebug -PapiBaseUrl=http://10.0.2.2:8080
+```
+
+`10.0.2.2` is the host as an emulator sees it; use the machine's LAN address for a real device, or
+the `cloudflared` tunnel URL from the local dev setup. The debug manifest already allows cleartext,
+so a local HTTP backend works without further changes. Without the property the build points at
+production, which is what a release build always does.
+
+### Auth
+
+`SessionTokens` is the only thing that knows the bearer token. `DashboardHttpClient` attaches it,
+and on a 401 calls `SessionTokens.invalidate()`, which clears storage and emits on `expired`.
+`DashboardSessionViewModel` observes that once and drops to the sign-in screen, so any screen's
+rejected call ends the session everywhere rather than leaving one screen in an error state.
+
+A 403 is kept distinct: it means the tenant lacks the module or the user lacks the role, and must
+not sign anyone out. A 400 keeps the server's stable error code (`tax_id_required`,
+`address_required`, `id_taken`, …) so a form can point at the field that is wrong.
+
+### Offline
+
+`CachedResource` serves the last good response from `SnapshotStore`, then refreshes. A failed
+refresh keeps the cached value and reports the error beside it. `ResourceState.fromCache` is true
+only while the backend has not confirmed what is on screen, which is what the "showing your last
+snapshot" notice is keyed on. Signing in, switching company and signing out all clear the cache so
+one account never sees another's data.
+
+### Freshness
+
+No websockets; the app polls on the same cadences as the web dashboard. The conversation thread
+polls `GET /app/api/conversations/{id}/updates?since=` every 4s and merges by message id (the
+server resends across a five-second overlap window); the conversation list every 15s; the
+notification badge every 60s; persona every 3s while a prompt is compiling.
+
+### Navigation
+
+`ModuleRegistry` is the single source of truth for what is reachable. `MobileModule.supported`
+marks whether the app has a screen for a module: `/app/api/me` lists every module the tenant pays
+for, and modules the app cannot render are shown under a "on the web dashboard" heading rather than
+as taps that go nowhere. `Navigator` holds the back stack; Android wires its `back()` to the
+activity's `OnBackPressedDispatcher`.
+
+### Not on mobile
+
+The agent builder, the document-template studio, the website-widget customiser, WhatsApp template
+CRUD, Instagram, the Google/Gmail integrations, and persona file uploads stay on the web dashboard.
+The app names them rather than hiding them.

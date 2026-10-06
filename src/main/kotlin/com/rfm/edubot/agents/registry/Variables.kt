@@ -47,6 +47,7 @@ object AgentVariables {
     val invoice = vars(
         "invoice",
         "id" to VarType.ID, "number" to VarType.TEXT, "status" to VarType.TEXT, "total" to VarType.MONEY, "totalCents" to VarType.NUMBER,
+        "amountDue" to VarType.MONEY, "amountDueCents" to VarType.NUMBER,
         "dueDate" to VarType.DATE, "daysOverdue" to VarType.NUMBER, "daysUntilDue" to VarType.NUMBER, "isOverdue" to VarType.BOOLEAN,
         "paidAt" to VarType.DATETIME, "quoteNumber" to VarType.TEXT,
     )

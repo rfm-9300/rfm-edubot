@@ -154,19 +154,21 @@ object SummaryAction : AgentAction {
                 InvoiceRepository(mongo, tenantId).list(status = InvoiceStatus.PENDING)
                     .filter { it.dueDate < today }
                     .sortedBy { it.dueDate }
-                    .map { invoice -> "${invoice.number} · ${clients.findById(invoice.clientId)?.name.orEmpty()} · ${format.formatCents(invoice.totalCents)} · ${due(invoice.dueDate)}" }
+                    .map { invoice -> "${invoice.number} · ${clients.findById(invoice.clientId)?.name.orEmpty()} · ${format.formatCents(invoice.amountDueCents(today))} · ${due(invoice.dueDate)}" }
             }
             "cash_week" -> {
                 val weekStart = today.minus(today.dayOfWeek.isoDayNumber - 1, DateTimeUnit.DAY)
                 val invoices = InvoiceRepository(mongo, tenantId).list()
-                val collected = invoices.filter { it.status == InvoiceStatus.PAID && it.paidAt?.toLocalDateTime(ctx.zone)?.date?.let { day -> day >= weekStart } == true }.sumOf { it.totalCents }
+                val collected = invoices.flatMap { it.receipts() }
+                    .filter { (at, _) -> at.toLocalDateTime(ctx.zone).date >= weekStart }
+                    .sumOf { (_, cents) -> cents }
                 val pending = invoices.filter { it.status == InvoiceStatus.PENDING || it.status == InvoiceStatus.OVERDUE }
                 val overdue = pending.filter { it.dueDate < today }
                 val payables = PaymentRepository(mongo, tenantId).list(status = PaymentStatus.PENDING).filter { it.dueDate <= today.plus(7, DateTimeUnit.DAY) }
                 listOf(
                     AgentCopy.t(ctx.locale, "summary.cash.collected", "amount" to format.formatCents(collected)),
-                    AgentCopy.t(ctx.locale, "summary.cash.outstanding", "amount" to format.formatCents(pending.sumOf { it.totalCents })),
-                    AgentCopy.t(ctx.locale, "summary.cash.overdue", "amount" to format.formatCents(overdue.sumOf { it.totalCents }), "count" to overdue.size.toString()),
+                    AgentCopy.t(ctx.locale, "summary.cash.outstanding", "amount" to format.formatCents(pending.sumOf { it.outstandingCents })),
+                    AgentCopy.t(ctx.locale, "summary.cash.overdue", "amount" to format.formatCents(overdue.sumOf { it.amountDueCents(today) }), "count" to overdue.size.toString()),
                     AgentCopy.t(ctx.locale, "summary.cash.payables", "amount" to format.formatCents(payables.sumOf { it.totalCents })),
                 )
             }

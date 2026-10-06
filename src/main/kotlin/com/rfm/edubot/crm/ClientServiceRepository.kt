@@ -180,6 +180,17 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         return result.modifiedCount.toInt()
     }
 
+    /** The rows invoice [invoiceId] billed go back to open, to be invoiced again, once it is cancelled or deleted. */
+    suspend fun reopenInvoiced(invoiceId: ObjectId): Int =
+        collection.updateMany(
+            scoped(Filters.and(Filters.eq("invoiceId", invoiceId), Filters.eq("status", ClientServiceStatus.INVOICED.name))),
+            Updates.combine(
+                Updates.set("status", ClientServiceStatus.OPEN.name),
+                Updates.unset("invoiceId"),
+                Updates.set("updatedAt", SystemClock.now().toDate()),
+            ),
+        ).modifiedCount.toInt()
+
     private fun Document.toClientService() = ClientService(
         id = getObjectId("_id"),
         tenantId = getObjectId("tenantId"),

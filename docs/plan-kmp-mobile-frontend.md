@@ -1,8 +1,37 @@
 # KMP Mobile Frontend Plan
 
+Status: **Implemented** for the foundation and 13 of the 17 tenant modules · Last updated: 2026-10-02
+
 > Build a Kotlin Multiplatform mobile application for Android and iOS as an alternative frontend
 > to the tenant dashboard at `/app`. The app consumes the tenant-scoped dashboard API; it does not
 > replace the Ktor backend or expose operator/backoffice functionality.
+
+## Status
+
+See [architecture.md § Mobile Frontend](architecture.md#mobile-frontend) for the shipped structure.
+
+**Done.** The module layout (`core:common`, `core:model`, `core:network`, `core:data`,
+`core:localization`, `core:ui`, `core:testing`, eleven `feature:*` modules, `shared`); tokenless
+HTTP with typed failures and one place that reports an expired session; repositories with an
+offline snapshot cache; key-based string catalogs in three languages with drift tests; light and
+dark themes from the web's `minimal` tokens; a back stack; a module registry that cannot offer a
+screen the app does not have; polling on the web's own cadences.
+
+Screens: sign-in, Home, inbox (list + conversation), contacts, clients, jobs, quotes, invoices,
+payments, suppliers, employees, catalog, bookings, agents, notifications, assistant, persona,
+settings.
+
+**Deliberately web-only.** The agent builder, the document-template studio, the widget customiser,
+WhatsApp template CRUD, Instagram, the Google/Gmail integrations, and persona file uploads. The app
+names these under a "on the web dashboard" heading rather than offering taps that do nothing.
+
+**Not started.** Google sign-in (§6.2); SQLDelight (the snapshot cache covers the offline cases the
+app actually has — revisit if a screen needs queries rather than whole responses); push
+notifications (§11); media attachments in the inbox; creating quotes, invoices and bookings from
+the phone (reading and deciding on them works); `detekt`/`ktlint` (§15.7); Maestro flows (§15.9);
+the accessibility audit (§15.6).
+
+The sections below are the original plan and are kept for the parts not yet built.
 
 ## 0. Recommended Direction
 

@@ -18,6 +18,8 @@ import com.rfm.edubot.admin.CreateQuoteRequest
 import com.rfm.edubot.admin.CreateEmployeeRequest
 import com.rfm.edubot.admin.CreateSupplierRequest
 import com.rfm.edubot.admin.InvoiceClientServicesRequest
+import com.rfm.edubot.admin.InvoiceInstallmentsRequest
+import com.rfm.edubot.admin.InvoiceTaxOfficeCodeRequest
 import com.rfm.edubot.admin.UpdateClientServiceRequest
 import com.rfm.edubot.admin.createStandardItem
 import com.rfm.edubot.admin.dto
@@ -42,7 +44,9 @@ import com.rfm.edubot.crm.ClientServiceDelete
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.DirectoryDelete
+import com.rfm.edubot.crm.InvoiceChange
 import com.rfm.edubot.crm.InvoiceRepository
+import com.rfm.edubot.crm.PaymentCancel
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
@@ -50,6 +54,7 @@ import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.eurToCents
 import com.rfm.edubot.crm.model.ClientServiceStatus
+import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.crm.model.QuoteStatus
@@ -788,7 +793,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
             val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            if (deps.invoices.list(quote.clientId).any { it.quoteId == quote.id }) {
+            // A cancelled invoice frees its quote to be invoiced again.
+            if (deps.invoices.list(quote.clientId).any { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED }) {
                 return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
             }
             val invoice = deps.invoices.create(quote.clientId, quote.id, quote.items, dueDate)
@@ -813,7 +819,14 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val deps = tenantDeps(ctx)
             val request = call.receive<CreateInvoiceRequest>()
             if (request.items.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "at least one item is required"))
-            val invoice = deps.invoices.create(ObjectId(request.clientId), request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) }, request.items.map { it.toLineItem() }, LocalDate.parse(request.dueDate))
+            request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val invoice = deps.invoices.create(
+                ObjectId(request.clientId),
+                request.quoteId?.takeIf { it.isNotBlank() }?.let { ObjectId(it) },
+                request.items.map { it.toLineItem() },
+                LocalDate.parse(request.dueDate),
+                request.taxOfficeCode,
+            )
             val client = deps.clients.findById(invoice.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
             call.respond(HttpStatusCode.Created, invoice.dto(client))
         }
@@ -821,8 +834,48 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val invoice = deps.invoices.findById(ObjectId(call.parameters["id"])) ?: return@get call.respond(HttpStatusCode.NotFound)
-            val quoteNumber = invoice.quoteId?.let { deps.quotes.findById(it)?.number }
-            call.respond(invoice.dto(deps.clients.findById(invoice.clientId), quoteNumber))
+            call.respond(deps.invoiceDto(invoice))
+        }
+        patch("/invoices/{id}/tax-office-code") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<InvoiceTaxOfficeCodeRequest>()
+            request.error()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+            val invoice = deps.invoices.setTaxOfficeCode(id, request.taxOfficeCode) ?: return@patch call.respond(HttpStatusCode.NotFound)
+            call.respond(deps.invoiceDto(invoice))
+        }
+        put("/invoices/{id}/installments") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@put call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
+            val parts = call.receive<InvoiceInstallmentsRequest>().parts()
+                ?: return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "installment_invalid"))
+            call.respondInvoiceChange(deps, deps.invoices.setInstallments(id, parts))
+        }
+        patch("/invoices/{id}/installments/{index}/paid") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@patch call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            val index = call.parameters["index"]?.toIntOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+            call.respondInvoiceChange(deps, deps.invoices.receiveInstallment(id, index))
+        }
+        // Cancelling and deleting both free the Serviços rows the invoice billed, to be invoiced again.
+        post("/invoices/{id}/cancel") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val change = deps.invoices.cancel(id)
+            if (change is InvoiceChange.Done) deps.clientServices.reopenInvoiced(id)
+            call.respondInvoiceChange(deps, change)
+        }
+        delete("/invoices/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            deps.invoices.delete(id) ?: return@delete call.respond(HttpStatusCode.NotFound)
+            deps.clientServices.reopenInvoiced(id)
+            call.respond(mapOf("deleted" to true))
         }
         get("/invoices/{id}/pdf") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -942,7 +995,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-            val supplier = call.uniquePhone { deps.suppliers.create(request.name, request.phone, request.address, request.type) } ?: return@post
+            val supplier = call.uniquePhone {
+                deps.suppliers.create(request.name, request.phone, request.address, request.type, request.supplierServices().orEmpty())
+            } ?: return@post
             call.respond(HttpStatusCode.Created, supplier.value.dto())
         }
         patch("/suppliers/{id}") {
@@ -952,8 +1007,9 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<CreateSupplierRequest>()
             if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
             request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-            val supplier = (call.uniquePhone { deps.suppliers.update(id, request.name, request.phone, request.address, request.type) } ?: return@patch)
-                .value ?: return@patch call.respond(HttpStatusCode.NotFound)
+            val supplier = (call.uniquePhone {
+                deps.suppliers.update(id, request.name, request.phone, request.address, request.type, request.supplierServices())
+            } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(supplier.dto())
         }
         removableDirectory("suppliers", DashboardModules.SUPPLIERS, { tenantDeps(it) }, { suppliers.delete(it) }) { id, archived ->
@@ -1058,6 +1114,23 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val payment = deps.payments.setClient(id, clientId) ?: return@patch call.respond(HttpStatusCode.NotFound)
             call.respond(deps.paymentDto(payment))
         }
+        post("/payments/{id}/cancel") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+            when (val cancel = deps.payments.cancel(id)) {
+                PaymentCancel.NotFound -> call.respond(HttpStatusCode.NotFound)
+                is PaymentCancel.Refused -> call.respond(HttpStatusCode.Conflict, mapOf("error" to cancel.reason))
+                is PaymentCancel.Done -> call.respond(deps.paymentDto(cancel.payment))
+            }
+        }
+        delete("/payments/{id}") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.PAYMENTS) } ?: return@delete call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
+            deps.payments.delete(id) ?: return@delete call.respond(HttpStatusCode.NotFound)
+            call.respond(mapOf("deleted" to true))
+        }
     }
 }
 
@@ -1124,6 +1197,21 @@ private suspend fun <T> ApplicationCall.uniquePhone(write: suspend () -> T): Wri
         respond(HttpStatusCode.Conflict, mapOf("error" to "phone_taken"))
         null
     }
+
+private suspend fun CrmDeps.invoiceDto(invoice: Invoice) =
+    invoice.dto(clients.findById(invoice.clientId), invoice.quoteId?.let { quotes.findById(it)?.number })
+
+/** The invoice after a change, or why it was refused: 409 when its state doesn't allow it, 400 for a bad request. */
+private suspend fun ApplicationCall.respondInvoiceChange(deps: CrmDeps, change: InvoiceChange) = when (change) {
+    InvoiceChange.NotFound -> respond(HttpStatusCode.NotFound)
+    is InvoiceChange.Refused -> respond(
+        if (change.reason in INVOICE_STATE_CONFLICTS) HttpStatusCode.Conflict else HttpStatusCode.BadRequest,
+        mapOf("error" to change.reason),
+    )
+    is InvoiceChange.Done -> respond(deps.invoiceDto(change.invoice))
+}
+
+private val INVOICE_STATE_CONFLICTS = setOf("invoice_closed", "invoice_paid", "invoice_cancelled", "installments_paid", "installment_paid", "conflict")
 
 private suspend fun CrmDeps.paymentDto(payment: com.rfm.edubot.crm.model.Payment) = payment.dto(
     supplier = payment.supplierId?.let { suppliers.findById(it) },
