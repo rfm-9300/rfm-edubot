@@ -17,6 +17,8 @@ let state = {
   search: '', active: 'overview', selectedAsset: '',
   // Directory ('clients', 'suppliers' or 'employees') whose archived records are listed instead of the active ones.
   archivedView: '', archivedRows: [],
+  // What the company asks for about clients: required standard fields and its own fields (GET /app/api/crm/clients/fields).
+  clientFields: null,
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
@@ -41,6 +43,7 @@ const GOOGLE = I18N.section('app.integrations.google');
 const PORTAL_TAB = 'my-services';
 const PORTAL = I18N.section('app.portal');
 const SUB = I18N.section('admin.submissions');
+const FIELDS = I18N.section('admin.fields');
 const isPortal = () => !!state.me?.employee;
 // Registered services become Serviços rows, so the team reviews them with both modules on.
 const submissionsOn = () => hasModule('employees') && hasModule('services');
@@ -982,7 +985,7 @@ async function loadModule(tab) {
     state.conversations = await api('/app/api/conversations');
     state.fetched.conversations = true;
   }
-  if (tab === 'clients') state.clients = await api('/app/api/crm/clients');
+  if (tab === 'clients') [state.clients] = await Promise.all([api('/app/api/crm/clients'), loadClientFields(true)]);
   if (tab === 'suppliers') state.suppliers = await api('/app/api/crm/suppliers');
   if (tab === 'employees') {
     const [employees, pending] = await Promise.all([
@@ -3270,13 +3273,16 @@ function renderClients(root) {
   const source = archived ? state.archivedRows : state.clients;
   const q = state.search.trim().toLowerCase();
   const qDigits = phoneDigits(q);
+  const custom = clientCustomFields();
+  const columns = custom.filter(f => f.showInList);
   const matches = c => !q
-    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''}`.toLowerCase().includes(q)
+    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
+  const customCell = (f, c) => `<td class="${{ NUMBER: 'num', DATE: 'mono muted' }[f.type] || 'muted'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`;
   const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
-    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML([c.address, c.city].filter(Boolean).join(', '))}</td><td class="mono muted">${escapeHTML(c.phone)}</td><td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
+    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML([c.address, c.city].filter(Boolean).join(', '))}</td><td class="mono muted">${escapeHTML(c.phone)}</td>${columns.map(f => customCell(f, c)).join('')}<td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
@@ -3285,14 +3291,16 @@ function renderClients(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('clients'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: directoryViewChips('clients')
+      + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : ''),
+    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th>${columns.map(f => `<th${f.type === 'NUMBER' ? ' class="right"' : ''}>${escapeHTML(f.label)}</th>`).join('')}<th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
     emptyArt: CLIENTS_EMPTY_ART,
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
+  $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
   wireDirectoryView(root);
 }
 
@@ -3776,6 +3784,7 @@ async function loadClientRecord(id) {
     hasModule('agents') ? api(`/app/api/agents/subjects/client/${q}`).catch(() => null) : null,
     emails,
     ensureBookingData(),
+    loadClientFields(),
   ]);
   return {
     client,
@@ -3987,6 +3996,13 @@ function clientCardHtml(r, bk) {
     actions: recordRemovalButton(c), archivedAt: c.archivedAt,
     warning: c.automationPaused && hasModule('agents') ? I18N.t('app.agents.automations.pausedTitle') : '',
   });
+}
+
+// The company's own fields that this client has a value for.
+function clientDetailsHtml(c) {
+  const facts = clientCustomFields().map(f => [f.label, customFieldText(f, c.customFields?.[f.key])]).filter(([, text]) => text);
+  if (!facts.length) return '';
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(FIELDS.detailsTitle)}</h2></header><div class="panel__body">${dashFacts(facts)}</div></section>`;
 }
 
 function clientKpiCells(m, bk) {
@@ -4263,6 +4279,7 @@ function renderClientRecord(focusTab = false) {
   ].filter(Boolean);
   body.innerHTML = `
     ${clientCardHtml(r, bk)}
+    ${clientDetailsHtml(r.client)}
     ${recordKpisHtml(clientKpiCells(m, bk))}
     ${recordAttentionHtml(clientAttention(r, m, bk))}
     ${clientTabs(r)}
@@ -4414,6 +4431,202 @@ function openInvoiceOpenWork(client, services, preselect = null) {
   openDrawer(STR.clientInvoiceOpenWorkTitle, form);
 }
 
+// ── Client fields ─────────────────────────────────────────────────────────────────────────────
+// Each company picks which standard fields staff must fill in and adds fields of its own
+// (GET/PUT /app/api/crm/clients/fields). The client form, the list's columns and the record's
+// Details follow it; a client carries its values in `customFields`, by field key.
+const STANDARD_CLIENT_FIELDS = ['name', 'phone', 'taxId', 'email', 'contactPerson', 'address', 'postalCode', 'city'];
+// What staff were always asked for, until the company's choice has loaded.
+const DEFAULT_REQUIRED_CLIENT_FIELDS = ['name', 'phone', 'taxId', 'address'];
+const CUSTOM_FIELD_TYPES = ['TEXT', 'NUMBER', 'DATE', 'SELECT', 'CHECKBOX'];
+const REQUIRED_ERROR_FIELDS = {
+  tax_id_required: 'taxId', email_required: 'email', contact_person_required: 'contactPerson',
+  address_required: 'address', postal_code_required: 'postalCode', city_required: 'city',
+};
+
+const standardClientFieldLabel = key => ({
+  name: STR.clientFormName, phone: STR.clientFormPhone, taxId: STR.clientFormTaxId, email: STR.clientFormEmail,
+  contactPerson: STR.clientFormContact, address: STR.clientFormAddress, postalCode: STR.clientFormPostalCode, city: STR.clientFormCity,
+}[key] || key);
+
+async function loadClientFields(fresh = false) {
+  if (!state.clientFields || fresh) state.clientFields = await api('/app/api/crm/clients/fields').catch(() => state.clientFields);
+  return state.clientFields;
+}
+const clientCustomFields = () => state.clientFields?.custom || [];
+const clientFieldRequired = key => (state.clientFields
+  ? !!state.clientFields.standard.find(f => f.key === key)?.required
+  : DEFAULT_REQUIRED_CLIENT_FIELDS.includes(key));
+const customFieldTypeLabel = type => (FIELDS.types && FIELDS.types[type]) || type;
+const fieldsErrorText = code => (FIELDS.errors && typeof FIELDS.errors === 'object' && code && FIELDS.errors[code]) || FIELDS.saveFailed;
+
+// How a stored value reads in the list and the record; empty when there is nothing to show.
+function customFieldText(field, value) {
+  if (value == null || value === '' || value === false) return '';
+  if (field.type === 'CHECKBOX') return FIELDS.yes;
+  if (field.type === 'NUMBER' && Number.isFinite(Number(value))) return new Intl.NumberFormat(uiLocale()).format(Number(value));
+  if (field.type === 'DATE') return fmtDay(value);
+  return String(value);
+}
+
+function customFieldInput(field, value) {
+  const id = `cf-custom-${field.key}`;
+  const attrs = `id="${id}" data-custom-field="${escapeHTML(field.key)}"${field.required ? ' required' : ''}`;
+  if (field.type === 'CHECKBOX') {
+    return `<div class="form__row"><label class="form__check"><input type="checkbox" ${attrs}${value === true ? ' checked' : ''} /> ${escapeHTML(field.label)}</label></div>`;
+  }
+  const label = `<label class="lbl" for="${id}">${escapeHTML(field.label)}${field.required ? ' <span class="req">●</span>' : ''}</label>`;
+  const current = value == null ? '' : String(value);
+  if (field.type === 'SELECT') {
+    // A choice the company has since removed stays on the clients that have it, until someone changes it.
+    const options = current && !field.options.includes(current) ? [...field.options, current] : field.options;
+    return `<div class="form__row">${label}<select class="sel" ${attrs}><option value=""></option>${options.map(o => `<option value="${escapeHTML(o)}"${o === current ? ' selected' : ''}>${escapeHTML(o)}</option>`).join('')}</select></div>`;
+  }
+  const input = {
+    NUMBER: 'class="inp inp--mono" type="number" step="any" inputmode="decimal"',
+    DATE: 'class="inp inp--mono" type="date"',
+  }[field.type] || 'class="inp" maxlength="500" autocomplete="off"';
+  return `<div class="form__row">${label}<input ${input} ${attrs} value="${escapeHTML(current)}" /></div>`;
+}
+
+function customFieldValues(form) {
+  const values = {};
+  for (const field of clientCustomFields()) {
+    const el = $(`[data-custom-field="${field.key}"]`, form);
+    if (el) values[field.key] = field.type === 'CHECKBOX' ? el.checked : el.value.trim();
+  }
+  return values;
+}
+
+async function clientSaveErrorText(err, fallback) {
+  const code = err?.code || '';
+  if (code === 'invalid_email') return STR.clientInvalidEmail;
+  if (code === 'phone_taken') return STR.clientPhoneTaken;
+  if (REQUIRED_ERROR_FIELDS[code]) return FIELDS.missing({ field: standardClientFieldLabel(REQUIRED_ERROR_FIELDS[code]) });
+  if (!code.startsWith('custom_field_')) return fallback;
+  // A field an admin added after this form opened isn't known here yet.
+  if (!clientCustomFields().some(f => f.key === err.detail)) await loadClientFields(true);
+  const field = clientCustomFields().find(f => f.key === err.detail)?.label || err.detail;
+  if (code === 'custom_field_required') return FIELDS.missing({ field });
+  if (code === 'custom_field_too_long') return FIELDS.tooLong({ field });
+  return FIELDS.invalid({ field });
+}
+
+// Saves the company's client fields; what isn't passed stays as it is. True once saved.
+async function saveClientFields({ required, custom }) {
+  const now = state.clientFields;
+  const body = {
+    required: required ?? now.standard.filter(f => f.required && !f.locked).map(f => f.key),
+    custom: (custom ?? now.custom).map(f => ({ key: f.key, label: f.label, type: f.type, required: f.required, showInList: f.showInList, options: f.options })),
+  };
+  try {
+    state.clientFields = await api('/app/api/crm/clients/fields', { method: 'PUT', body: JSON.stringify(body) });
+    toast(FIELDS.saved);
+    if (state.active === 'clients') render();
+    return true;
+  } catch (err) {
+    toast(fieldsErrorText(err?.code));
+    return false;
+  }
+}
+
+async function openClientFieldsEditor() {
+  const info = await loadClientFields(true);
+  if (!info) return toast(STR.loadFailed);
+  const body = document.createElement('div');
+  body.className = 'form';
+  const standard = info.standard.map(f => `<label class="form__check"><input type="checkbox" data-required-field="${escapeHTML(f.key)}"${f.required ? ' checked' : ''}${f.locked || !info.canEdit ? ' disabled' : ''} /> ${escapeHTML(standardClientFieldLabel(f.key))}</label>`).join('');
+  const rows = info.custom.map(f => {
+    const detail = [
+      customFieldTypeLabel(f.type),
+      f.type === 'SELECT' ? f.options.join(', ') : '',
+      f.required ? FIELDS.detailRequired : '',
+      f.showInList ? FIELDS.detailInList : '',
+    ].filter(Boolean).join(' · ');
+    return `<li><button class="worklist__item" type="button" data-edit-field="${escapeHTML(f.key)}" data-tone="neutral"${info.canEdit ? '' : ' disabled'}>
+      <span class="worklist__dot" aria-hidden="true"></span>
+      <span class="worklist__main"><span class="worklist__title">${escapeHTML(f.label)}</span><span class="worklist__detail">${escapeHTML(detail)}</span></span>
+    </button></li>`;
+  }).join('');
+  body.innerHTML = `
+    <p class="hint">${escapeHTML(FIELDS.intro)}</p>
+    <section class="panel">
+      <header class="panel__head"><h2 class="panel__title" id="cfe-standard">${escapeHTML(FIELDS.standardTitle)}</h2></header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(FIELDS.standardHint)}</p>
+        <div class="form__checks" role="group" aria-labelledby="cfe-standard">${standard}</div>
+      </div>
+    </section>
+    <section class="panel">
+      <header class="panel__head"><h2 class="panel__title">${escapeHTML(FIELDS.customTitle)}${info.custom.length ? ` <span class="tag">${info.custom.length}</span>` : ''}</h2></header>
+      ${info.custom.length ? `<ul class="worklist">${rows}</ul>` : `<div class="empty"><p class="empty__title">${escapeHTML(FIELDS.emptyTitle)}</p><p class="empty__desc">${escapeHTML(FIELDS.emptyDesc)}</p></div>`}
+    </section>
+    ${info.canEdit ? `<div class="drawer__foot"><button class="btn btn--primary" type="button" data-add-field><span class="btn__plus">+</span> ${escapeHTML(FIELDS.add)}</button></div>` : ''}`;
+  openDrawer(FIELDS.title, body, false, { eyebrow: FIELDS.eyebrow });
+  // Name and phone lead the list but are always required, so their boxes can't take the focus.
+  requestAnimationFrame(() => $('[data-required-field]:not(:disabled), [data-add-field]', body)?.focus());
+  const here = { key: 'client-fields', label: FIELDS.title, open: () => openClientFieldsEditor() };
+  $$('[data-required-field]', body).forEach(box => box.addEventListener('change', async () => {
+    const required = $$('[data-required-field]:checked:not(:disabled)', body).map(b => b.dataset.requiredField);
+    if (!(await saveClientFields({ required }))) box.checked = !box.checked;
+  }));
+  $$('[data-edit-field]', body).forEach(b => b.addEventListener('click', () => openFrom(here, () => openClientFieldForm(info.custom.find(f => f.key === b.dataset.editField)))));
+  $('[data-add-field]', body)?.addEventListener('click', () => openFrom(here, () => openClientFieldForm(null)));
+}
+
+function openClientFieldForm(field) {
+  const editing = field || null;
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row form__row--full"><label class="lbl" for="fd-label">${escapeHTML(FIELDS.label)} <span class="req">●</span></label>
+      <input class="inp" id="fd-label" required maxlength="60" autocomplete="off" placeholder="${escapeHTML(FIELDS.labelPh)}" value="${escapeHTML(editing?.label || '')}" /></div>
+    <div class="form__row form__row--full"><label class="lbl" for="fd-type">${escapeHTML(FIELDS.type)}</label>
+      <select class="sel" id="fd-type"${editing ? ' disabled' : ''}>${CUSTOM_FIELD_TYPES.map(t => `<option value="${t}"${t === (editing?.type || 'TEXT') ? ' selected' : ''}>${escapeHTML(customFieldTypeLabel(t))}</option>`).join('')}</select>
+      ${editing ? `<p class="hint">${escapeHTML(FIELDS.typeLocked)}</p>` : ''}</div>
+    <div class="form__row form__row--full" data-fd-options><label class="lbl" for="fd-options">${escapeHTML(FIELDS.options)} <span class="req">●</span></label>
+      <textarea class="txt" id="fd-options" rows="4">${escapeHTML((editing?.options || []).join('\n'))}</textarea>
+      <p class="hint">${escapeHTML(FIELDS.optionsHint)}</p></div>
+    <div class="form__row form__row--full" data-fd-required><label class="form__check"><input type="checkbox" id="fd-required"${editing?.required ? ' checked' : ''} /> ${escapeHTML(FIELDS.required)}</label></div>
+    <div class="form__row form__row--full"><label class="form__check"><input type="checkbox" id="fd-list"${editing?.showInList ? ' checked' : ''} /> ${escapeHTML(FIELDS.showInList)}</label></div>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : FIELDS.add)}</button>
+      <button class="btn btn--ghost" type="button" data-form-cancel>${escapeHTML(STR.cancel)}</button>
+      ${editing ? `<button class="btn btn--ghost" type="button" data-field-remove>${escapeHTML(FIELDS.remove)}</button>` : ''}
+    </div>`;
+  const type = $('#fd-type', form);
+  const paintType = () => {
+    $('[data-fd-options]', form).hidden = type.value !== 'SELECT';
+    $('[data-fd-required]', form).hidden = type.value === 'CHECKBOX';
+  };
+  type.addEventListener('change', paintType);
+  paintType();
+  $('[data-form-cancel]', form).addEventListener('click', () => closeDrawer());
+  $('[data-field-remove]', form)?.addEventListener('click', async () => {
+    const ok = await confirmDialog({ title: FIELDS.removeTitle({ label: editing.label }), body: FIELDS.removeBody, okLabel: FIELDS.removeOk });
+    if (ok && await saveClientFields({ custom: clientCustomFields().filter(f => f.key !== editing.key) })) closeDrawer();
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const next = {
+      key: editing?.key || null,
+      label: $('#fd-label', form).value.trim(),
+      type: type.value,
+      required: type.value !== 'CHECKBOX' && $('#fd-required', form).checked,
+      showInList: $('#fd-list', form).checked,
+      options: type.value === 'SELECT' ? $('#fd-options', form).value.split('\n').map(o => o.trim()).filter(Boolean) : [],
+    };
+    if (!next.label) return toast(fieldsErrorText('label_required'));
+    if (next.type === 'SELECT' && !next.options.length) return toast(fieldsErrorText('options_required'));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    const custom = editing ? clientCustomFields().map(f => (f.key === editing.key ? next : f)) : [...clientCustomFields(), next];
+    if (await saveClientFields({ custom })) closeDrawer();
+    else btn.disabled = false;
+  });
+  openDrawer(editing ? FIELDS.editTitle : FIELDS.newTitle, form, false, { eyebrow: FIELDS.title });
+}
+
 function wireDuplicatePhone(form, editingId) {
   const input = $('#cf-phone', form);
   const hint = $('#cf-dup', form);
@@ -4436,6 +4649,7 @@ function wireDuplicatePhone(form, editingId) {
 
 async function openClientForm(client) {
   const editing = client && client.id ? client : null;
+  await loadClientFields();
   const field = ({ id, label, value, attrs = '', cls = 'inp', required = false, full = false }) => `<div class="form__row${full ? ' form__row--full' : ''}"><label class="lbl" for="${id}">${escapeHTML(label)}${required ? ' <span class="req">●</span>' : ''}</label>
     <input class="${cls}" id="${id}" value="${escapeHTML(value || '')}" ${required ? 'required ' : ''}${attrs} /></div>`;
   const form = document.createElement('form');
@@ -4443,15 +4657,16 @@ async function openClientForm(client) {
   form.innerHTML = `
     <div class="form__grid">
       ${field({ id: 'cf-name', label: STR.clientFormName, value: editing?.name, required: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
-      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', required: true, attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
+      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', required: clientFieldRequired('taxId'), attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
       <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="cf-phone" type="tel" required maxlength="40" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(editing?.phone || '')}" />
         <p class="hint hint--warn" id="cf-dup" hidden></p></div>
-      ${field({ id: 'cf-email', label: STR.clientFormEmail, value: editing?.email, attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
-      ${field({ id: 'cf-contact', label: STR.clientFormContact, value: editing?.contactPerson, full: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhContact)}"` })}
-      ${field({ id: 'cf-address', label: STR.clientFormAddress, value: editing?.address, full: true, required: true, attrs: `maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}"` })}
-      ${field({ id: 'cf-postal', label: STR.clientFormPostalCode, value: editing?.postalCode, cls: 'inp inp--mono', attrs: `maxlength="20" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPostalCode)}"` })}
-      ${field({ id: 'cf-city', label: STR.clientFormCity, value: editing?.city, attrs: `maxlength="100" autocomplete="off" placeholder="${escapeHTML(STR.clientPhCity)}"` })}
+      ${field({ id: 'cf-email', label: STR.clientFormEmail, value: editing?.email, required: clientFieldRequired('email'), attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
+      ${field({ id: 'cf-contact', label: STR.clientFormContact, value: editing?.contactPerson, full: true, required: clientFieldRequired('contactPerson'), attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhContact)}"` })}
+      ${field({ id: 'cf-address', label: STR.clientFormAddress, value: editing?.address, full: true, required: clientFieldRequired('address'), attrs: `maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}"` })}
+      ${field({ id: 'cf-postal', label: STR.clientFormPostalCode, value: editing?.postalCode, cls: 'inp inp--mono', required: clientFieldRequired('postalCode'), attrs: `maxlength="20" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPostalCode)}"` })}
+      ${field({ id: 'cf-city', label: STR.clientFormCity, value: editing?.city, required: clientFieldRequired('city'), attrs: `maxlength="100" autocomplete="off" placeholder="${escapeHTML(STR.clientPhCity)}"` })}
+      ${clientCustomFields().map(f => customFieldInput(f, editing?.customFields?.[f.key])).join('')}
       <div class="form__row form__row--full"><label class="lbl" for="cf-notes">${escapeHTML(STR.clientFormNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <textarea class="txt" id="cf-notes" maxlength="4000" placeholder="${escapeHTML(STR.clientPhNotes)}">${escapeHTML(editing?.notes || '')}</textarea>
         <p class="hint">${escapeHTML(STR.clientNotesHint)}</p></div>
@@ -4470,7 +4685,12 @@ async function openClientForm(client) {
       contactPerson: val('#cf-contact'), address: val('#cf-address'), postalCode: val('#cf-postal'), city: val('#cf-city'),
       notes: val('#cf-notes'),
     };
-    if (!payload.name || !payload.phone || !payload.taxId || !payload.address) return toast(STR.clientValidate);
+    const customFields = customFieldValues(form);
+    if (Object.keys(customFields).length) payload.customFields = customFields;
+    const missing = STANDARD_CLIENT_FIELDS.find(key => clientFieldRequired(key) && !payload[key]);
+    if (missing) return toast(FIELDS.missing({ field: standardClientFieldLabel(missing) }));
+    const missingCustom = clientCustomFields().find(f => f.required && !customFields[f.key]);
+    if (missingCustom) return toast(FIELDS.missing({ field: missingCustom.label }));
     if (payload.email && !EMAIL_SHAPE.test(payload.email)) return toast(STR.clientInvalidEmail);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
@@ -4484,10 +4704,7 @@ async function openClientForm(client) {
       else openClientDrawer(saved);
     } catch (err) {
       btn.disabled = false;
-      toast(err?.code === 'invalid_email' ? STR.clientInvalidEmail
-        : err?.code === 'phone_taken' ? STR.clientPhoneTaken
-          : err?.code === 'tax_id_required' || err?.code === 'address_required' ? STR.clientValidate
-            : editing ? STR.clientUpdateFailed : STR.clientCreateFailed);
+      toast(await clientSaveErrorText(err, editing ? STR.clientUpdateFailed : STR.clientCreateFailed));
     }
   });
   openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { eyebrow: STR.clientEyebrow });
