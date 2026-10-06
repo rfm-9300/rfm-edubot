@@ -287,6 +287,51 @@ returns `items` (an older row as its one line). The form names an unnamed servic
 ("Corte + Massagem"). A row approved from an employee's registered service carries `employeeId`, the
 employee who did the work; its detail shows "Done by" and links to the employee.
 
+### Invoices: tax office code, installments, cancel and delete
+
+An invoice can carry `taxOfficeCode`, the code the tax office gave it (the ATCUD in Portugal), at most
+80 characters: set on `POST /app/api/crm/invoices`, changed or cleared (empty string) with
+`PATCH /app/api/crm/invoices/{id}/tax-office-code`. The PDF prints it on the number line as `ATCUD:<code>`.
+
+An unpaid invoice can be paid in installments (`installments`: amount, due date, `paidAt` once received).
+`PUT /app/api/crm/invoices/{id}/installments` replaces the parts still to receive with the ones sent; they
+must add up to what is still owed, at most 24 in all, and the received ones stay as they are. A single
+part with nothing received yet removes the plan (the invoice is paid in one go by that date).
+`PATCH …/installments/{index}/paid` receives one part; the last one marks the invoice `PAID` and
+appends `invoice.paid`. `PATCH …/paid` (mark paid) receives every open part. The rules live in
+`InvoiceInstallments` (pure); `InvoiceRepository` applies them only while the stored status and parts are
+still the ones they were decided on, retrying otherwise.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: issued (one go)
+    Pending --> Split: PUT installments (2+ parts)
+    Split --> Split: part received, dueDate moves to the next open part
+    Split --> Pending: PUT one part, nothing received
+    Pending --> Paid: mark paid
+    Split --> Paid: last part received / mark paid
+    Pending --> Cancelled: cancel (nothing received)
+    Split --> Cancelled: cancel (nothing received)
+    Pending --> [*]: delete
+    Split --> [*]: delete
+    Paid --> [*]: delete
+    Cancelled --> [*]: delete
+```
+
+With a plan, `dueDate` is the next open part's date (the last part's once all are received), so the
+agents' due-date triggers, overdue flags, Home and the bot's tools follow the plan without knowing about
+it. Money is counted part by part: the API sends `paidEur` and `outstandingEur`; Home's outstanding
+subtracts received parts, overdue and aging count each open part by its own date, and collected and the
+cash-flow chart count each part in the month it was received (`Invoice.receipts()` and its Document twin
+in `OverviewService`). The agents get `invoice.amountDue` (the parts due by then, or all that is owed),
+which the reminder templates now print instead of the total.
+
+`POST /app/api/crm/invoices/{id}/cancel` keeps the invoice and its number as `CANCELLED`; only an invoice
+with no money received can be cancelled (`409 invoice_paid` / `installments_paid`). `DELETE …/{id}`
+removes it for good, whatever its state. Both reopen the Serviços rows it billed
+(`ClientServiceRepository.reopenInvoiced`), and a cancelled invoice no longer blocks converting its quote
+again. No domain event is written for either.
+
 ### Catalog
 
 Optional `catalog` module (`crm.standard_items`): the services and materials that quotes, invoices,
@@ -317,6 +362,16 @@ PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm
 A supplier has an optional free-text `type` (materials, subcontractor…): the form suggests the types
 already in use and the directory filters by it. `PATCH` keeps the type when omitted and clears it on
 an empty string.
+
+A supplier also has usual `services` (description, unit, and a usual price per unit, or none when it
+varies; at most 50). `POST`/`PATCH /app/api/crm/suppliers` replace them when the body sends a list (an
+empty one clears them) and keep them when it doesn't. Search matches them. The payment form offers the
+picked supplier's services as ticks, each adding a line to the bill; nothing on the payment points back
+at the service.
+
+`POST /app/api/crm/payments/{id}/cancel` keeps a payment and its number as `CANCELLED`, only while it is
+unpaid (`409 payment_paid` / `payment_cancelled`); `DELETE /app/api/crm/payments/{id}` removes one in any
+state. Mark paid leaves a paid or cancelled payment as it is. No domain event is written for either.
 
 A payment can also name the client it was spent on (`clientId`, optional): set it on
 `POST /app/api/crm/payments`, change or clear it with `PATCH /app/api/crm/payments/{id}/client`,
@@ -542,11 +597,11 @@ sequenceDiagram
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
-| `crm.invoices` | Invoice records, status/due dates, PDF path | unique on `number` |
+| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments | unique on `number` |
 | `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
 | `crm.service_submissions` | Services employees registered from their own sign-in: client, day, lines, status (PENDING/APPROVED/REJECTED), the approved Serviços row (`serviceId`) or the rejection reason | `tenantId+employeeId+createdAt`; `tenantId+status+createdAt` |
 | `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
-| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` | unique `(tenantId, phone)` and `(tenantId, number)` |
+| `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` and usual `services` | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |

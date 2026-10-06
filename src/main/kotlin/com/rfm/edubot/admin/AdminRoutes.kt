@@ -2,6 +2,8 @@ package com.rfm.edubot.admin
 
 import com.mongodb.ErrorCategory
 import com.mongodb.MongoServerException
+import com.rfm.edubot.crm.InvoiceInstallments
+import com.rfm.edubot.crm.eurToCents
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Employee
@@ -9,6 +11,7 @@ import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.Supplier
+import com.rfm.edubot.crm.model.SupplierService
 import com.rfm.edubot.crm.MIN_BOOKING_MINUTES
 import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
@@ -113,7 +116,36 @@ internal data class CreateInvoiceRequest(
     val quoteId: String? = null,
     val items: List<CreateLineItemRequest>,
     val dueDate: String,
-)
+    val taxOfficeCode: String? = null,
+) {
+    fun detailsError(): String? = taxOfficeCodeError(taxOfficeCode)
+}
+
+/** A blank or missing code clears it. */
+@Serializable
+internal data class InvoiceTaxOfficeCodeRequest(val taxOfficeCode: String? = null) {
+    fun error(): String? = taxOfficeCodeError(taxOfficeCode)
+}
+
+/** The parts still to receive; installments already received are kept as they are. */
+@Serializable
+internal data class InvoiceInstallmentsRequest(val installments: List<InvoiceInstallmentRequest>) {
+    /** The parts, or null when an amount or a date isn't one. */
+    fun parts(): List<InvoiceInstallments.Part>? = installments.map { part ->
+        val date = runCatching { LocalDate.parse(part.dueDate.trim()) }.getOrNull() ?: return null
+        if (!part.amountEur.isFinite()) return null
+        InvoiceInstallments.Part(eurToCents(part.amountEur), date)
+    }
+}
+
+@Serializable
+internal data class InvoiceInstallmentRequest(val amountEur: Double, val dueDate: String)
+
+/** The ATCUD is about 70 characters at most; this leaves room for a prefix someone types with it. */
+internal const val MAX_TAX_OFFICE_CODE = 80
+
+internal fun taxOfficeCodeError(code: String?): String? =
+    if ((code?.trim()?.length ?: 0) > MAX_TAX_OFFICE_CODE) "tax_office_code_too_long" else null
 
 @Serializable
 internal data class CreateLineItemRequest(
@@ -258,23 +290,51 @@ internal data class InvoiceDto(
     val quoteNumber: String? = null,
     val paidAt: String? = null,
     val items: List<LineItemDto> = emptyList(),
+    val paidEur: Double,
+    val outstandingEur: Double,
+    val taxOfficeCode: String? = null,
+    val installments: List<InvoiceInstallmentDto> = emptyList(),
 )
 
-/** Also the PATCH body: an omitted [type] keeps the stored one; an empty string clears it. */
+@Serializable
+internal data class InvoiceInstallmentDto(val amountEur: Double, val dueDate: String, val paidAt: String? = null)
+
+/** Also the PATCH body: an omitted [type] or [services] keeps the stored one; an empty string or list clears it. */
 @Serializable
 internal data class CreateSupplierRequest(
     val name: String,
     val phone: String,
     val address: String? = null,
     val type: String? = null,
+    val services: List<SupplierServiceRequest>? = null,
 ) {
     /** Stable error code for the first invalid optional field, or null. */
-    fun detailsError(): String? = if ((type?.trim()?.length ?: 0) > MAX_TYPE) "type_too_long" else null
+    fun detailsError(): String? = when {
+        (type?.trim()?.length ?: 0) > MAX_TYPE -> "type_too_long"
+        services == null -> null
+        services.size > MAX_SERVICES -> "too_many_services"
+        services.any { it.description.isBlank() } -> "service_description_required"
+        services.any { it.description.trim().length > MAX_SERVICE_DESCRIPTION } -> "service_description_too_long"
+        services.any { it.unit.trim().length > MAX_SERVICE_UNIT } -> "service_unit_too_long"
+        services.any { price -> price.unitPriceEur?.let { !it.isFinite() || it < 0 } == true } -> "service_price_invalid"
+        else -> null
+    }
+
+    fun supplierServices(): List<SupplierService>? = services?.map {
+        SupplierService(it.description.trim(), it.unit.trim(), it.unitPriceEur?.let(::eurToCents))
+    }
 
     companion object {
         const val MAX_TYPE = 60
+        const val MAX_SERVICES = 50
+        const val MAX_SERVICE_DESCRIPTION = 200
+        const val MAX_SERVICE_UNIT = 20
     }
 }
+
+/** A service the supplier usually does; without a price when it changes from job to job. */
+@Serializable
+internal data class SupplierServiceRequest(val description: String, val unit: String = "", val unitPriceEur: Double? = null)
 
 /** Also the PATCH body: omitted [birthDate], [address] and [taxId] keep what is stored; an empty string clears them. */
 @Serializable
@@ -328,7 +388,11 @@ internal data class SupplierDto(
     val type: String? = null,
     val createdAt: String,
     val archivedAt: String? = null,
+    val services: List<SupplierServiceDto> = emptyList(),
 )
+
+@Serializable
+internal data class SupplierServiceDto(val description: String, val unit: String = "", val unitPriceEur: Double? = null)
 
 @Serializable
 internal data class EmployeeDto(
@@ -500,6 +564,10 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     quoteNumber = quoteNumber,
     paidAt = paidAt?.toString(),
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    paidEur = paidCents / 100.0,
+    outstandingEur = outstandingCents / 100.0,
+    taxOfficeCode = taxOfficeCode,
+    installments = installments.map { InvoiceInstallmentDto(it.amountCents / 100.0, it.dueDate.toString(), it.paidAt?.toString()) },
 )
 
 internal fun Employee.dto() = EmployeeDto(
@@ -524,6 +592,7 @@ internal fun Supplier.dto() = SupplierDto(
     type = type,
     createdAt = createdAt.toString(),
     archivedAt = archivedAt?.toString(),
+    services = services.map { SupplierServiceDto(it.description, it.unit, it.unitPriceCents?.let { cents -> cents / 100.0 }) },
 )
 
 internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client: Client? = null) = PaymentDto(

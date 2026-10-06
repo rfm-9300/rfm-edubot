@@ -221,6 +221,19 @@ class CrmTools(
                         put("status", invoice.status.name)
                         put("due_date", invoice.dueDate.toString())
                         put("total_eur", invoice.totalCents / 100.0)
+                        put("paid_eur", invoice.paidCents / 100.0)
+                        put("outstanding_eur", invoice.outstandingCents / 100.0)
+                        if (invoice.installments.isNotEmpty()) {
+                            put("installments", buildJsonArray {
+                                invoice.installments.forEach { part ->
+                                    add(buildJsonObject {
+                                        put("amount_eur", part.amountCents / 100.0)
+                                        put("due_date", part.dueDate.toString())
+                                        put("paid", part.paidAt != null)
+                                    })
+                                }
+                            })
+                        }
                     })
                 }
             })

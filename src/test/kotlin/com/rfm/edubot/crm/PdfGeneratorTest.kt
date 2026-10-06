@@ -2,6 +2,7 @@ package com.rfm.edubot.crm
 
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.InvoiceInstallment
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
@@ -317,6 +318,39 @@ class PdfGeneratorTest {
 
         val paid = textOf(generator.generateInvoice(invoice().copy(status = InvoiceStatus.PAID), client))
         assertTrue(badge.containsMatchIn(paid), paid)
+    }
+
+    @Test
+    fun `the tax office code prints as the ATCUD without doubling a typed prefix`() {
+        val text = textOf(generator.generateInvoice(invoice().copy(taxOfficeCode = "JJ4XTRK3-12"), client))
+        assertTrue(text.contains("ATCUD:JJ4XTRK3-12"), text)
+        assertEquals("ATCUD:JJ4XTRK3-12", PdfGenerator.atcud("atcud: JJ4XTRK3-12"))
+        assertTrue(!textOf(generator.generateInvoice(invoice(), client)).contains("ATCUD"))
+    }
+
+    @Test
+    fun `an invoice paid in installments lists them, received ones marked, in every design`() {
+        val received = Clock.System.now()
+        val split = invoice().copy(
+            dueDate = kotlinx.datetime.LocalDate(2026, 11, 6),
+            installments = listOf(
+                InvoiceInstallment(75_000, kotlinx.datetime.LocalDate(2026, 10, 6), paidAt = received),
+                InvoiceInstallment(75_000, kotlinx.datetime.LocalDate(2026, 11, 6)),
+            ),
+        )
+        val text = textOf(generator.generateInvoice(split, client))
+        assertTrue(text.contains("1.ª prestação: 750,00 € até 06/10/2026 (paga)"), text)
+        assertTrue(text.contains("2.ª prestação: 750,00 € até 06/11/2026") && !text.contains("06/11/2026 (paga)"), text)
+        assertTrue(text.contains("Próximo vencimento 06/11/2026"), text)
+        assertTrue(text.contains(PdfGenerator.DEFAULT_INSTALLMENT_PAYMENT_TERMS), text)
+
+        val twelve = invoice().copy(installments = (1..12).map { InvoiceInstallment(12_500, kotlinx.datetime.LocalDate(2026, it, 1)) })
+        BuiltInDesignTemplates.ALL.forEach { design ->
+            val template = DocumentTemplate(companyName = "RoPaint Lda", accentColor = design.accentColor, showDecor = design.showDecor, layout = design.layout, style = design.style)
+            val bytes = generator.generateInvoice(twelve.copy(taxOfficeCode = "CSDF7T5H-0035"), client, template)
+            assertTrue(overlappingRuns(bytes).isEmpty(), "${design.name} prints text on top of text: ${overlappingRuns(bytes)}")
+            assertTrue(textOf(bytes).contains("12.ª prestação"), design.name)
+        }
     }
 
     @Test

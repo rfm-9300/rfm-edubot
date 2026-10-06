@@ -6,6 +6,7 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.InvoiceInstallment
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
@@ -380,7 +381,7 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         return collection.find(filter).sort(Document("createdAt", -1)).limit(100).toList().map { it.toInvoice() }
     }
 
-    suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate): Invoice {
+    suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate, taxOfficeCode: String? = null): Invoice {
         val now = SystemClock.now()
         val invoice = Invoice(
             tenantId = tenantId,
@@ -392,6 +393,7 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             totalCents = items.sumOf { it.totalCents },
             createdAt = now,
             updatedAt = now,
+            taxOfficeCode = taxOfficeCode?.trim()?.takeIf { it.isNotBlank() },
         )
         collection.insertOne(invoice.toDocument())
         events.append(
@@ -412,12 +414,11 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
     suspend fun sumByClient(): List<ClientInvoiceTotal> {
         val pipeline = listOf(
-            Document("\$match", Document("tenantId", tenantId)),
+            Document("\$match", Document("tenantId", tenantId).append("status", Document("\$ne", InvoiceStatus.CANCELLED.name))),
+            Document("\$addFields", Document("paidPart", paidPartExpression())),
             Document("\$group", Document("_id", "\$clientId")
                 .append("totalCents", Document("\$sum", "\$totalCents"))
-                .append("paidCents", Document("\$sum", Document("\$cond", listOf(
-                    Document("\$eq", listOf("\$status", "PAID")), "\$totalCents", 0L
-                ))))
+                .append("paidCents", Document("\$sum", "\$paidPart"))
                 .append("invoiceCount", Document("\$sum", 1))),
             Document("\$lookup", Document("from", "crm.clients")
                 .append("let", Document("clientId", "\$_id"))
@@ -442,22 +443,123 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         }
     }
 
+    /** Pays the whole invoice, open installments included. A paid or cancelled invoice comes back unchanged. */
     suspend fun markPaid(id: ObjectId): Invoice? {
-        val now = Instant.fromEpochMilliseconds(SystemClock.now().toEpochMilliseconds())
-        val before = collection.findOneAndUpdate(
-            scoped(Filters.eq("_id", id)),
-            Updates.combine(Updates.set("status", InvoiceStatus.PAID.name), Updates.set("paidAt", now.toDate()), Updates.set("updatedAt", now.toDate())),
-            FindOneAndUpdateOptions().returnDocument(ReturnDocument.BEFORE),
-        )?.toInvoice() ?: return null
-        val invoice = before.copy(status = InvoiceStatus.PAID, paidAt = now, updatedAt = now)
-        if (before.status != InvoiceStatus.PAID) {
-            events.append(
-                tenantId, DomainEventTypes.INVOICE_PAID, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
-                EventPayloads.invoice(invoice) { put("from", before.status.name) }, invoice.relatedRefs(),
-            )
+        val before = findById(id) ?: return null
+        if (before.status == InvoiceStatus.PAID || before.status == InvoiceStatus.CANCELLED) return before
+        val now = nowMillis()
+        val ops = mutableListOf(
+            Updates.set("status", InvoiceStatus.PAID.name),
+            Updates.set("paidAt", now.toDate()),
+            Updates.set("updatedAt", now.toDate()),
+        )
+        if (before.installments.isNotEmpty()) {
+            ops += Updates.set("installments", InvoiceInstallments.payAll(before, now).map { it.toDocument() })
         }
+        val invoice = collection.findOneAndUpdate(
+            scoped(Filters.and(Filters.eq("_id", id), Filters.`in`("status", OPEN_STATUSES))),
+            Updates.combine(ops),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toInvoice() ?: return findById(id)
+        appendPaid(invoice, before.status)
         return invoice
     }
+
+    /** A blank [code] clears it. */
+    suspend fun setTaxOfficeCode(id: ObjectId, code: String?): Invoice? =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(
+                Updates.set("taxOfficeCode", code?.trim()?.takeIf { it.isNotBlank() }),
+                Updates.set("updatedAt", SystemClock.now().toDate()),
+            ),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toInvoice()
+
+    /** Splits what is still to receive into [parts] ([InvoiceInstallments.plan]). */
+    suspend fun setInstallments(id: ObjectId, parts: List<InvoiceInstallments.Part>): InvoiceChange =
+        change(id) { InvoiceInstallments.plan(it, parts) }
+
+    /** Records installment [index] as received now; receiving the last one pays the invoice. */
+    suspend fun receiveInstallment(id: ObjectId, index: Int): InvoiceChange {
+        val now = nowMillis()
+        return change(id) { InvoiceInstallments.receive(it, index, now) }
+    }
+
+    /**
+     * Cancelling keeps the invoice and its number, as cancelled. Only one with no money received can be
+     * cancelled; a paid one, or one with installments received, can only be deleted.
+     */
+    suspend fun cancel(id: ObjectId): InvoiceChange {
+        val before = findById(id) ?: return InvoiceChange.NotFound
+        when {
+            before.status == InvoiceStatus.CANCELLED -> return InvoiceChange.Refused("invoice_cancelled")
+            before.status == InvoiceStatus.PAID -> return InvoiceChange.Refused("invoice_paid")
+            before.paidCents > 0 -> return InvoiceChange.Refused("installments_paid")
+        }
+        val invoice = collection.findOneAndUpdate(
+            scoped(
+                Filters.and(
+                    Filters.eq("_id", id),
+                    Filters.`in`("status", OPEN_STATUSES),
+                    Filters.nor(Filters.elemMatch("installments", Filters.exists("paidAt"))),
+                ),
+            ),
+            Updates.combine(Updates.set("status", InvoiceStatus.CANCELLED.name), Updates.set("updatedAt", SystemClock.now().toDate())),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toInvoice() ?: return InvoiceChange.Refused("conflict")
+        return InvoiceChange.Done(invoice)
+    }
+
+    /** Removes the invoice for good and returns what it was. */
+    suspend fun delete(id: ObjectId): Invoice? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toInvoice()
+
+    /**
+     * Applies [decide] to the stored invoice. The write only lands if its status and installments are still the
+     * ones [decide] saw, so two people receiving installments at once can't undo each other; it then tries again.
+     */
+    private suspend fun change(id: ObjectId, decide: (Invoice) -> InvoiceInstallments.Outcome): InvoiceChange {
+        repeat(3) {
+            val before = findById(id) ?: return InvoiceChange.NotFound
+            val outcome = when (val decided = decide(before)) {
+                is InvoiceInstallments.Outcome.Refused -> return InvoiceChange.Refused(decided.reason)
+                is InvoiceInstallments.Outcome.Ready -> decided
+            }
+            val unchanged = Filters.and(
+                Filters.eq("_id", id),
+                Filters.eq("status", before.status.name),
+                if (before.installments.isEmpty()) {
+                    Filters.or(Filters.exists("installments", false), Filters.eq("installments", emptyList<Document>()))
+                } else {
+                    Filters.eq("installments", before.installments.map { it.toDocument() })
+                },
+            )
+            val invoice = collection.findOneAndUpdate(
+                scoped(unchanged),
+                Updates.combine(
+                    Updates.set("installments", outcome.installments.map { it.toDocument() }),
+                    Updates.set("status", outcome.status.name),
+                    Updates.set("dueDate", outcome.dueDate.toString()),
+                    Updates.set("paidAt", outcome.paidAt?.toDate()),
+                    Updates.set("updatedAt", SystemClock.now().toDate()),
+                ),
+                FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+            )?.toInvoice() ?: return@repeat
+            appendPaid(invoice, before.status)
+            return InvoiceChange.Done(invoice)
+        }
+        return InvoiceChange.Refused("conflict")
+    }
+
+    private suspend fun appendPaid(invoice: Invoice, from: InvoiceStatus) {
+        if (from == InvoiceStatus.PAID || invoice.status != InvoiceStatus.PAID) return
+        events.append(
+            tenantId, DomainEventTypes.INVOICE_PAID, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
+            EventPayloads.invoice(invoice) { put("from", from.name) }, invoice.relatedRefs(),
+        )
+    }
+
+    private fun nowMillis(): Instant = Instant.fromEpochMilliseconds(SystemClock.now().toEpochMilliseconds())
 
     private fun Document.toInvoice() = Invoice(
         id = getObjectId("_id"),
@@ -473,6 +575,8 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         pdfPath = getString("pdfPath"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
+        taxOfficeCode = getString("taxOfficeCode"),
+        installments = getList("installments", Document::class.java).orEmpty().map { it.toInstallment() },
     )
 
     private fun Invoice.toDocument() = Document("_id", id)
@@ -488,9 +592,53 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("pdfPath", pdfPath)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
+        .append("taxOfficeCode", taxOfficeCode)
+        .append("installments", installments.map { it.toDocument() })
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    companion object {
+        private val OPEN_STATUSES = listOf(InvoiceStatus.PENDING.name, InvoiceStatus.OVERDUE.name)
+    }
 }
+
+/** Result of a guarded invoice change: the invoice after it, a stable error code, or no such invoice. */
+sealed interface InvoiceChange {
+    data class Done(val invoice: Invoice) : InvoiceChange
+    data class Refused(val reason: String) : InvoiceChange
+    data object NotFound : InvoiceChange
+}
+
+/**
+ * Per invoice, what was received: the total once paid, otherwise its received installments. For
+ * aggregations over `crm.invoices` (`$addFields`, before a `$group`).
+ */
+internal fun paidPartExpression(): Document {
+    val received = Document(
+        "\$filter",
+        Document("input", Document("\$ifNull", listOf("\$installments", emptyList<Any>())))
+            .append("as", "part")
+            .append("cond", Document("\$eq", listOf(Document("\$type", "\$\$part.paidAt"), "date"))),
+    )
+    return Document(
+        "\$cond",
+        listOf(
+            Document("\$eq", listOf("\$status", InvoiceStatus.PAID.name)),
+            "\$totalCents",
+            Document("\$sum", Document("\$map", Document("input", received).append("as", "part").append("in", "\$\$part.amountCents"))),
+        ),
+    )
+}
+
+internal fun Document.toInstallment() = InvoiceInstallment(
+    amountCents = getLongValue("amountCents"),
+    dueDate = LocalDate.parse(getString("dueDate")),
+    paidAt = getDate("paidAt")?.toInstantValue(),
+)
+
+internal fun InvoiceInstallment.toDocument(): Document = Document("amountCents", amountCents)
+    .append("dueDate", dueDate.toString())
+    .apply { paidAt?.let { append("paidAt", it.toDate()) } }
 
 class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")

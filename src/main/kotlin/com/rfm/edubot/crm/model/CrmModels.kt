@@ -59,6 +59,15 @@ data class Supplier(
     val updatedAt: Instant,
     /** Set on a supplier that has payments and was removed: hidden from lists and pickers, restorable. */
     val archivedAt: Instant? = null,
+    /** What the supplier usually does; the payment form offers these as lines once the supplier is picked. */
+    val services: List<SupplierService> = emptyList(),
+)
+
+data class SupplierService(
+    val description: String,
+    val unit: String = "",
+    /** The supplier's usual price per unit; null when it changes from job to job. */
+    val unitPriceCents: Long? = null,
 )
 
 /** Person on the tenant's team: a payments payee, and with a sign-in of their own, the one registering the services they do. */
@@ -182,10 +191,52 @@ data class Invoice(
     val quoteId: ObjectId? = null,
     val items: List<LineItem>,
     val status: InvoiceStatus = InvoiceStatus.PENDING,
+    /**
+     * With [installments], the next unpaid one's due date (the last one's once all are paid), so reminders,
+     * overdue flags and Home follow the plan without knowing about it.
+     */
     val dueDate: LocalDate,
     val paidAt: Instant? = null,
     val totalCents: Long,
     val pdfPath: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
+    /** The code the tax office gave this invoice (the ATCUD in Portugal), printed on the PDF. */
+    val taxOfficeCode: String? = null,
+    /** Empty when the invoice is paid in one go; otherwise parts adding up to [totalCents], paid ones first. */
+    val installments: List<InvoiceInstallment> = emptyList(),
+) {
+    /** Received so far: the whole total once paid, otherwise the installments already paid. */
+    val paidCents: Long
+        get() = if (status == InvoiceStatus.PAID) totalCents else installments.filter { it.paidAt != null }.sumOf { it.amountCents }
+
+    /** Still to receive; nothing on a paid or cancelled invoice. */
+    val outstandingCents: Long
+        get() = if (status == InvoiceStatus.PAID || status == InvoiceStatus.CANCELLED) 0 else totalCents - paidCents
+
+    /**
+     * What the client owes by [today] or by the due date, whichever is later: the unpaid installments due by
+     * then (every overdue one on an overdue invoice), or everything outstanding when it is paid in one go.
+     */
+    fun amountDueCents(today: LocalDate): Long {
+        if (outstandingCents == 0L) return 0
+        val unpaid = installments.filter { it.paidAt == null }
+        if (unpaid.isEmpty()) return outstandingCents
+        val by = maxOf(today, dueDate)
+        return unpaid.filter { it.dueDate <= by }.sumOf { it.amountCents }
+    }
+
+    /** Money received and when: each paid installment, or the total on the day it was paid in one go. */
+    fun receipts(): List<Pair<Instant, Long>> {
+        val parts = installments.filter { it.paidAt != null || status == InvoiceStatus.PAID }
+        if (parts.isNotEmpty()) return parts.mapNotNull { part -> (part.paidAt ?: paidAt)?.let { it to part.amountCents } }
+        return if (status == InvoiceStatus.PAID) listOf((paidAt ?: updatedAt) to totalCents) else emptyList()
+    }
+}
+
+/** One part of an invoice paid in installments. */
+data class InvoiceInstallment(
+    val amountCents: Long,
+    val dueDate: LocalDate,
+    val paidAt: Instant? = null,
 )

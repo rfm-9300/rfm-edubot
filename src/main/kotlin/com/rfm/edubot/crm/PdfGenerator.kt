@@ -135,27 +135,38 @@ class PdfGenerator {
         invoice: Invoice,
         client: Client,
         template: DocumentTemplate = DocumentTemplate(),
-    ): ByteArray = buildDocument(
-        docType = template.invoiceTitle.ifBlank { "FATURA" },
-        client = client,
-        items = invoice.items,
-        totalCents = invoice.totalCents,
-        paymentTerms = template.invoicePaymentTerms.takeIf { it.isNotBlank() } ?: DEFAULT_INVOICE_PAYMENT_TERMS,
-        terms = template.termsText.takeIf { it.isNotBlank() },
-        template = template,
-        meta = DocumentMeta(
-            number = invoice.number,
-            issued = fmtDate(invoice.createdAt.toString()),
-            dueLabel = "Vencimento",
-            due = fmtDate(invoice.dueDate.toString()),
-            status = when (invoice.status) {
-                InvoiceStatus.PAID -> Status.PAID
-                InvoiceStatus.OVERDUE -> Status.OVERDUE
-                InvoiceStatus.CANCELLED -> Status.CANCELLED
-                InvoiceStatus.PENDING -> null
+    ): ByteArray {
+        val split = invoice.installments.isNotEmpty()
+        val stillDue = invoice.installments.any { it.paidAt == null } && invoice.status != InvoiceStatus.PAID
+        return buildDocument(
+            docType = template.invoiceTitle.ifBlank { "FATURA" },
+            client = client,
+            items = invoice.items,
+            totalCents = invoice.totalCents,
+            paymentTerms = template.invoicePaymentTerms.takeIf { it.isNotBlank() }
+                ?: if (split) DEFAULT_INSTALLMENT_PAYMENT_TERMS else DEFAULT_INVOICE_PAYMENT_TERMS,
+            terms = template.termsText.takeIf { it.isNotBlank() },
+            template = template,
+            meta = DocumentMeta(
+                number = invoice.number,
+                issued = fmtDate(invoice.createdAt.toString()),
+                // With installments still open, the due date is the next one's.
+                dueLabel = if (stillDue) "Próximo vencimento" else "Vencimento",
+                due = fmtDate(invoice.dueDate.toString()),
+                status = when (invoice.status) {
+                    InvoiceStatus.PAID -> Status.PAID
+                    InvoiceStatus.OVERDUE -> Status.OVERDUE
+                    InvoiceStatus.CANCELLED -> Status.CANCELLED
+                    InvoiceStatus.PENDING -> null
+                },
+                taxCode = invoice.taxOfficeCode?.let(::atcud),
+            ),
+            installments = invoice.installments.mapIndexed { i, part ->
+                val paid = part.paidAt != null || invoice.status == InvoiceStatus.PAID
+                "${i + 1}.ª prestação: ${money(part.amountCents)} até ${fmtDate(part.dueDate.toString())}" + if (paid) " (paga)" else ""
             },
-        ),
-    )
+        )
+    }
 
     /** What the title block prints under the document name. */
     private data class DocumentMeta(
@@ -164,6 +175,7 @@ class PdfGenerator {
         val dueLabel: String?,
         val due: String?,
         val status: Status?,
+        val taxCode: String? = null,
     )
 
     /** Statuses worth telling the recipient; internal ones (pending, sent) print nothing. */
@@ -187,6 +199,7 @@ class PdfGenerator {
         terms: String?,
         template: DocumentTemplate,
         meta: DocumentMeta,
+        installments: List<String> = emptyList(),
     ): ByteArray {
         PDDocument().use { doc ->
             loadFonts(doc)
@@ -197,7 +210,7 @@ class PdfGenerator {
 
             // Pre-calculate row heights and page breaks (two-pass layout).
             val rows = items.map { rowLayout(it, table) }
-            val reserve = closingBlockHeight(paymentTerms, terms, blocks)
+            val reserve = closingBlockHeight(paymentTerms, installments, terms, blocks)
             val pageBreaks = layoutItems(
                 heights = rows.map { it.height },
                 firstPageStartY = rowsTop(H - table.y),
@@ -237,7 +250,7 @@ class PdfGenerator {
             blocks["totals"]?.takeIf { it.visible }?.let { block ->
                 cursor = drawTotals(cs, totalCents, cursor, block) - TOTALS_GAP
             }
-            drawPaymentAndTerms(cs, paymentTerms, terms, blocks, cursor)
+            drawPaymentAndTerms(cs, paymentTerms, installments, terms, blocks, cursor)
             cs.close()
 
             drawFooters(doc, template, blocks["footer"])
@@ -264,6 +277,7 @@ class PdfGenerator {
      */
     private fun closingBlockHeight(
         paymentTerms: String?,
+        installments: List<String>,
         terms: String?,
         blocks: Map<String, DocumentLayoutBlock>,
     ): Float {
@@ -276,6 +290,7 @@ class PdfGenerator {
             paymentTerms?.takeIf { it.isNotBlank() }?.let {
                 height += SECTION_HEADING + wrap(it, regular, 9f, width).take(PAYMENT_MAX_LINES).size * SECTION_LINE + SECTION_GAP
             }
+            if (installments.isNotEmpty()) height += SECTION_HEADING + installments.size * SECTION_LINE + SECTION_GAP
         }
         if (termsBlock != null) {
             terms?.takeIf { it.isNotBlank() }?.let {
@@ -468,6 +483,7 @@ class PdfGenerator {
             add(Triple(meta.number, bold, cBrandText))
             add(Triple("  ·  Emitido em ${meta.issued}", regular, inkMuted))
             if (meta.dueLabel != null && meta.due != null) add(Triple("  ·  ${meta.dueLabel} ${meta.due}", regular, inkMuted))
+            meta.taxCode?.let { add(Triple("  ·  $it", regular, inkMuted)) }
             if (statusInLine && meta.status != null) add(Triple("  ·  ${meta.status.label}", bold, meta.status.ink))
         }
         var size = 9f
@@ -491,6 +507,7 @@ class PdfGenerator {
         val lines = listOfNotNull(
             "Emitido em ${meta.issued}" to regular,
             meta.due?.let { "${meta.dueLabel} $it" to regular },
+            meta.taxCode?.let { it to regular },
             meta.status?.let { it.label.uppercase() to bold },
         )
         lines.forEach { (line, font) ->
@@ -700,6 +717,7 @@ class PdfGenerator {
     private fun drawPaymentAndTerms(
         cs: PDPageContentStream,
         paymentTerms: String?,
+        installments: List<String>,
         terms: String?,
         blocks: Map<String, DocumentLayoutBlock>,
         startY: Float,
@@ -711,15 +729,18 @@ class PdfGenerator {
         val conditions = terms?.takeIf { it.isNotBlank() && termsBlock != null }
         var y = startY
         payment?.let {
-            y = drawSection(cs, "Forma de pagamento", it, anchor.x, anchor.w, y, PAYMENT_MAX_LINES) - SECTION_GAP
+            y = drawSection(cs, "Forma de pagamento", wrap(it, regular, 9f, anchor.w).take(PAYMENT_MAX_LINES), anchor.x, y) - SECTION_GAP
+        }
+        if (installments.isNotEmpty() && paymentBlock != null) {
+            y = drawSection(cs, "Prestações", installments.map { fitLine(it, regular, 9f, anchor.w) }, anchor.x, y) - SECTION_GAP
         }
         conditions?.let {
-            y = drawSection(cs, "Termos e condições", it, anchor.x, anchor.w, y, TERMS_MAX_LINES)
+            y = drawSection(cs, "Termos e condições", wrap(it, regular, 9f, anchor.w).take(TERMS_MAX_LINES), anchor.x, y)
         }
         return y
     }
 
-    private fun drawSection(cs: PDPageContentStream, heading: String, body: String, x: Float, width: Float, startY: Float, maxLines: Int): Float {
+    private fun drawSection(cs: PDPageContentStream, heading: String, lines: List<String>, x: Float, startY: Float): Float {
         var y = startY
         if (design.ruled) {
             text(cs, heading, x, y, 10f, bold, cBrandText)
@@ -727,7 +748,7 @@ class PdfGenerator {
             text(cs, heading.uppercase(), x, y, 7.5f, bold, cBrandText, tracking = 1f)
         }
         y -= SECTION_HEADING
-        wrap(body, regular, 9f, width).take(maxLines).forEach { line ->
+        lines.forEach { line ->
             text(cs, line, x, y, 9f, regular, ink)
             y -= SECTION_LINE
         }
@@ -860,6 +881,13 @@ class PdfGenerator {
     companion object {
         /** Payment terms on an invoice whose tenant has not written its own. Quotes get none. */
         const val DEFAULT_INVOICE_PAYMENT_TERMS = "Pagamento até à data de vencimento."
+
+        /** The same, for an invoice paid in installments; the installments follow under their own heading. */
+        const val DEFAULT_INSTALLMENT_PAYMENT_TERMS = "Pagamento em prestações, nas datas indicadas."
+
+        /** Portuguese law prints the code as `ATCUD:` and the code; a prefix typed with it isn't doubled. */
+        internal fun atcud(code: String): String =
+            "ATCUD:" + code.trim().replace(Regex("^ATCUD\\s*:?\\s*", RegexOption.IGNORE_CASE), "")
 
         /** Terms on a quote without its own validity date, when the tenant has not written terms. Invoices get none. */
         const val DEFAULT_QUOTE_TERMS = "Este orçamento é válido por 30 dias."

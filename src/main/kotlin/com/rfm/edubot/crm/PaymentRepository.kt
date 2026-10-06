@@ -76,26 +76,43 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         return payment
     }
 
+    /** A paid or cancelled payment comes back unchanged. */
     suspend fun markPaid(id: ObjectId): Payment? {
         val now = Instant.fromEpochMilliseconds(SystemClock.now().toEpochMilliseconds())
         val before = collection.findOneAndUpdate(
-            scoped(Filters.eq("_id", id)),
+            scoped(Filters.and(Filters.eq("_id", id), Filters.`in`("status", OPEN_STATUSES))),
             Updates.combine(
                 Updates.set("status", PaymentStatus.PAID.name),
                 Updates.set("paidAt", now.toDate()),
                 Updates.set("updatedAt", now.toDate()),
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.BEFORE),
-        )?.toPayment() ?: return null
+        )?.toPayment() ?: return findById(id)
         val payment = before.copy(status = PaymentStatus.PAID, paidAt = now, updatedAt = now)
-        if (before.status != PaymentStatus.PAID) {
-            events.append(
-                tenantId, DomainEventTypes.PAYMENT_PAID, SubjectRef.of(SubjectTypes.PAYMENT, payment.id),
-                EventPayloads.payment(payment) { put("from", before.status.name) }, payment.relatedRefs(),
-            )
-        }
+        events.append(
+            tenantId, DomainEventTypes.PAYMENT_PAID, SubjectRef.of(SubjectTypes.PAYMENT, payment.id),
+            EventPayloads.payment(payment) { put("from", before.status.name) }, payment.relatedRefs(),
+        )
         return payment
     }
+
+    /** Cancelling keeps the payment and its number, as cancelled. A paid one can only be deleted. */
+    suspend fun cancel(id: ObjectId): PaymentCancel {
+        val cancelled = collection.findOneAndUpdate(
+            scoped(Filters.and(Filters.eq("_id", id), Filters.`in`("status", OPEN_STATUSES))),
+            Updates.combine(Updates.set("status", PaymentStatus.CANCELLED.name), Updates.set("updatedAt", SystemClock.now().toDate())),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toPayment()
+        if (cancelled != null) return PaymentCancel.Done(cancelled)
+        return when (findById(id)?.status) {
+            null -> PaymentCancel.NotFound
+            PaymentStatus.PAID -> PaymentCancel.Refused("payment_paid")
+            else -> PaymentCancel.Refused("payment_cancelled")
+        }
+    }
+
+    /** Removes the payment for good and returns what it was. */
+    suspend fun delete(id: ObjectId): Payment? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toPayment()
 
     private fun Payment.relatedRefs(): List<SubjectRef> = listOfNotNull(
         clientId?.let { SubjectRef.of(SubjectTypes.CLIENT, it) },
@@ -149,6 +166,17 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("updatedAt", updatedAt.toDate())
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    companion object {
+        private val OPEN_STATUSES = listOf(PaymentStatus.PENDING.name, PaymentStatus.OVERDUE.name)
+    }
+}
+
+/** What cancelling a payment did: the payment as cancelled, a stable error code refusing it, or no such payment. */
+sealed interface PaymentCancel {
+    data class Done(val payment: Payment) : PaymentCancel
+    data class Refused(val reason: String) : PaymentCancel
+    data object NotFound : PaymentCancel
 }
 
 private fun parsePaymentStatus(raw: String?): PaymentStatus =
