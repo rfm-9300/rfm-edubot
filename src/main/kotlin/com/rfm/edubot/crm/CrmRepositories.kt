@@ -22,6 +22,10 @@ import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.boolean
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.double
 import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
@@ -36,7 +40,8 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
 
     suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
-    suspend fun search(query: String, limit: Int = 20, archived: Boolean = false): List<Client> {
+    /** [customKeys] are the tenant's own fields whose values the query also matches. */
+    suspend fun search(query: String, limit: Int = 20, archived: Boolean = false, customKeys: Collection<String> = emptyList()): List<Client> {
         val trimmed = query.trim()
         val text = if (trimmed.isBlank()) {
             null
@@ -61,7 +66,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
                     Filters.regex("email", contains, "i"),
                     Filters.regex("taxId", contains, "i"),
                     phoneDigits,
-                )
+                ) + customKeys.filter(CustomFields::isKey).map { Filters.regex("customFields.$it", contains, "i") }
             )
         }
         val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
@@ -115,6 +120,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
     /**
      * [address] is replaced as given (null clears it). The other details are only written when not null,
      * so callers that don't send them keep the stored values; a blank string clears them.
+     * [customFieldChanges] sets custom values by field key, or clears the ones mapped to null; others stay.
      */
     suspend fun update(
         id: ObjectId,
@@ -127,6 +133,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         postalCode: String? = null,
         city: String? = null,
         contactPerson: String? = null,
+        customFieldChanges: Map<String, JsonPrimitive?> = emptyMap(),
     ): Client? {
         val now = SystemClock.now()
         val updates = mutableListOf(
@@ -141,6 +148,9 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         postalCode?.let { updates += Updates.set("postalCode", it.cleaned()) }
         city?.let { updates += Updates.set("city", it.cleaned()) }
         contactPerson?.let { updates += Updates.set("contactPerson", it.cleaned()) }
+        customFieldChanges.filterKeys(CustomFields::isKey).forEach { (key, value) ->
+            updates += if (value == null) Updates.unset("customFields.$key") else Updates.set("customFields.$key", value.toBsonValue())
+        }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(updates),
@@ -161,6 +171,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         postalCode: String? = null,
         city: String? = null,
         contactPerson: String? = null,
+        customFields: Map<String, JsonPrimitive> = emptyMap(),
     ): Client {
         val now = SystemClock.now()
         val number = "CLT-${sequences.next("client_number").toString().padStart(3, '0')}"
@@ -178,6 +189,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             notes = notes.cleaned(),
             createdAt = now,
             updatedAt = now,
+            customFields = customFields.filterKeys(CustomFields::isKey),
         )
         collection.insertOne(client.toDocument())
         events.append(tenantId, DomainEventTypes.CLIENT_CREATED, SubjectRef.of(SubjectTypes.CLIENT, client.id), EventPayloads.client(client))
@@ -203,7 +215,23 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
         automationPaused = getBoolean("automationPaused") ?: false,
+        customFields = get("customFields", Document::class.java)?.customFieldValues().orEmpty(),
     )
+
+    private fun Document.customFieldValues(): Map<String, JsonPrimitive> = entries.mapNotNull { (key, value) ->
+        when (value) {
+            is String -> key to JsonPrimitive(value)
+            is Boolean -> key to JsonPrimitive(value)
+            is Number -> key to JsonPrimitive(value.toDouble())
+            else -> null
+        }
+    }.toMap()
+
+    private fun JsonPrimitive.toBsonValue(): Any = when {
+        isString -> content
+        booleanOrNull != null -> boolean
+        else -> double
+    }
 
     private fun Client.toDocument() = Document("_id", id)
         .append("tenantId", tenantId)
@@ -220,6 +248,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
         .append("automationPaused", automationPaused)
+        .apply { if (customFields.isNotEmpty()) append("customFields", Document(customFields.mapValues { it.value.toBsonValue() })) }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }

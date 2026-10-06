@@ -2,6 +2,7 @@ package com.rfm.edubot.crm.model
 
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.serialization.json.JsonPrimitive
 import org.bson.codecs.pojo.annotations.BsonId
 import org.bson.types.ObjectId
 
@@ -27,6 +28,11 @@ data class Client(
     val archivedAt: Instant? = null,
     /** Agents skip this client entirely: no reminders, no follow-ups, no automated changes. */
     val automationPaused: Boolean = false,
+    /**
+     * Values of the tenant's own client fields by field key: a string (text, date or choice), a number or true.
+     * Staff-only, like [notes]. A field the tenant removed may leave its value here; nothing shows it.
+     */
+    val customFields: Map<String, JsonPrimitive> = emptyMap(),
 )
 
 data class LineItem(

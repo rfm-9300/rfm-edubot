@@ -3,6 +3,7 @@ package com.rfm.edubot.dashboard
 import com.auth0.jwt.interfaces.Payload
 import com.rfm.edubot.crm.model.Employee
 import com.rfm.edubot.dashboard.model.DashboardUser
+import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorType
@@ -114,6 +115,10 @@ internal fun ApplicationCall.dashboardContext(): DashboardContext? = attributes.
 
 /** An employee's sign-in has none of the company's modules, only [EmployeePortal]'s pages. */
 internal fun DashboardContext.requireModule(id: String): Boolean = user?.isEmployee != true && id in DashboardModules.effectiveFor(tenant)
+
+/** The company's administrators, and operators opening its dashboard, change how it works for the whole team. */
+internal fun DashboardContext.isAdmin(): Boolean =
+    principalType == DashboardAccessPolicy.OPERATOR_IMPERSONATION || user?.role == DashboardUserRole.TENANT_ADMIN
 
 /** Who a change made through this dashboard session is attributed to. */
 internal fun DashboardContext.actor(): Actor =
