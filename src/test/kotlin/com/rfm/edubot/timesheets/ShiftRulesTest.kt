@@ -105,6 +105,17 @@ class ShiftRulesTest {
     }
 
     @Test
+    fun `a break ended within its first minute doesn't block correcting the shift`() {
+        val now = Instant.parse("2026-10-10T12:00:00Z")
+        val times = ShiftMath.wallTimes(
+            LocalDate(2026, 10, 5), LocalTime(8, 0), LocalTime(17, 0),
+            listOf(LocalTime(10, 15) to LocalTime(10, 15), LocalTime(12, 0) to LocalTime(13, 0)), lisbon,
+        )
+        assertNull(ShiftMath.problem(times, now), "the form sends back the 10:15–10:15 the shift shows")
+        assertEquals(listOf(Instant.parse("2026-10-05T11:00:00Z")), times.breaks.map { it.startAt })
+    }
+
+    @Test
     fun `a forgotten clock-out is only for a shift past the company's limit`() {
         val open = started().then(PunchType.BREAK_START, monday8 + 4.hours)
         val early = monday8 + 6.hours

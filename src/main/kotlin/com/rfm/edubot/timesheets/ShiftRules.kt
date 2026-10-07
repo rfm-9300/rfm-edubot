@@ -72,7 +72,9 @@ object ShiftMath {
 
     /**
      * Wall-clock times typed for a shift that starts on [day]: a time earlier than the start is on the next
-     * day, so `22:00`–`06:00` is a night shift. The timezone's daylight-saving rules apply.
+     * day, so `22:00`–`06:00` is a night shift. The timezone's daylight-saving rules apply. A break typed
+     * with the same start and end is left out: it's what a break ended within its first minute shows as,
+     * and refusing it would block every correction of that shift.
      */
     fun wallTimes(day: LocalDate, start: LocalTime, end: LocalTime?, breaks: List<Pair<LocalTime, LocalTime?>>, zone: TimeZone): ShiftTimes {
         val startAt = LocalDateTime(day, start).toInstant(zone)
@@ -84,7 +86,8 @@ object ShiftMath {
         return ShiftTimes(
             startAt = startAt,
             endAt = end?.let { after(it, strictly = true) },
-            breaks = breaks.map { (from, to) -> ShiftBreak(after(from, strictly = false), to?.let { after(it, strictly = false) }) },
+            breaks = breaks.filterNot { (from, to) -> from == to }
+                .map { (from, to) -> ShiftBreak(after(from, strictly = false), to?.let { after(it, strictly = false) }) },
         )
     }
 
