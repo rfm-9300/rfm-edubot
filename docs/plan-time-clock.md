@@ -1,7 +1,8 @@
 # Implementation Plan — Time Clock (employees logging their hours)
 
 Status: **Phase 1 implemented** (server, `/app` employee page and team page, mobile time clock with
-location and biometrics) · Owner: Rodrigo · Last updated: 2026-10-07
+location and biometrics); the as-built reference is [Time clock](architecture.md#time-clock) in the
+architecture doc · Owner: Rodrigo · Last updated: 2026-10-07
 
 Employees (colaboradores) clock in and out, take breaks and see their hours, from the web or the
 phone. The company sees who is working, reviews and approves the hours, fixes mistakes with a reason
@@ -131,9 +132,9 @@ GDPR art. 13). The settings page says so in one line.
 
 | Collection | Purpose | Indexes |
 |---|---|---|
-| `timesheets.shifts` | Shifts with their punches, breaks, flags, review and edit history | unique partial `(tenantId, employeeId)` where `status = OPEN`; `tenantId+day`; `tenantId+employeeId+startAt`; `tenantId+review.status+day` |
+| `timesheets.shifts` | Shifts with their punches, breaks, flags, review and edit history | unique partial `(tenantId, employeeId)` where `status = OPEN`; `tenantId+day`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` (retention) |
 | `timesheets.sites` | Work sites: name, address, latitude, longitude, radius (25–2,000 m, default 150), optional client, active | `tenantId+name` |
-| `timesheets.devices` | Phones enrolled for verified punches: employee, key id (SHA-256 of the public key), public key, platform, name, status, last used | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+status` |
+| `timesheets.devices` | Phones enrolled for verified punches: employee, key id (SHA-256 of the public key), public key, platform, name, active or revoked, last used | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
 | `timesheets.challenges` | One-time nonces for signing, 2-minute validity | TTL 5 min on `createdAt` |
 | `timesheets.settings` | A company's rules (`_id` = tenant id) | `_id` |
 
@@ -229,8 +230,8 @@ sequenceDiagram
   background permission is requested (Android `ACCESS_FINE_LOCATION`/`COARSE` only; iOS "When In
   Use").
 - `location = OFF` stores nothing; coordinates sent anyway are dropped.
-- Coordinates are kept 90 days (`TIME_LOCATION_RETENTION_DAYS`), then removed by a daily job; the
-  site verdict and accuracy stay, which is what the attendance record needs.
+- Coordinates are kept 90 days, then removed by `TimesheetLocationRetention` (every 6 hours, on a
+  scheduler lease); the site verdict and accuracy stay, which is what the attendance record needs.
 - The employee sees, for each of their punches, the site verdict, accuracy and verification.
 - The team sees punch locations as a verdict plus a map link; nothing else about the employee's
   movements exists to see.
@@ -275,7 +276,10 @@ clock** row (device, enrolled, last used, Revoke for admins).
 `SessionTokens` treats any 401 as an expired session. Phase 1 makes the shell employee-aware:
 `DashboardIdentity.employee`, a registry that offers only the portal pages (My hours; My services is
 listed as web-only) plus Settings, no bell, and Settings without the widget, channels or the
-company-wide language call (an employee's language is a local choice, as on the web).
+company-wide language call (an employee's language is a local choice, as on the web). The signed-in
+screens' view models are cleared when a different session starts, because a poller left from an
+admin's session would call with the next employee's token; the time clock's repository and cache
+are per employee, for phones shared at a site.
 
 **Platform services**, as interfaces in `core:common`, implemented in `androidApp` and
 `shared/iosMain` and passed into `MobileGraph` (the `VoiceInput` pattern):
@@ -288,8 +292,9 @@ company-wide language call (an employee's language is a local choice, as on the 
   prompt)`, `deleteKey(alias)`. Android: Keystore EC key with `setUserAuthenticationRequired`,
   per-use strong biometric (`BiometricPrompt` + `CryptoObject`), `setInvalidatedByBiometricEnrollment`.
   iOS: Secure Enclave key with `.privateKeyUsage | .biometryCurrentSet`, signed with
-  `SecKeyCreateSignature` (Face ID/Touch ID prompt). The alias carries the employee id, so two
-  employees on one phone don't share a key.
+  `SecKeyCreateSignature` through an `LAContext` that passed Face ID/Touch ID (no passcode
+  fallback); a changed `evaluatedPolicyDomainState` reports the key as invalidated. The alias carries
+  the employee id, so two employees on one phone don't share a key.
 
 **`feature:timeclock`**: `TimeClockViewModel` (status, punch flow: location → challenge → sign →
 punch; enrollment; forgotten clock-out; errors as `AppError` or local reasons) and `TimeClockScreen`
