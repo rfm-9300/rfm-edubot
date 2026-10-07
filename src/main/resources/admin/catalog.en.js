@@ -1007,6 +1007,11 @@ window.__I18N_CATALOGS['en'] = {
       withdraw: 'Withdraw', withdrawTitle: 'Withdraw this service?',
       withdrawBody: p => `"${p.name}" is removed and the team won't see it anymore.`, withdrawn: 'Service withdrawn',
     },
+    columns: {
+      button: 'Columns', title: 'Columns',
+      intro: 'Choose the columns this list shows. Your choice is saved in this browser.',
+      standard: 'Standard columns', reset: 'Restore the default columns',
+    },
     notifications: {
       title: 'Notifications', aria: 'Notifications', ariaUnread: 'Notifications, {n} unread',
       unreadGroup: 'New', earlierGroup: 'Earlier', markAllRead: 'Mark all as read',

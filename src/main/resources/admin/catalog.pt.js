@@ -1007,6 +1007,11 @@ window.__I18N_CATALOGS['pt-PT'] = {
       withdraw: 'Retirar', withdrawTitle: 'Retirar este serviço?',
       withdrawBody: p => `"${p.name}" é removido e a equipa deixa de o ver.`, withdrawn: 'Serviço retirado',
     },
+    columns: {
+      button: 'Colunas', title: 'Colunas',
+      intro: 'Escolha as colunas que esta lista mostra. A sua escolha fica guardada neste navegador.',
+      standard: 'Colunas habituais', reset: 'Repor as colunas habituais',
+    },
     notifications: {
       title: 'Notificações', aria: 'Notificações', ariaUnread: 'Notificações, {n} por ler',
       unreadGroup: 'Novas', earlierGroup: 'Anteriores', markAllRead: 'Marcar todas como lidas',

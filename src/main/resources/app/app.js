@@ -19,6 +19,8 @@ let state = {
   archivedView: '', archivedRows: [],
   // What the company asks for about clients: required standard fields and its own fields (GET /app/api/crm/clients/fields).
   clientFields: null,
+  // Column choices of the directory lists as read from this browser, by storage key (columnChoicesKey).
+  columnChoices: {},
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
@@ -44,6 +46,7 @@ const PORTAL_TAB = 'my-services';
 const PORTAL = I18N.section('app.portal');
 const SUB = I18N.section('admin.submissions');
 const FIELDS = I18N.section('admin.fields');
+const COLUMNS = I18N.section('app.columns');
 const isPortal = () => !!state.me?.employee;
 // Registered services become Serviços rows, so the team reviews them with both modules on.
 const submissionsOn = () => hasModule('employees') && hasModule('services');
@@ -3304,6 +3307,124 @@ function wireDirectoryView(root) {
   $$('[data-directory-view]', root).forEach(b => b.addEventListener('click', () => showDirectoryView(b.dataset.directoryView)));
 }
 
+// Each person picks the columns of a directory list. The choice stays in this browser, per company and
+// user, as on/off overrides of each column's default, so a column added later still follows its default.
+const columnChoicesKey = table => `tableColumns:${state.me?.tenant?.id || ''}:${state.me?.user?.id || 'operator'}:${table}`;
+
+function columnChoices(table) {
+  const key = columnChoicesKey(table);
+  if (!state.columnChoices[key]) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key) || 'null'); } catch { /* unreadable: defaults */ }
+    state.columnChoices[key] = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  }
+  return state.columnChoices[key];
+}
+
+function saveColumnChoices(table, choices) {
+  const key = columnChoicesKey(table);
+  state.columnChoices[key] = choices;
+  try {
+    if (Object.keys(choices).length) localStorage.setItem(key, JSON.stringify(choices));
+    else localStorage.removeItem(key);
+  } catch { /* ignore */ }
+}
+
+const isColumnShown = (choices, column) => !!column.fixed || (choices[column.id] ?? !!column.default);
+const shownColumns = (table, columns) => columns.filter(c => isColumnShown(columnChoices(table), c));
+const columnsHead = columns => `<tr>${columns.map(c => `<th${c.head ? ` class="${c.head}"` : ''}>${escapeHTML(c.label)}</th>`).join('')}</tr>`;
+// A cell may read which other columns are shown (`ids`), e.g. the address leaves the city to its own column.
+const columnCells = (columns, ids, row) => columns.map(c => c.cell(row, ids)).join('');
+const columnsButton = table => `<button class="btn btn--sm btn--ghost" type="button" data-columns="${table}">${escapeHTML(COLUMNS.button)}</button>`;
+
+function openColumnPicker(table, columns, eyebrow) {
+  const body = document.createElement('div');
+  body.className = 'form';
+  const box = c => `<label class="form__check"><input type="checkbox" data-column="${escapeHTML(c.id)}"${isColumnShown(columnChoices(table), c) ? ' checked' : ''}${c.fixed ? ' disabled' : ''} /> ${escapeHTML(c.label)}</label>`;
+  const group = (id, title, list) => (list.length ? `<section class="panel">
+      <header class="panel__head"><h2 class="panel__title" id="${id}">${escapeHTML(title)}</h2></header>
+      <div class="panel__body form"><div class="form__checks" role="group" aria-labelledby="${id}">${list.map(box).join('')}</div></div>
+    </section>` : '');
+  body.innerHTML = `
+    <p class="hint">${escapeHTML(COLUMNS.intro)}</p>
+    ${group('columns-standard', COLUMNS.standard, columns.filter(c => !c.custom))}
+    ${group('columns-custom', FIELDS.customTitle, columns.filter(c => c.custom))}
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-columns-reset>${escapeHTML(COLUMNS.reset)}</button></div>`;
+  openDrawer(COLUMNS.title, body, false, { eyebrow });
+  // The name is always shown, so its box can't take the focus.
+  requestAnimationFrame(() => $('[data-column]:not(:disabled)', body)?.focus());
+  const column = input => columns.find(c => c.id === input.dataset.column);
+  $$('[data-column]', body).forEach(input => input.addEventListener('change', () => {
+    const choices = Object.fromEntries(Object.entries(columnChoices(table)).filter(([id]) => columns.some(c => c.id === id)));
+    if (input.checked === !!column(input).default) delete choices[input.dataset.column];
+    else choices[input.dataset.column] = input.checked;
+    saveColumnChoices(table, choices);
+    render();
+  }));
+  $('[data-columns-reset]', body).addEventListener('click', () => {
+    saveColumnChoices(table, {});
+    $$('[data-column]', body).forEach(input => { input.checked = isColumnShown({}, column(input)); });
+    render();
+  });
+}
+
+function clientColumns() {
+  const t = CRM.clients;
+  const muted = value => `<td class="muted">${escapeHTML(value || '')}</td>`;
+  const mono = value => `<td class="mono muted nowrap">${escapeHTML(value || '')}</td>`;
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: c => `<td class="name long">${escapeHTML(c.name)}</td>` },
+    { id: 'contactPerson', label: standardClientFieldLabel('contactPerson'), cell: c => muted(c.contactPerson) },
+    { id: 'address', label: t.thAddress, default: true, cell: (c, ids) => `<td class="muted long">${escapeHTML(ids.has('city') ? c.address || '' : [c.address, c.city].filter(Boolean).join(', '))}</td>` },
+    { id: 'postalCode', label: standardClientFieldLabel('postalCode'), cell: c => mono(c.postalCode) },
+    { id: 'city', label: standardClientFieldLabel('city'), cell: c => muted(c.city) },
+    { id: 'phone', label: t.thPhone, default: true, cell: c => mono(c.phone) },
+    { id: 'email', label: standardClientFieldLabel('email'), cell: c => muted(c.email) },
+    { id: 'taxId', label: standardClientFieldLabel('taxId'), cell: c => mono(c.taxId) },
+    ...clientCustomFields().map(f => ({
+      id: f.key, label: f.label, default: f.showInList, custom: true, head: f.type === 'NUMBER' ? 'right' : '',
+      cell: c => `<td class="${{ NUMBER: 'num nowrap', DATE: 'mono muted nowrap', CHECKBOX: 'muted' }[f.type] || 'muted long'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`,
+    })),
+    { id: 'createdAt', label: t.thCreated, default: true, cell: c => `<td class="mono nowrap">${fmtDay(c.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: c => `<td class="id right">${escapeHTML(c.number)}</td>` },
+  ];
+}
+
+const supplierServiceNames = s => (s.services || []).map(x => x.description).join(', ');
+
+function supplierColumns() {
+  const t = CRM.suppliers;
+  const name = s => {
+    const services = supplierServiceNames(s);
+    return services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
+  };
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: s => `<td class="name long">${name(s)}</td>` },
+    { id: 'type', label: t.thType, default: true, cell: s => `<td class="muted">${escapeHTML(s.type || '')}</td>` },
+    { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
+    { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono nowrap">${fmtDay(s.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
+  ];
+}
+
+function employeeColumns() {
+  const t = CRM.employees;
+  const toApprove = new Map();
+  for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
+  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: e => `<td class="name long">${escapeHTML(e.name)}${pendingPill(e.id)}</td>` },
+    { id: 'role', label: t.thRole, default: true, cell: e => `<td class="muted">${escapeHTML(e.role || '')}</td>` },
+    { id: 'phone', label: t.thPhone, default: true, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.phone)}</td>` },
+    { id: 'taxId', label: t.formTaxId, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.taxId || '')}</td>` },
+    { id: 'birthDate', label: t.formBirthDate, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.birthDate ? fmtDay(e.birthDate) : '')}</td>` },
+    { id: 'address', label: t.formAddress, cell: e => `<td class="muted long">${escapeHTML(e.address || '')}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: e => `<td class="mono nowrap">${fmtDay(e.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: e => `<td class="id right">${escapeHTML(e.number)}</td>` },
+  ];
+}
+
 function renderClients(root) {
   const t = CRM.clients;
   const archived = state.archivedView === 'clients';
@@ -3311,15 +3432,15 @@ function renderClients(root) {
   const q = state.search.trim().toLowerCase();
   const qDigits = phoneDigits(q);
   const custom = clientCustomFields();
-  const columns = custom.filter(f => f.showInList);
+  const columns = shownColumns('clients', clientColumns());
+  const ids = new Set(columns.map(c => c.id));
   const matches = c => !q
     || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
-  const customCell = (f, c) => `<td class="${{ NUMBER: 'num', DATE: 'mono muted' }[f.type] || 'muted'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`;
   const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
-    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML([c.address, c.city].filter(Boolean).join(', '))}</td><td class="mono muted">${escapeHTML(c.phone)}</td>${columns.map(f => customCell(f, c)).join('')}<td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
+    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}">${columnCells(columns, ids, c)}</tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
@@ -3328,9 +3449,9 @@ function renderClients(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('clients')
+    tools: directoryViewChips('clients') + columnsButton('clients')
       + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : ''),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th>${columns.map(f => `<th${f.type === 'NUMBER' ? ' class="right"' : ''}>${escapeHTML(f.label)}</th>`).join('')}<th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
@@ -3338,6 +3459,7 @@ function renderClients(root) {
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
   $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('clients', clientColumns(), labels.clients));
   wireDirectoryView(root);
 }
 
@@ -3361,15 +3483,12 @@ function renderSuppliers(root) {
   const types = supplierTypes(source);
   const typeKey = supplierTypeKey(state.filterSupplierType);
   if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
-  const serviceNames = s => (s.services || []).map(x => x.description).join(', ');
+  const columns = shownColumns('suppliers', supplierColumns());
+  const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${serviceNames(s)}`.toLowerCase().includes(q))
-    .map(s => {
-      const services = serviceNames(s);
-      const name = services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
-      return `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${name}</td><td class="muted">${escapeHTML(s.type || '')}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`;
-    })
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
+    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, ids, s)}</tr>`)
     .join('');
   const typeFilter = types.length
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
@@ -3382,14 +3501,15 @@ function renderSuppliers(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: typeFilter + directoryViewChips('suppliers'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: typeFilter + directoryViewChips('suppliers') + columnsButton('suppliers'),
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
   $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('suppliers', supplierColumns(), labels.suppliers));
   wireDirectoryView(root);
 }
 
@@ -3398,12 +3518,11 @@ function renderEmployees(root) {
   const archived = state.archivedView === 'employees';
   const source = archived ? state.archivedRows : (state.employees || []);
   const q = state.search.toLowerCase();
-  const toApprove = new Map();
-  for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
-  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
+  const columns = shownColumns('employees', employeeColumns());
+  const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
-    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}${pendingPill(e.id)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
+    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, ids, e)}</tr>`)
     .join('');
   const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
@@ -3413,13 +3532,14 @@ function renderEmployees(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('employees'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thRole)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: directoryViewChips('employees') + columnsButton('employees'),
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
   wireDirectoryView(root);
 }
 

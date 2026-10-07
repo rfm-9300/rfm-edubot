@@ -268,7 +268,9 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 </div>
 ```
 
-Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
+Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions` `.nowrap` `.long`.
+
+A table can have more columns than its panel fits, as the `/app` directory lists can once someone adds columns; it then scrolls inside `.tbl-wrap`, and the browser squeezes every cell that may wrap down to its longest word. So values that must stay whole take `.nowrap` (phone numbers, NIFs, postal codes, dates, numbers), and text that wraps takes `.long`, an 11em minimum, so a name or an address breaks over a few lines rather than one word per line. `.id` codes take neither (they still break at the hyphen on a phone).
 
 A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill.
 
