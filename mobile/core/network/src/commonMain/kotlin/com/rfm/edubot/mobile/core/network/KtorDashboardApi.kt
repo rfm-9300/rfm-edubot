@@ -46,8 +46,16 @@ import com.rfm.edubot.mobile.core.model.Session
 import com.rfm.edubot.mobile.core.model.StartedConversation
 import com.rfm.edubot.mobile.core.model.Supplier
 import com.rfm.edubot.mobile.core.model.SwitchedCompany
+import com.rfm.edubot.mobile.core.model.CloseShift
+import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.PunchRequest
+import com.rfm.edubot.mobile.core.model.PunchResult
+import com.rfm.edubot.mobile.core.model.Shift
 import com.rfm.edubot.mobile.core.model.ThreadMessage
 import com.rfm.edubot.mobile.core.model.ThreadUpdates
+import com.rfm.edubot.mobile.core.model.TimeChallenge
+import com.rfm.edubot.mobile.core.model.TimeClockStatus
+import com.rfm.edubot.mobile.core.model.TimeDevice
 import com.rfm.edubot.mobile.core.model.TimeSlot
 import com.rfm.edubot.mobile.core.model.UpdateBooking
 import com.rfm.edubot.mobile.core.model.WebWidget
@@ -284,6 +292,25 @@ class KtorNotificationsApi(private val http: DashboardHttpClient) : Notification
 
     override suspend fun markAllRead() {
         http.send(HttpMethod.Post, "$APP/notifications/read-all")
+    }
+}
+
+class KtorTimeClockApi(private val http: DashboardHttpClient) : TimeClockApi {
+    override suspend fun status(): TimeClockStatus = http.get("$APP/portal/time")
+
+    override suspend fun shifts(): List<Shift> = http.get("$APP/portal/time/shifts")
+
+    override suspend fun challenge(): TimeChallenge = http.post("$APP/portal/time/challenge")
+
+    override suspend fun punch(request: PunchRequest): PunchResult = http.post("$APP/portal/time/punches", request)
+
+    override suspend fun closeForgotten(shiftId: String, request: CloseShift): PunchResult =
+        http.post("$APP/portal/time/shifts/$shiftId/close", request)
+
+    override suspend fun enroll(request: EnrollDevice): TimeDevice = http.post("$APP/portal/time/devices", request)
+
+    override suspend fun removeDevice(keyId: String) {
+        http.send(HttpMethod.Delete, "$APP/portal/time/devices/$keyId")
     }
 }
 

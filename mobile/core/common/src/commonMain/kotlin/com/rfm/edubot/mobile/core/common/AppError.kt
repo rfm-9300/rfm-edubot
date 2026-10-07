@@ -16,8 +16,11 @@ sealed interface AppError {
 
     data object NotFound : AppError
 
-    /** A 400/409 with a stable code in the body. [code] is empty when the body carried none. */
-    data class Rejected(val code: String, val status: Int = 400) : AppError
+    /**
+     * A 400/409 with a stable code in the body. [code] is empty when the body carried none; [details] are
+     * the body's other plain fields (the nearest site and its distance for `outside_sites`).
+     */
+    data class Rejected(val code: String, val status: Int = 400, val details: Map<String, String> = emptyMap()) : AppError
 
     /** 5xx. */
     data class Unavailable(val status: Int) : AppError

@@ -81,6 +81,48 @@ class DashboardHttpClientTest {
     }
 
     @Test
+    fun `a refused clock-in keeps the nearest site the backend named`() = runTest {
+        val (http, _, _) = client {
+            respond("""{"error":"outside_sites","siteName":"Obra Rua do Sol","distanceM":1410}""", HttpStatusCode.Conflict, jsonHeaders)
+        }
+        val failure = assertFailsWith<ApiException> {
+            KtorTimeClockApi(http).punch(com.rfm.edubot.mobile.core.model.PunchRequest(type = "IN"))
+        }
+        assertEquals(
+            AppError.Rejected("outside_sites", 409, mapOf("siteName" to "Obra Rua do Sol", "distanceM" to "1410")),
+            failure.error,
+        )
+    }
+
+    @Test
+    fun `a punch is posted to the employee's own time clock`() = runTest {
+        var path: String? = null
+        var body: String? = null
+        val (http, _, _) = client { request ->
+            path = request.url.encodedPath
+            body = (request.body as io.ktor.http.content.TextContent).text
+            respond(
+                """{"status":{"policy":{},"state":"WORKING","serverTime":"2026-10-07T08:00:00Z"},
+                   "shift":{"id":"s1","employeeId":"e1","status":"OPEN","day":"2026-10-07","startAt":"2026-10-07T07:00:00Z","startTime":"08:00"}}""",
+                HttpStatusCode.Created,
+                jsonHeaders,
+            )
+        }
+        val result = KtorTimeClockApi(http).punch(
+            com.rfm.edubot.mobile.core.model.PunchRequest(
+                type = "IN",
+                location = com.rfm.edubot.mobile.core.model.PunchLocation(38.7223, -9.1393, 12.0),
+                verification = com.rfm.edubot.mobile.core.model.PunchVerification("key", "nonce", "sig"),
+            ),
+        )
+        assertEquals("/app/api/portal/time/punches", path)
+        assertTrue(body!!.contains(""""channel":"APP""""))
+        assertTrue(body!!.contains(""""keyId":"key""""))
+        assertEquals("WORKING", result.status.state)
+        assertEquals("08:00", result.shift.startTime)
+    }
+
+    @Test
     fun `a 400 with no code still reports a rejection`() = runTest {
         val (http, _, _) = client { respondError(HttpStatusCode.BadRequest) }
         val failure = assertFailsWith<ApiException> { KtorSettingsApi(http).account() }

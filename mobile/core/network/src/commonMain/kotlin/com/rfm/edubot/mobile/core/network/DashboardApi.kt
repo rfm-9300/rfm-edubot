@@ -37,8 +37,16 @@ import com.rfm.edubot.mobile.core.model.Session
 import com.rfm.edubot.mobile.core.model.StartedConversation
 import com.rfm.edubot.mobile.core.model.Supplier
 import com.rfm.edubot.mobile.core.model.SwitchedCompany
+import com.rfm.edubot.mobile.core.model.CloseShift
+import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.PunchRequest
+import com.rfm.edubot.mobile.core.model.PunchResult
+import com.rfm.edubot.mobile.core.model.Shift
 import com.rfm.edubot.mobile.core.model.ThreadMessage
 import com.rfm.edubot.mobile.core.model.ThreadUpdates
+import com.rfm.edubot.mobile.core.model.TimeChallenge
+import com.rfm.edubot.mobile.core.model.TimeClockStatus
+import com.rfm.edubot.mobile.core.model.TimeDevice
 import com.rfm.edubot.mobile.core.model.TimeSlot
 import com.rfm.edubot.mobile.core.model.UpdateBooking
 import com.rfm.edubot.mobile.core.model.WebWidget
@@ -171,4 +179,15 @@ interface SettingsApi {
     suspend fun webWidget(): WebWidget
     suspend fun updateLocale(locale: String): String
     suspend fun account(): Account
+}
+
+/** An employee's own time clock (`/app/api/portal/time…`). */
+interface TimeClockApi {
+    suspend fun status(): TimeClockStatus
+    suspend fun shifts(): List<Shift>
+    suspend fun challenge(): TimeChallenge
+    suspend fun punch(request: PunchRequest): PunchResult
+    suspend fun closeForgotten(shiftId: String, request: CloseShift): PunchResult
+    suspend fun enroll(request: EnrollDevice): TimeDevice
+    suspend fun removeDevice(keyId: String)
 }

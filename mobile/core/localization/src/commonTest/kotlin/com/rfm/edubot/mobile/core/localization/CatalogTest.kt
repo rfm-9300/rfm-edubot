@@ -56,7 +56,7 @@ class CatalogTest {
         val modules = listOf(
             "overview", "conversations", "contacts", "instagram", "clients", "services", "quotes",
             "invoices", "suppliers", "employees", "payments", "catalog", "bookings", "persona",
-            "ai-assistant", "agents", "settings",
+            "ai-assistant", "agents", "settings", "timesheets", "my-hours", "my-services",
         )
         AppLocale.entries.forEach { locale ->
             val strings = Localization.of(locale)
