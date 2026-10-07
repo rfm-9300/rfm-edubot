@@ -302,6 +302,9 @@ html[data-theme="dark"] .sidebar { background: var(--bg-deep); }
 .nav__item[data-tab="services"]      { --tab: #fb923c; } .nav__item[data-tab="services"]  .nav__dot::after { content: "🛠️"; }
 .nav__item[data-tab="suppliers"]     { --tab: #818cf8; } .nav__item[data-tab="suppliers"] .nav__dot::after { content: "🏭"; }
 .nav__item[data-tab="employees"]     { --tab: #06b6d4; } .nav__item[data-tab="employees"] .nav__dot::after { content: "👷"; }
+.nav__item[data-tab="timesheets"]    { --tab: #0891b2; } .nav__item[data-tab="timesheets"] .nav__dot::after { content: "⏱️"; }
+.nav__item[data-tab="my-hours"]      { --tab: #0891b2; } .nav__item[data-tab="my-hours"]  .nav__dot::after { content: "⏱️"; }
+.nav__item[data-tab="my-services"]   { --tab: #fb923c; } .nav__item[data-tab="my-services"] .nav__dot::after { content: "🧾"; }
 .nav__item[data-tab="payments"]      { --tab: #f97316; } .nav__item[data-tab="payments"]  .nav__dot::after { content: "💸"; }
 .nav__item[data-tab="bookings"]      { --tab: #34d399; } .nav__item[data-tab="bookings"]  .nav__dot::after { content: "📅"; }
 .nav__item[data-tab="items"],
@@ -980,6 +983,10 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 .lines--installments .line { grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--installments .lines__head > span:nth-child(3) { text-align: left; padding-left: 10px; }
 .line__index { display: grid; align-items: center; padding: 0 12px; border-right: 1px solid var(--line-soft); color: var(--ink-mute); font-size: 12.5px; font-weight: 700; }
+/* A shift's breaks: from, to, remove. Same columns on phones. */
+.lines--breaks .lines__head,
+.lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.lines--breaks .lines__head > span { text-align: left; }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
 @media (max-width: 560px) {
   .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
@@ -1001,6 +1008,8 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
   .lines--services .line > [data-k="description"] { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .lines--installments .lines__head, .lines--installments .line { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .lines--installments .lines__head > span:first-child { grid-column: auto; }
+  .lines--breaks .lines__head, .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child { grid-column: auto; }
 }
 /* iOS zooms the page into a focused field whose text is under 16px. */
 @media (pointer: coarse) {
@@ -2096,6 +2105,27 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 }
 .panel__meta { color: var(--ink-mute); font-size: 12.5px; font-weight: 600; white-space: nowrap; }
 
+/* ── Time clock (/app → My hours): the state, the running time and the punch buttons ── */
+.clock { display: grid; gap: 10px; margin-bottom: 18px; padding: 18px 20px; }
+.clock__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.clock__time { margin: 4px 0 0; color: var(--ink); font-family: var(--display); font-size: 40px; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.clock[data-state="ON_BREAK"] .clock__time { color: var(--warn-ink); }
+.clock__line { margin: 0; color: var(--ink-2); font-size: 14px; font-weight: 600; }
+.clock__meta { margin: 0; color: var(--ink-mute); font-size: 12.5px; }
+.clock__actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 4px; }
+.clock__actions .btn { min-width: 150px; }
+.clock > .notice { margin-bottom: 0; }
+/* Forgot to clock out: the time they finished, inside the warning. */
+.clock__fix { align-items: center; }
+.clock__fix .lbl { margin: 0; }
+.clock__fix .inp { width: 120px; }
+@media (max-width: 560px) {
+  .clock { padding: 16px; }
+  .clock__time { font-size: 34px; }
+  .clock__actions .btn { flex: 1 1 140px; min-width: 0; }
+  .notice:has(.clock__fix) { flex-direction: column; align-items: stretch; }
+}
+
 /* ── Agents (/app → Agents): notices, recipes, flows, the builder and the template gallery ── */
 .notice { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); color: var(--ink-2); font-size: 13px; }
 .notice--warn { border-color: transparent; background: var(--warn-soft); color: var(--ink); }
@@ -2354,6 +2384,9 @@ html[data-layout="minimal"] .nav__item[data-tab="invoices"] { --nav-icon: url("d
 html[data-layout="minimal"] .nav__item[data-tab="financeiro"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4 20h16'/><path d='M7 16v-5M12 16V6M17 16v-8'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="suppliers"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M2.5 6.5h11v9h-11z'/><path d='M13.5 9.5h4l3 3v3h-7'/><circle cx='6.5' cy='17.5' r='1.8'/><circle cx='16.5' cy='17.5' r='1.8'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="employees"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='4' width='16' height='17' rx='2.5'/><path d='M9.5 4V2.8h5V4'/><circle cx='12' cy='11' r='2.5'/><path d='M8 17.5c.7-1.6 2.2-2.5 4-2.5s3.3.9 4 2.5'/></svg>"); }
+html[data-layout="minimal"] .nav__item[data-tab="timesheets"],
+html[data-layout="minimal"] .nav__item[data-tab="my-hours"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><circle cx='12' cy='13' r='7.5'/><path d='M12 9.5V13l2.5 1.5'/><path d='M10 2.8h4M12 2.8v2.7'/></svg>"); }
+html[data-layout="minimal"] .nav__item[data-tab="my-services"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='5' y='4' width='14' height='17' rx='2'/><path d='M9 4V3h6v1'/><path d='m9 12.5 2 2 4-4'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="payments"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='5.5' width='18' height='13' rx='2'/><path d='M3 10h18M7 14.5h4'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="catalog"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='4' y='4' width='6.5' height='6.5' rx='1.5'/><rect x='13.5' y='4' width='6.5' height='6.5' rx='1.5'/><rect x='4' y='13.5' width='6.5' height='6.5' rx='1.5'/><rect x='13.5' y='13.5' width='6.5' height='6.5' rx='1.5'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="bookings"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3.5' y='5' width='17' height='15.5' rx='2'/><path d='M8 3v4M16 3v4M3.5 10h17'/></svg>"); }

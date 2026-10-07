@@ -33,6 +33,7 @@ const MODULES = [
   { id: 'instagram' },
   // Opt-in: a new tenant starts without it, and tenants with no saved selection don't get it.
   { id: 'agents', optIn: true },
+  { id: 'timesheets', optIn: true },
 ];
 
 async function api(path, options = {}) {
