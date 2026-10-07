@@ -39,10 +39,12 @@
   const locale = () => d.uiLocale();
   const isPendingClosed = s => s.status === 'CLOSED' && s.review === 'PENDING';
 
+  const NBSP = '\u00a0';
+  const unbroken = text => String(text).replace(/ /g, NBSP);
   function hm(minutes) {
     const total = Math.max(0, Math.floor(minutes || 0));
     const h = Math.floor(total / 60);
-    return h ? tr('hm', { h, m: total % 60 }) : tr('minutesOnly', { m: total });
+    return unbroken(h ? tr('hm', { h, m: total % 60 }) : tr('minutesOnly', { m: total }));
   }
   const hoursValue = minutes => new Intl.NumberFormat(locale(), { maximumFractionDigits: 1 }).format((minutes || 0) / 60);
   function distance(m) {
@@ -51,13 +53,14 @@
       ? new Intl.NumberFormat(locale(), { style: 'unit', unit: 'kilometer', maximumFractionDigits: 1 }).format(meters / 1000)
       : new Intl.NumberFormat(locale(), { style: 'unit', unit: 'meter', maximumFractionDigits: 0 }).format(meters);
   }
-  const dayText = day => d.fmtDayKey(day, { weekday: 'short', day: 'numeric', month: 'short' });
+  const dayText = day => unbroken(d.fmtDayKey(day, { weekday: 'short', day: 'numeric', month: 'short' }));
   const clockTime = ms => new Date(ms).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit', timeZone: d.tenantTz() });
   const mapHref = (lat, lng) => `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${lat},${lng}`)}`;
   const breakRange = b => `${b.startTime}–${b.endTime || '…'}`;
+  // A word joiner each side keeps "08:00–17:30" on one line.
   function timeRange(s) {
-    if (!s.endTime) return `${s.startTime}–…`;
-    return `${s.startTime}–${s.endTime}${s.endsNextDay ? ` (${T.nextDay})` : ''}`;
+    if (!s.endTime) return `${s.startTime}\u2060–\u2060…`;
+    return `${s.startTime}\u2060–\u2060${s.endTime}${s.endsNextDay ? ` ${unbroken(`(${T.nextDay})`)}` : ''}`;
   }
   function addTime(hhmm, minutes) {
     const [h, m] = String(hhmm || '00:00').split(':').map(Number);
@@ -93,7 +96,7 @@
     if (p.siteName) parts.push(p.inside ? tr('atSite', { site: p.siteName }) : tr('fromSite', { distance: distance(p.siteDistanceM), site: p.siteName }));
     else if (p.latitude != null || p.accuracyM != null) parts.push(T.located);
     else parts.push([T.noLocation, p.locationError ? known(`locationError.${p.locationError}`, '') : ''].filter(Boolean).join(' · '));
-    if (p.accuracyM != null) parts.push(tr('accuracy', { m: Math.round(p.accuracyM) }));
+    if (p.accuracyM != null) parts.push(tr('accuracy', { distance: distance(p.accuracyM) }));
     if (p.mocked) parts.push(known('flags.MOCK_LOCATION', ''));
     return parts.filter(Boolean).join(' · ');
   }
@@ -134,8 +137,7 @@
     return `<tr class="conversation-row${marker}" data-shift="${esc(s.id)}" tabindex="0">
       ${withEmployee ? `<td class="name">${esc(s.employeeName || '')}</td>` : ''}
       <td class="mono"${withEmployee ? label(T.thDay) : ''}>${esc(dayText(s.day))}</td>
-      <td class="mono"${label(T.thTime)}>${esc(timeRange(s))}</td>
-      <td class="num"${label(T.thBreaks)}>${esc(s.breakMinutes ? hm(s.breakMinutes) : '—')}</td>
+      <td class="mono"${label(T.thTime)}>${esc(timeRange(s))}${s.breakMinutes ? `<div class="sub">${esc(tr('breakSub', { time: hm(s.breakMinutes) }))}</div>` : ''}</td>
       <td class="num"${label(T.thWorked)}>${esc(hm(workedNow(s, now)))}</td>
       <td${label(T.thSite)}>${esc(s.siteName || '—')}</td>
       <td${label(T.thFlags)}>${s.flags.length ? `<div class="tbl__pills">${flagPills(s.flags)}</div>` : '<span class="muted">—</span>'}</td>
@@ -244,12 +246,12 @@
     const rows = [...weeks.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([week, list]) => {
       const total = list.reduce((sum, s) => sum + workedNow(s, now), 0);
       const label = `${tr('weekRow', { date: d.fmtDayKey(week, { day: 'numeric', month: 'short' }) })} · ${hm(total)}`;
-      return `<tr class="is-day"><td colspan="7">${esc(label)}</td></tr>${list.map(s => shiftRow(s, false, now)).join('')}`;
+      return `<tr class="is-day"><td colspan="6">${esc(label)}</td></tr>${list.map(s => shiftRow(s, false, now)).join('')}`;
     }).join('');
     return tablePanel({
       title: T.historyTitle,
       tag: mine.shifts.length,
-      head: [[T.thDay], [T.thTime], [T.thBreaks, 'right'], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
+      head: [[T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
       rows,
       empty: T.historyEmpty,
       emptyDesc: T.historyEmptyDesc,
@@ -391,7 +393,7 @@
         if (err.message !== 'unauthorized') d.toast(errorText(err));
       }
     });
-    d.openDrawer(forTeam ? name : `${T.detailEyebrow} · ${name}`, body, false, { eyebrow: T.detailEyebrow });
+    d.openDrawer(dayText(s.day), body, false, { eyebrow: forTeam ? `${T.detailEyebrow} · ${s.employeeNumber || ''}`.replace(/ · $/, '') : T.detailEyebrow });
   }
 
   function punchesHtml(s) {
@@ -400,17 +402,19 @@
       const how = [known(`channel.${p.channel}`, p.channel), p.recordedAt ? tr('recordedAt', { when: d.fmtDate(p.recordedAt) }) : '', p.by || ''].filter(Boolean).join(' · ');
       const verified = p.verified ? pill(tr('verifiedOn', { device: p.deviceName || '' }), 'ok')
         : p.channel === 'APP' || p.channel === 'WEB' ? pill(T.notVerified, '') : '';
+      // The verification column already says whether the phone signed it.
+      const flags = p.flags.filter(f => f !== 'UNVERIFIED');
       const map = p.latitude != null && p.longitude != null
-        ? ` <a href="${esc(mapHref(p.latitude, p.longitude))}" target="_blank" rel="noopener" data-map>${esc(T.openMap)}</a>` : '';
+        ? ` <a class="tbl__link" href="${esc(mapHref(p.latitude, p.longitude))}" target="_blank" rel="noopener" data-map>${esc(T.openMap)}</a>` : '';
       return `<tr>
         <td class="name">${esc(known(`punchType.${p.type}`, p.type))}<div class="sub">${esc(how)}</div></td>
-        <td class="mono" data-label="${esc(T.thTime)}">${esc(p.time)}</td>
-        <td data-label="${esc(T.thSite)}">${esc(p.channel === 'TEAM' || p.channel === 'CORRECTION' ? '—' : punchWhere(p))}${map}${p.flags.length ? `<div class="tbl__pills">${flagPills(p.flags)}</div>` : ''}</td>
-        <td data-label="${esc(T.thStatus)}">${verified}</td>
+        <td class="mono" data-label="${esc(T.thAt)}">${esc(p.time)}</td>
+        <td data-label="${esc(T.thSite)}">${esc(p.channel === 'TEAM' || p.channel === 'CORRECTION' ? '—' : punchWhere(p))}${map}${flags.length ? `<div class="tbl__pills">${flagPills(flags)}</div>` : ''}</td>
+        <td data-label="${esc(T.thVerified)}">${verified}</td>
       </tr>`;
     }).join('');
     return `<div class="panel"><header class="panel__head"><h2 class="panel__title">${esc(T.punchesTitle)}</h2></header>
-      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${esc(T.punchesTitle)}</th><th>${esc(T.thTime)}</th><th>${esc(T.thSite)}</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${esc(T.thPunch)}</th><th>${esc(T.thAt)}</th><th>${esc(T.thSite)}</th><th>${esc(T.thVerified)}</th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
   }
 
   function editsHtml(s) {
@@ -496,7 +500,8 @@
   function boardHtml(working, now) {
     const rows = working.map(s => {
       const tone = s.overdue ? 'warn' : s.onBreak ? 'info' : 'ok';
-      const detail = [tr('boardSince', { time: s.startTime }), s.siteName, s.onBreak ? known('state.ON_BREAK', '') : ''].filter(Boolean).join(' · ');
+      const where = s.siteName || (s.flags.includes('OUTSIDE_SITE') ? known('flags.OUTSIDE_SITE', '') : '');
+      const detail = [tr('boardSince', { time: s.startTime }), where, s.onBreak ? known('state.ON_BREAK', '') : ''].filter(Boolean).join(' · ');
       const side = s.overdue ? pill(T.overdueTag, 'warn') : `<span class="worklist__when">${esc(hm(workedNow(s, now)))}</span>`;
       return `<li><button class="worklist__item" type="button" data-shift="${esc(s.id)}" data-tone="${tone}">
         <span class="worklist__dot" aria-hidden="true"></span>
@@ -523,7 +528,7 @@
       tag: visible.length,
       tools,
       filters: employees + chips,
-      head: [[T.thEmployee], [T.thDay], [T.thTime], [T.thBreaks, 'right'], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
+      head: [[T.thEmployee], [T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
       rows: visible.map(s => shiftRow(s, true, now)).join(''),
       empty: T.shiftsEmpty,
       emptyDesc: T.shiftsEmptyDesc,
@@ -834,11 +839,17 @@
       </div>`;
     const lat = $('#sf-lat', form);
     const lng = $('#sf-lng', form);
-    // "38.72230, -9.13930" pasted from Google Maps fills both fields.
-    lat.addEventListener('input', () => {
-      const pair = lat.value.match(/^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/);
-      if (pair) { lat.value = pair[1]; lng.value = pair[2]; }
-    });
+    // "38.72230, -9.13930" from Google Maps fills both fields, pasted or typed (once the field is left, not
+    // halfway through typing the pair).
+    const split = text => {
+      const pair = String(text || '').match(/^\s*(-?\d{1,3}\.\d+)\s*,\s*(-?\d{1,3}\.\d+)\s*$/);
+      if (!pair) return false;
+      lat.value = pair[1];
+      lng.value = pair[2];
+      return true;
+    };
+    lat.addEventListener('paste', e => { if (split(e.clipboardData?.getData('text'))) e.preventDefault(); });
+    lat.addEventListener('change', () => split(lat.value));
     $('[data-sf-here]', form).addEventListener('click', async e => {
       const btn = e.currentTarget;
       btn.disabled = true;

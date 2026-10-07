@@ -1031,6 +1031,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
       thDay: 'Dia', thTime: 'Horário', thBreaks: 'Pausas', thWorked: 'Trabalhado', thSite: 'Local', thStatus: 'Estado', thEmployee: 'Colaborador', thFlags: 'Alertas',
       thDays: 'Dias', thOverDaily: 'Acima das horas diárias', thOverWeekly: 'Acima das horas semanais', thToReview: 'Por rever',
       review: { OPEN: 'Em curso', PENDING: 'Por rever', APPROVED: 'Aprovado' },
+      breakSub: '{time} de pausa',
       nextDay: '+1 dia',
       flags: {
         NO_LOCATION: 'Sem localização', LOW_ACCURACY: 'Localização imprecisa', MOCK_LOCATION: 'Localização simulada',
@@ -1041,7 +1042,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
       punchType: { IN: 'Entrada', BREAK_START: 'Pausa', BREAK_END: 'Fim da pausa', OUT: 'Saída' },
       channel: { APP: 'App do telemóvel', WEB: 'Browser', TEAM: 'Pela equipa', CORRECTION: 'Indicado pelo colaborador' },
       verifiedOn: 'Verificado no {device}', notVerified: 'Não verificado',
-      atSite: 'Em {site}', fromSite: 'A {distance} de {site}', noLocation: 'Sem localização', accuracy: '±{m} m', openMap: 'Mapa',
+      atSite: 'Em {site}', fromSite: 'A {distance} de {site}', noLocation: 'Sem localização', accuracy: '±{distance}', openMap: 'Mapa', thPunch: 'Registo', thAt: 'Hora', thVerified: 'Verificação',
       locationError: { PERMISSION_DENIED: 'localização não autorizada', DISABLED: 'localização desligada', TIMEOUT: 'sem localização a tempo', UNAVAILABLE: 'localização indisponível' },
       recordedAt: 'indicado {when}', editedBy: '{who} · {when}', before: 'Antes', after: 'Depois', added: 'Adicionado',
       metaDay: 'Dia', metaStart: 'Entrada', metaEnd: 'Saída', metaBreaks: 'Pausas', metaSite: 'Local', metaReviewed: 'Aprovado',

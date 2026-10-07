@@ -1031,6 +1031,7 @@ window.__I18N_CATALOGS['en'] = {
       thDay: 'Day', thTime: 'Time', thBreaks: 'Breaks', thWorked: 'Worked', thSite: 'Site', thStatus: 'Status', thEmployee: 'Employee', thFlags: 'Alerts',
       thDays: 'Days', thOverDaily: 'Over the daily hours', thOverWeekly: 'Over the weekly hours', thToReview: 'To review',
       review: { OPEN: 'In progress', PENDING: 'To review', APPROVED: 'Approved' },
+      breakSub: '{time} break',
       nextDay: '+1 day',
       flags: {
         NO_LOCATION: 'No location', LOW_ACCURACY: 'Imprecise location', MOCK_LOCATION: 'Simulated location',
@@ -1041,7 +1042,7 @@ window.__I18N_CATALOGS['en'] = {
       punchType: { IN: 'Clock in', BREAK_START: 'Break', BREAK_END: 'Back from break', OUT: 'Clock out' },
       channel: { APP: 'Phone app', WEB: 'Browser', TEAM: 'By the team', CORRECTION: 'Told by the employee' },
       verifiedOn: 'Verified on {device}', notVerified: 'Not verified',
-      atSite: 'At {site}', fromSite: '{distance} from {site}', noLocation: 'No location', accuracy: '±{m} m', openMap: 'Map',
+      atSite: 'At {site}', fromSite: '{distance} from {site}', noLocation: 'No location', accuracy: '±{distance}', openMap: 'Map', thPunch: 'Punch', thAt: 'Time', thVerified: 'Verified',
       locationError: { PERMISSION_DENIED: 'location not allowed', DISABLED: 'location turned off', TIMEOUT: 'no fix in time', UNAVAILABLE: 'location unavailable' },
       recordedAt: 'entered {when}', editedBy: '{who} · {when}', before: 'Before', after: 'After', added: 'Added',
       metaDay: 'Day', metaStart: 'Start', metaEnd: 'End', metaBreaks: 'Breaks', metaSite: 'Site', metaReviewed: 'Approved',

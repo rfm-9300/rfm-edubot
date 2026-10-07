@@ -642,6 +642,9 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl__open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .tbl__open:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .tbl__pills { display: grid; justify-items: start; gap: 4px; }
+/* A link inside a cell's text (a punch's place on the map), coloured like links in chat bubbles. */
+.tbl__link { color: var(--info-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
+.tbl__link:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .tbl tbody tr.is-overdue td:first-child { box-shadow: inset 4px 0 0 var(--bad); }
 .tbl tbody tr.is-paid    td:first-child { box-shadow: inset 4px 0 0 var(--ok); }
 .tbl tbody tr.is-draft   td:first-child { box-shadow: inset 4px 0 0 var(--ink-faint); }
