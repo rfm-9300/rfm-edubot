@@ -175,16 +175,18 @@ private fun ClockPanel(status: TimeClockStatus, now: Long, strings: Strings, bus
             Badge(label, tone)
         }
         Spacer(Modifier.height(BotSpace.sm))
-        Text(
-            if (open == null) strings[Txt.TIME_STATE_OFF] else hm(strings, workedNow(open, now)),
-            style = MaterialTheme.typography.headlineLarge,
-            color = if (open?.onBreak == true) BotColors.warnInk else BotColors.ink,
-        )
+        if (open != null) {
+            Text(
+                hm(strings, workedNow(open, now)),
+                style = MaterialTheme.typography.headlineLarge,
+                color = if (open.onBreak) BotColors.warnInk else BotColors.ink,
+            )
+        }
         Text(line, style = MaterialTheme.typography.bodyMedium, color = BotColors.inkSecondary)
         open?.punches?.lastOrNull()?.let { last ->
             Spacer(Modifier.height(BotSpace.xs))
             Text(
-                strings.format(Txt.TIME_LAST, "what" to "${last.time} · ${where(last, strings)}"),
+                strings.format(Txt.TIME_LAST, "what" to "${strings[last.type.punchedKey()]} ${last.time} · ${where(last, strings)}"),
                 style = MaterialTheme.typography.bodySmall,
                 color = BotColors.inkMuted,
             )
@@ -349,6 +351,13 @@ private fun TimeClockProblem.key(): String = when (this) {
     TimeClockProblem.BIOMETRIC_FAILED -> Txt.TIME_PROBLEM_BIOMETRIC_FAILED
     TimeClockProblem.KEY_CHANGED -> Txt.TIME_PROBLEM_KEY_CHANGED
     TimeClockProblem.SETUP_NEEDED -> Txt.TIME_PROBLEM_SETUP_NEEDED
+}
+
+private fun String.punchedKey(): String = when (this) {
+    PunchRequest.IN -> Txt.TIME_PUNCHED_IN
+    PunchRequest.BREAK_START -> Txt.TIME_PUNCHED_BREAK_START
+    PunchRequest.BREAK_END -> Txt.TIME_PUNCHED_BREAK_END
+    else -> Txt.TIME_PUNCHED_OUT
 }
 
 private fun TimeClockDone.key(): String = when (this) {
