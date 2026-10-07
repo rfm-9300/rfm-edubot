@@ -61,6 +61,7 @@ import com.rfm.edubot.mobile.core.ui.SecondaryButton
 import com.rfm.edubot.mobile.core.ui.SectionLabel
 import com.rfm.edubot.mobile.core.ui.Tone
 import kotlinx.coroutines.delay
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.isoDayNumber
 import kotlin.math.roundToInt
@@ -115,7 +116,7 @@ fun TimeClockScreen(
         status.open?.takeIf { status.overdue }?.let { open ->
             item { OverduePanel(open, status, strings, clock, busy = ui.busy, onClose = { end -> vm.closeForgotten(open.id, end) }) }
         }
-        item { ClockPanel(status, now, strings, busy = ui.busy, onPunch = { type, label -> vm.punch(type, prompt(label)) }) }
+        item { ClockPanel(status, now, clock, strings, busy = ui.busy, onPunch = { type, label -> vm.punch(type, prompt(label)) }) }
         item { Feedback(ui, strings) }
         if (status.policy.biometric != TimesheetPolicy.POLICY_OFF) {
             item {
@@ -152,7 +153,7 @@ fun TimeClockScreen(
 }
 
 @Composable
-private fun ClockPanel(status: TimeClockStatus, now: Long, strings: Strings, busy: Boolean, onPunch: (String, String) -> Unit) {
+private fun ClockPanel(status: TimeClockStatus, now: Long, clock: TenantClock, strings: Strings, busy: Boolean, onPunch: (String, String) -> Unit) {
     val open = status.open
     val (label, tone) = when (status.state) {
         TimeClockStatus.STATE_WORKING -> strings[Txt.TIME_STATE_WORKING] to Tone.Ok
@@ -175,13 +176,11 @@ private fun ClockPanel(status: TimeClockStatus, now: Long, strings: Strings, bus
             Badge(label, tone)
         }
         Spacer(Modifier.height(BotSpace.sm))
-        if (open != null) {
-            Text(
-                hm(strings, workedNow(open, now)),
-                style = MaterialTheme.typography.headlineLarge,
-                color = if (open.onBreak) BotColors.warnInk else BotColors.ink,
-            )
-        }
+        Text(
+            if (open == null) clock.timeOfDay(Instant.fromEpochMilliseconds(now).toString()).orEmpty() else hm(strings, workedNow(open, now)),
+            style = MaterialTheme.typography.headlineLarge,
+            color = if (open?.onBreak == true) BotColors.warnInk else BotColors.ink,
+        )
         Text(line, style = MaterialTheme.typography.bodyMedium, color = BotColors.inkSecondary)
         open?.punches?.lastOrNull()?.let { last ->
             Spacer(Modifier.height(BotSpace.xs))
@@ -231,7 +230,11 @@ private fun PhonePanel(phone: PhoneSetup, required: Boolean, busy: Boolean, stri
             Spacer(Modifier.height(BotSpace.xs))
             Text(strings[if (required) Txt.TIME_SETUP_REQUIRED else Txt.TIME_SETUP_BODY], style = MaterialTheme.typography.bodySmall, color = BotColors.inkSecondary)
             Spacer(Modifier.height(BotSpace.md))
-            PrimaryButton(strings[Txt.TIME_SETUP_ACTION], onClick = onSetUp, Modifier.fillMaxWidth(), busy = busy)
+            if (required) {
+                PrimaryButton(strings[Txt.TIME_SETUP_ACTION], onClick = onSetUp, Modifier.fillMaxWidth(), busy = busy)
+            } else {
+                SecondaryButton(strings[Txt.TIME_SETUP_ACTION], onClick = onSetUp, Modifier.fillMaxWidth(), enabled = !busy)
+            }
         }
     }
 }
