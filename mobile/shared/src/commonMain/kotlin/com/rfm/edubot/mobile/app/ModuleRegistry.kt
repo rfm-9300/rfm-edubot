@@ -20,10 +20,16 @@ data class MobileModule(
 
 data class NavSection(val group: ModuleGroup, val modules: List<MobileModule>)
 
+/**
+ * The functions take `employee` because an employee's token is refused everywhere but their own pages:
+ * offering them a company screen would sign them out on its first call.
+ */
 object ModuleRegistry {
     /** Order and grouping follow the web sidebar so the two products read the same. */
     val catalog: List<MobileModule> = listOf(
         MobileModule(DashboardModules.OVERVIEW, ModuleGroup.Home, "⌂"),
+        MobileModule(DashboardModules.MY_HOURS, ModuleGroup.Home, "◷"),
+        MobileModule(DashboardModules.MY_SERVICES, ModuleGroup.Home, "✓", supported = false),
         MobileModule(DashboardModules.CONVERSATIONS, ModuleGroup.Inbox, "◌"),
         MobileModule(DashboardModules.CONTACTS, ModuleGroup.Inbox, "◎"),
         MobileModule(DashboardModules.INSTAGRAM, ModuleGroup.Inbox, "◍", supported = false),
@@ -34,6 +40,7 @@ object ModuleRegistry {
         MobileModule(DashboardModules.PAYMENTS, ModuleGroup.Business, "↗"),
         MobileModule(DashboardModules.SUPPLIERS, ModuleGroup.Business, "⌸"),
         MobileModule(DashboardModules.EMPLOYEES, ModuleGroup.Business, "☷"),
+        MobileModule(DashboardModules.TIMESHEETS, ModuleGroup.Business, "◷", supported = false),
         MobileModule(DashboardModules.CATALOG, ModuleGroup.Business, "⊞"),
         MobileModule(DashboardModules.BOOKINGS, ModuleGroup.Business, "▦"),
         MobileModule(DashboardModules.PERSONA, ModuleGroup.Automation, "☺"),
@@ -44,24 +51,32 @@ object ModuleRegistry {
 
     private val byId: Map<String, MobileModule> = catalog.associateBy { it.id }
 
+    /** Only an employee's sign-in has these, and it has nothing else but Settings. */
+    private val employeePages = setOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES)
+
     /**
      * Settings is always reachable: signing out, changing language and switching company live
-     * there, and a tenant whose plan omits the module would otherwise be stuck.
+     * there, and a tenant whose plan omits the module would otherwise be stuck. Home is too, except
+     * for an employee, whose session can't read the company's overview.
      */
-    private val alwaysReachable = setOf(DashboardModules.OVERVIEW, DashboardModules.SETTINGS)
+    private fun alwaysReachable(employee: Boolean): Set<String> =
+        if (employee) setOf(DashboardModules.SETTINGS) else setOf(DashboardModules.OVERVIEW, DashboardModules.SETTINGS)
+
+    private fun MobileModule.grantedTo(granted: Set<String>, employee: Boolean): Boolean =
+        id in granted && (id == DashboardModules.SETTINGS || (id in employeePages) == employee)
 
     fun find(id: String): MobileModule? = byId[id]
 
     /** The modules the app can open for this tenant, in nav order. */
-    fun available(enabled: Collection<String>): List<MobileModule> {
-        val granted = enabled.toSet() + alwaysReachable
-        return catalog.filter { it.supported && it.id in granted }
+    fun available(enabled: Collection<String>, employee: Boolean = false): List<MobileModule> {
+        val granted = enabled.toSet() + alwaysReachable(employee)
+        return catalog.filter { it.supported && it.grantedTo(granted, employee) }
     }
 
     /** Grouped for the "More" list, skipping whatever is already on the bottom bar. */
-    fun sections(enabled: Collection<String>, excluding: Collection<String> = emptySet()): List<NavSection> {
+    fun sections(enabled: Collection<String>, excluding: Collection<String> = emptySet(), employee: Boolean = false): List<NavSection> {
         val hidden = excluding.toSet()
-        return available(enabled)
+        return available(enabled, employee)
             .filterNot { it.id in hidden }
             .groupBy { it.group }
             .map { (group, modules) -> NavSection(group, modules) }
@@ -72,18 +87,20 @@ object ModuleRegistry {
      * The tenant pays for these and the app has no screen for them yet. Surfaced honestly rather
      * than as a tap that re-renders the same list.
      */
-    fun webOnly(enabled: Collection<String>): List<MobileModule> {
+    fun webOnly(enabled: Collection<String>, employee: Boolean = false): List<MobileModule> {
         val granted = enabled.toSet()
-        return catalog.filter { !it.supported && it.id in granted }
+        return catalog.filter { !it.supported && it.grantedTo(granted, employee) }
     }
 
     /**
      * The bottom bar. Home, the inbox and whichever automation surface this tenant has, because
-     * those are what someone opens a phone for; everything else is one tap away under More.
+     * those are what someone opens a phone for; everything else is one tap away under More. An
+     * employee's is their clock.
      */
-    fun bottomBar(enabled: Collection<String>): List<MobileModule> {
-        val available = available(enabled).map { it.id }.toSet()
+    fun bottomBar(enabled: Collection<String>, employee: Boolean = false): List<MobileModule> {
+        val available = available(enabled, employee).map { it.id }.toSet()
         return listOf(
+            DashboardModules.MY_HOURS,
             DashboardModules.OVERVIEW,
             DashboardModules.CONVERSATIONS,
             DashboardModules.AGENTS,
@@ -96,8 +113,10 @@ object ModuleRegistry {
     }
 
     /** Where to land after signing in, and the fallback when a module disappears from the plan. */
-    fun startModule(enabled: Collection<String>): String =
-        bottomBar(enabled).firstOrNull()?.id ?: available(enabled).firstOrNull()?.id ?: DashboardModules.SETTINGS
+    fun startModule(enabled: Collection<String>, employee: Boolean = false): String =
+        bottomBar(enabled, employee).firstOrNull()?.id
+            ?: available(enabled, employee).firstOrNull()?.id
+            ?: DashboardModules.SETTINGS
 
     /** `More` takes the last slot, so the bar never holds more than this many modules. */
     const val BOTTOM_BAR_SLOTS = 3

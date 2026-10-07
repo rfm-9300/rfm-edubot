@@ -18,6 +18,8 @@ fun MainViewController(deviceLocale: String?): UIViewController {
         tokenStore = IosTokenStore(),
         snapshotStore = IosSnapshotStore(),
         voiceInput = IosVoiceInput(),
+        location = IosLocationProvider(),
+        signer = IosDeviceSigner(),
     )
     return ComposeUIViewController {
         DashboardApp(graph = graph, deviceLocale = deviceLocale)

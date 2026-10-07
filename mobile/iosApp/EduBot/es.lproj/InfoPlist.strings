@@ -1,2 +1,4 @@
 "NSMicrophoneUsageDescription" = "Permite el acceso al micrófono para dictar mensajes al asistente de IA.";
 "NSSpeechRecognitionUsageDescription" = "Permite el reconocimiento de voz para convertir tu voz en un mensaje editable.";
+"NSLocationWhenInUseUsageDescription" = "Tu ubicación se lee una vez cuando fichas la entrada o la salida, para que tu empresa sepa que estabas en el trabajo.";
+"NSFaceIDUsageDescription" = "Face ID confirma que eres tú quien ficha la entrada o la salida. Tu cara nunca sale de este teléfono.";

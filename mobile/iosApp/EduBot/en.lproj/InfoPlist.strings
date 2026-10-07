@@ -1,2 +1,4 @@
 "NSMicrophoneUsageDescription" = "Allow microphone access to dictate messages to the AI assistant.";
 "NSSpeechRecognitionUsageDescription" = "Allow speech recognition to turn your voice into an editable message.";
+"NSLocationWhenInUseUsageDescription" = "Your location is read once when you clock in or out, so your company knows you were at work.";
+"NSFaceIDUsageDescription" = "Face ID confirms it is you who clocks in or out. Your face never leaves this phone.";

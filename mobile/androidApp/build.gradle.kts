@@ -52,6 +52,9 @@ kotlin {
 dependencies {
     implementation(project(":shared"))
     implementation(libs.androidx.activity.compose)
+    implementation(libs.androidx.biometric)
     implementation(libs.androidx.core.ktx)
+    // BiometricPrompt needs a FragmentActivity; biometric 1.1.0 alone would resolve fragment 1.2.
+    implementation(libs.androidx.fragment)
     implementation(libs.androidx.security.crypto)
 }

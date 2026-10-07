@@ -26,6 +26,8 @@ class SettingsViewModel(
     private val repository: SettingsRepository,
     initialLocale: String,
     private val onLocaleUpdated: (String) -> Unit,
+    /** An employee's session reaches only their own account, never the company's settings. */
+    private val employee: Boolean = false,
     scopeOverride: CoroutineScope? = null,
 ) : ViewModel() {
     private val scope = scopeOverride ?: viewModelScope
@@ -34,7 +36,7 @@ class SettingsViewModel(
 
     fun load() = scope.launch {
         // Neither call is essential to the screen, so a failure shows beside the rest, not instead.
-        repository.webWidget().valueOrNull?.let { widget -> mutable.update { it.copy(widget = widget) } }
+        if (!employee) repository.webWidget().valueOrNull?.let { widget -> mutable.update { it.copy(widget = widget) } }
         repository.account().valueOrNull?.let { account -> mutable.update { it.copy(account = account) } }
     }
 
@@ -45,6 +47,12 @@ class SettingsViewModel(
     fun updateLocale(locale: String) = scope.launch {
         val previous = mutable.value.selectedLocale
         if (locale == previous || mutable.value.updatingLocale) return@launch
+        if (employee) {
+            // The saved language is the company's, so an employee's choice holds on this phone only.
+            mutable.update { it.copy(selectedLocale = locale, error = null) }
+            onLocaleUpdated(locale)
+            return@launch
+        }
         mutable.update { it.copy(selectedLocale = locale, updatingLocale = true, error = null) }
         onLocaleUpdated(locale)
         when (val saved = repository.updateLocale(locale)) {

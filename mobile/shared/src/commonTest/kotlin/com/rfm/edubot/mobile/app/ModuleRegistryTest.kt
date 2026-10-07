@@ -33,10 +33,10 @@ class ModuleRegistryTest {
         val handledDirectly = setOf(
             DashboardModules.OVERVIEW, DashboardModules.CONVERSATIONS, DashboardModules.CONTACTS,
             DashboardModules.AI_ASSISTANT, DashboardModules.AGENTS, DashboardModules.BOOKINGS,
-            DashboardModules.PERSONA, DashboardModules.SETTINGS,
+            DashboardModules.PERSONA, DashboardModules.SETTINGS, DashboardModules.MY_HOURS,
         )
         val routable = crmSections + handledDirectly
-        ModuleRegistry.available(fullPlan).forEach { module ->
+        (ModuleRegistry.available(fullPlan) + ModuleRegistry.available(fullPlan, employee = true)).forEach { module ->
             assertTrue(module.id in routable, "${module.id} is offered but the shell has no screen for it")
         }
     }
@@ -44,11 +44,38 @@ class ModuleRegistryTest {
     @Test
     fun `a module the tenant pays for but the app cannot render is named rather than faked`() {
         val webOnly = ModuleRegistry.webOnly(fullPlan).map { it.id }
-        assertEquals(listOf(DashboardModules.INSTAGRAM), webOnly)
+        assertEquals(listOf(DashboardModules.INSTAGRAM, DashboardModules.TIMESHEETS), webOnly)
         assertFalse(
-            ModuleRegistry.available(fullPlan).any { it.id == DashboardModules.INSTAGRAM },
+            ModuleRegistry.available(fullPlan).any { it.id in webOnly },
             "it must not also appear as something tappable",
         )
+    }
+
+    @Test
+    fun `an employee gets their clock and settings and nothing of the company's`() {
+        val plan = listOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES)
+        assertEquals(
+            listOf(DashboardModules.MY_HOURS, DashboardModules.SETTINGS),
+            ModuleRegistry.available(plan, employee = true).map { it.id },
+            "their token is refused by every company endpoint, so a company screen would sign them out",
+        )
+        assertEquals(listOf(DashboardModules.MY_HOURS), ModuleRegistry.bottomBar(plan, employee = true).map { it.id })
+        assertEquals(DashboardModules.MY_HOURS, ModuleRegistry.startModule(plan, employee = true))
+        assertEquals(listOf(DashboardModules.MY_SERVICES), ModuleRegistry.webOnly(plan, employee = true).map { it.id })
+    }
+
+    @Test
+    fun `an employee without the time clock lands on settings rather than the company's home`() {
+        val plan = listOf(DashboardModules.MY_SERVICES)
+        assertEquals(DashboardModules.SETTINGS, ModuleRegistry.startModule(plan, employee = true))
+        assertFalse(ModuleRegistry.available(plan, employee = true).any { it.id == DashboardModules.OVERVIEW })
+    }
+
+    @Test
+    fun `a company session never offers an employee's own pages`() {
+        val listed = ModuleRegistry.available(fullPlan).map { it.id } + ModuleRegistry.webOnly(fullPlan).map { it.id }
+        assertFalse(DashboardModules.MY_HOURS in listed)
+        assertFalse(DashboardModules.MY_SERVICES in listed)
     }
 
     @Test
@@ -142,7 +169,7 @@ class ModuleRegistryTest {
     fun `bottom bar labels fit the tab without eliding`() {
         AppLocale.entries.forEach { locale ->
             val strings = Localization.of(locale)
-            ModuleRegistry.bottomBar(fullPlan).forEach { module ->
+            (ModuleRegistry.bottomBar(fullPlan) + ModuleRegistry.bottomBar(fullPlan, employee = true)).forEach { module ->
                 val label = strings.moduleShort(module.id)
                 assertTrue(
                     label.length <= BOTTOM_BAR_LABEL_CHARS,

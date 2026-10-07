@@ -74,6 +74,7 @@ import com.rfm.edubot.mobile.feature.notifications.NotificationsScreen
 import com.rfm.edubot.mobile.feature.overview.OverviewScreen
 import com.rfm.edubot.mobile.feature.persona.PersonaScreen
 import com.rfm.edubot.mobile.feature.settings.SettingsScreen
+import com.rfm.edubot.mobile.feature.timeclock.TimeClockScreen
 
 /**
  * The app.
@@ -107,6 +108,14 @@ fun DashboardApp(
         )
         val state by sessionVm.state.collectAsState()
         val themeChoice by sessionVm.theme.collectAsState()
+        val sessionViewModels = viewModel<SessionViewModels>(
+            key = "session-view-models",
+            factory = viewModelFactory { initializer { SessionViewModels() } },
+        )
+        val sessionKey = (state as? SessionState.SignedIn)?.identity?.let {
+            listOf(it.tenant.id, it.principalType, it.user?.id, it.employee?.id).joinToString("/")
+        }
+        remember(sessionKey) { sessionViewModels.enter(sessionKey) }
         val dark = when (themeChoice) {
             ThemeChoice.Light -> false
             ThemeChoice.Dark -> true
@@ -125,12 +134,14 @@ fun DashboardApp(
                     initialPassword = initialPassword,
                     onSignIn = sessionVm::signIn,
                 )
-                is SessionState.SignedIn -> DashboardShell(
-                    graph = graph,
-                    sessionVm = sessionVm,
-                    signedIn = current,
-                    onBackHandlerChanged = onBackHandlerChanged,
-                )
+                is SessionState.SignedIn -> CompositionLocalProvider(LocalViewModelStoreOwner provides sessionViewModels) {
+                    DashboardShell(
+                        graph = graph,
+                        sessionVm = sessionVm,
+                        signedIn = current,
+                        onBackHandlerChanged = onBackHandlerChanged,
+                    )
+                }
             }
         }
     }
@@ -147,16 +158,11 @@ private fun DashboardShell(
     val strings = sessionVm.strings
     val clock = sessionVm.clock
     val modules = identity.modules
-    val navigator = remember(identity.tenant.id) { Navigator(ModuleRegistry.startModule(modules)) }
+    val employee = identity.isEmployee
+    val navigator = remember(identity.tenant.id, employee) { Navigator(ModuleRegistry.startModule(modules, employee)) }
     val nav by navigator.state.collectAsState()
-    val bottomBar = remember(modules) { ModuleRegistry.bottomBar(modules) }
-
-    val notificationsVm = viewModel<NotificationsBadgeViewModel>(
-        key = "notifications:${identity.tenant.id}",
-        factory = viewModelFactory { initializer { NotificationsBadgeViewModel(graph.notifications) } },
-    )
-    val unread by notificationsVm.unread.collectAsState()
-    LaunchedEffect(identity.tenant.id) { notificationsVm.watch() }
+    val bottomBar = remember(modules, employee) { ModuleRegistry.bottomBar(modules, employee) }
+    val unread = if (employee) 0L else unreadNotifications(graph, identity.tenant.id)
 
     // Only claim back while there is something to pop, so the gesture still closes the app at a root.
     LaunchedEffect(nav.canGoBack, onBackHandlerChanged) {
@@ -169,9 +175,10 @@ private fun DashboardShell(
             TenantBar(
                 tenantName = identity.tenant.name,
                 operator = identity.isOperator,
+                employeeName = identity.employee?.name,
                 unread = unread,
                 strings = strings,
-                onNotifications = { navigator.open(Destination.Notifications) },
+                onNotifications = if (employee) null else ({ navigator.open(Destination.Notifications) }),
             )
         },
         bottomBar = {
@@ -188,6 +195,7 @@ private fun DashboardShell(
         when (val destination = nav.current) {
             is Destination.MoreMenu -> MoreScreen(
                 modules = modules,
+                employee = employee,
                 excluding = bottomBar.map { it.id },
                 strings = strings,
                 padding = padding,
@@ -310,6 +318,16 @@ private fun ModuleScreen(
             strings = strings,
             padding = padding,
         )
+        DashboardModules.MY_HOURS -> identity.employee?.let { employee ->
+            TimeClockScreen(
+                repository = remember(employee.id) { graph.timeClock(employee.id) },
+                location = graph.location,
+                signer = graph.signer,
+                strings = strings,
+                clock = clock,
+                padding = padding,
+            )
+        }
         DashboardModules.SETTINGS -> SettingsScreen(
             settings = graph.settings,
             identity = identity,
@@ -334,13 +352,27 @@ private fun ModuleScreen(
     }
 }
 
+/** The bell's count. Not for an employee: their session can't read the company's notifications. */
+@Composable
+private fun unreadNotifications(graph: MobileGraph, tenantId: String): Long {
+    val notificationsVm = viewModel<NotificationsBadgeViewModel>(
+        key = "notifications:$tenantId",
+        factory = viewModelFactory { initializer { NotificationsBadgeViewModel(graph.notifications) } },
+    )
+    val unread by notificationsVm.unread.collectAsState()
+    LaunchedEffect(tenantId) { notificationsVm.watch() }
+    return unread
+}
+
+/** [onNotifications] is null where there is no bell to show. */
 @Composable
 private fun TenantBar(
     tenantName: String,
     operator: Boolean,
+    employeeName: String?,
     unread: Long,
     strings: Strings,
-    onNotifications: () -> Unit,
+    onNotifications: (() -> Unit)?,
 ) = Surface(color = BotColors.surface, border = BorderStroke(1.dp, BotColors.line)) {
     Row(
         Modifier.fillMaxWidth().statusBarsPadding().padding(horizontal = BotSpace.xl, vertical = BotSpace.md),
@@ -362,8 +394,17 @@ private fun TenantBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+            } else if (employeeName != null) {
+                Text(
+                    employeeName,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = BotColors.inkMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
+        if (onNotifications == null) return@Row
         // The glyph carries no meaning to a screen reader, so the row describes itself.
         val bellLabel = if (unread > 0) {
             "${strings[Txt.NOTIFICATIONS_TITLE]}, ${strings.format(Txt.NOTIFICATIONS_UNREAD, "count" to unread)}"
@@ -444,13 +485,14 @@ private fun BottomDestination(label: String, glyph: String, selected: Boolean, o
 @Composable
 private fun MoreScreen(
     modules: List<String>,
+    employee: Boolean,
     excluding: List<String>,
     strings: Strings,
     padding: PaddingValues,
     onSelect: (String) -> Unit,
 ) {
-    val sections = remember(modules, excluding) { ModuleRegistry.sections(modules, excluding) }
-    val webOnly = remember(modules) { ModuleRegistry.webOnly(modules) }
+    val sections = remember(modules, excluding, employee) { ModuleRegistry.sections(modules, excluding, employee) }
+    val webOnly = remember(modules, employee) { ModuleRegistry.webOnly(modules, employee) }
     LazyColumn(
         Modifier.fillMaxSize().padding(padding),
         contentPadding = PaddingValues(bottom = BotSpace.xl),
