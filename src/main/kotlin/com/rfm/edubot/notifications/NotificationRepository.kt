@@ -45,6 +45,10 @@ object NotificationKinds {
     const val INTEGRATION_RECONNECT = "integration_reconnect"
     /** An employee registered a service; its `ref` is `submission:ID`. */
     const val SERVICE_SUBMITTED = "service_submitted"
+    /** An employee set up a phone for the time clock (replacing any other); its `ref` is `employee:ID`. */
+    const val TIME_DEVICE_ENROLLED = "time_device_enrolled"
+    /** An employee forgot to clock out and said when they finished; its `ref` is `shift:ID`. */
+    const val TIME_MISSED_CLOCK_OUT = "time_missed_clock_out"
 }
 
 class NotificationRepository(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {

@@ -167,7 +167,7 @@ internal fun Route.dashboardRoutes(
                     MeDto(
                         tenant = ctx.tenant.dto().let { if (employee != null) it.copy(channels = emptyList()) else it },
                         user = ctx.user?.dto(),
-                        modules = if (employee != null) listOf(EmployeePortal.MODULE) else DashboardModules.effectiveFor(ctx.tenant),
+                        modules = if (employee != null) EmployeePortal.pages(ctx.tenant) else DashboardModules.effectiveFor(ctx.tenant),
                         principalType = ctx.principalType,
                         companies = companies
                             .filter { DashboardAccessPolicy.allows(it, ctx.user, ctx.principalType) }
@@ -1486,7 +1486,7 @@ private suspend fun runPersonaTest(
     /** The tenant's companies this session can switch to, the current one included. */
     val companies: List<CompanyMeDto>,
     val companyLimit: Int,
-    /** Set for an employee's sign-in, whose only page is [EmployeePortal.MODULE]. */
+    /** Set for an employee's sign-in, whose [modules] are [EmployeePortal.pages]. */
     val employee: EmployeeMeDto? = null,
 )
 @Serializable private data class EmployeeMeDto(val id: String, val number: String, val name: String)

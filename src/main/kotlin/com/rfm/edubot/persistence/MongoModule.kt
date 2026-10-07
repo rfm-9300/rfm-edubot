@@ -219,6 +219,22 @@ class MongoModule(config: AppConfig.MongoConfig) {
             serviceSubmissions.createIndex(Document("tenantId", 1).append("employeeId", 1).append("createdAt", -1))
             serviceSubmissions.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
 
+            val shifts = db.getCollection<Document>("timesheets.shifts")
+            // One open shift per employee: two clock-ins at once leave one shift.
+            shifts.createIndex(
+                Document("tenantId", 1).append("employeeId", 1),
+                IndexOptions().unique(true).name("one_open_shift").partialFilterExpression(Document("status", "OPEN")),
+            )
+            shifts.createIndex(Document("tenantId", 1).append("day", -1))
+            shifts.createIndex(Document("tenantId", 1).append("employeeId", 1).append("day", -1))
+            shifts.createIndex(Document("tenantId", 1).append("status", 1).append("review.status", 1))
+            shifts.createIndex(Document("punches.at", 1))
+            db.getCollection<Document>("timesheets.sites").createIndex(Document("tenantId", 1).append("name", 1))
+            val timeDevices = db.getCollection<Document>("timesheets.devices")
+            timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("keyId", 1), IndexOptions().unique(true))
+            timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("active", 1))
+            db.getCollection<Document>("timesheets.challenges").createIndex(Document("createdAt", 1), IndexOptions().expireAfter(5, TimeUnit.MINUTES))
+
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("employeeId", 1))

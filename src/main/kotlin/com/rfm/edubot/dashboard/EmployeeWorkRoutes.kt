@@ -243,24 +243,18 @@ private val log = LoggerFactory.getLogger("EmployeeWork")
 
 private const val PORTAL_CLIENT_LIMIT = 2000
 
-private data class PortalSession(val ctx: DashboardContext, val employee: Employee) {
-    val tenant: Tenant get() = ctx.tenant
-}
-
-/** The signed-in employee; anyone else gets 403, since these pages are only an employee's own. */
-private suspend fun ApplicationCall.portalSession(): PortalSession? {
-    val ctx = dashboardContext()
-    val employee = ctx?.employee
-    if (ctx == null || employee == null) {
-        respond(HttpStatusCode.Forbidden, mapOf("error" to "employees_only"))
-        return null
-    }
-    return PortalSession(ctx, employee)
-}
+private suspend fun ApplicationCall.portalSession(): PortalSession? = portalSession(EmployeePortal.MY_SERVICES)
 
 /** The team reviewing employees' submissions: the employees and services modules, never an employee. */
 private suspend fun ApplicationCall.reviewContext(): DashboardContext? {
     val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) && it.requireModule(DashboardModules.SERVICES) }
+    if (ctx == null) respond(HttpStatusCode.Forbidden)
+    return ctx
+}
+
+/** The team managing employees' sign-ins: whenever employees have a page to sign in to (services or the time clock). */
+private suspend fun ApplicationCall.accessContext(): DashboardContext? {
+    val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) && EmployeePortal.isAvailable(it.tenant) }
     if (ctx == null) respond(HttpStatusCode.Forbidden)
     return ctx
 }
@@ -273,7 +267,7 @@ private fun DashboardContext.reviewer(): String = user?.email ?: "operator"
 
 /** The employee in the path, for the team; [manage] also needs [canManageAccess]. */
 private suspend fun ApplicationCall.accessTarget(mongo: MongoModule, manage: Boolean = false): Pair<DashboardContext, Employee>? {
-    val ctx = reviewContext() ?: return null
+    val ctx = accessContext() ?: return null
     if (manage && !ctx.canManageAccess()) {
         respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
         return null
