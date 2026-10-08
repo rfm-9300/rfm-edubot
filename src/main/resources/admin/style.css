@@ -1241,9 +1241,26 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 }
 .chat__form { display: flex; gap: 10px; margin-top: 14px; }
 .chat__input { flex: 1; border-radius: 999px; }
+/* A line about the chat rather than in it: a handoff in the persona test, an error. */
+.chat__note { align-self: center; max-width: 92%; color: var(--ink-mute); font-size: 12px; font-weight: 600; line-height: 1.45; text-align: center; }
 
 @media (max-width: 620px) {
   .chat__form { align-items: stretch; flex-direction: column; }
+}
+
+/* ── Persona studio (/app → Persona): editor tabs beside a test chat that stays in view ── */
+.persona-studio { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 18px; align-items: start; }
+.persona-studio__main, .persona-studio__pane { display: grid; gap: 16px; min-width: 0; }
+.persona-studio__main .settings-tabs { margin-bottom: 0; }
+/* Sticks just under the sticky top bar (64px in the minimal skin) and scrolls when the screen is shorter than the panel. */
+.persona-studio__test { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; min-width: 0; }
+.persona-studio__test .chat__log { min-height: 240px; max-height: 420px; }
+.persona-studio__test .chat__form { margin-top: 0; }
+.persona-studio .pill[hidden] { display: none; }
+
+@media (max-width: 1100px) {
+  .persona-studio { grid-template-columns: minmax(0, 1fr); }
+  .persona-studio__test { position: static; }
 }
 
 /* ── Conversations inbox (/app): list + thread, both scroll inside a fixed-height shell ── */
@@ -2164,7 +2181,6 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .ai-outputs { display: grid; justify-items: start; gap: 8px; }
 .ai-output { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1.6fr) 30px; align-items: center; gap: 8px; width: 100%; }
 .ai-output__options { grid-column: 1 / -2; }
-.persona-agents { margin-bottom: 18px; }
 .inp-unit { display: flex; align-items: center; gap: 8px; }
 .inp-unit .inp { max-width: 120px; }
 .inp-unit__label { color: var(--ink-mute); font-size: 13px; }

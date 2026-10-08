@@ -565,12 +565,29 @@ When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a 
 | `.chat__msg chat__msg--user` | Outgoing (gradient) |
 | `.chat__msg chat__msg--bot` | Incoming (surface + border) |
 | `.chat__typing` | Italic muted |
+| `.chat__note` | A centered muted line about the chat, not in it: where the persona test would hand over, an error |
 | `.chat__form` + `.chat__input` | Composer (pill input) |
 | `.assistant` | Two-column assistant shell |
 | `.assistant__thread` / `.is-active` | Thread list item |
 | `.assistant__action` | Confirm-before-execute card |
 
 User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that. The customer inbox has its own components (next section).
+
+### Persona studio
+
+```html
+<div class="persona-studio">
+  <div class="persona-studio__main">
+    <div class="settings-tabs" role="tablist">…Behavior · Knowledge · Instructions · History…</div>
+    <div class="persona-studio__pane" role="tabpanel"><!-- panels --></div>
+  </div>
+  <aside class="persona-studio__test">
+    <section class="panel"><!-- head: title, .pill--warn "Unsaved changes" (hidden when none), Clear; body: .chip-picks, .chat__log, .chat__form --></section>
+  </aside>
+</div>
+```
+
+Two columns (editor, test chat at up to 400px) with the chat sticky at the top; one column under 1100px, the chat after the editor. The main column and its pane are grids with a 16px gap, so panels inside need no margins. Its "Unsaved changes" pill toggles with `hidden` (`.persona-studio .pill[hidden]`).
 
 ## Conversations inbox
 
@@ -859,7 +876,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 | `.conds` > `.cond-row` (`--exit`) | Condition rows: field · operator · value · remove `.iconbtn`; with two or more, a `.sel--inline` match select sits on top |
 | `.chip-picks` | Multi-select chips (weekdays, statuses, an AI task's actions); picked = `.chip.is-on` + `aria-pressed`. "Describe it" reuses the row for its examples, which fill the textarea instead of staying picked |
 | `.ai-outputs` > `.ai-output` (`__desc` `__options`) | An AI task's fields to return, one row each: mono name, type select, what it should contain, remove `.iconbtn` (not on the last row), and a full-width options input under a choice. On narrow screens the description drops to its own line. A ghost "Add a field" button ends the list |
-| `.persona-agents` | Persona page panel: a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
+| `.persona-agents` | Mount point at the end of the Persona page's Behavior tab: a `.panel` with a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
 | `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
 | `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing. `--blank` cards ("Describe it", "Start from scratch") come first and have no recipe |
 | `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
