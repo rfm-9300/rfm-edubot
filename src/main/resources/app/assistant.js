@@ -264,7 +264,8 @@
       </div>
       <div class="form__grid">
         <div class="form__row"><label class="lbl" for="as-style">${esc(T.styleLabel)}</label>
-          <select class="sel" id="as-style"${off('disabled')}>${styles.map(v => `<option value="${v}"${v === s.replyStyle ? ' selected' : ''}>${esc(T[`style${v}`])}</option>`).join('')}</select></div>
+          <select class="sel" id="as-style"${off('disabled')}>${styles.map(v => `<option value="${v}"${v === s.replyStyle ? ' selected' : ''}>${esc(T[`style${v}`])}</option>`).join('')}</select>
+          <p class="hint" id="as-style-hint"></p></div>
         <div class="form__row"><label class="lbl" for="as-language">${esc(T.languageLabel)}</label>
           <select class="sel" id="as-language"${off('disabled')}>${languages.map(([v, label]) => `<option value="${v}"${v === (s.language || '') ? ' selected' : ''}>${esc(label)}</option>`).join('')}</select></div>
       </div>
@@ -287,6 +288,10 @@
     const paintCount = () => { count.textContent = T.count({ n: instructions.value.length, max: s.maxInstructions }); };
     instructions.addEventListener('input', paintCount);
     paintCount();
+    const style = form.querySelector('#as-style');
+    const paintStyle = () => { form.querySelector('#as-style-hint').textContent = T[`styleHint${style.value}`] || ''; };
+    style.addEventListener('change', paintStyle);
+    paintStyle();
     form.querySelector('[data-form-cancel]').addEventListener('click', () => d.closeDrawer());
     form.addEventListener('submit', async e => {
       e.preventDefault();
