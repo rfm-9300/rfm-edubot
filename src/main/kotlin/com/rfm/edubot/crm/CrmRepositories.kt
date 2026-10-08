@@ -269,6 +269,22 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         return collection.find(filter).sort(Document("createdAt", -1)).limit(100).toList().map { it.toQuote() }
     }
 
+    /** Quotes matching every filter given, newest first: created in [createdFrom, createdUntil), up to [limit]. */
+    suspend fun search(
+        clientId: ObjectId? = null,
+        statuses: Collection<QuoteStatus> = emptyList(),
+        createdFrom: Instant? = null,
+        createdUntil: Instant? = null,
+        limit: Int = 1_000,
+    ): List<Quote> {
+        val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
+        clientId?.let { filters.add(Filters.eq("clientId", it)) }
+        if (statuses.isNotEmpty()) filters.add(Filters.`in`("status", statuses.map { it.name }))
+        createdFrom?.let { filters.add(Filters.gte("createdAt", it.toDate())) }
+        createdUntil?.let { filters.add(Filters.lt("createdAt", it.toDate())) }
+        return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit).toList().map { it.toQuote() }
+    }
+
     suspend fun create(clientId: ObjectId, items: List<LineItem>, notes: String?, validUntil: LocalDate?): Quote {
         val now = SystemClock.now()
         val quote = Quote(
@@ -402,12 +418,39 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
     suspend fun findById(id: ObjectId): Invoice? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toInvoice()
 
+    suspend fun findByNumber(number: String): Invoice? =
+        collection.find(scoped(Filters.regex("number", "^${Regex.escape(number.trim())}$", "i"))).firstOrNull()?.toInvoice()
+
     suspend fun list(clientId: ObjectId? = null, status: InvoiceStatus? = null): List<Invoice> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
         val filter = Filters.and(filters)
         return collection.find(filter).sort(Document("createdAt", -1)).limit(100).toList().map { it.toInvoice() }
+    }
+
+    /**
+     * Invoices matching every filter given, newest first: issued (created) in [issuedFrom, issuedUntil),
+     * due between [dueFrom] and [dueTo] inclusive, up to [limit].
+     */
+    suspend fun search(
+        clientId: ObjectId? = null,
+        statuses: Collection<InvoiceStatus> = emptyList(),
+        issuedFrom: Instant? = null,
+        issuedUntil: Instant? = null,
+        dueFrom: LocalDate? = null,
+        dueTo: LocalDate? = null,
+        limit: Int = 1_000,
+    ): List<Invoice> {
+        val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
+        clientId?.let { filters.add(Filters.eq("clientId", it)) }
+        if (statuses.isNotEmpty()) filters.add(Filters.`in`("status", statuses.map { it.name }))
+        issuedFrom?.let { filters.add(Filters.gte("createdAt", it.toDate())) }
+        issuedUntil?.let { filters.add(Filters.lt("createdAt", it.toDate())) }
+        // Due dates are stored as ISO strings, which sort like the dates they are.
+        dueFrom?.let { filters.add(Filters.gte("dueDate", it.toString())) }
+        dueTo?.let { filters.add(Filters.lte("dueDate", it.toString())) }
+        return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit).toList().map { it.toInvoice() }
     }
 
     suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate, taxOfficeCode: String? = null): Invoice {
