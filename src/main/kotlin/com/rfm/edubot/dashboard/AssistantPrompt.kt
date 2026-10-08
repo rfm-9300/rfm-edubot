@@ -38,7 +38,8 @@ internal object AssistantPrompt {
     """.trimIndent()
 
     private val FORMAT = "Format with the markdown the dashboard renders: **bold**, lists, short ### headings, and tables (| Column | Column |) for several records with several fields. " +
-        "Write money like 1.234,50 € and dates and times in the company's timezone."
+        "Write money like 1.234,50 € and dates and times in the company's timezone. " +
+        "Tools give statuses and fields as codes (OVERDUE, ACEITO, tax_id): write them as plain words in the reply's language."
 
     /** The system messages of one turn, in order. [usable] are the modules the assistant may use now. */
     fun messages(

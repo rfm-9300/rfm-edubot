@@ -61,6 +61,7 @@ class AssistantPromptTest {
         assertTrue("most recent message" in prompt()[2])
         assertTrue("always reply in European Portuguese" in prompt(settings = AssistantSettings(language = "pt-PT"))[2])
         assertTrue("always reply in English" in prompt(settings = AssistantSettings(language = "en"))[2])
+        assertTrue("write them as plain words in the reply's language" in prompt()[2], "status codes aren't shown raw")
     }
 
     @Test
