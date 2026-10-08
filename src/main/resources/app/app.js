@@ -7290,6 +7290,8 @@ const PERSONA_OPTIONS = {
   emoji: ['NONE', 'LIGHT', 'EXPRESSIVE'],
 };
 const PERSONA_TRIES = ['who', 'hours', 'price', 'human', 'jailbreak', 'language'];
+// Extensions the upload accepts as other names for a listed type, left out of the hint.
+const PERSONA_TYPE_ALIASES = ['markdown', 'text'];
 const fmtCount = n => new Intl.NumberFormat(uiLocale()).format(Number(n || 0));
 const fmtMegabytes = bytes => new Intl.NumberFormat(uiLocale(), { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(Number(bytes || 0) / (1024 * 1024));
 const personaStatusLabel = s => ps(`status.${s || 'EMPTY'}`);
@@ -7406,7 +7408,7 @@ function personaBehaviorPane(p) {
   const b = personaBehavior();
   const limits = p.limits || {};
   const off = p.canEdit ? '' : ' disabled';
-  const select = field => `<select class="sel" id="pb-${field}"${off}><option value="">${escapeHTML(PS.optionUnset)}</option>${PERSONA_OPTIONS[field].map(v => `<option value="${v}"${b[field] === v ? ' selected' : ''}>${escapeHTML(ps(`${field}.${v}`))}</option>`).join('')}</select>`;
+  const select = field => `<select class="sel" id="pb-${field}"${off}><option value="">${escapeHTML(PS.optionUnset)}</option>${PERSONA_OPTIONS[field].map(v => `<option value="${v}"${b[field] === v ? ' selected' : ''}>${escapeHTML(ps(`options.${field}.${v}`))}</option>`).join('')}</select>`;
   const languages = (limits.languages || []).map(code => `<option value="${escapeHTML(code)}"${b.language === code ? ' selected' : ''}>${escapeHTML(personaLanguageLabel(code))}</option>`).join('');
   const h = b.handoff || {};
   const ruleCount = (b.rules || []).filter(r => r.trim()).length;
@@ -7493,7 +7495,7 @@ function personaKnowledgePane(p) {
         </form>
         <div class="form__row form__row--full"><label class="lbl" for="persona-file">${escapeHTML(PS.fileLabel)}</label>
           <input class="inp" id="persona-file" type="file" accept="${escapeHTML(types.map(t => `.${t}`).join(','))}" />
-          <p class="hint">${escapeHTML(ps('fileHint', { types: types.map(t => t.toUpperCase()).join(', '), size: fmtMegabytes(limits.uploadBytes) }))}</p></div>
+          <p class="hint">${escapeHTML(ps('fileHint', { types: types.filter(t => !PERSONA_TYPE_ALIASES.includes(t)).map(t => t.toUpperCase()).join(', '), size: fmtMegabytes(limits.uploadBytes) }))}</p></div>
       </div></section>` : '';
   const rows = sources.map(s => `<tr>
       <td class="name long">${escapeHTML(s.label)}<div class="sub">${escapeHTML([ps(`kind.${s.kind}`), ps('chars', { n: fmtCount(s.chars) }), s.addedBy ? personaAuthor(s.addedBy) : ''].filter(Boolean).join(' · '))}</div>${s.truncated ? `<p class="hint hint--warn">${escapeHTML(PS.truncated)}</p>` : ''}</td>
@@ -7584,7 +7586,7 @@ function personaHistoryPane(p) {
 }
 
 function personaBehaviorFacts(b = {}) {
-  const choice = field => (b[field] ? ps(`${field}.${b[field]}`) : null);
+  const choice = field => (b[field] ? ps(`options.${field}.${b[field]}`) : null);
   return dashFacts([
     [PS.botName, b.botName || PS.optionUnset],
     [PS.language, b.language ? `${personaLanguageLabel(b.language)}${b.languageStrict ? ` · ${PS.languageStrictShort}` : ''}` : PS.languageAuto],

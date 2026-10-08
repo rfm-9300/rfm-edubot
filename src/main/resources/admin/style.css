@@ -1252,7 +1252,8 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .persona-studio { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 18px; align-items: start; }
 .persona-studio__main, .persona-studio__pane { display: grid; gap: 16px; min-width: 0; }
 .persona-studio__main .settings-tabs { margin-bottom: 0; }
-.persona-studio__test { position: sticky; top: 16px; min-width: 0; }
+/* Sticks just under the sticky top bar (64px in the minimal skin) and scrolls when the screen is shorter than the panel. */
+.persona-studio__test { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; min-width: 0; }
 .persona-studio__test .chat__log { min-height: 240px; max-height: 420px; }
 .persona-studio__test .chat__form { margin-top: 0; }
 .persona-studio .pill[hidden] { display: none; }
