@@ -28,6 +28,12 @@ interface ToolPack {
     /** What a person confirming [call] should see beyond its arguments (names behind ids…); null when the arguments say it all. */
     suspend fun describe(call: ToolCall): JsonObject? = null
 
+    /**
+     * Why the write [call] couldn't run as it is (a missing field, a record that doesn't exist, a slot taken), as the
+     * error result the model reads; null when it can. Lets a caller refuse a proposal before a person is asked to confirm it.
+     */
+    suspend fun check(call: ToolCall): JsonObject? = null
+
     fun definitionsFor(modules: Collection<String>): List<ToolDefinition> =
         definitions.filter { definition -> moduleOf(definition.name)?.let { it in modules } ?: true }
 
@@ -41,6 +47,8 @@ class CrmToolPack(private val tools: CrmTools) : ToolPack {
     override fun isReadOnly(name: String): Boolean = name in CrmTools.READ_ONLY_TOOL_NAMES
     override fun moduleOf(name: String): String? = CrmTools.MODULE_OF_TOOL[name]
     override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject = tools.execute(call)
+    override suspend fun describe(call: ToolCall): JsonObject? = tools.describe(call)
+    override suspend fun check(call: ToolCall): JsonObject? = tools.check(call)
 }
 
 class BookingToolPack(private val tools: BookingTools) : ToolPack {
@@ -49,6 +57,8 @@ class BookingToolPack(private val tools: BookingTools) : ToolPack {
     override fun isReadOnly(name: String): Boolean = name in BookingTools.READ_ONLY_TOOL_NAMES
     override fun moduleOf(name: String): String? = BookingTools.MODULE_OF_TOOL[name]
     override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject = tools.execute(call, context.booking)
+    override suspend fun describe(call: ToolCall): JsonObject? = tools.describe(call)
+    override suspend fun check(call: ToolCall): JsonObject? = tools.check(call)
 }
 
 /** Routes each call to the first pack that knows it. */
@@ -63,4 +73,5 @@ class CompositeToolPack(private val packs: List<ToolPack>) : ToolPack {
     override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject =
         packFor(call.name)?.execute(call, context) ?: buildJsonObject { put("error", "Unknown tool: ${call.name}") }
     override suspend fun describe(call: ToolCall): JsonObject? = packFor(call.name)?.describe(call)
+    override suspend fun check(call: ToolCall): JsonObject? = packFor(call.name)?.check(call)
 }
