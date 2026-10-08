@@ -23,6 +23,7 @@ import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
 import com.rfm.edubot.ai.UsageInfo
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.dashboard.ConfirmOutcome
 import com.rfm.edubot.dashboard.DashboardAccessPolicy
 import com.rfm.edubot.dashboard.DashboardAssistantService
 import com.rfm.edubot.dashboard.DashboardContext
@@ -396,7 +397,7 @@ class AgentToolsTest {
         val thread = service.repository.createThread(tenant.id, owner, "Agentes")
         val modules = DashboardModules.effectiveFor(tenant)
 
-        service.reply(admin, owner, thread.id, modules, "Pausa o agente das faturas")
+        service.reply(admin, owner, thread, modules, "Pausa o agente das faturas")
 
         assertTrue(model.tools.first().map { it.name }.containsAll(listOf(AgentTools.LIST_AGENTS, AgentTools.PAUSE, AgentTools.DRAFT, "search_clients")))
         val system = model.seen.first().filter { it.role == "system" }.map { it.content.orEmpty() }
@@ -408,14 +409,14 @@ class AgentToolsTest {
         assertEquals(buildJsonObject { put("agent", "Faturas"); put("status", "ACTIVE") }, proposed.preview)
         assertEquals(AgentStatus.ACTIVE, module.agents.findById(tenant.id, agent.id)!!.status, "nothing changes before the confirmation")
 
-        assertTrue(service.confirm(admin, owner, thread.id, modules, proposed.id))
+        assertEquals(ConfirmOutcome.DONE, service.confirm(admin, owner, thread.id, modules, proposed.id))
 
         assertEquals(AgentStatus.PAUSED, module.agents.findById(tenant.id, agent.id)!!.status)
         val done = service.repository.listMessages(tenant.id, owner, thread.id).mapNotNull { it.action }.single()
         assertEquals("CONFIRMED", done.status)
         assertEquals("PAUSED", done.result!!.str("status"))
         assertEquals(3, model.seen.size, "the model explains the result")
-        assertFalse(service.confirm(admin, owner, thread.id, modules, proposed.id), "a confirmation runs once")
+        assertEquals(ConfirmOutcome.NOT_PENDING, service.confirm(admin, owner, thread.id, modules, proposed.id), "a confirmation runs once")
     }
 
     @Test
@@ -431,7 +432,7 @@ class AgentToolsTest {
         val owner = "user:${member.user!!.id.toHexString()}"
         val thread = service.repository.createThread(tenant.id, owner, "Agentes")
 
-        service.reply(member, owner, thread.id, DashboardModules.effectiveFor(tenant), "Pausa o agente das faturas")
+        service.reply(member, owner, thread, DashboardModules.effectiveFor(tenant), "Pausa o agente das faturas")
 
         val offered = model.tools.first().map { it.name }
         assertTrue(AgentTools.RUN in offered && AgentTools.DECIDE in offered)

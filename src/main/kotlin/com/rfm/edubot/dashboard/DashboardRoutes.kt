@@ -182,7 +182,7 @@ internal fun Route.dashboardRoutes(
                 val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.OVERVIEW)) return@get call.respond(HttpStatusCode.Forbidden)
                 val extended = call.request.queryParameters["extended"] == "1"
-                call.respond(OverviewService(mongo).build(ctx.tenant, extended))
+                call.respond(OverviewService(mongo).build(ctx.tenant, extended, ctx.assistantOwnerKey()))
             }
             get("/contacts") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -588,7 +588,7 @@ internal fun Route.dashboardRoutes(
                 pipelineFactory.evict(updated.id)
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
-            dashboardAssistantRoutes(mongo, aiClient, assistantExtension)
+            dashboardAssistantRoutes(mongo, aiClient, assistantExtension, inbox)
             crmRoutes(mongo, runtimeConfig, dashboardUsers, tenantRepository)
             installBookingRoutes {
                 val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
