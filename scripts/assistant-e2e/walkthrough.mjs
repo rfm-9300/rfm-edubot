@@ -32,7 +32,7 @@ const linger = ms => (HEADFUL ? new Promise(resolve => setTimeout(resolve, ms)) 
 async function check(name, fn) {
   try {
     await fn();
-    await linger(1200);
+    await linger(2500);
     results.push({ name, ok: true });
     console.log(`  ✓ ${name}`);
   } catch (e) {
@@ -135,16 +135,19 @@ async function open(token, theme = 'light') {
   return page;
 }
 
-const shot = (page, name) => page.screenshot({ path: path.join(OUT, `${name}.png`) });
+async function shot(page, name) {
+  await page.screenshot({ path: path.join(OUT, `${name}.png`) });
+  await linger(1800);
+}
 const text = (page, selector) => page.$eval(selector, el => el.innerText).catch(() => '');
 const settle = page => page.waitForFunction(() => !document.querySelector('.chat__typing') && !document.querySelector('#assistant-input')?.disabled, { timeout: 60000 });
 async function ask(page, message) {
   await page.click('#assistant-input');
-  await page.type('#assistant-input', message, { delay: HEADFUL ? 12 : 0 });
+  await page.type('#assistant-input', message, { delay: HEADFUL ? 35 : 0 });
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !!document.querySelector('.chat__typing') || document.querySelectorAll('.chat__msg--user').length > 0);
   await settle(page);
-  await linger(900);
+  await linger(2200);
 }
 const lastCard = page => page.$$eval('.assistant__action', cards => cards.at(-1)?.innerText || '');
 const lastCardState = page => page.$$eval('.assistant__action', cards => (cards.at(-1)?.className.match(/assistant__action--(\w+)/) || [])[1] || '');
@@ -330,6 +333,7 @@ await check('on a phone nothing scrolls sideways', async () => {
   const wide = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
   expect(wide <= 1, `the page is ${wide}px wider than the phone`);
   await phone.screenshot({ path: path.join(OUT, '13-phone.png'), fullPage: true });
+  await linger(2500);
   await phone.close();
 });
 
