@@ -225,7 +225,8 @@ class MessagePipeline(
             val bookingNote = bookingTools?.let {
                 SystemPrompts.BOOKING_TOOLS_NOTE + "\n" + SystemPrompts.bookingCustomerNote(bookingContext.customerName, bookingContext.customerPhone)
             }
-            val contextMessages = buildContext(conversation, inbound, bookingNote).toMutableList()
+            val handoffAllowed = PersonaPrompt.handsOff(persona, inbound.platform)
+            val contextMessages = buildContext(conversation, inbound, bookingNote, handoffAllowed).toMutableList()
             val confirmationReply = isConfirmationReplyToCrmPrompt(inbound.messageText, contextMessages)
             val continuingCrm = isContinuingCrmFlow(contextMessages)
             if (confirmationReply) {
@@ -288,7 +289,7 @@ class MessagePipeline(
             var feedbackSent = false
             val toolDefinitions = crmTools.definitionsFor(enabledModules) + (bookingTools?.definitions ?: emptyList())
             // A customer may ask for a person in any message, so the handoff is offered on every turn, unlike CRM tools.
-            var handoffOffered = PersonaPrompt.handsOff(persona)
+            var handoffOffered = handoffAllowed
             fun offeredTools() = (if (useTools) toolDefinitions else emptyList()) + (if (handoffOffered) listOf(PersonaPrompt.handoffTool) else emptyList())
             val handoffMessage = persona?.behavior?.handoff?.message?.trim()?.takeIf { it.isNotEmpty() }
             var handedOff = false
@@ -469,8 +470,8 @@ class MessagePipeline(
         }
     }
 
-    private suspend fun buildContext(conversation: Conversation, inbound: InboundMessage, bookingNote: String?): List<ChatMessage> {
-        val contextMessages = PersonaPrompt.customerSystemMessages(persona, enabledModules, timezoneId, bookingNote).toMutableList()
+    private suspend fun buildContext(conversation: Conversation, inbound: InboundMessage, bookingNote: String?, handoff: Boolean): List<ChatMessage> {
+        val contextMessages = PersonaPrompt.customerSystemMessages(persona, enabledModules, timezoneId, bookingNote, handoff).toMutableList()
 
         conversation.summary?.let { summary ->
             contextMessages.add(

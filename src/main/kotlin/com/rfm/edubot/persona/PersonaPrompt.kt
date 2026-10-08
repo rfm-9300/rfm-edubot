@@ -3,6 +3,7 @@ package com.rfm.edubot.persona
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.ToolDefinition
+import com.rfm.edubot.tenant.model.Platform
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import kotlinx.serialization.json.putJsonArray
@@ -57,17 +58,24 @@ object PersonaPrompt {
         modules: Set<String>,
         timezoneId: String,
         bookingNote: String? = null,
+        handoff: Boolean = handsOff(persona),
     ): List<ChatMessage> = buildList {
         add(ChatMessage(role = "system", content = personaBlock(persona) ?: SystemPrompts.DEFAULT_IDENTITY))
         add(ChatMessage(role = "system", content = SystemPrompts.CUSTOMER_GUARDRAILS))
         add(ChatMessage(role = "system", content = SystemPrompts.currentDateTimeContext(timezoneId)))
         SystemPrompts.crmPromptFor(modules)?.let { add(ChatMessage(role = "system", content = it)) }
         bookingNote?.let { add(ChatMessage(role = "system", content = it)) }
-        handoffNote(persona?.behavior?.handoff)?.let { add(ChatMessage(role = "system", content = it)) }
+        if (handoff) handoffNote(persona?.behavior?.handoff)?.let { add(ChatMessage(role = "system", content = it)) }
     }
 
     /** Whether the model may hand conversations to a person. */
     fun handsOff(persona: TenantPersona?): Boolean = persona?.behavior?.handoff?.enabled == true
+
+    /**
+     * Whether a chat on [platform] may be handed over: only where the team answers from the inbox. Website
+     * chats are read-only there, so a handover would leave the visitor with nobody to reply.
+     */
+    fun handsOff(persona: TenantPersona?, platform: Platform): Boolean = handsOff(persona) && platform != Platform.WEB
 
     fun handoffNote(handoff: PersonaHandoff?): String? {
         if (handoff?.enabled != true) return null

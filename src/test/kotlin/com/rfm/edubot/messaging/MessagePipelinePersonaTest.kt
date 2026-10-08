@@ -195,6 +195,18 @@ class MessagePipelinePersonaTest {
     }
 
     @Test
+    fun `a website chat is never handed over, since the team can't answer it from the inbox`(): Unit = runBlocking {
+        val model = FakeModel { FakeModel.text("Para falar com a equipa, ligue 210 000 000.") }
+
+        pipeline(model, persona(behavior = handoffOn)).handle(inbound("quero falar com uma pessoa").copy(platform = Platform.WEB), responder)
+
+        assertFalse(model.last().offers(PersonaPrompt.HANDOFF_TOOL))
+        assertFalse(model.last().system.any { it.startsWith("Handing over to a person") })
+        coVerify(exactly = 0) { conversations.setAutoReplyEnabled(any(), any(), any()) }
+        assertEquals(listOf("Para falar com a equipa, ligue 210 000 000."), sent)
+    }
+
+    @Test
     fun `a failing team notice doesn't stop the handover or the reply`(): Unit = runBlocking {
         val model = FakeModel { FakeModel.handoff("pediu reembolso") }
         val failing = MessagePipeline(
