@@ -4,12 +4,6 @@ import at.favre.lib.crypto.bcrypt.BCrypt
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
 import com.rfm.edubot.ai.AiClient
-import com.rfm.edubot.ai.ChatMessage
-import com.rfm.edubot.ai.SystemPrompts
-import com.rfm.edubot.ai.TenantUsageRepository
-import com.rfm.edubot.ai.UsageSources
-import com.rfm.edubot.ai.tools.CrmToolPack
-import com.rfm.edubot.ai.tools.ToolLoop
 import com.rfm.edubot.admin.CreateClientRequest
 import com.rfm.edubot.admin.CreateClientServiceRequest
 import com.rfm.edubot.admin.CreateInvoiceRequest
@@ -44,7 +38,6 @@ import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.ClientServiceBilling
 import com.rfm.edubot.crm.ClientServiceDelete
 import com.rfm.edubot.crm.ClientServiceRepository
-import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.DirectoryDelete
 import com.rfm.edubot.crm.InvoiceChange
 import com.rfm.edubot.crm.InvoiceRepository
@@ -69,11 +62,6 @@ import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaCompiler
-import com.rfm.edubot.persona.PersonaFileExtractor
-import com.rfm.edubot.persona.PersonaRepository
-import com.rfm.edubot.persona.PersonaSource
-import com.rfm.edubot.persona.PersonaStatus
-import com.rfm.edubot.persona.SourceKind
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
@@ -118,8 +106,6 @@ import java.nio.file.Path
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 import java.util.Date
@@ -327,79 +313,7 @@ internal fun Route.dashboardRoutes(
                 val type = runCatching { ContentType.parse(file.mimeType) }.getOrDefault(ContentType.Application.OctetStream)
                 call.respondBytes(file.bytes, type)
             }
-            get("/persona") {
-                val ctx = call.dashboardContext() ?: return@get
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@get call.respond(HttpStatusCode.Forbidden)
-                val repo = PersonaRepository(mongo)
-                call.respond(personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
-            }
-            put("/persona") {
-                val ctx = call.dashboardContext() ?: return@put
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@put call.respond(HttpStatusCode.Forbidden)
-                val request = call.receive<PersonaUpdateRequest>()
-                val repo = PersonaRepository(mongo)
-                val persona = repo.upsertCompiled(ctx.tenant.id, request.compiledInstructions.trim())
-                pipelineFactory.evict(ctx.tenant.id)
-                call.respond(personaDto(persona, repo.listSources(ctx.tenant.id)))
-            }
-            post("/persona/sources") {
-                val ctx = call.dashboardContext() ?: return@post
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
-                val content = call.receive<PersonaSourceRequest>().content.trim()
-                if (content.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "content is required"))
-                val repo = PersonaRepository(mongo)
-                repo.addSource(ctx.tenant.id, SourceKind.TEXT_NOTE, content, content.take(60))
-                personaCompiler.enqueue(ctx.tenant.id, ctx.tenant.openrouterModel)
-                call.respond(HttpStatusCode.Accepted, personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
-            }
-            post("/persona/sources/file") {
-                val ctx = call.dashboardContext() ?: return@post
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
-                var filename: String? = null
-                var bytes: ByteArray? = null
-                call.receiveMultipart().forEachPart { part ->
-                    if (part is PartData.FileItem) {
-                        filename = part.originalFileName
-                        bytes = part.provider().readRemaining().readByteArray()
-                    }
-                    part.dispose()
-                }
-                val name = filename?.takeIf { it.isNotBlank() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no file provided"))
-                val data = bytes ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty file"))
-                val text = try {
-                    PersonaFileExtractor.extract(name, data)
-                } catch (e: PersonaFileExtractor.UnsupportedFileException) {
-                    return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to (e.message ?: "unsupported file")))
-                }
-                if (text.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no extractable text in file"))
-                val repo = PersonaRepository(mongo)
-                repo.addSource(ctx.tenant.id, SourceKind.FILE, text, name)
-                personaCompiler.enqueue(ctx.tenant.id, ctx.tenant.openrouterModel)
-                call.respond(HttpStatusCode.Accepted, personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
-            }
-            delete("/persona/sources/{id}") {
-                val ctx = call.dashboardContext() ?: return@delete
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@delete call.respond(HttpStatusCode.Forbidden)
-                val repo = PersonaRepository(mongo)
-                if (!repo.deleteSource(ctx.tenant.id, ObjectId(call.parameters["id"]))) return@delete call.respond(HttpStatusCode.NotFound)
-                call.respond(mapOf("deleted" to true))
-            }
-            post("/persona/rebuild") {
-                val ctx = call.dashboardContext() ?: return@post
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
-                personaCompiler.rebuild(ctx.tenant.id, ctx.tenant.openrouterModel)
-                val repo = PersonaRepository(mongo)
-                call.respond(personaDto(repo.findByTenant(ctx.tenant.id), repo.listSources(ctx.tenant.id)))
-            }
-            post("/persona/test") {
-                val ctx = call.dashboardContext() ?: return@post
-                if (!ctx.requireModule(DashboardModules.PERSONA)) return@post call.respond(HttpStatusCode.Forbidden)
-                val request = call.receive<PersonaTestRequest>()
-                val history = request.messages.filter { it.content.isNotBlank() }.takeLast(20)
-                if (history.isEmpty()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "messages are required"))
-                val reply = runPersonaTest(mongo, aiClient, ctx.tenant, history)
-                call.respond(PersonaTestResponse(reply))
-            }
+            personaRoutes(mongo, pipelineFactory, personaCompiler, aiClient)
             get("/web-widget") {
                 val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
@@ -1422,59 +1336,6 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
     .withExpiresAt(Date(System.currentTimeMillis() + expiryHours * 60L * 60L * 1000L))
     .sign(Algorithm.HMAC256(config.jwtSecret))
 
-/**
- * Ephemeral persona playground: runs the tenant's saved persona against an in-memory chat history
- * with read-only CRM tools only. Nothing is persisted, dedup/rate-limit are bypassed, and write
- * tools (create/update/mark-paid) are never offered or executed, so test chats cannot mutate data.
- */
-private suspend fun runPersonaTest(
-    mongo: MongoModule,
-    aiClient: AiClient,
-    tenant: Tenant,
-    history: List<PersonaTestMessage>,
-): String {
-    val modules = DashboardModules.effectiveFor(tenant).toSet()
-    val persona = PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions
-    val context = mutableListOf<ChatMessage>()
-    val personaBlock = persona?.takeIf { it.isNotBlank() }
-    context.add(
-        ChatMessage(
-            role = "system",
-            content = if (personaBlock != null) "<persona>\n$personaBlock\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
-        )
-    )
-    SystemPrompts.crmPromptFor(modules)?.let { crmPrompt -> context.add(ChatMessage(role = "system", content = crmPrompt)) }
-    for (msg in history) {
-        val role = if (msg.role == "assistant") "assistant" else "user"
-        context.add(ChatMessage(role = role, content = msg.content))
-    }
-
-    val crmTools = CrmToolPack(
-        CrmTools(
-            ClientRepository(mongo, tenant.id),
-            QuoteRepository(mongo, tenant.id),
-            InvoiceRepository(mongo, tenant.id),
-            StandardItemRepository(mongo, tenant.id),
-        ),
-    )
-    val result = ToolLoop(aiClient).run(
-        messages = context,
-        tools = crmTools,
-        definitions = crmTools.readOnlyDefinitionsFor(modules),
-        maxIterations = 4,
-        modelOverride = tenant.openrouterModel,
-        fallbackInstruction = "Responda agora ao utilizador sem chamar ferramentas.",
-        deniedResult = {
-            buildJsonObject {
-                put("error", "tool_not_available_in_test")
-                put("message", "This action is disabled in the persona test chat.")
-            }
-        },
-    )
-    TenantUsageRepository(mongo, tenant.id).recordUsage(result.usage.total.toLong(), UsageSources.ASSISTANT)
-    return result.text ?: "Desculpe, não consegui processar isso."
-}
-
 @Serializable private data class DashboardLoginResponse(val token: String)
 @Serializable private data class ArchiveStateDto(val archivedAt: String?)
 @Serializable private data class DashboardUserCreateRequest(val email: String, val password: String, val role: String = "TENANT_ADMIN")
@@ -1500,13 +1361,6 @@ private suspend fun runPersonaTest(
 )
 @Serializable private data class DashboardUserDto(val id: String, val email: String, val role: String, val status: String)
 @Serializable private data class ContactStatusRequest(val status: String)
-@Serializable private data class PersonaUpdateRequest(val compiledInstructions: String)
-@Serializable private data class PersonaSourceRequest(val content: String)
-@Serializable private data class PersonaTestMessage(val role: String, val content: String)
-@Serializable private data class PersonaTestRequest(val messages: List<PersonaTestMessage>)
-@Serializable private data class PersonaTestResponse(val reply: String)
-@Serializable private data class PersonaSourceDto(val id: String, val kind: String, val label: String, val compiled: Boolean, val createdAt: String)
-@Serializable private data class PersonaDto(val compiledInstructions: String, val version: Int, val tokenEstimate: Int, val status: String, val updatedAt: String?, val sources: List<PersonaSourceDto>)
 @Serializable private data class ContactDto(val id: String, val waId: String, val channel: String, val displayName: String?, val status: String, val lastSeenAt: String)
 @Serializable private data class QuoteStatusRequest(val status: String)
 @Serializable private data class ConvertQuoteRequest(val dueDate: String)
@@ -1610,14 +1464,6 @@ private fun Tenant.dto() = TenantMeDto(
     },
 )
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
-private fun personaDto(persona: com.rfm.edubot.persona.TenantPersona?, sources: List<PersonaSource>) = PersonaDto(
-    compiledInstructions = persona?.compiledInstructions.orEmpty(),
-    version = persona?.version ?: 0,
-    tokenEstimate = persona?.tokenEstimate ?: 0,
-    status = persona?.status?.name ?: PersonaStatus.EMPTY.name,
-    updatedAt = persona?.updatedAt?.toString(),
-    sources = sources.map { PersonaSourceDto(it.id.toHexString(), it.kind.name, it.label, it.compiledIntoVersion != null, it.createdAt.toString()) },
-)
 private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, channel.name, displayName, status.name, lastSeenAt.toString())
 private fun com.rfm.edubot.conversation.model.Conversation.dto(
     displayName: String?,
@@ -1634,7 +1480,7 @@ private fun com.rfm.edubot.conversation.model.Conversation.dto(
     messageCount,
     lastPreview = last?.previewText(),
     lastRole = last?.role?.name,
-    waiting = last?.role == UserRole.USER,
+    waiting = needsTeamReply(last),
     autoReplyEnabled = autoReplyEnabled,
     unreadCount = unreadCount,
     lastAuthor = last?.authorLabel(),

@@ -5,6 +5,7 @@ import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.ChatMessage
 import com.rfm.edubot.ai.SystemPrompts
 import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.OutboundDeliveryException
@@ -29,6 +30,9 @@ import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.TokenUsage
 import com.rfm.edubot.conversation.model.UserRole
+import com.rfm.edubot.persona.PersonaHandoff
+import com.rfm.edubot.persona.PersonaPrompt
+import com.rfm.edubot.persona.TenantPersona
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
@@ -60,12 +64,17 @@ class MessagePipeline(
     private val pdfGenerator: PdfGenerator,
     private val documentTemplate: DocumentTemplate = DocumentTemplate(),
     private val openrouterModel: String? = null,
-    private val compiledPersona: String? = null,
+    private val persona: TenantPersona? = null,
     private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
     private val tenantUsage: TenantUsageRepository? = null,
     private val monthlyTokenBudget: Long = Long.MAX_VALUE,
     private val timezoneId: String = TenantTimeZones.DEFAULT,
+    /** Told when the bot hands a conversation to the team, after its replies there are paused. */
+    private val onHandoff: (suspend (Handoff) -> Unit)? = null,
 ) {
+    /** A conversation the bot passed to a person, with the customer's name when known and the model's reason. */
+    data class Handoff(val conversation: Conversation, val customerName: String?, val reason: String)
+
     private val log = LoggerFactory.getLogger("MessagePipeline")
     private val json = Json { ignoreUnknownKeys = true; explicitNulls = false }
 
@@ -208,7 +217,15 @@ class MessagePipeline(
                 return
             }
 
-            val contextMessages = buildContext(conversation, inbound.messageText).toMutableList()
+            val bookingContext = BookingCallContext(
+                source = inbound.platform.bookingSource(),
+                customerName = user.displayName?.takeIf { it.isNotBlank() } ?: profileName,
+                customerPhone = if (inbound.platform == Platform.WHATSAPP) "+${user.waId}" else null,
+            )
+            val bookingNote = bookingTools?.let {
+                SystemPrompts.BOOKING_TOOLS_NOTE + "\n" + SystemPrompts.bookingCustomerNote(bookingContext.customerName, bookingContext.customerPhone)
+            }
+            val contextMessages = buildContext(conversation, inbound, bookingNote).toMutableList()
             val confirmationReply = isConfirmationReplyToCrmPrompt(inbound.messageText, contextMessages)
             val continuingCrm = isContinuingCrmFlow(contextMessages)
             if (confirmationReply) {
@@ -270,17 +287,11 @@ class MessagePipeline(
             var useTools = shouldUseCrmTools(inbound.messageText) || shouldUseBookingTools(inbound.messageText) || continuingCrm || isConfirmedCrmAction
             var feedbackSent = false
             val toolDefinitions = crmTools.definitionsFor(enabledModules) + (bookingTools?.definitions ?: emptyList())
-            val bookingContext = BookingCallContext(
-                source = inbound.platform.bookingSource(),
-                customerName = user.displayName?.takeIf { it.isNotBlank() } ?: profileName,
-                customerPhone = if (inbound.platform == Platform.WHATSAPP) "+${user.waId}" else null,
-            )
-            if (bookingTools != null) {
-                contextMessages.add(
-                    1,
-                    ChatMessage(role = "system", content = SystemPrompts.BOOKING_TOOLS_NOTE + "\n" + SystemPrompts.bookingCustomerNote(bookingContext.customerName, bookingContext.customerPhone)),
-                )
-            }
+            // A customer may ask for a person in any message, so the handoff is offered on every turn, unlike CRM tools.
+            var handoffOffered = PersonaPrompt.handsOff(persona)
+            fun offeredTools() = (if (useTools) toolDefinitions else emptyList()) + (if (handoffOffered) listOf(PersonaPrompt.handoffTool) else emptyList())
+            val handoffMessage = persona?.behavior?.handoff?.message?.trim()?.takeIf { it.isNotEmpty() }
+            var handedOff = false
 
             // Send immediate feedback before the first AI call when we know tools will run,
             // so the user doesn't wait in silence during the ~4-5s model latency.
@@ -292,12 +303,14 @@ class MessagePipeline(
             while (!completed && iterations < 5) {
                 iterations += 1
                 val forceTools = useTools && isConfirmedCrmAction && iterations == 1
+                val offered = offeredTools()
                 val aiResponse = try {
-                    aiClient.complete(contextMessages, if (useTools) toolDefinitions else emptyList(), forceToolUse = forceTools, modelOverride = openrouterModel)
+                    aiClient.complete(contextMessages, offered, forceToolUse = forceTools, modelOverride = openrouterModel)
                 } catch (e: Exception) {
-                    if (useTools && e.message?.contains("tool", ignoreCase = true) == true) {
+                    if (offered.isNotEmpty() && e.message?.contains("tool", ignoreCase = true) == true) {
                         log.warn("AI model rejected tool use; retrying without tools: {}", e.message)
                         useTools = false
+                        handoffOffered = false
                         aiClient.complete(contextMessages, emptyList(), modelOverride = openrouterModel)
                     } else {
                         throw e
@@ -320,11 +333,14 @@ class MessagePipeline(
                         completed = true
                     }
                     is AiResponse.ToolUse -> {
-                        if (!feedbackSent) {
-                            responder.sendText(user.waId, "Um momento, processando...")
-                            feedbackSent = true
-                        } else if (iterations == 2) {
-                            responder.sendText(user.waId, "Quase pronto, gerando o documento...")
+                        // Handing over is instant, so it gets no "processing" note before the goodbye.
+                        if (aiResponse.calls.any { it.name != PersonaPrompt.HANDOFF_TOOL }) {
+                            if (!feedbackSent) {
+                                responder.sendText(user.waId, "Um momento, processando...")
+                                feedbackSent = true
+                            } else if (iterations == 2) {
+                                responder.sendText(user.waId, "Quase pronto, gerando o documento...")
+                            }
                         }
                         // Accumulate across tool-loop iterations - each iteration is a separate
                         // OpenRouter call, and undercounting here would make the monthly token
@@ -340,6 +356,20 @@ class MessagePipeline(
                         contextMessages.add(aiResponse.message)
                         for (call in aiResponse.calls) {
                             log.info("Executing tool: name={}, id={}", call.name, call.id)
+                            if (call.name == PersonaPrompt.HANDOFF_TOOL) {
+                                val result = if (handoffOffered) {
+                                    if (!handedOff) handOff(conversation, bookingContext.customerName, call)
+                                    handedOff = true
+                                    buildJsonObject {
+                                        put("handed_off", true)
+                                        put("instruction", "The team now has this conversation. Tell the customer briefly that a person will continue here; don't promise a time.")
+                                    }
+                                } else {
+                                    buildJsonObject { put("error", "tool_not_available") }
+                                }
+                                contextMessages.add(ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id))
+                                continue
+                            }
                             val result = try {
                                 if (requiresExplicitConfirmation(call.name) && !isConfirmedCrmAction && !hasExplicitConfirmation(inbound.messageText, contextMessages)) {
                                     buildJsonObject {
@@ -373,6 +403,10 @@ class MessagePipeline(
                             result.createdDocument()?.let { createdDocuments.add(it) }
                             contextMessages.add(ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id))
                         }
+                        if (handedOff && handoffMessage != null) {
+                            replyText = handoffMessage
+                            completed = true
+                        }
                     }
                 }
             }
@@ -382,7 +416,7 @@ class MessagePipeline(
                 val finalResponse = aiClient.complete(
                     contextMessages + ChatMessage(
                         role = "system",
-                        content = "Do not call tools now. Reply to the user in Portuguese with the current result. If a tool returned confirmation_required, ask for confirmation before any record is created."
+                        content = "Do not call tools now. Reply to the user with the current result, in the language your persona and this conversation call for. If a tool returned confirmation_required, ask for confirmation before any record is created."
                     ),
                     emptyList(),
                     modelOverride = openrouterModel,
@@ -435,21 +469,8 @@ class MessagePipeline(
         }
     }
 
-    private suspend fun buildContext(conversation: Conversation, newUserMessage: String): List<ChatMessage> {
-        val contextMessages = mutableListOf<ChatMessage>()
-
-        val persona = compiledPersona?.takeIf { it.isNotBlank() }
-        contextMessages.add(
-            ChatMessage(
-                role = "system",
-                content = if (persona != null) "<persona>\n$persona\n</persona>" else SystemPrompts.DEFAULT_IDENTITY,
-            )
-        )
-        contextMessages.add(ChatMessage(role = "system", content = SystemPrompts.currentDateTimeContext(timezoneId)))
-
-        SystemPrompts.crmPromptFor(enabledModules)?.let { crmPrompt ->
-            contextMessages.add(ChatMessage(role = "system", content = crmPrompt))
-        }
+    private suspend fun buildContext(conversation: Conversation, inbound: InboundMessage, bookingNote: String?): List<ChatMessage> {
+        val contextMessages = PersonaPrompt.customerSystemMessages(persona, enabledModules, timezoneId, bookingNote).toMutableList()
 
         conversation.summary?.let { summary ->
             contextMessages.add(
@@ -460,7 +481,10 @@ class MessagePipeline(
             )
         }
 
-        val recentMessages = messages.lastNByWaId(conversation.waId, 10, conversation.channel)
+        // The message being answered is stored before this runs; it goes last, once.
+        val recentMessages = messages.lastNByWaId(conversation.waId, 11, conversation.channel)
+            .filterNot { it.role == UserRole.USER && it.waMessageId != null && it.waMessageId == inbound.waMessageId }
+            .takeLast(10)
         for (msg in recentMessages) {
             when (msg.content) {
                 is MessageContent.Text -> {
@@ -476,9 +500,18 @@ class MessagePipeline(
             }
         }
 
-        contextMessages.add(ChatMessage(role = "user", content = newUserMessage))
+        contextMessages.add(ChatMessage(role = "user", content = inbound.messageText))
 
         return contextMessages
+    }
+
+    /** Pauses the bot in [conversation] the way a person pausing it in the inbox would, then tells the team. */
+    private suspend fun handOff(conversation: Conversation, customerName: String?, call: ToolCall) {
+        val reason = call.arguments["reason"]?.jsonPrimitive?.contentOrNull?.trim()?.take(300).orEmpty()
+        conversations.setAutoReplyEnabled(conversation.id, false, PersonaHandoff.PAUSED_BY)
+        log.info("Conversation handed to the team: conversationId={}, reason={}", conversation.id, reason)
+        runCatching { onHandoff?.invoke(Handoff(conversation, customerName, reason)) }
+            .onFailure { log.warn("Handoff notice failed: conversationId={}, error={}", conversation.id, it.message) }
     }
 
     /** Tells the AI a customer sent media it cannot open, with the caption when there was one. */

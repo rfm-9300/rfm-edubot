@@ -1,6 +1,7 @@
 package com.rfm.edubot
 
 import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.admin.AdminAccess
 import com.rfm.edubot.admin.AdminEmailRepository
 import com.rfm.edubot.admin.BackupControl
@@ -192,7 +193,13 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         aiClient = aiClient,
         scope = pipelineScope,
         onCompiled = { tenantId -> pipelineFactory.evict(tenantId) },
+        usageFor = { tenantId -> TenantUsageRepository(mongoModule, tenantId) },
     )
+    // A deploy can stop the server mid-synthesis or before a debounced one ran; finish those now.
+    pipelineScope.launch {
+        runCatching { personaCompiler.resumePending { tenantRepository.findById(it) } }
+            .onFailure { LoggerFactory.getLogger("Application").warn("Could not resume persona synthesis: {}", it.message) }
+    }
 
     val tokenCipher = TokenCipher.fromConfig(appConfig.integrations.encryptionKey)
     if (tokenCipher == null && appConfig.integrations.encryptionKey.isNotBlank()) {

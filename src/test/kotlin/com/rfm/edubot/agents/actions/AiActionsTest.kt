@@ -48,7 +48,11 @@ import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.notifications.NotificationKinds
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.persona.PersonaAddressForm
+import com.rfm.edubot.persona.PersonaBehavior
+import com.rfm.edubot.persona.PersonaEmoji
 import com.rfm.edubot.persona.PersonaRepository
+import com.rfm.edubot.persona.PersonaTone
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
@@ -90,6 +94,7 @@ import org.junit.jupiter.api.BeforeAll
 import java.util.Collections
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
 import kotlin.time.Duration.Companion.hours
@@ -412,6 +417,27 @@ class AiActionsTest {
         assertEquals("Cara Ana,\n\nObrigado.\n\nEquipa Obras Silva", mail.output.text("text"), "a signature already there isn't added twice")
         assertEquals("Pagamento recebido", mail.output.text("subject"))
         assertEquals(listOf("text", "subject"), model.tools[1].single().parameters["required"]!!.jsonArray.map { it.jsonPrimitive.content })
+    }
+
+    @Test
+    fun `a composed message takes the Persona's rules and form of address, while the agent's voice keeps the tone`(): Unit = runBlocking {
+        val tenant = tenant()
+        val subject = SubjectRef.of(SubjectTypes.INVOICE, invoiceFor(tenant))
+        val personas = PersonaRepository(mongo)
+        personas.upsertCompiled(tenant.id, "Garantia de 2 anos em todas as obras.")
+        personas.saveBehavior(
+            tenant.id,
+            PersonaBehavior(botName = "Sofia", tone = PersonaTone.CASUAL, addressForm = PersonaAddressForm.FORMAL, emoji = PersonaEmoji.EXPRESSIVE, rules = listOf("Nunca prometa prazos.")),
+            null,
+        )
+        val model = Model(calls("submit_message" to buildJsonObject { put("text", "Caro cliente, obrigado.") }))
+
+        execute(AiComposeAction, context(tenant, subject, step("ai.compose", buildJsonObject { put("brief", "Agradecer") }), model.client, voice = AgentVoice(tone = "formal", usePersona = true)))
+
+        val persona = model.seen[0].first { it.content!!.startsWith("<persona>") }.content!!
+        assertTrue("Address the customer formally" in persona && "Nunca prometa prazos." in persona && "Garantia de 2 anos" in persona, persona)
+        listOf("Sofia", "Tone:", "Emoji:").forEach { assertFalse(it in persona, "$it should come from the agent's voice, not the Persona: $persona") }
+        assertTrue("Tone: formal" in model.seen[0].first().content!!)
     }
 
     @Test

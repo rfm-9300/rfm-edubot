@@ -936,7 +936,7 @@ class OverviewService(private val mongo: MongoModule) {
             .displayNamesByIds(conversations.map { it.userId })
         return conversations.mapNotNull { convo ->
             val message = last[convo.id] ?: return@mapNotNull null
-            if (message.role != UserRole.USER) return@mapNotNull null
+            if (!convo.needsTeamReply(message)) return@mapNotNull null
             val name = displayNames[convo.userId]?.takeIf { it.isNotBlank() } ?: convo.waId
             val preview = when (val content = message.content) {
                 is MessageContent.Text -> content.body.trim()
