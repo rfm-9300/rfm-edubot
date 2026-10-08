@@ -27,9 +27,12 @@ const PASSWORD = 'Walkthrough-2026!';
 fs.mkdirSync(OUT, { recursive: true });
 
 const results = [];
+/** Headful runs stop for a moment at each step, so a person (or a recording) can follow along. */
+const linger = ms => (HEADFUL ? new Promise(resolve => setTimeout(resolve, ms)) : Promise.resolve());
 async function check(name, fn) {
   try {
     await fn();
+    await linger(1200);
     results.push({ name, ok: true });
     console.log(`  ✓ ${name}`);
   } catch (e) {
@@ -113,7 +116,7 @@ const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: !HEADFUL,
   slowMo: SLOW,
-  args: ['--no-sandbox', '--window-size=1400,940', '--window-position=0,0'],
+  args: ['--no-sandbox', HEADFUL ? '--start-maximized' : '--window-size=1400,940', '--window-position=0,0'],
   defaultViewport: HEADFUL ? null : { width: 1400, height: 900 },
 });
 await browser.defaultBrowserContext().overridePermissions(APP, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
@@ -141,6 +144,7 @@ async function ask(page, message) {
   await page.keyboard.press('Enter');
   await page.waitForFunction(() => !!document.querySelector('.chat__typing') || document.querySelectorAll('.chat__msg--user').length > 0);
   await settle(page);
+  await linger(900);
 }
 const lastCard = page => page.$$eval('.assistant__action', cards => cards.at(-1)?.innerText || '');
 const lastCardState = page => page.$$eval('.assistant__action', cards => (cards.at(-1)?.className.match(/assistant__action--(\w+)/) || [])[1] || '');
