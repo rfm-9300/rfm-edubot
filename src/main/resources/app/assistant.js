@@ -545,7 +545,7 @@
     const searchable = ui.threads.length > 4 || !!ui.query;
     const threads = ui.query ? ui.threads.filter(t => fold(t.title).includes(fold(ui.query))) : ui.threads;
     const messages = current?.messages || [];
-    const settingsButton = `<button class="btn btn--sm" type="button" id="assistant-settings">${esc(T.settings)}</button>`;
+    const settingsButton = `<div class="actions"><button class="btn btn--sm" type="button" id="assistant-settings">${esc(T.settings)}</button></div>`;
     const head = current ? `<div class="assistant__head">
         <p class="assistant__title" title="${esc(current.thread.title)}">${esc(current.thread.title)}</p>
         <div class="actions">${s && !s.allowChanges ? `<span class="pill" title="${esc(T.readOnlyHint)}">${esc(T.readOnly)}</span>` : ''}
