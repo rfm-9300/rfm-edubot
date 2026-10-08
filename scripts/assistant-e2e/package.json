@@ -1,0 +1,12 @@
+{
+  "name": "assistant-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser walkthrough of the dashboard's AI Assistant against a running app and fake-openrouter.py.",
+  "scripts": {
+    "walkthrough": "node walkthrough.mjs"
+  },
+  "dependencies": {
+    "puppeteer-core": "^23.11.1"
+  }
+}

@@ -6,6 +6,9 @@
 *.hprof
 build/
 .gradle/
+# The browser walkthroughs' npm installs and screenshots.
+/scripts/*/node_modules/
+/scripts/*/out/
 .idea/
 mobile/local.properties
 mobile/build/

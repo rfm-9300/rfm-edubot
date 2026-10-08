@@ -271,6 +271,9 @@ def plan(last, tools, done, today, t):
         nif = find(r"(?:nif|tax id|nie|cif)\s*:?\s*(\d{9})", last)
         if nif:
             args["tax_id"] = nif
+        address = find(r"(?:morada|address|dirección)\s+(.+?)(?=\s+(?:em|in|en|nif|tax|com|with)\b|,|$)", last)
+        if address:
+            args["address"] = address
         city = find(r"(?:em|in|en)\s+([A-ZÁÉÍÓÚ][\wÀ-ÿ]+)\s*$", last, flags=0)
         if city:
             args["city"] = city
@@ -330,7 +333,7 @@ def plan(last, tools, done, today, t):
             return step
 
     if re.search(r"(responde|reply|responder|answer).*(:|dizendo|saying|diciendo)", low) and offered(tools, "list_conversations"):
-        who = find(r"(?:responde|reply|responder|answer)\s+(?:à|ao|a|to)\s+([A-ZÁÉÍÓÚ][\wÀ-ÿ'-]+)", last, flags=0)
+        who = find(r"(?i:responde|reply|responder|answer)\s+(?i:à|ao|a|to)\s+([A-ZÁÉÍÓÚ][\wÀ-ÿ'-]+)", last, flags=0)
         text = find(r"[:]\s*(.+)$", last) or find(r"(?:dizendo|saying|diciendo)\s+(.+)$", last) or ""
         if "list_conversations" not in names:
             return ("tool", "list_conversations", {"query": who or ""})
