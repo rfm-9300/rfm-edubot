@@ -369,8 +369,11 @@
     return rows;
   }
 
-  /** What the card lists: the names, numbers and amounts behind the change, never raw ids when the server named them. */
-  function actionDetails(action) {
+  /**
+   * What the card lists: the names, numbers and amounts behind the change, never raw ids when the server named
+   * them, and not the names its title already gives.
+   */
+  function actionDetails(action, title) {
     if (AGENT_TOOLS.has(action.toolName)) return agentDetails(action);
     const S = d.STR;
     const D = T.detail;
@@ -379,21 +382,22 @@
     const named = Object.keys(p).length > 0;
     const rows = [];
     const add = (label, value) => { if (value !== undefined && value !== null && value !== '') rows.push(`${label}: ${value}`); };
+    const name = (label, value) => { if (value && !title.includes(String(value))) add(label, value); };
     const money = v => (v === undefined || v === null ? '' : d.fmtEUR(v));
     const day = v => (v ? d.fmtDay(v) : '');
-    add(D.client, p.client);
-    add(D.quote, p.quote);
-    add(D.invoice, p.invoice);
-    add(D.payment, p.payment);
-    add(D.payee, p.payee);
+    name(D.client, p.client);
+    name(D.quote, p.quote);
+    name(D.invoice, p.invoice);
+    name(D.payment, p.payment);
+    name(D.payee, p.payee);
     add(D.booking, p.booking);
-    add(D.contact, p.contact);
+    name(D.contact, p.contact);
     add(D.channel, p.channel ? (T.channels[p.channel] || p.channel) : '');
-    add(D.service, p.service);
+    name(D.service, p.service);
     add(D.whenFrom, p.when_from);
     add(D.when, p.when);
     add(D.duration, p.duration_minutes ? d.fmtMinutes(p.duration_minutes) : '');
-    if (action.toolName === 'create_client') CLIENT_FIELDS.forEach(field => add(T.fields[field], args[field]));
+    if (action.toolName === 'create_client') CLIENT_FIELDS.forEach(field => (field === 'name' ? name : add)(T.fields[field], args[field]));
     (p.changes || []).forEach(c => rows.push(`${T.fields[c.field] || c.field}: ${c.from || '—'} → ${c.to || '—'}`));
     (args.items || []).forEach(item => rows.push(`${item.description} · ${item.quantity || 1} × ${d.fmtEUR(item.price_eur)}`));
     add(D.totalFrom, money(p.total_from_eur));
@@ -447,15 +451,25 @@
     return buttons.length ? `<div class="assistant__action-buttons">${buttons.join('')}</div>` : '';
   }
 
+  /** Why a confirmed change failed, in the person's language when the dashboard knows the reason; the tool's own text is for the model. */
+  function failureReason(action) {
+    const code = action.result?.error || '';
+    const known = key => { const value = d.STR[key]; return typeof value === 'string' && value !== `app.${key}` ? value : ''; };
+    if (!code) return '';
+    if (code === 'phone_taken') return known('clientPhoneTaken');
+    if (code === 'invalid_email') return known('clientInvalidEmail');
+    return known(`inboxErr_${code}`) || known(`bookingsErr_${code}`);
+  }
+
   function actionCard(action) {
     const p = action.preview || {};
-    const details = actionDetails(action);
+    const title = actionTitle(action);
+    const details = actionDetails(action, title);
     const status = action.status;
-    const failure = status === 'FAILED' ? (action.result?.message || '') : '';
-    const note = status === 'EXPIRED' ? T.expiredHint : status === 'FAILED' ? T.failedHint({ reason: failure }) : '';
+    const note = status === 'EXPIRED' ? T.expiredHint : status === 'FAILED' ? T.failedHint({ reason: failureReason(action) }) : '';
     const message = action.toolName === 'reply_to_conversation' ? (p.text || action.arguments?.text || '') : '';
     return `<div class="assistant__action assistant__action--${esc(status.toLowerCase())}">
-      <div class="assistant__action-head"><div><span class="assistant__action-label">${esc(d.STR.assistantProposedAction)}</span><strong>${esc(actionTitle(action))}</strong></div>
+      <div class="assistant__action-head"><div><span class="assistant__action-label">${esc(d.STR.assistantProposedAction)}</span><strong>${esc(title)}</strong></div>
         <span class="pill ${STATUS_TONES[status] || ''}">${esc(statusLabel(status))}</span></div>
       ${details.length ? `<ul class="assistant__action-details">${details.map(row => `<li>${esc(row)}</li>`).join('')}</ul>` : ''}
       ${message ? `<blockquote class="assistant__quote">${esc(message)}</blockquote>` : ''}
@@ -529,6 +543,8 @@
   function render(root) {
     const current = ui.current;
     const s = ui.settings;
+    // The box stays while a search is on, so a list that shrank below it can still be cleared.
+    const searchable = ui.threads.length > 4 || !!ui.query;
     const threads = ui.query ? ui.threads.filter(t => fold(t.title).includes(fold(ui.query))) : ui.threads;
     const messages = current?.messages || [];
     const settingsButton = `<button class="btn btn--sm" type="button" id="assistant-settings">${esc(T.settings)}</button>`;
@@ -545,7 +561,7 @@
       <div class="assistant">
         <aside class="assistant__sidebar">
           <button class="btn btn--primary" id="assistant-new" type="button"${ui.busy ? ' disabled' : ''}>${esc(d.STR.assistantNewThread)}</button>
-          ${ui.threads.length > 4 ? `<input class="inp assistant__search" id="assistant-search" type="search" placeholder="${esc(T.search)}" aria-label="${esc(T.search)}" value="${esc(ui.query)}" />` : ''}
+          ${searchable ? `<input class="inp assistant__search" id="assistant-search" type="search" placeholder="${esc(T.search)}" aria-label="${esc(T.search)}" value="${esc(ui.query)}" />` : ''}
           <div class="assistant__threads">${threads.map(threadRow).join('') || `<p class="chat__empty">${esc(ui.query ? T.searchEmpty : d.STR.assistantNoThreads)}</p>`}</div>
         </aside>
         <div class="panel assistant__chat">
