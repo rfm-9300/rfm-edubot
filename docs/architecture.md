@@ -33,12 +33,17 @@ sequenceDiagram
         P->>R: tryAcquire(waId)
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message (skipped if already stored)
+        Note over P: System messages from PersonaPrompt: persona, platform rules, date, CRM and booking rules, handoff
         loop max 5 tool iterations
-            P->>AI: complete(contextMessages, crmTools)
+            P->>AI: complete(contextMessages, crmTools + handoff_to_human)
             AI-->>P: text reply or tool_calls
             P->>CRM: execute tool calls
             CRM->>DB: clients / quotes / invoices
             P->>AI: append tool results
+        end
+        opt handoff_to_human (persona setting, WhatsApp and Instagram)
+            P->>DB: pause auto-reply (autoReplyPausedBy = bot:handoff)
+            P->>DB: notification for the team
         end
         P->>DB: insert assistant Message
         P->>WA: sendText reply
@@ -75,7 +80,7 @@ graph TD
         MR[MessageRepository]
         CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
-        DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
+        DA[Dashboard AI Assistant<br/>threads, settings, confirmed changes]
         EV[DomainEventLog<br/>domain_events outbox]
         TC[Time clock<br/>shifts, punches, work sites,<br/>phone keys, timesheets]
     end
@@ -117,6 +122,7 @@ graph TD
     AR --> TC
     TC --> NT
     DA --> AI & CRM & Mongo
+    DA --> OC
     DA --> AEX
     CRM --> EV
     EV --> ADP
@@ -724,8 +730,9 @@ sequenceDiagram
 | `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
-| `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
-| `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+| `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user; `renamed` once the person names one | `tenantId`, `ownerKey`, `updatedAt` |
+| `dashboard_assistant_messages` | User/assistant turns, proposed changes with their arguments, preview, status and result, failed turns' `error`, and the modules an answer read (`sources`) | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+| `dashboard_assistant_settings` | A company's settings for its assistant: instructions, reply style, language, changes on or off, modules kept out | `_id` = tenant id |
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
 | `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
@@ -748,18 +755,108 @@ sequenceDiagram
 | `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
 | `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId` |
 | `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
+| `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
+| `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
+| `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
 
 ## Dashboard AI Assistant
 
-The optional `ai-assistant` module uses the same `AiClient` plus CRM/`BookingTools` implementations as the
-messaging pipeline, but applies the signed-in tenant's enabled modules as a second capability filter.
-Read tools execute during the chat turn. Write tool calls are persisted as `PENDING` actions and are
-not executed until the owning dashboard user confirms the exact payload shown in the UI. Confirmation
-atomically claims the action before execution, preventing duplicate writes from repeated requests.
+The optional `ai-assistant` module is the team's assistant, not the customers': it answers questions
+about the company's data and proposes changes that a person confirms on a card in `/app`. Code:
+`dashboard/DashboardAssistant.kt` (service, repository, history, tool policy), `AssistantPrompt.kt`,
+`AssistantTools.kt`, `AssistantSettings.kt` and `DashboardAssistantRoutes.kt`; the page is `app/assistant.js`.
 
-Threads and messages are scoped by both `tenantId` and an owner key derived from the dashboard user,
-so users cannot open or confirm another user's assistant actions. Every assistant endpoint is also
-protected by dashboard JWT authentication and the normal server-side module gate.
+```mermaid
+sequenceDiagram
+    participant U as Dashboard user
+    participant S as DashboardAssistantService
+    participant AI as AiClient (OpenRouter)
+    participant T as Tools (assistant, CRM, bookings, agents)
+    participant DB as MongoDB
+    U->>S: POST /assistant/threads/{id}/messages
+    S->>DB: expire the thread's PENDING actions, store the message
+    alt monthly token budget spent
+        S->>DB: answer with error budget_exceeded (no model call)
+    else
+        S->>AI: AssistantPrompt + history (proposals as tool calls with their outcome) + allowed tools
+        loop up to 6 steps
+            AI-->>S: read calls
+            S->>T: run them, results back to the model
+            AI-->>S: write call
+            S->>T: check(): could it run?
+            alt it couldn't
+                S->>AI: the error, so the model asks for what's missing
+            else it could
+                S->>T: describe(): names behind ids, totals
+                S->>DB: PENDING action with its preview
+            end
+        end
+        S->>DB: the answer and the modules it read, or error model_unavailable / empty_reply
+    end
+    U->>S: POST /actions/{id}/confirm
+    S->>DB: claim PENDING → EXECUTING, run it, CONFIRMED or FAILED with the result
+    S->>AI: a follow-up on how it went
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: proposed (checked, previewed)
+    PENDING --> EXECUTING: Confirm (atomic claim)
+    EXECUTING --> CONFIRMED: it ran
+    EXECUTING --> FAILED: refused or failed
+    PENDING --> CANCELLED: Cancel
+    PENDING --> EXPIRED: the person sends another message
+```
+
+**Prompt.** `AssistantPrompt` builds the system messages: who it works for (company, admin or member),
+the rules (base every figure on tool results, look records up before acting, call a write tool as soon
+as it has what it needs instead of asking in text, never claim a change that no result confirms, how
+earlier proposals ended), the date in the company's timezone, reply style and language, what it can use
+and what is kept out, answers-only mode, business notes (the client fields the company requires, invoice
+statuses, quote lines, catalog prices, the 24-hour WhatsApp window), the booking and agents notes, the
+untrusted-content rule, and last the company's instructions inside `<company_instructions>` (the tags
+are stripped from the text first). The customer bot's CRM prompt, with its "pode gerar" text
+confirmations, is not used here.
+
+**Settings.** One document per company in `dashboard_assistant_settings` (`GET`/`PUT
+/app/api/assistant/settings`, admins only for `PUT`): instructions (4000 characters), reply style
+(`CONCISE`, `BALANCED`, `DETAILED`), a fixed language or the message's, `allowChanges`, and
+`disabledModules`. With changes off no write tool is offered and a confirmation answers 403
+`changes_off`; a module kept out has no tools and the prompt says it isn't available.
+
+**Tools.** The CRM and booking tools the bot has, the agents tools (`AgentAssistant`), and
+`AssistantTools`, which only the dashboard gets: `get_business_overview` (Home's figures and attention
+list), `get_client` (the whole record with the company's own fields, money owed, quotes, unbilled work,
+next booking), `create_client` and `update_client` (checked like the client form: required fields,
+email, custom fields, phone already taken), `list_invoices` and `list_quotes` (status, client, issue or
+due dates, a summary of every match; a pending invoice past due counts as overdue, as on Home),
+`convert_quote_to_invoice` (`crm/QuoteInvoicing`, shared with the Quotes page), `list_services`,
+`list_payments` and `mark_payment_paid`, `list_suppliers`, `list_employees`, and `list_conversations`,
+`get_conversation` and `reply_to_conversation`. What customers wrote reaches the model inside
+`<untrusted_content>`. A reply goes out through `InboxService` from the person who confirmed it, so the
+24-hour window, the website's read-only chats and pausing the bot apply as in the Inbox. The
+assistant's `create_client`, `list_invoices` and `list_quotes` take the place of the bot's tools of the
+same name. Tools follow the modules on for the company minus those kept out; reads run at once, writes
+always wait for a card.
+
+**History.** The last 30 messages go back to the model. A proposal becomes the tool call it was, followed
+by its outcome (`waiting_for_confirmation`, the result once confirmed, the error once failed, `cancelled`,
+`expired`, results cut at 2000 characters), so later turns know what happened and which record was made.
+Failed turns are left out. Action ids are the assistant's own (`act_…`): providers don't promise unique
+call ids, and `action.id` is unique across the collection.
+
+**Errors, budget and threads.** A turn without an answer is stored with its reason (`model_unavailable`,
+`budget_exceeded`, `empty_reply`) and `POST /threads/{id}/retry` answers again. The assistant stops at
+the company's monthly token budget, like the bot, and records its tokens as `assistant`. Threads and
+messages are scoped by `tenantId` and the person's owner key (`assistantOwnerKey`), so no one opens,
+confirms or deletes another person's; every endpoint is behind the dashboard JWT and the module gate,
+and Home counts only the viewer's waiting changes. Threads can be renamed (`PATCH`, which keeps the name
+from then on), searched by title (`?q=`), deleted with their messages (`DELETE`) and paged backwards
+(`?before=` with `hasMore`); each lists its waiting changes (`pending`).
+
+Tests: `DashboardAssistantRoutesTest` (HTTP end to end with a scripted model), `AssistantToolsTest`,
+`AssistantPromptTest`, `AssistantHistoryTest`. `scripts/assistant-e2e/walkthrough.mjs` runs the page in
+Chrome against `fake-openrouter.py`.
 
 ## Agents and automations
 
@@ -913,15 +1010,84 @@ sequenceDiagram
   company uses the account. Tasks and notifications an automation made from an email keep what its
   steps wrote into them, like an AI summary: notifications expire after 90 days, tasks stay.
 
+## Persona
+
+How a company's bot talks to its customers, edited under **Persona** in `/app` (module `persona`).
+It has two parts, both injected into every customer chat: **settings** the company picks (bot
+name, language and whether to hold it, tone, form of address, reply length, emoji, greeting, rules,
+handoff) and **instructions**, free text that the synthesis writes from the company's sources
+(typed notes, uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand.
+Code: `persona/` (`PersonaRepository`, `PersonaCompiler`, `PersonaPrompt`, `PersonaValidation`,
+`PersonaFileExtractor`) and `dashboard/PersonaRoutes.kt`.
+
+```mermaid
+flowchart LR
+    NOTE["Note / file<br/>POST …/persona/sources(/file)"] --> SRC[(persona_sources)]
+    SRC -->|queue, 4 s debounce| PC["PersonaCompiler<br/>batches · condense · budget"]
+    PC -->|current file + new material| AI[AiClient]
+    AI --> PC
+    PC -->|SYNTHESIS / REBUILD| TP[(tenant_persona)]
+    EDIT["Settings / hand edit / restore<br/>PUT …/persona(/behavior)"] --> TP
+    TP --> VER[(persona_versions)]
+    TP -->|evict| TPF[TenantPipelineFactory]
+    TPF --> MP[MessagePipeline]
+    TP --> PP["PersonaPrompt<br/>persona block + platform rules"]
+    PP --> MP
+    PP --> TEST["Test chat<br/>POST …/persona/test (drafts)"]
+    PP --> AGT["Agents: Write with AI<br/>(address, rules, knowledge)"]
+    MP -->|handoff_to_human| PAUSE["Conversation paused<br/>+ team notification"]
+```
+
+- **What the model reads.** `PersonaPrompt.customerSystemMessages` builds the system messages of
+  every customer chat, and the dashboard test chat uses the same function: the `<persona>` block
+  (settings first, saying they win over the instructions, then the instructions; exactly the
+  instructions when no setting is set, or the neutral `DEFAULT_IDENTITY` when there is nothing),
+  then `SystemPrompts.CUSTOMER_GUARDRAILS` (customers can't change the bot's role or get its
+  instructions, no invented facts or unauthorized promises, the customer's language unless the
+  persona sets one), the date, the CRM rules for the company's modules, the booking note and the
+  handoff note. Agents' "Write with AI" steps that follow the Persona take only the form of
+  address, the rules and the instructions; the step's own Voice keeps tone, emoji, length and
+  language.
+- **Synthesis.** A note or file queues an incremental synthesis (status COMPILING at once, run
+  after a 4-second debounce): the current instructions plus the pending sources, the material in
+  `<material>` tags as data, in batches of at most 48,000 characters (a larger file goes in parts).
+  The target is 6,000 characters (12,000 when someone made the file longer by hand); a longer
+  answer gets one condensing pass and is then cut at a paragraph (`trimmed` in history). An empty
+  answer, a model failure or a spent monthly budget (`tenant_usage`, source `persona`) leaves the
+  previous persona in use with status ERROR and `lastError`. A synthesis that finds the persona
+  edited meanwhile starts again from the edit. **Rebuild** writes the instructions again from every
+  source, dropping hand edits (they stay in history). Removing a source already synthesized marks
+  the persona `stale` until a rebuild or a hand edit. At boot, `resumePending` queues every company
+  left COMPILING or with pending sources.
+- **History.** Every change is a version in `persona_versions` (instructions and settings, what
+  changed, who); a persona from before history is recorded once as BASELINE on its first change.
+  Restoring a version writes it back as a new one. Writes bump `version` atomically (pipeline
+  updates with `$literal` values, so text starting with `$` stays text).
+- **Handoff.** With the setting on, `handoff_to_human` is offered on every WhatsApp and Instagram
+  turn (website chats are read-only in the inbox, so they never hand over). Calling it pauses the
+  bot in that conversation (`autoReplyPausedBy = bot:handoff`, which also emits
+  `conversation.handoff` for agents), sends the company's handover message as written (or the
+  model's words when there is none) and notifies everyone (`conversation_handoff`, opening the
+  chat). The chat counts as waiting until a person writes (`Conversation.needsTeamReply`).
+- **Who changes it.** Anyone with the module reads the persona, its sources and history and uses
+  the test chat; changes need a company admin or an operator (`403 not_allowed` otherwise). The
+  test chat runs only read tools, refuses writes and only reports a handoff, so it changes nothing.
+- **Limits.** Instructions 12,000 characters; notes 20,000; uploads 10 MB with 200,000 characters
+  of extracted text; 100 sources and 600,000 characters across them; 25 rules of 300 characters;
+  the last 20 test messages of 4,000 characters. `GET /app/api/persona` returns them, and errors
+  carry `{error, field, limit}` for the dashboard to word.
+
 ## Context Building
 
 `MessagePipeline.buildContext()` assembles the LLM prompt in order:
-1. System prompt (`SystemPrompts.CRM_V1`)
+1. The system messages from `PersonaPrompt.customerSystemMessages` ([Persona](#persona)): persona
+   (or the neutral identity), platform rules, current date and time, CRM rules for the enabled
+   modules, the booking note and the handoff note
 2. Conversation summary (if any) wrapped in `<previous_context>`
-3. Last 10 persisted messages (user + assistant)
+3. Last 10 persisted messages (user + assistant), without the message being answered
 4. Current user message
 
-When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to OpenRouter. Tool results are appended as `tool` messages until the model returns a final text response or the five-iteration cap is reached.
+When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to OpenRouter (plus `handoff_to_human` on every turn when the persona's handoff is on). Tool results are appended as `tool` messages until the model returns a final text response or the five-iteration cap is reached. `OPENROUTER_BASE_URL` points the calls at another OpenAI-compatible endpoint (local or staging runs).
 
 ## Key Design Decisions
 

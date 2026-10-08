@@ -40,6 +40,7 @@ import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.persona.PersonaPrompt
 import com.rfm.edubot.persona.PersonaRepository
 import com.rfm.edubot.tenant.model.TenantLocales
 import kotlinx.datetime.LocalDate
@@ -341,8 +342,9 @@ object AiComposeAction : AgentAction {
         val channel = input.string("channel")?.takeIf { it in channels } ?: "whatsapp"
         val voice = ctx.run.definition.voice
         val signature = signature(ctx, voice, channel)
+        // The step's own Voice sets tone, emoji, length and language; the Persona adds how customers are addressed, its rules and its knowledge.
         val persona = if (voice.usePersona && channel != "internal") {
-            PersonaRepository(ctx.services.mongo).findByTenant(ctx.tenant.id)?.compiledInstructions?.trim()?.takeIf { it.isNotEmpty() }
+            PersonaPrompt.personaBlock(PersonaRepository(ctx.services.mongo).findByTenant(ctx.tenant.id), PersonaPrompt.Purpose.COMPOSE)
         } else {
             null
         }
@@ -350,7 +352,7 @@ object AiComposeAction : AgentAction {
         val result = ToolLoop(ai).run(
             messages = listOfNotNull(
                 ChatMessage(role = "system", content = prompt(ctx, channel, input.string("length") ?: "short", voice, signature != null)),
-                persona?.let { ChatMessage(role = "system", content = "<persona>\n$it\n</persona>") },
+                persona?.let { ChatMessage(role = "system", content = it) },
                 ChatMessage(role = "system", content = AiSteps.context(ctx)),
                 ChatMessage(role = "user", content = brief),
             ),

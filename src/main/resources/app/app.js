@@ -3,7 +3,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
-  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
+  persona: null, personaChat: [], webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
@@ -19,18 +19,21 @@ let state = {
   archivedView: '', archivedRows: [],
   // What the company asks for about clients: required standard fields and its own fields (GET /app/api/crm/clients/fields).
   clientFields: null,
+  // Column choices of the directory lists as read from this browser, by storage key (columnChoicesKey).
+  columnChoices: {},
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
-  settingsSection: 'channels', personaAdvanced: false, overviewLayout: null, overviewExtended: false,
+  settingsSection: 'channels', overviewLayout: null, overviewExtended: false,
+  // Persona page: the open tab, unsaved edits ({ behavior, compiledInstructions }, either may be absent) and the history list.
+  personaTab: 'behavior', personaDraft: {}, personaVersions: null, personaPreview: null,
   whatsAppSignup: { enabled: false },
   // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
   integrations: null, email: null,
   fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false },
 };
 let personaChatBusy = false;
-let assistantBusy = false;
 let fbSdkPromise = null;
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
@@ -47,6 +50,7 @@ const PORTAL = I18N.section('app.portal');
 const TIME = I18N.section('app.time');
 const SUB = I18N.section('admin.submissions');
 const FIELDS = I18N.section('admin.fields');
+const COLUMNS = I18N.section('app.columns');
 const isPortal = () => !!state.me?.employee;
 // Registered services become Serviços rows, so the team reviews them with both modules on.
 const submissionsOn = () => hasModule('employees') && hasModule('services');
@@ -259,15 +263,7 @@ async function api(path, options = {}) {
   const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
   const res = await fetch(path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
   if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.status = res.status;
-    const body = await res.json().catch(() => null);
-    err.code = body && typeof body.error === 'string' ? body.error : '';
-    err.detail = body && typeof body.detail === 'string' ? body.detail : '';
-    err.body = body;
-    throw err;
-  }
+  if (!res.ok) throw await apiError(res);
   if (res.status === 204) return null;
   return res.json();
 }
@@ -286,18 +282,24 @@ async function downloadFile(path, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
+/** The error a failed response carries: its status, the server's `error` code, when given the field and limit it is about, and the parsed body. */
+async function apiError(res) {
+  const err = new Error(`HTTP ${res.status}`);
+  err.status = res.status;
+  const body = await res.json().catch(() => null);
+  err.code = body && typeof body.error === 'string' ? body.error : '';
+  err.detail = body && typeof body.detail === 'string' ? body.detail : '';
+  err.field = body && typeof body.field === 'string' ? body.field : '';
+  err.limit = body && typeof body.limit === 'number' ? body.limit : null;
+  err.body = body;
+  return err;
+}
+
 /** Like api(), for binary responses (customer media). */
 async function apiBlob(path) {
   const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
-  if (!res.ok) {
-    const err = new Error(`HTTP ${res.status}`);
-    err.status = res.status;
-    const body = await res.json().catch(() => null);
-    err.code = body && typeof body.error === 'string' ? body.error : '';
-    err.detail = body && typeof body.detail === 'string' ? body.detail : '';
-    throw err;
-  }
+  if (!res.ok) throw await apiError(res);
   return res.blob();
 }
 
@@ -629,7 +631,7 @@ const NOTIFY = I18N.section('app.notifications');
 const NOTIFICATIONS_POLL_MS = 60000;
 const NOTIFICATION_TONES = {
   agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad',
-  service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn',
+  service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', conversation_handoff: 'warn',
 };
 let notifications = { items: [], unread: 0 };
 let notificationsAt = 0;
@@ -702,6 +704,7 @@ function notificationText(n) {
     case 'service_submitted': return { title: kind('service_submitted'), detail: line(p.service, p.client) };
     case 'time_device_enrolled': return { title: kind('time_device_enrolled'), detail: p.device || '' };
     case 'time_missed_clock_out': return { title: kind('time_missed_clock_out'), detail: line(p.day ? fmtDay(p.day) : '', p.end ? `${TIME.overdueEnd} ${p.end}` : '') };
+    case 'conversation_handoff': return { title: kind('conversation_handoff'), detail: line(p.reason, p.channel ? channelName(p.channel) : '') };
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
 }
@@ -1119,12 +1122,7 @@ async function loadModule(tab) {
   }
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
   if (tab === 'persona') state.persona = await api('/app/api/persona');
-  if (tab === 'ai-assistant') {
-    if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
-    state.assistantThreads = await api('/app/api/assistant/threads');
-    if (state.assistantThread && !state.assistantThreads.some(t => t.id === state.assistantThread.thread.id)) state.assistantThread = null;
-    if (!state.assistantThread && state.assistantThreads.length) state.assistantThread = await api(`/app/api/assistant/threads/${state.assistantThreads[0].id}`);
-  }
+  if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
@@ -1186,7 +1184,7 @@ function render() {
   if (state.active === 'payments') return renderPayments(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
-  if (state.active === 'ai-assistant') return renderAssistant(root);
+  if (state.active === 'ai-assistant') return window.AssistantUI.render(root);
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
@@ -1254,6 +1252,18 @@ function timesheetsDeps() {
     todayKey, addDayKey, periodKey, currentPeriodKey, shiftPeriodKey,
     render, hasModule, isPortal, isAdmin: isCompanyAdmin, openPayeeDrawer, labels, STR, CRM,
     get state() { return state; },
+  };
+}
+function assistantDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, hero,
+    fmtDate, fmtDay, fmtEUR, fmtMinutes, relTime,
+    hasModule, labels, STR, pdfButton, wirePdfButtons,
+    get state() { return state; },
+    statusLabel: recordStatusLabel,
+    openSubject: openAgentSubject,
+    canOpenSubject: canOpenAgentSubject,
+    onChange: () => renderNav(),
   };
 }
 // Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
@@ -2204,7 +2214,10 @@ function inboxInitials(c) {
   if (!name) return (c?.waId || '').replace(/\D/g, '').slice(-2) || '?';
   return name.split(/\s+/).slice(0, 2).map(w => w[0]).join('').toUpperCase();
 }
+/** `autoReplyPausedBy` of a conversation the bot handed to the team (Conversation.BOT_HANDOFF on the server). */
+const BOT_HANDOFF = 'bot:handoff';
 function inboxAgentLabel(userId, name) {
+  if (name === BOT_HANDOFF) return STR.inboxPausedByBot;
   if ((userId && userId === state.me?.user?.id) || (name && name === state.me?.user?.email)) return STR.inboxYou;
   return name ? name.split('@')[0] : STR.inboxTeam;
 }
@@ -2584,10 +2597,11 @@ function threadHeadHtml(c) {
 function threadBannerHtml(c) {
   if (c.channel === 'WEB') return `<div class="thread-banner" role="note"><span>${escapeHTML(STR.webConversationReadOnly)}</span></div>`;
   if (c.autoReplyEnabled !== false) return '';
-  const by = c.autoReplyPausedBy ? tApp('inboxPausedBy', { who: inboxAgentLabel(null, c.autoReplyPausedBy) }) : '';
+  const handedOff = c.autoReplyPausedBy === BOT_HANDOFF;
+  const by = c.autoReplyPausedBy && !handedOff ? tApp('inboxPausedBy', { who: inboxAgentLabel(null, c.autoReplyPausedBy) }) : '';
   const meta = [by, c.autoReplyPausedAt ? relTime(c.autoReplyPausedAt) : ''].filter(Boolean).join(' · ');
   return `<div class="thread-banner thread-banner--warn" role="status">
-    <div class="thread-banner__text"><strong>${escapeHTML(STR.inboxAiPausedTitle)}</strong><span>${escapeHTML(STR.inboxAiPausedDesc)}</span>${meta ? `<span class="thread-banner__meta">${escapeHTML(meta)}</span>` : ''}</div>
+    <div class="thread-banner__text"><strong>${escapeHTML(handedOff ? STR.inboxHandoffTitle : STR.inboxAiPausedTitle)}</strong><span>${escapeHTML(handedOff ? STR.inboxHandoffDesc : STR.inboxAiPausedDesc)}</span>${meta ? `<span class="thread-banner__meta">${escapeHTML(meta)}</span>` : ''}</div>
     <button type="button" class="btn btn--sm" data-ai-toggle="on">${escapeHTML(STR.inboxAiResume)}</button>
   </div>`;
 }
@@ -3363,6 +3377,124 @@ function wireDirectoryView(root) {
   $$('[data-directory-view]', root).forEach(b => b.addEventListener('click', () => showDirectoryView(b.dataset.directoryView)));
 }
 
+// Each person picks the columns of a directory list. The choice stays in this browser, per company and
+// user, as on/off overrides of each column's default, so a column added later still follows its default.
+const columnChoicesKey = table => `tableColumns:${state.me?.tenant?.id || ''}:${state.me?.user?.id || 'operator'}:${table}`;
+
+function columnChoices(table) {
+  const key = columnChoicesKey(table);
+  if (!state.columnChoices[key]) {
+    let saved = null;
+    try { saved = JSON.parse(localStorage.getItem(key) || 'null'); } catch { /* unreadable: defaults */ }
+    state.columnChoices[key] = saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+  }
+  return state.columnChoices[key];
+}
+
+function saveColumnChoices(table, choices) {
+  const key = columnChoicesKey(table);
+  state.columnChoices[key] = choices;
+  try {
+    if (Object.keys(choices).length) localStorage.setItem(key, JSON.stringify(choices));
+    else localStorage.removeItem(key);
+  } catch { /* ignore */ }
+}
+
+const isColumnShown = (choices, column) => !!column.fixed || (choices[column.id] ?? !!column.default);
+const shownColumns = (table, columns) => columns.filter(c => isColumnShown(columnChoices(table), c));
+const columnsHead = columns => `<tr>${columns.map(c => `<th${c.head ? ` class="${c.head}"` : ''}>${escapeHTML(c.label)}</th>`).join('')}</tr>`;
+// A cell may read which other columns are shown (`ids`), e.g. the address leaves the city to its own column.
+const columnCells = (columns, ids, row) => columns.map(c => c.cell(row, ids)).join('');
+const columnsButton = table => `<button class="btn btn--sm btn--ghost" type="button" data-columns="${table}">${escapeHTML(COLUMNS.button)}</button>`;
+
+function openColumnPicker(table, columns, eyebrow) {
+  const body = document.createElement('div');
+  body.className = 'form';
+  const box = c => `<label class="form__check"><input type="checkbox" data-column="${escapeHTML(c.id)}"${isColumnShown(columnChoices(table), c) ? ' checked' : ''}${c.fixed ? ' disabled' : ''} /> ${escapeHTML(c.label)}</label>`;
+  const group = (id, title, list) => (list.length ? `<section class="panel">
+      <header class="panel__head"><h2 class="panel__title" id="${id}">${escapeHTML(title)}</h2></header>
+      <div class="panel__body form"><div class="form__checks" role="group" aria-labelledby="${id}">${list.map(box).join('')}</div></div>
+    </section>` : '');
+  body.innerHTML = `
+    <p class="hint">${escapeHTML(COLUMNS.intro)}</p>
+    ${group('columns-standard', COLUMNS.standard, columns.filter(c => !c.custom))}
+    ${group('columns-custom', FIELDS.customTitle, columns.filter(c => c.custom))}
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-columns-reset>${escapeHTML(COLUMNS.reset)}</button></div>`;
+  openDrawer(COLUMNS.title, body, false, { eyebrow });
+  // The name is always shown, so its box can't take the focus.
+  requestAnimationFrame(() => $('[data-column]:not(:disabled)', body)?.focus());
+  const column = input => columns.find(c => c.id === input.dataset.column);
+  $$('[data-column]', body).forEach(input => input.addEventListener('change', () => {
+    const choices = Object.fromEntries(Object.entries(columnChoices(table)).filter(([id]) => columns.some(c => c.id === id)));
+    if (input.checked === !!column(input).default) delete choices[input.dataset.column];
+    else choices[input.dataset.column] = input.checked;
+    saveColumnChoices(table, choices);
+    render();
+  }));
+  $('[data-columns-reset]', body).addEventListener('click', () => {
+    saveColumnChoices(table, {});
+    $$('[data-column]', body).forEach(input => { input.checked = isColumnShown({}, column(input)); });
+    render();
+  });
+}
+
+function clientColumns() {
+  const t = CRM.clients;
+  const muted = value => `<td class="muted">${escapeHTML(value || '')}</td>`;
+  const mono = value => `<td class="mono muted nowrap">${escapeHTML(value || '')}</td>`;
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: c => `<td class="name long">${escapeHTML(c.name)}</td>` },
+    { id: 'contactPerson', label: standardClientFieldLabel('contactPerson'), cell: c => muted(c.contactPerson) },
+    { id: 'address', label: t.thAddress, default: true, cell: (c, ids) => `<td class="muted long">${escapeHTML(ids.has('city') ? c.address || '' : [c.address, c.city].filter(Boolean).join(', '))}</td>` },
+    { id: 'postalCode', label: standardClientFieldLabel('postalCode'), cell: c => mono(c.postalCode) },
+    { id: 'city', label: standardClientFieldLabel('city'), cell: c => muted(c.city) },
+    { id: 'phone', label: t.thPhone, default: true, cell: c => mono(c.phone) },
+    { id: 'email', label: standardClientFieldLabel('email'), cell: c => muted(c.email) },
+    { id: 'taxId', label: standardClientFieldLabel('taxId'), cell: c => mono(c.taxId) },
+    ...clientCustomFields().map(f => ({
+      id: f.key, label: f.label, default: f.showInList, custom: true, head: f.type === 'NUMBER' ? 'right' : '',
+      cell: c => `<td class="${{ NUMBER: 'num nowrap', DATE: 'mono muted nowrap', CHECKBOX: 'muted' }[f.type] || 'muted long'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`,
+    })),
+    { id: 'createdAt', label: t.thCreated, default: true, cell: c => `<td class="mono nowrap">${fmtDay(c.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: c => `<td class="id right">${escapeHTML(c.number)}</td>` },
+  ];
+}
+
+const supplierServiceNames = s => (s.services || []).map(x => x.description).join(', ');
+
+function supplierColumns() {
+  const t = CRM.suppliers;
+  const name = s => {
+    const services = supplierServiceNames(s);
+    return services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
+  };
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: s => `<td class="name long">${name(s)}</td>` },
+    { id: 'type', label: t.thType, default: true, cell: s => `<td class="muted">${escapeHTML(s.type || '')}</td>` },
+    { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
+    { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono nowrap">${fmtDay(s.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
+  ];
+}
+
+function employeeColumns() {
+  const t = CRM.employees;
+  const toApprove = new Map();
+  for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
+  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
+  return [
+    { id: 'name', label: t.thName, fixed: true, cell: e => `<td class="name long">${escapeHTML(e.name)}${pendingPill(e.id)}</td>` },
+    { id: 'role', label: t.thRole, default: true, cell: e => `<td class="muted">${escapeHTML(e.role || '')}</td>` },
+    { id: 'phone', label: t.thPhone, default: true, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.phone)}</td>` },
+    { id: 'taxId', label: t.formTaxId, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.taxId || '')}</td>` },
+    { id: 'birthDate', label: t.formBirthDate, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.birthDate ? fmtDay(e.birthDate) : '')}</td>` },
+    { id: 'address', label: t.formAddress, cell: e => `<td class="muted long">${escapeHTML(e.address || '')}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: e => `<td class="mono nowrap">${fmtDay(e.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, default: true, head: 'right', cell: e => `<td class="id right">${escapeHTML(e.number)}</td>` },
+  ];
+}
+
 function renderClients(root) {
   const t = CRM.clients;
   const archived = state.archivedView === 'clients';
@@ -3370,15 +3502,15 @@ function renderClients(root) {
   const q = state.search.trim().toLowerCase();
   const qDigits = phoneDigits(q);
   const custom = clientCustomFields();
-  const columns = custom.filter(f => f.showInList);
+  const columns = shownColumns('clients', clientColumns());
+  const ids = new Set(columns.map(c => c.id));
   const matches = c => !q
     || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
-  const customCell = (f, c) => `<td class="${{ NUMBER: 'num', DATE: 'mono muted' }[f.type] || 'muted'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`;
   const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
-    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}"><td class="name">${escapeHTML(c.name)}</td><td class="muted">${escapeHTML([c.address, c.city].filter(Boolean).join(', '))}</td><td class="mono muted">${escapeHTML(c.phone)}</td>${columns.map(f => customCell(f, c)).join('')}<td class="mono">${fmtDay(c.createdAt)}</td><td class="id right">${escapeHTML(c.number)}</td></tr>`)
+    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}">${columnCells(columns, ids, c)}</tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
@@ -3387,9 +3519,9 @@ function renderClients(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('clients')
+    tools: directoryViewChips('clients') + columnsButton('clients')
       + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : ''),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th>${columns.map(f => `<th${f.type === 'NUMBER' ? ' class="right"' : ''}>${escapeHTML(f.label)}</th>`).join('')}<th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
@@ -3397,6 +3529,7 @@ function renderClients(root) {
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
   $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('clients', clientColumns(), labels.clients));
   wireDirectoryView(root);
 }
 
@@ -3420,15 +3553,12 @@ function renderSuppliers(root) {
   const types = supplierTypes(source);
   const typeKey = supplierTypeKey(state.filterSupplierType);
   if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
-  const serviceNames = s => (s.services || []).map(x => x.description).join(', ');
+  const columns = shownColumns('suppliers', supplierColumns());
+  const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${serviceNames(s)}`.toLowerCase().includes(q))
-    .map(s => {
-      const services = serviceNames(s);
-      const name = services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
-      return `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}"><td class="name">${name}</td><td class="muted">${escapeHTML(s.type || '')}</td><td class="muted">${escapeHTML(s.address || '')}</td><td class="mono muted">${escapeHTML(s.phone)}</td><td class="mono">${fmtDay(s.createdAt)}</td><td class="id right">${escapeHTML(s.number)}</td></tr>`;
-    })
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
+    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, ids, s)}</tr>`)
     .join('');
   const typeFilter = types.length
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
@@ -3441,14 +3571,15 @@ function renderSuppliers(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: typeFilter + directoryViewChips('suppliers'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thAddress)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: typeFilter + directoryViewChips('suppliers') + columnsButton('suppliers'),
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
   $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('suppliers', supplierColumns(), labels.suppliers));
   wireDirectoryView(root);
 }
 
@@ -3457,12 +3588,11 @@ function renderEmployees(root) {
   const archived = state.archivedView === 'employees';
   const source = archived ? state.archivedRows : (state.employees || []);
   const q = state.search.toLowerCase();
-  const toApprove = new Map();
-  for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
-  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
+  const columns = shownColumns('employees', employeeColumns());
+  const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
-    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}"><td class="name">${escapeHTML(e.name)}${pendingPill(e.id)}</td><td class="muted">${escapeHTML(e.role || '')}</td><td class="mono muted">${escapeHTML(e.phone)}</td><td class="mono">${fmtDay(e.createdAt)}</td><td class="id right">${escapeHTML(e.number)}</td></tr>`)
+    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, ids, e)}</tr>`)
     .join('');
   const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
@@ -3472,13 +3602,14 @@ function renderEmployees(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('employees'),
-    head: `<tr><th>${escapeHTML(t.thName)}</th><th>${escapeHTML(t.thRole)}</th><th>${escapeHTML(t.thPhone)}</th><th>${escapeHTML(t.thCreated)}</th><th class="right">${escapeHTML(t.thNo)}</th></tr>`,
+    tools: directoryViewChips('employees') + columnsButton('employees'),
+    head: columnsHead(columns),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
+  $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
   wireDirectoryView(root);
 }
 
@@ -7067,312 +7198,420 @@ function renderCatalog(root) {
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
 }
 
-function assistantActionLabel(action) {
-  const args = action.arguments || {};
-  const preview = action.preview || {};
-  const agent = preview.agent || args.agent_id || '';
-  const step = preview.action ? (window.AgentsUI?.actionLabel(preview.action) || preview.action) : '';
-  if (action.toolName === 'run_agent') return STR.assistantRunAgent({ agent, record: preview.record || '' });
-  if (action.toolName === 'pause_agent') return STR.assistantPauseAgent({ agent });
-  if (action.toolName === 'activate_agent') return STR.assistantActivateAgent({ agent });
-  if (action.toolName === 'approve_agent_item') return args.decision === 'reject' ? STR.assistantRejectAgentItem({ action: step }) : STR.assistantApproveAgentItem({ action: step });
-  if (action.toolName === 'draft_agent') return STR.assistantDraftAgent;
-  if (action.toolName === 'create_client') return STR.assistantCreateClient({ name: args.name || '' });
-  if (action.toolName === 'create_quote') return STR.assistantCreateQuote;
-  if (action.toolName === 'update_quote') return STR.assistantUpdateQuote({ id: args.quote_id || '' });
-  if (action.toolName === 'create_invoice') return STR.assistantCreateInvoice;
-  if (action.toolName === 'mark_invoice_paid') return STR.assistantMarkPaid({ id: args.invoice_id || '' });
-  if (action.toolName === 'create_booking') return STR.assistantCreateBooking;
-  if (action.toolName === 'reschedule_booking') return STR.assistantRescheduleBooking;
-  if (action.toolName === 'cancel_booking') return STR.assistantCancelBooking;
-  if (action.toolName === 'confirm_booking') return STR.assistantConfirmBooking;
-  return STR.assistantChangeData;
+// ── Persona: how the bot talks to customers ─────────────────────────────────
+// Settings, knowledge, instructions and history on the left; a test chat on the right that uses
+// unsaved edits (state.personaDraft) so a change can be tried before it reaches customers.
+const PS = I18N.section('app.personaStudio');
+const ps = (key, params) => I18N.t(`app.personaStudio.${key}`, params);
+const PERSONA_TABS = ['behavior', 'knowledge', 'instructions', 'history'];
+const PERSONA_OPTIONS = {
+  tone: ['FRIENDLY', 'PROFESSIONAL', 'FORMAL', 'CASUAL', 'EMPATHETIC'],
+  addressForm: ['INFORMAL', 'FORMAL'],
+  replyLength: ['SHORT', 'MEDIUM', 'DETAILED'],
+  emoji: ['NONE', 'LIGHT', 'EXPRESSIVE'],
+};
+const PERSONA_TRIES = ['who', 'hours', 'price', 'human', 'jailbreak', 'language'];
+// Extensions the upload accepts as other names for a listed type, left out of the hint.
+const PERSONA_TYPE_ALIASES = ['markdown', 'text'];
+const fmtCount = n => new Intl.NumberFormat(uiLocale()).format(Number(n || 0));
+const fmtMegabytes = bytes => new Intl.NumberFormat(uiLocale(), { style: 'unit', unit: 'megabyte', maximumFractionDigits: 0 }).format(Number(bytes || 0) / (1024 * 1024));
+const personaStatusLabel = s => ps(`status.${s || 'EMPTY'}`);
+const personaAuthor = a => (a === 'operator' ? PS.byOperator : a);
+const personaLanguageLabel = code => ps(`lang.${code}`);
+
+function personaErrorText(code, err = {}) {
+  const field = err.field ? ps(`fields.${err.field.replace('.', '_')}`) : '';
+  const key = `app.personaStudio.errors.${code}`;
+  const text = code ? I18N.t(key, { field, limit: err.limit != null ? fmtCount(err.limit) : '', size: err.limit != null ? fmtMegabytes(err.limit) : '' }) : key;
+  return text === key ? PS.errorGeneric : text;
 }
+const personaFail = err => { if (err?.message !== 'unauthorized') toast(personaErrorText(err?.code, err)); };
 
-const ASSISTANT_AGENT_TOOLS = new Set(['run_agent', 'pause_agent', 'activate_agent', 'approve_agent_item', 'draft_agent']);
-
-/** An agent action's details come from the server's preview (names behind the ids), not from the arguments. */
-function assistantAgentDetails(action) {
-  const args = action.arguments || {};
-  const p = action.preview || {};
-  const details = [];
-  if (action.toolName === 'approve_agent_item') {
-    if (p.agent) details.push(STR.assistantAgentName({ name: p.agent }));
-    if (p.record) details.push(STR.assistantAgentRecord({ record: p.record }));
-    if (p.recipients?.length) details.push(STR.assistantAgentTo({ to: p.recipients.join(', ') }));
-    if (p.subject) details.push(STR.assistantAgentSubject({ subject: p.subject }));
-    if (p.body) details.push(STR.assistantAgentMessage({ text: p.body }));
-    if (args.decision === 'reject' && args.reason) details.push(STR.assistantAgentReason({ reason: args.reason }));
-  }
-  if (action.toolName === 'draft_agent' && args.request) details.push(STR.assistantAgentRequest({ text: args.request }));
-  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
+/** The unsaved edits the test chat and the preview should use; null when nothing is unsaved. */
+function personaDraftPayload() {
+  const d = state.personaDraft || {};
+  const out = {};
+  if (d.behavior) out.behavior = d.behavior;
+  if (d.compiledInstructions != null) out.compiledInstructions = d.compiledInstructions;
+  return Object.keys(out).length ? out : null;
 }
+const personaBehavior = () => state.personaDraft?.behavior || state.persona?.behavior || {};
+const personaInstructions = () => state.personaDraft?.compiledInstructions ?? state.persona?.compiledInstructions ?? '';
 
-function assistantActionDetails(action) {
-  if (ASSISTANT_AGENT_TOOLS.has(action.toolName)) return assistantAgentDetails(action);
-  const args = action.arguments || {};
-  const details = [];
-  if (args.name) details.push(`${STR.thName}: ${args.name}`);
-  if (args.phone) details.push(`${STR.thPhone}: ${args.phone}`);
-  if (args.address) details.push(`${STR.thAddress}: ${args.address}`);
-  if (args.client_id) details.push(STR.assistantClientRef({ id: args.client_id }));
-  if (args.quote_id) details.push(STR.assistantQuoteRef({ id: args.quote_id }));
-  if (args.invoice_id) details.push(STR.assistantInvoiceRef({ id: args.invoice_id }));
-  if (args.valid_until) details.push(STR.assistantValidUntil({ date: args.valid_until }));
-  if (args.due_date) details.push(STR.assistantDueDate({ date: args.due_date }));
-  if (args.status) details.push(STR.assistantNewStatus({ status: args.status }));
-  if (args.service_id) details.push(`${STR.bookingsService}: ${state.bookingServices.find(s => s.id === args.service_id)?.name || args.service_id}`);
-  if (args.start_at) details.push(`${STR.bookingsStart}: ${String(args.start_at).replace('T', ' ')}`);
-  if (args.contact_name) details.push(`${STR.bookingsContactName}: ${args.contact_name}`);
-  if (args.contact_phone) details.push(`${STR.bookingsContactPhone}: ${args.contact_phone}`);
-  if (args.booking_id) details.push(STR.assistantBookingRef({ id: args.booking_id }));
-  if (args.notes) details.push(`${STR.quoteNotes}: ${args.notes}`);
-  (args.items || []).forEach(item => details.push(`${item.description} · ${item.quantity || 1} × ${fmtEUR(item.price_eur)}`));
-  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
-}
-
-function assistantDocumentDownload(action) {
-  if (action.status !== 'CONFIRMED') return '';
-  const result = action.result || {};
-  const id = result.id;
-  if (!id) return '';
-  const invoice = action.toolName === 'create_invoice' || result.type === 'invoice';
-  const quote = action.toolName === 'create_quote' || result.type === 'quote';
-  if (!invoice && !quote) return '';
-  const type = invoice ? 'invoices' : 'quotes';
-  const number = result.number || '';
-  const filename = `${invoice ? 'Fatura' : 'Orcamento'} ${number || id}.pdf`;
-  return `<div class="assistant__action-buttons">${pdfButton(id, type, true, STR.assistantDownloadPdf({ number }), filename)}</div>`;
-}
-
-/** After a confirmed draft or run, the way to what it made. */
-function assistantAgentLink(action) {
-  if (action.status !== 'CONFIRMED' || !hasModule('agents') || !window.AgentsUI) return '';
-  const result = action.result || {};
-  const ref = action.toolName === 'draft_agent' && result.agent_id ? `agent:${result.agent_id}`
-    : action.toolName === 'run_agent' && result.run_id ? `run:${result.run_id}` : '';
-  if (!ref) return '';
-  const label = ref.startsWith('agent:') ? STR.assistantOpenDraft : STR.assistantOpenRun;
-  return `<div class="assistant__action-buttons"><button class="btn btn--sm" type="button" data-assistant-agent-ref="${escapeHTML(ref)}">${escapeHTML(label)}</button></div>`;
-}
-
-async function openAssistantThread(id) {
-  state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
-  render();
-}
-
-async function createAssistantThread() {
-  const thread = await api('/app/api/assistant/threads', { method: 'POST', body: JSON.stringify({ title: STR.assistantNewThread }) });
-  state.assistantThreads.unshift(thread);
-  state.assistantThread = { thread, messages: [] };
-  render();
-}
-
-function renderAssistant(root) {
-  const current = state.assistantThread;
-  const threadRows = state.assistantThreads.map(t => `<button class="assistant__thread ${current?.thread.id === t.id ? 'is-active' : ''}" data-assistant-thread="${t.id}" type="button"><strong>${escapeHTML(t.title)}</strong><span>${escapeHTML(fmtDate(t.updatedAt))}</span></button>`).join('');
-  const messages = (current?.messages || []).map(m => {
-    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>` : '';
-    if (!m.action) return bubble;
-    const pending = m.action.status === 'PENDING';
-    const details = assistantActionDetails(m.action);
-    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}${assistantAgentLink(m.action)}</div>`;
-  }).join('');
-  root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
-  $('#assistant-new').addEventListener('click', createAssistantThread);
-  $$('[data-assistant-thread]').forEach(b => b.addEventListener('click', () => openAssistantThread(b.dataset.assistantThread)));
-  const log = $('#assistant-log'); log.scrollTop = log.scrollHeight;
-  const composer = $('#assistant-input');
-  const resizeComposer = () => {
-    composer.style.height = 'auto';
-    composer.style.height = `${Math.min(composer.scrollHeight, 140)}px`;
+/** Settings as the server stores them (trimmed, blanks unset), so an edit undone by hand doesn't count as unsaved. */
+function normalizedBehavior(b = {}) {
+  const text = v => (typeof v === 'string' ? v.trim() : '') || null;
+  return {
+    botName: text(b.botName), language: text(b.language), languageStrict: !!(text(b.language) && b.languageStrict),
+    tone: text(b.tone), addressForm: text(b.addressForm), replyLength: text(b.replyLength), emoji: text(b.emoji),
+    greeting: text(b.greeting), rules: (b.rules || []).map(r => r.trim()).filter(Boolean),
+    handoff: { enabled: !!b.handoff?.enabled, triggers: text(b.handoff?.triggers), message: text(b.handoff?.message) },
   };
-  composer.addEventListener('input', resizeComposer);
-  resizeComposer();
-  composer.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      $('#assistant-form').requestSubmit();
-    }
-  });
-  $('#assistant-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    if (!current || assistantBusy) return;
-    const input = $('#assistant-input'), content = input.value.trim();
-    if (!content) return;
-    input.value = '';
-    assistantBusy = true;
-    current.messages.push({ role: 'user', content });
-    renderAssistant(root);
-    try {
-      state.assistantThread = await api(`/app/api/assistant/threads/${current.thread.id}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
-      state.assistantThreads = await api('/app/api/assistant/threads');
-    } catch { toast(STR.assistantError); }
-    finally { assistantBusy = false; render(); }
-  });
-  $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
-  $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
-  $$('[data-assistant-agent-ref]', root).forEach(b => b.addEventListener('click', () => window.AgentsUI.openRef(b.dataset.assistantAgentRef)));
-  wirePdfButtons(root);
 }
+const sameBehavior = (a, b) => JSON.stringify(normalizedBehavior(a)) === JSON.stringify(normalizedBehavior(b));
 
-async function updateAssistantAction(threadId, actionId, decision) {
-  if (assistantBusy) return;
-  assistantBusy = true;
-  render();
-  try {
-    state.assistantThread = await api(`/app/api/assistant/threads/${threadId}/actions/${encodeURIComponent(actionId)}/${decision}`, { method: 'POST', body: '{}' });
-    state.assistantThreads = await api('/app/api/assistant/threads');
-  } catch { toast(STR.assistantActionError); }
-  finally { assistantBusy = false; render(); }
-}
 let personaPollTimer;
 async function refreshPersona() {
+  const before = state.persona;
   state.persona = await api('/app/api/persona');
-  if (state.active === 'persona') render();
+  if (before?.status === 'COMPILING' && state.persona.status !== 'COMPILING') {
+    state.personaVersions = null;
+    state.personaPreview = null;
+    if (state.persona.status === 'ERROR') toast(personaErrorText(state.persona.lastError));
+    else if (state.persona.version !== before.version) toast(ps('synthesized', { n: state.persona.version }));
+  }
+  if (state.active === 'persona') renderKeepingFocus();
   clearTimeout(personaPollTimer);
-  if (state.persona.status === 'COMPILING') personaPollTimer = setTimeout(refreshPersona, 3000);
+  if (state.persona.status === 'COMPILING') personaPollTimer = setTimeout(() => refreshPersona().catch(() => {}), 3000);
+}
+
+/** Redraws the page without dropping the field someone is typing in (polls redraw while they work). */
+function renderKeepingFocus() {
+  const el = document.activeElement;
+  const id = el?.id;
+  const range = el && typeof el.selectionStart === 'number' ? [el.selectionStart, el.selectionEnd] : null;
+  render();
+  const again = id && document.getElementById(id);
+  if (!again) return;
+  again.focus();
+  if (range && again.setSelectionRange) { try { again.setSelectionRange(range[0], range[1]); } catch { /* not a text field */ } }
+}
+
+async function loadPersonaVersions() {
+  state.personaVersions = await api('/app/api/persona/versions');
 }
 
 function renderPersona(root) {
   const p = state.persona || {};
-  const sources = p.sources || [];
-  const compiling = p.status === 'COMPILING';
-  const sourceRows = sources.map(s => `<tr><td>${s.kind === 'FILE' ? '📄' : '📝'} ${escapeHTML(s.label)}</td><td>${s.compiled ? `<span class="muted">${STR.sourceSynced}</span>` : `<span>${STR.sourcePending}</span>`}</td><td class="mono muted">${fmtDate(s.createdAt)}</td><td class="right"><button class="btn btn--sm" data-del-source="${s.id}">${STR.remove}</button></td></tr>`).join('');
-  root.innerHTML = `${hero(labels.persona, STR.personaDesc)}
-    <div class="view__stats" style="margin-bottom:18px">
-      <div class="stat"><div class="stat__label">${STR.thStatus}</div><div class="stat__value">${compiling ? STR.personaCompiling : escapeHTML(p.status || 'EMPTY')}</div></div>
-      <div class="stat"><div class="stat__label">${STR.statVersion}</div><div class="stat__value">${p.version || 0}</div></div>
-      <div class="stat"><div class="stat__label">${STR.statTokens}</div><div class="stat__value">${p.tokenEstimate || 0}</div></div>
-      <div class="stat"><div class="stat__label">${STR.statUpdated}</div><div class="stat__value" style="font-size:16px">${escapeHTML(fmtDate(p.updatedAt))}</div></div>
-    </div>
-
-    <div class="panel" style="padding:18px;margin-bottom:18px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-        <h2 class="view__title" style="font-size:18px">${escapeHTML(STR.testBotTitle)}</h2>
-        <button class="btn btn--sm" id="persona-chat-clear">${escapeHTML(STR.clear)}</button>
+  const tab = PERSONA_TABS.includes(state.personaTab) ? state.personaTab : 'behavior';
+  const stats = statCards([
+    { label: PS.statStatus, value: personaStatusLabel(p.status) },
+    { label: PS.statVersion, value: p.version ? ps('versionShort', { n: p.version }) : '—' },
+    { label: PS.statTokens, value: fmtCount(p.tokenEstimate) },
+    { label: PS.statUpdated, value: p.updatedAt && p.version ? relTime(p.updatedAt) : '—' },
+  ]);
+  const tabs = `<div class="settings-tabs" role="tablist" aria-label="${escapeHTML(PS.tabsAria)}">${PERSONA_TABS.map(id => `<button type="button" role="tab" class="chip ${tab === id ? 'is-on' : ''}" aria-selected="${tab === id}" data-persona-tab="${id}">${escapeHTML(ps(`tab.${id}`))}${id === 'knowledge' && p.pendingSources ? `<span class="chip__count">${fmtCount(p.pendingSources)}</span>` : ''}</button>`).join('')}</div>`;
+  root.innerHTML = `${hero(labels.persona, STR.personaDesc, stats)}
+    ${personaNotices(p)}
+    <div class="persona-studio">
+      <div class="persona-studio__main">
+        ${tabs}
+        <div class="persona-studio__pane" role="tabpanel">${personaPane(tab, p)}</div>
       </div>
-      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.testBotDesc)}</p>
-      <div class="chat__log" id="persona-chat-log"></div>
-      <form class="chat__form" id="persona-chat-form">
-        <input class="inp chat__input" id="persona-chat-input" placeholder="${escapeHTML(STR.chatPlaceholder)}" autocomplete="off" />
-        <button class="btn btn--primary" type="submit" id="persona-chat-send">${escapeHTML(STR.send)}</button>
-      </form>
-    </div>
-
-    <div class="panel" style="padding:18px;margin-bottom:18px">
-      <h2 class="view__title" style="font-size:18px;margin-bottom:6px">${escapeHTML(STR.addInfoTitle)}</h2>
-      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.addInfoDesc)}</p>
-      <form class="form" id="persona-note-form">
-        <div class="form__row form__row--full">
-          <label class="lbl" for="persona-note">${escapeHTML(STR.noteLabel)}</label>
-          <textarea class="txt" id="persona-note" rows="4" placeholder="${escapeHTML(STR.notePlaceholder)}"></textarea>
-        </div>
-        <button class="btn btn--primary" type="submit">${escapeHTML(STR.addNote)}</button>
-      </form>
-      <div class="form__row form__row--full" style="margin-top:14px">
-        <label class="lbl" for="persona-file">${escapeHTML(STR.fileLabel)}</label>
-        <input class="inp" id="persona-file" type="file" accept=".pdf,.txt,.md,.markdown" />
-        <div class="hint">${escapeHTML(STR.fileHint)}</div>
-      </div>
-    </div>
-
-    <div class="panel" style="padding:18px;margin-bottom:18px">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-        <div><h2 class="view__title" style="font-size:18px">${escapeHTML(STR.sourcesTitle)}</h2><p class="view__desc">${escapeHTML(STR.sourcesDesc)}</p></div>
-        <button class="btn btn--sm" id="persona-rebuild" ${compiling ? 'disabled' : ''}>${escapeHTML(STR.rebuildAll)}</button>
-      </div>
-      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${STR.thSource}</th><th>${STR.thState}</th><th>${STR.thCreated}</th><th class="right">${STR.thActions}</th></tr></thead><tbody>${sourceRows || `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(STR.noSourcesTitle)}</p><p class="empty__desc">${escapeHTML(STR.noSourcesDesc)}</p></div></td></tr>`}</tbody></table></div>
-    </div>
-
-    <div class="persona-agents" id="persona-agents" hidden></div>
-
-    <div class="panel" style="padding:18px">
-      <div class="settings-tabs">
-        <button type="button" class="chip ${state.personaAdvanced ? 'is-on' : ''}" id="persona-advanced-toggle">${escapeHTML(STR.personaAdvanced)}</button>
-      </div>
-      <p class="view__desc">${escapeHTML(STR.personaAdvancedHint)}</p>
-      ${state.personaAdvanced ? `
-      <h2 class="view__title" style="font-size:18px;margin:14px 0 6px">${escapeHTML(STR.compiledTitle)}</h2>
-      <p class="view__desc" style="margin-bottom:14px">${escapeHTML(STR.compiledDesc)}</p>
-      <form class="form" id="persona-form">
-        <div class="form__row form__row--full">
-          <textarea class="txt" id="persona-text" rows="16" placeholder="${escapeHTML(STR.compiledPlaceholder)}">${escapeHTML(p.compiledInstructions || '')}</textarea>
-        </div>
-        <button class="btn btn--primary" type="submit">${escapeHTML(STR.saveManual)}</button>
-      </form>` : ''}
+      <aside class="persona-studio__test" aria-label="${escapeHTML(PS.testTitle)}">${personaTestPanel()}</aside>
     </div>`;
+  wirePersona(root, tab, p);
+}
 
-  const personaAgents = $('#persona-agents');
-  if (personaAgents && hasModule('agents') && window.AgentsUI) {
-    window.AgentsUI.mountPersonaAgents(personaAgents, p).then(() => { personaAgents.hidden = !personaAgents.childElementCount; });
+function personaNotice(tone, title, desc, actions = '') {
+  return `<div class="notice${tone ? ` notice--${tone}` : ''}" role="status"><div class="notice__text"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(desc)}</span></div>${actions}</div>`;
+}
+
+function personaNotices(p) {
+  const act = (attr, label) => (p.canEdit ? `<div class="notice__actions"><button type="button" class="btn btn--sm" ${attr}>${escapeHTML(label)}</button></div>` : '');
+  const out = [];
+  if (p.status === 'COMPILING') out.push(personaNotice('info', PS.compilingTitle, PS.compilingDesc));
+  else if (p.status === 'ERROR') out.push(personaNotice('warn', PS.errorTitle, `${personaErrorText(p.lastError)} ${PS.errorKeeps}`, act('data-persona-compile', PS.retry)));
+  else if (p.pendingSources) out.push(personaNotice('info', ps('pendingTitle', { n: p.pendingSources }), PS.pendingDesc, act('data-persona-compile', PS.synthesizeNow)));
+  if (p.stale && p.status !== 'COMPILING') out.push(personaNotice('warn', PS.staleTitle, PS.staleDesc, act('data-persona-rebuild', PS.rebuild)));
+  if (p.canEdit === false) out.push(personaNotice('', PS.readOnlyTitle, PS.readOnlyDesc));
+  return out.join('');
+}
+
+function personaPane(tab, p) {
+  if (tab === 'knowledge') return personaKnowledgePane(p);
+  if (tab === 'instructions') return personaInstructionsPane(p);
+  if (tab === 'history') return personaHistoryPane(p);
+  return personaBehaviorPane(p);
+}
+
+function personaBehaviorPane(p) {
+  const b = personaBehavior();
+  const limits = p.limits || {};
+  const off = p.canEdit ? '' : ' disabled';
+  const select = field => `<select class="sel" id="pb-${field}"${off}><option value="">${escapeHTML(PS.optionUnset)}</option>${PERSONA_OPTIONS[field].map(v => `<option value="${v}"${b[field] === v ? ' selected' : ''}>${escapeHTML(ps(`options.${field}.${v}`))}</option>`).join('')}</select>`;
+  const languages = (limits.languages || []).map(code => `<option value="${escapeHTML(code)}"${b.language === code ? ' selected' : ''}>${escapeHTML(personaLanguageLabel(code))}</option>`).join('');
+  const h = b.handoff || {};
+  const ruleCount = (b.rules || []).filter(r => r.trim()).length;
+  const opt = `<span class="opt">${escapeHTML(PS.optional)}</span>`;
+  return `<form class="form" id="persona-behavior-form" novalidate>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.identityTitle)}</h2></header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PS.identityHint)}</p>
+        <div class="form__grid">
+          <div class="form__row"><label class="lbl" for="pb-botName">${escapeHTML(PS.botName)} ${opt}</label>
+            <input class="inp" id="pb-botName" maxlength="${limits.botNameChars || 60}" autocomplete="off" placeholder="${escapeHTML(PS.botNamePh)}" value="${escapeHTML(b.botName || '')}"${off} /></div>
+          <div class="form__row"><label class="lbl" for="pb-language">${escapeHTML(PS.language)}</label>
+            <select class="sel" id="pb-language"${off}><option value="">${escapeHTML(PS.languageAuto)}</option>${languages}</select></div>
+          <div class="form__row form__row--full"><label class="form__check"><input type="checkbox" id="pb-languageStrict"${b.languageStrict ? ' checked' : ''}${b.language && p.canEdit ? '' : ' disabled'} /> ${escapeHTML(PS.languageStrict)}</label></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.styleTitle)}</h2></header>
+      <div class="panel__body form">
+        <div class="form__grid">
+          <div class="form__row"><label class="lbl" for="pb-tone">${escapeHTML(PS.tone)}</label>${select('tone')}</div>
+          <div class="form__row"><label class="lbl" for="pb-addressForm">${escapeHTML(PS.addressForm)}</label>${select('addressForm')}</div>
+          <div class="form__row"><label class="lbl" for="pb-replyLength">${escapeHTML(PS.replyLength)}</label>${select('replyLength')}</div>
+          <div class="form__row"><label class="lbl" for="pb-emoji">${escapeHTML(PS.emoji)}</label>${select('emoji')}</div>
+          <div class="form__row form__row--full"><label class="lbl" for="pb-greeting">${escapeHTML(PS.greeting)} ${opt}</label>
+            <textarea class="txt" id="pb-greeting" rows="2" maxlength="${limits.greetingChars || 400}" placeholder="${escapeHTML(PS.greetingPh)}"${off}>${escapeHTML(b.greeting || '')}</textarea>
+            <p class="hint">${escapeHTML(PS.greetingHint)}</p></div>
+        </div>
+      </div>
+    </section>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.rulesTitle)} <span class="tag" id="pb-rules-count">${fmtCount(ruleCount)}</span></h2></header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PS.rulesHint)}</p>
+        <label class="visually-hidden" for="pb-rules">${escapeHTML(PS.rulesTitle)}</label>
+        <textarea class="txt" id="pb-rules" rows="6" placeholder="${escapeHTML(PS.rulesPh)}"${off}>${escapeHTML((b.rules || []).join('\n'))}</textarea>
+        <p class="hint" id="pb-rules-limit">${escapeHTML(ps('rulesLimit', { max: fmtCount(limits.rules || 25), chars: fmtCount(limits.ruleChars || 300) }))}</p>
+      </div>
+    </section>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.handoffTitle)}</h2><span class="pill${h.enabled ? ' pill--ok' : ''}" id="pb-handoff-pill">${escapeHTML(h.enabled ? PS.handoffOn : PS.handoffOff)}</span></header>
+      <div class="panel__body form">
+        <label class="form__check"><input type="checkbox" id="pb-handoff"${h.enabled ? ' checked' : ''}${off} /> ${escapeHTML(PS.handoffEnable)}</label>
+        <div class="form__row form__row--full"><label class="lbl" for="pb-handoff-triggers">${escapeHTML(PS.handoffWhen)} ${opt}</label>
+          <textarea class="txt" id="pb-handoff-triggers" rows="2" maxlength="${limits.handoffChars || 500}" placeholder="${escapeHTML(PS.handoffWhenPh)}"${off}>${escapeHTML(h.triggers || '')}</textarea></div>
+        <div class="form__row form__row--full"><label class="lbl" for="pb-handoff-message">${escapeHTML(PS.handoffMessage)} ${opt}</label>
+          <textarea class="txt" id="pb-handoff-message" rows="2" maxlength="${limits.handoffChars || 500}" placeholder="${escapeHTML(PS.handoffMessagePh)}"${off}>${escapeHTML(h.message || '')}</textarea></div>
+        <p class="hint">${escapeHTML(PS.handoffHint)}</p>
+      </div>
+    </section>
+    ${p.canEdit ? `<div class="actions"><button class="btn btn--primary" type="submit" data-pb-save>${escapeHTML(PS.saveSettings)}</button><button class="btn btn--ghost" type="button" data-pb-discard${state.personaDraft?.behavior ? '' : ' disabled'}>${escapeHTML(PS.discard)}</button></div>` : ''}
+  </form>
+  <div class="persona-agents" id="persona-agents" hidden></div>`;
+}
+
+function readPersonaBehavior(form) {
+  const v = id => $(`#${id}`, form);
+  return {
+    botName: v('pb-botName').value,
+    language: v('pb-language').value || null,
+    languageStrict: v('pb-languageStrict').checked,
+    tone: v('pb-tone').value || null,
+    addressForm: v('pb-addressForm').value || null,
+    replyLength: v('pb-replyLength').value || null,
+    emoji: v('pb-emoji').value || null,
+    greeting: v('pb-greeting').value,
+    rules: v('pb-rules').value.split('\n'),
+    handoff: { enabled: v('pb-handoff').checked, triggers: v('pb-handoff-triggers').value, message: v('pb-handoff-message').value },
+  };
+}
+
+function personaKnowledgePane(p) {
+  const limits = p.limits || {};
+  const sources = p.sources || [];
+  const used = sources.reduce((n, s) => n + (s.chars || 0), 0);
+  const note = state.personaDraft?.note || '';
+  const types = limits.fileTypes || [];
+  const add = p.canEdit ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.addTitle)}</h2></header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PS.addHint)}</p>
+        <form class="form" id="persona-note-form">
+          <div class="form__row form__row--full"><label class="lbl" for="persona-note">${escapeHTML(PS.noteLabel)}</label>
+            <textarea class="txt" id="persona-note" rows="5" maxlength="${limits.noteChars || 20000}" placeholder="${escapeHTML(PS.notePh)}">${escapeHTML(note)}</textarea>
+            <p class="hint" id="persona-note-count">${escapeHTML(ps('charCount', { n: fmtCount(note.length), max: fmtCount(limits.noteChars || 20000) }))}</p></div>
+          <div class="actions"><button class="btn btn--primary" type="submit">${escapeHTML(PS.addNote)}</button></div>
+        </form>
+        <div class="form__row form__row--full"><label class="lbl" for="persona-file">${escapeHTML(PS.fileLabel)}</label>
+          <input class="inp" id="persona-file" type="file" accept="${escapeHTML(types.map(t => `.${t}`).join(','))}" />
+          <p class="hint">${escapeHTML(ps('fileHint', { types: types.filter(t => !PERSONA_TYPE_ALIASES.includes(t)).map(t => t.toUpperCase()).join(', '), size: fmtMegabytes(limits.uploadBytes) }))}</p></div>
+      </div></section>` : '';
+  const rows = sources.map(s => `<tr>
+      <td class="name long">${escapeHTML(s.label)}<div class="sub">${escapeHTML([ps(`kind.${s.kind}`), ps('chars', { n: fmtCount(s.chars) }), s.addedBy ? personaAuthor(s.addedBy) : ''].filter(Boolean).join(' · '))}</div>${s.truncated ? `<p class="hint hint--warn">${escapeHTML(PS.truncated)}</p>` : ''}</td>
+      <td data-label="${escapeHTML(PS.thState)}">${s.compiled ? `<span class="pill pill--ok">${escapeHTML(PS.sourceSynced)}</span>` : `<span class="pill pill--warn">${escapeHTML(PS.sourcePending)}</span>`}</td>
+      <td class="nowrap" data-label="${escapeHTML(PS.thAdded)}">${escapeHTML(fmtDate(s.createdAt))}</td>
+      <td class="right"><div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-view-source="${escapeHTML(s.id)}">${escapeHTML(PS.view)}</button>${p.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-del-source="${escapeHTML(s.id)}">${escapeHTML(PS.remove)}</button>` : ''}</div></td>
+    </tr>`).join('');
+  const empty = `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(PS.noSourcesTitle)}</p><p class="empty__desc">${escapeHTML(PS.noSourcesDesc)}</p></div></td></tr>`;
+  const tools = p.canEdit && sources.length ? `<div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-persona-rebuild${p.status === 'COMPILING' ? ' disabled' : ''}>${escapeHTML(PS.rebuild)}</button></div>` : '';
+  return `${add}
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.sourcesTitle)} <span class="tag">${fmtCount(sources.length)}</span></h2>${tools}</header>
+      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(PS.thSource)}</th><th>${escapeHTML(PS.thState)}</th><th>${escapeHTML(PS.thAdded)}</th><th class="right">${escapeHTML(STR.thActions)}</th></tr></thead><tbody>${rows || empty}</tbody></table></div>
+      <div class="panel__body"><p class="hint">${escapeHTML(ps('sourcesUsage', { n: fmtCount(sources.length), max: fmtCount(limits.sources || 100), chars: fmtCount(used), maxChars: fmtCount(limits.totalSourceChars || 600000) }))}</p></div>
+    </section>`;
+}
+
+function personaCountHint(n, max, withTokens) {
+  const tone = n > max ? ' hint--bad' : n > max * 0.8 ? ' hint--warn' : '';
+  const text = withTokens
+    ? ps('charCountTokens', { n: fmtCount(n), max: fmtCount(max), tokens: fmtCount(Math.ceil(n / 4)) })
+    : ps('charCount', { n: fmtCount(n), max: fmtCount(max) });
+  return { cls: `hint${tone}`, text };
+}
+
+function personaInstructionsPane(p) {
+  const max = p.limits?.instructionsChars || 12000;
+  const text = personaInstructions();
+  const count = personaCountHint(text.length, max, true);
+  const preview = state.personaPreview;
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.instructionsTitle)}</h2>${p.version ? `<span class="panel__meta">${escapeHTML(ps('versionShort', { n: p.version }))}</span>` : ''}</header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PS.instructionsHint)}</p>
+        <form class="form" id="persona-instructions-form">
+          <label class="visually-hidden" for="persona-text">${escapeHTML(PS.instructionsTitle)}</label>
+          <textarea class="txt" id="persona-text" rows="18" placeholder="${escapeHTML(PS.instructionsPh)}"${p.canEdit ? '' : ' readonly'}>${escapeHTML(text)}</textarea>
+          <p class="${count.cls}" id="persona-text-count">${escapeHTML(count.text)}</p>
+          ${p.canEdit ? `<div class="actions"><button class="btn btn--primary" type="submit" data-pi-save>${escapeHTML(PS.saveInstructions)}</button><button class="btn btn--ghost" type="button" data-pi-discard${state.personaDraft?.compiledInstructions == null ? ' disabled' : ''}>${escapeHTML(PS.discard)}</button></div>` : ''}
+        </form>
+      </div>
+    </section>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.previewTitle)}</h2><div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-persona-preview>${escapeHTML(PS.previewRefresh)}</button></div></header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PS.previewHint)}</p>
+        <textarea class="txt" id="persona-preview" rows="12" readonly aria-label="${escapeHTML(PS.previewTitle)}">${escapeHTML(preview?.block || '')}</textarea>
+        <p class="hint" id="persona-preview-meta">${escapeHTML(personaPreviewMeta(preview))}</p>
+      </div>
+    </section>`;
+}
+
+function personaPreviewMeta(preview) {
+  if (!preview) return PS.previewLoading;
+  if (!preview.block) return PS.previewEmpty;
+  return ps(preview.draft ? 'previewTokensDraft' : 'previewTokens', { n: fmtCount(preview.tokenEstimate) });
+}
+
+async function loadPersonaPreview() {
+  const draft = personaDraftPayload();
+  try {
+    const res = await api('/app/api/persona/preview', { method: 'POST', body: JSON.stringify(draft ? { draft } : {}) });
+    state.personaPreview = { ...res, draft: !!draft };
+  } catch (err) {
+    state.personaPreview = null;
+    return personaFail(err);
   }
-  $('#persona-advanced-toggle')?.addEventListener('click', () => {
-    state.personaAdvanced = !state.personaAdvanced;
-    render();
-  });
-  $('#persona-form')?.addEventListener('submit', async e => {
-    e.preventDefault();
-    const compiledInstructions = $('#persona-text').value.trim();
-    state.persona = await api('/app/api/persona', { method: 'PUT', body: JSON.stringify({ compiledInstructions }) });
-    toast(STR.personaSaved);
-    render();
-  });
-  $('#persona-note-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    const content = $('#persona-note').value.trim();
-    if (!content) return;
-    state.persona = await api('/app/api/persona/sources', { method: 'POST', body: JSON.stringify({ content }) });
-    toast(STR.noteAdded);
-    render();
-    refreshPersona();
-  });
-  $('#persona-file').addEventListener('change', async e => {
-    const file = e.target.files[0];
-    if (!file) return;
-    try {
-      state.persona = await uploadPersonaFile(file);
-      toast(STR.fileUploaded);
-      render();
-      refreshPersona();
-    } catch (err) { toast(err.message || STR.uploadFailed); }
-  });
-  $('#persona-rebuild').addEventListener('click', async () => {
-    state.persona = await api('/app/api/persona/rebuild', { method: 'POST', body: '{}' });
-    toast(STR.rebuildStarted);
-    render();
-    refreshPersona();
-  });
-  $$('[data-del-source]').forEach(b => b.addEventListener('click', async () => {
-    await api(`/app/api/persona/sources/${b.dataset.delSource}`, { method: 'DELETE' });
-    await refreshPersona();
-  }));
+  const box = $('#persona-preview');
+  if (box) box.value = state.personaPreview.block || '';
+  const meta = $('#persona-preview-meta');
+  if (meta) meta.textContent = personaPreviewMeta(state.personaPreview);
+}
 
-  renderPersonaChatLog(personaChatBusy);
-  $('#persona-chat-clear').addEventListener('click', () => { state.personaChat = []; renderPersonaChatLog(); });
-  $('#persona-chat-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    if (personaChatBusy) return;
-    const input = $('#persona-chat-input');
-    const text = input.value.trim();
-    if (!text) return;
-    state.personaChat.push({ role: 'user', content: text });
-    input.value = '';
-    personaChatBusy = true;
-    $('#persona-chat-send').disabled = true;
-    renderPersonaChatLog(true);
-    try {
-      const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify({ messages: state.personaChat }) });
-      state.personaChat.push({ role: 'assistant', content: res.reply });
-    } catch (err) {
-      state.personaChat.push({ role: 'assistant', content: STR.chatError });
-    } finally {
-      personaChatBusy = false;
-      renderPersonaChatLog();
-      const send = $('#persona-chat-send'); if (send) send.disabled = false;
-      const inp = $('#persona-chat-input'); if (inp) inp.focus();
-    }
-  });
+const personaChangeText = v => ps(`change.${v.change}`, { n: v.sourceCount, from: v.restoredFrom });
+
+function personaHistoryPane(p) {
+  const versions = state.personaVersions;
+  if (!versions) return `<section class="panel"><div class="panel__body"><p class="hint">${escapeHTML(PS.historyLoading)}</p></div></section>`;
+  const rows = versions.map(v => `<tr${v.live ? ' class="is-current"' : ''}>
+      <td class="name nowrap">${escapeHTML(ps('versionShort', { n: v.version }))}${v.live ? ` <span class="pill pill--ok">${escapeHTML(PS.live)}</span>` : ''}</td>
+      <td class="long" data-label="${escapeHTML(PS.thChange)}">${escapeHTML(personaChangeText(v))}${v.trimmed ? `<div class="sub">${escapeHTML(PS.trimmed)}</div>` : ''}</td>
+      <td data-label="${escapeHTML(PS.thBy)}">${escapeHTML(v.author ? personaAuthor(v.author) : PS.byAutomatic)}</td>
+      <td class="nowrap" data-label="${escapeHTML(PS.thWhen)}">${escapeHTML(fmtDate(v.createdAt))}</td>
+      <td class="right"><div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-version="${v.version}">${escapeHTML(PS.view)}</button>${p.canEdit && !v.live ? `<button class="btn btn--sm" type="button" data-restore="${v.version}">${escapeHTML(PS.restore)}</button>` : ''}</div></td>
+    </tr>`).join('');
+  const empty = `<tr><td colspan="5"><div class="empty"><p class="empty__title">${escapeHTML(PS.historyEmptyTitle)}</p><p class="empty__desc">${escapeHTML(PS.historyEmptyDesc)}</p></div></td></tr>`;
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.historyTitle)} <span class="tag">${fmtCount(versions.length)}</span></h2></header>
+      <div class="panel__body"><p class="hint">${escapeHTML(ps('historyHint', { n: fmtCount(versions.length) }))}</p></div>
+      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(PS.thVersion)}</th><th>${escapeHTML(PS.thChange)}</th><th>${escapeHTML(PS.thBy)}</th><th>${escapeHTML(PS.thWhen)}</th><th class="right">${escapeHTML(STR.thActions)}</th></tr></thead><tbody>${rows || empty}</tbody></table></div>
+    </section>`;
+}
+
+function personaBehaviorFacts(b = {}) {
+  const choice = field => (b[field] ? ps(`options.${field}.${b[field]}`) : null);
+  return dashFacts([
+    [PS.botName, b.botName || PS.optionUnset],
+    [PS.language, b.language ? `${personaLanguageLabel(b.language)}${b.languageStrict ? ` · ${PS.languageStrictShort}` : ''}` : PS.languageAuto],
+    [PS.tone, choice('tone') || PS.optionUnset],
+    [PS.addressForm, choice('addressForm') || PS.optionUnset],
+    [PS.replyLength, choice('replyLength') || PS.optionUnset],
+    [PS.emoji, choice('emoji') || PS.optionUnset],
+    b.greeting && [PS.greeting, b.greeting],
+    (b.rules || []).length && [PS.rulesTitle, b.rules.join(' · ')],
+    [PS.handoffTitle, b.handoff?.enabled ? [PS.handoffOn, b.handoff.message].filter(Boolean).join(' · ') : PS.handoffOff],
+  ]);
+}
+
+async function openPersonaVersion(n) {
+  let v;
+  try { v = await api(`/app/api/persona/versions/${encodeURIComponent(n)}`); } catch (err) { return personaFail(err); }
+  const canRestore = state.persona?.canEdit && !v.live;
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `${dashFacts([[PS.thChange, personaChangeText(v)], [PS.thBy, v.author ? personaAuthor(v.author) : PS.byAutomatic], [PS.thWhen, fmtDate(v.createdAt)]])}
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.versionSettings)}</h2></header><div class="panel__body">${personaBehaviorFacts(v.behavior)}</div></section>
+    <div class="form__row form__row--full"><label class="lbl" for="pv-text">${escapeHTML(PS.instructionsTitle)}</label>
+      <textarea class="txt" id="pv-text" rows="14" readonly>${escapeHTML(v.compiledInstructions || '')}</textarea></div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button>${canRestore ? `<button class="btn btn--accent" type="button" data-restore-version>${escapeHTML(PS.restoreThis)}</button>` : ''}</div>`;
+  openDrawer(ps('versionTitle', { n: v.version }), body, true, { eyebrow: labels.persona });
+  $('[data-restore-version]', body)?.addEventListener('click', () => restorePersonaVersion(v.version));
+}
+
+async function restorePersonaVersion(n) {
+  const ok = await confirmDialog({ title: ps('restoreTitle', { n }), body: PS.restoreBody, okLabel: PS.restore, danger: false });
+  if (!ok) return;
+  try {
+    state.persona = await api(`/app/api/persona/versions/${encodeURIComponent(n)}/restore`, { method: 'POST', body: '{}' });
+  } catch (err) { return personaFail(err); }
+  state.personaDraft = {};
+  state.personaPreview = null;
+  closeDrawer({ dismissed: true });
+  toast(ps('restored', { n }));
+  await loadPersonaVersions().catch(() => { state.personaVersions = null; });
+  render();
+}
+
+async function openPersonaSource(id) {
+  let s;
+  try { s = await api(`/app/api/persona/sources/${encodeURIComponent(id)}`); } catch (err) { return personaFail(err); }
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `${dashFacts([
+      [PS.thState, s.compiled ? PS.sourceSynced : PS.sourcePending],
+      [PS.thAdded, fmtDate(s.createdAt)],
+      s.addedBy && [PS.thBy, personaAuthor(s.addedBy)],
+      [PS.size, ps('chars', { n: fmtCount(s.chars) })],
+    ])}
+    ${s.truncated ? `<p class="hint hint--warn">${escapeHTML(PS.truncated)}</p>` : ''}
+    <div class="form__row form__row--full"><label class="lbl" for="ps-text">${escapeHTML(PS.sourceText)}</label>
+      <textarea class="txt" id="ps-text" rows="18" readonly>${escapeHTML(s.content)}</textarea></div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button></div>`;
+  openDrawer(s.label, body, true, { eyebrow: ps(`kind.${s.kind}`) });
+}
+
+async function removePersonaSource(source) {
+  const ok = await confirmDialog({ title: ps('removeTitle', { name: source.label }), body: source.compiled ? PS.removeCompiledBody : PS.removePendingBody, okLabel: PS.remove });
+  if (!ok) return;
+  try {
+    state.persona = await api(`/app/api/persona/sources/${encodeURIComponent(source.id)}`, { method: 'DELETE' });
+  } catch (err) { return personaFail(err); }
+  toast(PS.sourceRemoved);
+  render();
+}
+
+async function startPersonaSynthesis(rebuild) {
+  if (rebuild && !(await confirmDialog({ title: PS.rebuildTitle, body: PS.rebuildBody, okLabel: PS.rebuild, danger: false }))) return;
+  try {
+    state.persona = await api(`/app/api/persona/${rebuild ? 'rebuild' : 'compile'}`, { method: 'POST', body: '{}' });
+  } catch (err) { return personaFail(err); }
+  toast(rebuild ? PS.rebuildStarted : PS.synthesisStarted);
+  render();
+  refreshPersona().catch(() => {});
+}
+
+async function uploadPersonaFile(file) {
+  const form = new FormData();
+  form.append('file', file);
+  const res = await fetch('/app/api/persona/sources/file', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
+  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
+  if (!res.ok) throw await apiError(res);
+  return res.json();
+}
+
+function personaTestPanel() {
+  const dirty = !!personaDraftPayload();
+  return `<section class="panel">
+    <header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.testTitle)}</h2>
+      <div class="panel__tools"><span class="pill pill--warn" id="persona-test-draft"${dirty ? '' : ' hidden'}>${escapeHTML(PS.testDraft)}</span><button class="btn btn--sm btn--ghost" type="button" id="persona-chat-clear">${escapeHTML(STR.clear)}</button></div></header>
+    <div class="panel__body form">
+      <p class="hint">${escapeHTML(PS.testHint)}</p>
+      <div class="chip-picks" role="group" aria-label="${escapeHTML(PS.triesAria)}">${PERSONA_TRIES.map(k => `<button type="button" class="chip" data-persona-try="${k}">${escapeHTML(ps(`try.${k}`))}</button>`).join('')}</div>
+      <div class="chat__log" id="persona-chat-log" role="log" aria-live="polite"></div>
+      <form class="chat__form" id="persona-chat-form">
+        <input class="inp chat__input" id="persona-chat-input" placeholder="${escapeHTML(STR.chatPlaceholder)}" aria-label="${escapeHTML(STR.chatPlaceholder)}" autocomplete="off" />
+        <button class="btn btn--primary" type="submit" id="persona-chat-send"${personaChatBusy ? ' disabled' : ''}>${escapeHTML(STR.send)}</button>
+      </form>
+    </div>
+  </section>`;
 }
 
 function renderPersonaChatLog(busy = false) {
@@ -7383,19 +7622,204 @@ function renderPersonaChatLog(busy = false) {
     log.innerHTML = `<div class="chat__empty">${escapeHTML(STR.chatEmpty)}</div>`;
     return;
   }
-  log.innerHTML = msgs.map(m => `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>`).join('')
-    + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
+  log.innerHTML = msgs.map(m => {
+    if (m.role === 'note') return `<div class="chat__note">${escapeHTML(m.content)}</div>`;
+    const bubble = `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>`;
+    return m.handoff ? `${bubble}<div class="chat__note">${escapeHTML(m.reason ? ps('handoffNoteReason', { reason: m.reason }) : PS.handoffNote)}</div>` : bubble;
+  }).join('') + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }
 
-async function uploadPersonaFile(file) {
-  const form = new FormData();
-  form.append('file', file);
-  const res = await fetch('/app/api/persona/sources/file', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: form });
-  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
-  if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }
-  return res.json();
+async function sendPersonaTest(text) {
+  const content = (text || '').trim();
+  if (personaChatBusy || !content) return;
+  state.personaChat.push({ role: 'user', content });
+  personaChatBusy = true;
+  const send = $('#persona-chat-send');
+  if (send) send.disabled = true;
+  renderPersonaChatLog(true);
+  const draft = personaDraftPayload();
+  try {
+    const messages = state.personaChat.filter(m => m.role === 'user' || m.role === 'assistant').map(({ role, content: c }) => ({ role, content: c }));
+    const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify(draft ? { messages, draft } : { messages }) });
+    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason });
+  } catch (err) {
+    if (err?.message !== 'unauthorized') state.personaChat.push({ role: 'note', content: personaErrorText(err?.code, err) });
+  } finally {
+    personaChatBusy = false;
+    renderPersonaChatLog();
+    const again = $('#persona-chat-send');
+    if (again) again.disabled = false;
+    $('#persona-chat-input')?.focus();
+  }
 }
+
+/** Keeps the "testing unsaved changes" pill and the discard buttons in step with the draft, without a redraw. */
+function paintPersonaDraft() {
+  const pill = $('#persona-test-draft');
+  if (pill) pill.hidden = !personaDraftPayload();
+  const behavior = $('[data-pb-discard]');
+  if (behavior) behavior.disabled = !state.personaDraft?.behavior;
+  const instructions = $('[data-pi-discard]');
+  if (instructions) instructions.disabled = state.personaDraft?.compiledInstructions == null;
+}
+
+function wirePersona(root, tab, p) {
+  $$('[data-persona-tab]', root).forEach(b => b.addEventListener('click', async () => {
+    state.personaTab = b.dataset.personaTab;
+    if (state.personaTab === 'history' && !state.personaVersions) {
+      render();
+      await loadPersonaVersions().catch(err => { personaFail(err); state.personaVersions = []; });
+    }
+    if (state.personaTab === 'instructions') state.personaPreview = null;
+    render();
+  }));
+  $$('[data-persona-compile]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(false)));
+  $$('[data-persona-rebuild]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(true)));
+
+  const behaviorForm = $('#persona-behavior-form', root);
+  if (behaviorForm) {
+    const onEdit = () => {
+      const value = readPersonaBehavior(behaviorForm);
+      state.personaDraft.behavior = sameBehavior(value, p.behavior) ? undefined : value;
+      const strict = $('#pb-languageStrict', behaviorForm);
+      strict.disabled = !value.language || !p.canEdit;
+      if (!value.language) strict.checked = false;
+      $('#pb-rules-count', behaviorForm).textContent = fmtCount(value.rules.filter(r => r.trim()).length);
+      const pill = $('#pb-handoff-pill', behaviorForm);
+      pill.textContent = value.handoff.enabled ? PS.handoffOn : PS.handoffOff;
+      pill.classList.toggle('pill--ok', value.handoff.enabled);
+      paintPersonaDraft();
+    };
+    behaviorForm.addEventListener('input', onEdit);
+    behaviorForm.addEventListener('change', onEdit);
+    behaviorForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const save = $('[data-pb-save]', behaviorForm);
+      save.disabled = true;
+      try {
+        state.persona = await api('/app/api/persona/behavior', { method: 'PUT', body: JSON.stringify(readPersonaBehavior(behaviorForm)) });
+      } catch (err) {
+        save.disabled = false;
+        return personaFail(err);
+      }
+      delete state.personaDraft.behavior;
+      state.personaVersions = null;
+      state.personaPreview = null;
+      toast(PS.settingsSaved);
+      render();
+    });
+    $('[data-pb-discard]', behaviorForm)?.addEventListener('click', () => { delete state.personaDraft.behavior; render(); });
+    const agents = $('#persona-agents', root);
+    if (agents && hasModule('agents') && window.AgentsUI) {
+      window.AgentsUI.mountPersonaAgents(agents, p).then(() => { agents.hidden = !agents.childElementCount; });
+    }
+  }
+
+  const noteForm = $('#persona-note-form', root);
+  if (noteForm) {
+    const note = $('#persona-note', noteForm);
+    const max = p.limits?.noteChars || 20000;
+    note.addEventListener('input', () => {
+      state.personaDraft.note = note.value;
+      const count = personaCountHint(note.value.length, max, false);
+      const hint = $('#persona-note-count', noteForm);
+      hint.className = count.cls;
+      hint.textContent = count.text;
+    });
+    noteForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      const content = note.value.trim();
+      if (!content) return toast(personaErrorText('content_required', { field: 'content' }));
+      const submit = $('button[type=submit]', noteForm);
+      submit.disabled = true;
+      try {
+        state.persona = await api('/app/api/persona/sources', { method: 'POST', body: JSON.stringify({ content }) });
+      } catch (err) {
+        submit.disabled = false;
+        return personaFail(err);
+      }
+      delete state.personaDraft.note;
+      toast(PS.noteAdded);
+      render();
+      refreshPersona().catch(() => {});
+    });
+  }
+  $('#persona-file', root)?.addEventListener('change', async e => {
+    const input = e.target;
+    const file = input.files[0];
+    if (!file) return;
+    const limits = p.limits || {};
+    const ext = file.name.includes('.') ? file.name.split('.').pop().toLowerCase() : '';
+    if (limits.fileTypes && !limits.fileTypes.includes(ext)) { input.value = ''; return toast(personaErrorText('unsupported_file')); }
+    if (limits.uploadBytes && file.size > limits.uploadBytes) { input.value = ''; return toast(personaErrorText('file_too_large', { limit: limits.uploadBytes, field: 'file' })); }
+    input.disabled = true;
+    try {
+      state.persona = await uploadPersonaFile(file);
+    } catch (err) {
+      input.disabled = false;
+      input.value = '';
+      return personaFail(err);
+    }
+    toast(PS.fileUploaded);
+    render();
+    refreshPersona().catch(() => {});
+  });
+  $$('[data-view-source]', root).forEach(b => b.addEventListener('click', () => openPersonaSource(b.dataset.viewSource)));
+  $$('[data-del-source]', root).forEach(b => b.addEventListener('click', () => {
+    const source = (p.sources || []).find(s => s.id === b.dataset.delSource);
+    if (source) removePersonaSource(source);
+  }));
+
+  const instructionsForm = $('#persona-instructions-form', root);
+  if (instructionsForm) {
+    const area = $('#persona-text', instructionsForm);
+    const max = p.limits?.instructionsChars || 12000;
+    area.addEventListener('input', () => {
+      state.personaDraft.compiledInstructions = area.value === (p.compiledInstructions || '') ? undefined : area.value;
+      const count = personaCountHint(area.value.length, max, true);
+      const hint = $('#persona-text-count', instructionsForm);
+      hint.className = count.cls;
+      hint.textContent = count.text;
+      paintPersonaDraft();
+    });
+    instructionsForm.addEventListener('submit', async e => {
+      e.preventDefault();
+      if (area.value.trim().length > max) return toast(personaErrorText('too_long', { field: 'compiledInstructions', limit: max }));
+      const save = $('[data-pi-save]', instructionsForm);
+      save.disabled = true;
+      try {
+        state.persona = await api('/app/api/persona', { method: 'PUT', body: JSON.stringify({ compiledInstructions: area.value }) });
+      } catch (err) {
+        save.disabled = false;
+        return personaFail(err);
+      }
+      delete state.personaDraft.compiledInstructions;
+      state.personaVersions = null;
+      state.personaPreview = null;
+      toast(PS.instructionsSaved);
+      render();
+    });
+    $('[data-pi-discard]', instructionsForm)?.addEventListener('click', () => { delete state.personaDraft.compiledInstructions; state.personaPreview = null; render(); });
+    $('[data-persona-preview]', root)?.addEventListener('click', loadPersonaPreview);
+    if (!state.personaPreview) loadPersonaPreview();
+  }
+
+  $$('[data-version]', root).forEach(b => b.addEventListener('click', () => openPersonaVersion(b.dataset.version)));
+  $$('[data-restore]', root).forEach(b => b.addEventListener('click', () => restorePersonaVersion(b.dataset.restore)));
+
+  renderPersonaChatLog(personaChatBusy);
+  $('#persona-chat-clear', root).addEventListener('click', () => { state.personaChat = []; renderPersonaChatLog(); });
+  $$('[data-persona-try]', root).forEach(b => b.addEventListener('click', () => sendPersonaTest(ps(`try.${b.dataset.personaTry}`))));
+  $('#persona-chat-form', root).addEventListener('submit', e => {
+    e.preventDefault();
+    const input = $('#persona-chat-input');
+    const text = input.value;
+    input.value = '';
+    sendPersonaTest(text);
+  });
+}
+
 function widgetDraft() {
   if (!state.widgetDraft) {
     state.widgetDraft = {
@@ -9010,6 +9434,7 @@ async function init(relayed = false) {
   if (!relayed && handleOAuthPopup()) return;
   window.AgentsUI?.init(agentsDeps());
   window.TimesheetsUI?.init(timesheetsDeps());
+  window.AssistantUI?.init(assistantDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });

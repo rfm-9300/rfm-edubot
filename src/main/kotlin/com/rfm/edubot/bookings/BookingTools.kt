@@ -7,8 +7,10 @@ import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.tenant.model.TenantTimeZones
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -105,6 +107,92 @@ class BookingTools(
             put("message", ruleHint(e.code))
         }
     }
+
+    /** What a person confirming [call] in the dashboard sees: the service, the local time and who it is for. */
+    suspend fun describe(call: ToolCall): JsonObject? = runCatching {
+        val args = call.arguments
+        when (call.name) {
+            "create_booking" -> {
+                val service = services.findById(args.string("service_id"))
+                buildJsonObject {
+                    service?.let { s ->
+                        put("service", s.name)
+                        s.durationMinutes?.let { put("duration_minutes", it) }
+                        put("price_eur", s.priceCents / 100.0)
+                    }
+                    put("when", readable(parseInstant(args.string("start_at"))))
+                    args.optionalString("contact_name")?.let { put("contact", it) }
+                    args.optionalString("contact_phone")?.let { put("phone", it) }
+                    args.optionalString("status")?.let { put("status", it.uppercase()) }
+                }
+            }
+            "reschedule_booking" -> {
+                val booking = bookings.findById(bookingId(args)) ?: return null
+                buildJsonObject {
+                    put("booking", summary(booking))
+                    put("when_from", readable(booking.startAt))
+                    put("when", readable(parseInstant(args.string("start_at"))))
+                    args.optionalString("service_id")?.let { id -> services.findById(id)?.let { put("service", it.name) } }
+                }
+            }
+            "cancel_booking", "confirm_booking" -> {
+                val booking = bookings.findById(bookingId(args)) ?: return null
+                buildJsonObject {
+                    put("booking", summary(booking))
+                    put("status_from", booking.status.name)
+                }
+            }
+            else -> null
+        }
+    }.getOrNull()
+
+    /** Why the write [call] couldn't run as it is (the service, the contact, the slot), as the error result the model reads; null when it can. */
+    suspend fun check(call: ToolCall): JsonObject? = try {
+        val args = call.arguments
+        when (call.name) {
+            "create_booking" -> {
+                val service = services.findById(args.string("service_id")) ?: throw BookingRuleException(BookingScheduler.SERVICE_NOT_FOUND)
+                val minutes = service.durationMinutes?.takeIf { service.active } ?: throw BookingRuleException(BookingScheduler.SERVICE_NOT_BOOKABLE)
+                val start = parseInstant(args.string("start_at"))
+                val hasContact = args.optionalString("contact_name") != null && args.optionalString("contact_phone") != null
+                if (args.optionalString("client_id") == null && !hasContact) throw BookingRuleException(BookingScheduler.CONTACT_REQUIRED)
+                if (bookings.findOverlapping(start, start.plus(minutes, DateTimeUnit.MINUTE)).isNotEmpty()) throw BookingConflictException(BookingScheduler.CONFLICT)
+                null
+            }
+            "reschedule_booking" -> {
+                val booking = bookings.findById(bookingId(args)) ?: throw BookingRuleException(BookingScheduler.BOOKING_NOT_FOUND)
+                val start = parseInstant(args.string("start_at"))
+                val minutes = args.optionalString("service_id")?.let { id -> services.findById(id)?.takeIf { it.active }?.durationMinutes ?: throw BookingRuleException(BookingScheduler.SERVICE_NOT_BOOKABLE) }
+                    ?: (booking.endAt - booking.startAt).inWholeMinutes.toInt()
+                if (bookings.findOverlapping(start, start.plus(minutes, DateTimeUnit.MINUTE), excludeId = booking.id).isNotEmpty()) throw BookingConflictException(BookingScheduler.CONFLICT)
+                null
+            }
+            "cancel_booking", "confirm_booking" -> {
+                bookings.findById(bookingId(args)) ?: throw BookingRuleException(BookingScheduler.BOOKING_NOT_FOUND)
+                null
+            }
+            else -> null
+        }
+    } catch (e: BookingConflictException) {
+        buildJsonObject {
+            put("error", BookingScheduler.CONFLICT)
+            put("message", "That time overlaps another booking. Call list_available_slots and offer the free times instead.")
+        }
+    } catch (e: BookingRuleException) {
+        buildJsonObject {
+            put("error", e.code)
+            put("message", ruleHint(e.code))
+        }
+    } catch (e: IllegalArgumentException) {
+        buildJsonObject {
+            put("error", "invalid_arguments")
+            put("message", e.message ?: "Check the arguments.")
+        }
+    }
+
+    private fun readable(instant: Instant): String = local(instant).replace('T', ' ')
+
+    private fun summary(booking: Booking): String = "${booking.serviceName} · ${readable(booking.startAt)} · ${booking.contactName}"
 
     private suspend fun listServices(args: JsonObject): JsonObject {
         val activeOnly = args["active_only"]?.jsonPrimitive?.booleanOrNull

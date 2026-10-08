@@ -1,6 +1,6 @@
 # Implementation Plan — Per-Tenant Feature Visibility & Bot Persona
 
-Status: **Phase 1–3 implemented** · Owner: Rodrigo · Last updated: 2026-06-08
+Status: **Phase 1–4 implemented** · Owner: Rodrigo · Last updated: 2026-10-08 · Current design: [architecture.md → Persona](architecture.md#persona)
 
 Two related dashboard features:
 
@@ -213,6 +213,14 @@ New `persona/PersonaCompiler.kt`:
   `PersonaFileExtractor` (PDFBox for PDF, plain for TXT/MD; docx not supported — would need POI) →
   text becomes a `FILE` source fed into synthesis. No vector store; everything distills into the
   one compiled file.
+- **Phase 4 — Settings, history, handoff, studio. ✅ Done.** Structured settings beside the
+  instructions (name, language, tone, form of address, reply length, emoji, greeting, rules,
+  handoff), one prompt builder (`PersonaPrompt`) shared by customer chats and the test chat with
+  platform guardrails after the persona, `persona_versions` history with restore, a hardened
+  synthesis (boot recovery, batches, condensing, budget metering, never an empty persona,
+  restart on concurrent edits), `handoff_to_human` (pauses the chat and notifies the team), DOCX
+  and CSV uploads, admin-only changes, and the `/app` studio with a test chat that uses unsaved
+  edits. Docx is read without POI (the zip's `word/document.xml`, DTDs off).
 
 ### 3.7 Token budget & cost notes
 
@@ -236,12 +244,14 @@ New `persona/PersonaCompiler.kt`:
   reachable). Confirm whether `overview` should also be forced-on.
 - **D2 — Persona vs. base prompt.** Recommend layered (persona appended, `CRM_V1` retains tool/
   safety rules). Alternative: full system-prompt replacement (riskier — can break CRM flows).
-- **D3 — Recompaction.** Incremental merge by default; periodic full rebuild from `persona_sources`
-  to limit drift. Confirm cadence (manual button vs. scheduled).
-- **D4 — Manual edit of compiled file.** Allow direct edit, or sources-only? Recommend allow, with
-  a "this will be revised on next sync" note.
-- **D5 — Who can edit persona.** Tenant only, or operator too (support/impersonation already
-  exists via `/admin/api/tenants/{slug}/impersonate`)? Recommend both.
+- **D3 — Recompaction. Resolved:** a manual "Rebuild from sources" button, no schedule. Removing a
+  source that was already synthesized flags the persona (`stale`) and the dashboard offers the
+  rebuild; the rebuild runs in the background and its previous version stays in history.
+- **D4 — Manual edit of compiled file. Resolved:** allowed. The next synthesis starts from the edit
+  (and starts again if the edit lands while it runs); a rebuild drops hand edits, which the
+  dashboard says before confirming and history can restore.
+- **D5 — Who can edit persona. Resolved:** company admins and operators (impersonation) change it;
+  members read it and use the test chat.
 
 ## 6. Test plan
 

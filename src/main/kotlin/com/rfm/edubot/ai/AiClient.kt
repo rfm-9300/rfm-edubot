@@ -166,7 +166,7 @@ class AiClient(
             toolChoice = if (forceToolUse && toolSpecs != null) "required" else null,
         )
 
-        val response: HttpResponse = client.post("https://openrouter.ai/api/v1/chat/completions") {
+        val response: HttpResponse = client.post("${cfg.baseUrl.trimEnd('/')}/chat/completions") {
             headers {
                 append("Authorization", "Bearer ${cfg.apiKey}")
                 append("HTTP-Referer", "https://github.com/rfm/whatsapp-bot")

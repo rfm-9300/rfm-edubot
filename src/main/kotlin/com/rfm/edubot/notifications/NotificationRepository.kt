@@ -49,6 +49,8 @@ object NotificationKinds {
     const val TIME_DEVICE_ENROLLED = "time_device_enrolled"
     /** An employee forgot to clock out and said when they finished; its `ref` is `shift:ID`. */
     const val TIME_MISSED_CLOCK_OUT = "time_missed_clock_out"
+    /** The bot handed a conversation to the team; its subject is the conversation. */
+    const val CONVERSATION_HANDOFF = "conversation_handoff"
 }
 
 class NotificationRepository(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {

@@ -28,7 +28,8 @@ data class AssistantMessage(
 
 /**
  * A tool call the assistant wants to make. While [status] is `PENDING` the user has to confirm or
- * cancel it; [preview] is the rendered effect when the backend could produce one.
+ * cancel it; [preview] is what the backend shows beyond the arguments (the names behind ids, totals,
+ * the reply's text), keyed by what each value is. Its keys depend on the tool.
  */
 @Serializable
 data class AssistantAction(
@@ -37,7 +38,7 @@ data class AssistantAction(
     val arguments: JsonObject = JsonObject(emptyMap()),
     val status: String,
     val result: JsonObject? = null,
-    val preview: String? = null,
+    val preview: JsonObject? = null,
 ) {
     val pending: Boolean get() = status.equals("PENDING", ignoreCase = true)
 }

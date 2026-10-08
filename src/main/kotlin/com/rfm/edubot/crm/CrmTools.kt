@@ -51,6 +51,84 @@ class CrmTools(
     fun readOnlyDefinitionsFor(modules: Set<String>): List<ToolDefinition> =
         definitionsFor(modules).filter { it.name in READ_ONLY_TOOL_NAMES }
 
+    /**
+     * What a person confirming [call] in the dashboard sees beyond its arguments: the names and numbers behind
+     * the ids and the totals. Null when the arguments say it all, or the records they point at are gone.
+     */
+    suspend fun describe(call: ToolCall): JsonObject? = runCatching {
+        val args = call.arguments
+        when (call.name) {
+            "create_quote", "create_invoice" -> {
+                val client = clients.findById(resolveClientId(args.string("client_id")))
+                buildJsonObject {
+                    client?.let { put("client", "${it.name} (${it.number})") }
+                    put("total_eur", args.items().sumOf { it.totalCents } / 100.0)
+                    args.optionalString("quote_id")?.takeIf { ObjectId.isValid(it) }?.let { id -> quotes.findById(ObjectId(id))?.let { put("quote", it.number) } }
+                    args.optionalString(if (call.name == "create_invoice") "due_date" else "valid_until")?.let { put(if (call.name == "create_invoice") "due_date" else "valid_until", it) }
+                }
+            }
+            "update_quote" -> {
+                val quote = quotes.findById(resolveQuoteId(args.string("quote_id"))) ?: return null
+                buildJsonObject {
+                    put("quote", quote.number)
+                    clients.findById(quote.clientId)?.let { put("client", "${it.name} (${it.number})") }
+                    put("status_from", quote.status.name)
+                    put("total_from_eur", quote.totalCents / 100.0)
+                    if (args["items"] != null) put("total_eur", args.items().sumOf { it.totalCents } / 100.0)
+                }
+            }
+            "mark_invoice_paid" -> {
+                val invoice = invoices.findById(ObjectId(args.string("invoice_id"))) ?: return null
+                buildJsonObject {
+                    put("invoice", invoice.number)
+                    clients.findById(invoice.clientId)?.let { put("client", "${it.name} (${it.number})") }
+                    put("total_eur", invoice.totalCents / 100.0)
+                    put("outstanding_eur", invoice.outstandingCents / 100.0)
+                    put("due_date", invoice.dueDate.toString())
+                    put("status_from", invoice.status.name)
+                }
+            }
+            else -> null
+        }
+    }.getOrNull()
+
+    /** Why the write [call] couldn't run as it is, as the error result the model reads; null when it can. */
+    suspend fun check(call: ToolCall): JsonObject? = try {
+        val args = call.arguments
+        when (call.name) {
+            "create_quote", "create_invoice" -> {
+                clients.findById(resolveClientId(args.string("client_id"))) ?: throw IllegalArgumentException("Client not found for reference: ${args.string("client_id")}")
+                if (args.items().isEmpty()) throw IllegalArgumentException("Add at least one line with a description and price_eur.")
+                if (call.name == "create_invoice") kotlinx.datetime.LocalDate.parse(args.string("due_date"))
+                args.optionalString("valid_until")?.let { kotlinx.datetime.LocalDate.parse(it) }
+                args.optionalString("quote_id")?.let { if (!ObjectId.isValid(it) || quotes.findById(ObjectId(it)) == null) throw IllegalArgumentException("Quote not found for reference: $it") }
+                null
+            }
+            "update_quote" -> {
+                quotes.findById(resolveQuoteId(args.string("quote_id"))) ?: throw IllegalArgumentException("Quote not found for reference: ${args.string("quote_id")}")
+                args.optionalString("status")?.let { QuoteStatus.valueOf(it.uppercase()) }
+                args.optionalString("valid_until")?.let { kotlinx.datetime.LocalDate.parse(it) }
+                if (args["items"] != null && args.items().isEmpty()) throw IllegalArgumentException("A quote needs at least one line.")
+                null
+            }
+            "mark_invoice_paid" -> {
+                val invoice = args.optionalString("invoice_id")?.takeIf { ObjectId.isValid(it) }?.let { invoices.findById(ObjectId(it)) }
+                    ?: throw IllegalArgumentException("Invoice not found: use list_invoices for its id.")
+                when (invoice.status) {
+                    InvoiceStatus.PAID -> buildJsonObject { put("error", "already_paid"); put("message", "${invoice.number} is already paid.") }
+                    InvoiceStatus.CANCELLED -> buildJsonObject { put("error", "invoice_cancelled"); put("message", "${invoice.number} is cancelled.") }
+                    else -> null
+                }
+            }
+            else -> null
+        }
+    } catch (e: Exception) {
+        buildJsonObject {
+            put("error", "invalid_arguments")
+            put("message", com.rfm.edubot.ai.tools.toolFailureMessage(e))
+        }
+    }
+
     suspend fun execute(call: ToolCall): JsonObject = when (call.name) {
         "search_clients" -> searchClients(call.arguments)
         "list_service_templates" -> listServiceTemplates(call.arguments)

@@ -28,6 +28,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "dashboard_users",
                 "tenant_persona",
                 "persona_sources",
+                "persona_versions",
                 "dashboard_assistant_threads",
                 "dashboard_assistant_messages",
                 "crm.clients",
@@ -68,6 +69,8 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val personaSources = db.getCollection<Document>("persona_sources")
             personaSources.createIndex(Document("tenantId", 1).append("createdAt", -1))
             personaSources.createIndex(Document("tenantId", 1).append("compiledIntoVersion", 1))
+            db.getCollection<Document>("persona_versions")
+                .createIndex(Document("tenantId", 1).append("version", -1), IndexOptions().unique(true))
 
             val assistantThreads = db.getCollection<Document>("dashboard_assistant_threads")
             assistantThreads.createIndex(Document("tenantId", 1).append("ownerKey", 1).append("updatedAt", -1))

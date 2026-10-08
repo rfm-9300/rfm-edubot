@@ -94,6 +94,8 @@ data class AppConfig(
         val primaryModel: String = "google/gemini-flash-1.5",
         val fallbackModel: String = "qwen/qwen-2.5-7b-instruct",
         val maxTokens: Int = 1024,
+        /** The OpenAI-compatible API the chat completions go to; another one only for local or staging runs. */
+        val baseUrl: String = DEFAULT_OPENROUTER_BASE_URL,
     )
 
     data class MongoConfig(
@@ -138,6 +140,7 @@ data class AppConfig(
 
     companion object {
         private val log = LoggerFactory.getLogger("AppConfig")
+        const val DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 
         fun load(): AppConfig {
             val config = ConfigFactory.load()
@@ -168,6 +171,7 @@ data class AppConfig(
                 primaryModel = config.getString("app.openrouter.primaryModel"),
                 fallbackModel = config.getString("app.openrouter.fallbackModel"),
                 maxTokens = config.getInt("app.openrouter.maxTokens"),
+                baseUrl = getOptional(config, "app.openrouter.baseUrl").ifBlank { DEFAULT_OPENROUTER_BASE_URL },
             )
 
             val mongoConfig = MongoConfig(

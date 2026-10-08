@@ -63,9 +63,22 @@ data class Conversation(
     val lastInboundAt: Instant? = null,
     val unreadCount: Int = 0,
     val autoReplyPausedAt: Instant? = null,
-    /** Dashboard user whose reply or click paused the AI. */
+    /** Dashboard user whose reply or click paused the AI, or [BOT_HANDOFF]. */
     val autoReplyPausedBy: String? = null,
-)
+) {
+    /**
+     * Whether the team owes the customer a reply, given the conversation's [last] message: the customer
+     * wrote last, or the bot handed the conversation over and no person has written since.
+     */
+    fun needsTeamReply(last: Message?): Boolean =
+        last?.role == UserRole.USER ||
+            (!autoReplyEnabled && autoReplyPausedBy == BOT_HANDOFF && last?.role == UserRole.ASSISTANT && last.author == MessageAuthor.AI)
+
+    companion object {
+        /** [autoReplyPausedBy] when the bot handed the conversation to the team. Not an email, so no person matches it. */
+        const val BOT_HANDOFF = "bot:handoff"
+    }
+}
 
 data class Message(
     @BsonId val id: ObjectId = ObjectId(),

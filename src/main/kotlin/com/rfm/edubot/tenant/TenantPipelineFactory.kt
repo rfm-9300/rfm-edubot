@@ -17,7 +17,12 @@ import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.messaging.DeduplicationService
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.messaging.MessagePipeline
+import com.rfm.edubot.notifications.NotificationAudience
+import com.rfm.edubot.notifications.NotificationKinds
+import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.persona.PersonaRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.ratelimit.RateLimiter
@@ -80,8 +85,9 @@ class TenantPipelineFactory(
         val quotes = QuoteRepository(mongo, tenant.id)
         val invoices = InvoiceRepository(mongo, tenant.id)
         val items = StandardItemRepository(mongo, tenant.id)
-        val compiledPersona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id)?.compiledInstructions }
+        val persona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id) }
         val bookingTools = if (DashboardModules.BOOKINGS in modules) bookingDeps(mongo, tenant, BookingSource.WHATSAPP).tools() else null
+        val notifications = NotificationRepository(mongo)
         return MessagePipeline(
             users = UserRepository(mongo, tenant.id),
             conversations = ConversationRepository(mongo, tenant.id),
@@ -97,11 +103,25 @@ class TenantPipelineFactory(
             pdfGenerator = PdfGenerator(),
             documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
             openrouterModel = tenant.openrouterModel,
-            compiledPersona = compiledPersona,
+            persona = persona,
             enabledModules = modules,
             tenantUsage = TenantUsageRepository(mongo, tenant.id),
             monthlyTokenBudget = tenant.monthlyTokenBudget,
             timezoneId = tenant.timezone,
+            onHandoff = { handoff ->
+                notifications.notify(
+                    tenantId = tenant.id,
+                    kind = NotificationKinds.CONVERSATION_HANDOFF,
+                    audience = NotificationAudience.ALL,
+                    params = mapOf(
+                        "name" to (handoff.customerName?.takeIf { it.isNotBlank() } ?: handoff.conversation.waId),
+                        "reason" to handoff.reason,
+                        "channel" to handoff.conversation.channel.name,
+                    ),
+                    link = DashboardModules.CONVERSATIONS,
+                    subject = SubjectRef.of(SubjectTypes.CONVERSATION, handoff.conversation.id),
+                )
+            },
         )
     }
 }

@@ -67,6 +67,7 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+- `scripts/persona-e2e/` — browser walkthrough of the Persona page: start `python3 scripts/persona-e2e/fake-openrouter.py`, run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1` and a backoffice password, then in that folder `npm install && ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs` (exits non-zero on a failed check)
 
 ## Local Development - "run local"
 
@@ -82,6 +83,7 @@ When Rodrigo says "create-mocks", "create mocks", "seed mocks", or asks to resto
 3. `./gradlew run` — app on port 8080
 4. Expose webhook: `cloudflared tunnel --url http://localhost:8080`
 5. Register tunnel URL + verify token in Meta Developer Dashboard
+6. Optional, without an OpenRouter key: start `python3 scripts/assistant-e2e/fake-openrouter.py`, set `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1`, and `node scripts/assistant-e2e/walkthrough.mjs` walks the AI Assistant page in Chrome
 
 ## Architecture
 See `docs/architecture.md` for full diagrams and component breakdown.

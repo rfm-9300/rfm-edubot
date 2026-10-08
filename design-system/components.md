@@ -268,7 +268,9 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 </div>
 ```
 
-Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions`.
+Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions` `.nowrap` `.long`.
+
+A table can have more columns than its panel fits, as the `/app` directory lists can once someone adds columns; it then scrolls inside `.tbl-wrap`, and the browser squeezes every cell that may wrap down to its longest word. So values that must stay whole take `.nowrap` (phone numbers, NIFs, postal codes, dates, numbers), and text that wraps takes `.long`, an 11em minimum, so a name or an address breaks over a few lines rather than one word per line. `.id` codes take neither (they still break at the hyphen on a phone).
 
 A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill. A link inside a cell's text (a punch's place on the map) is `a.tbl__link`: `--info-ink`, underlined, with the focus ring.
 
@@ -564,12 +566,36 @@ When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a 
 | `.chat__msg chat__msg--user` | Outgoing (gradient) |
 | `.chat__msg chat__msg--bot` | Incoming (surface + border) |
 | `.chat__typing` | Italic muted |
+| `.chat__note` | A centered muted line about the chat, not in it: where the persona test would hand over, an error |
 | `.chat__form` + `.chat__input` | Composer (pill input) |
 | `.assistant` | Two-column assistant shell |
-| `.assistant__thread` / `.is-active` | Thread list item |
-| `.assistant__action` | Confirm-before-execute card |
+| `.assistant__thread` / `.is-active` | Thread list item: title, relative time, and a `.pill--warn.assistant__pending` count of the changes waiting in it |
+| `.assistant__search` | Conversation search over the list, once there are more than four (and while a search is on) |
+| `.assistant__head` | Above the log: `.assistant__title`, Rename and Delete; a plain `.pill` "Answers only" while changes are off |
+| `.assistant__welcome` + `.assistant__starters` | An empty conversation: a title, a line and starter questions as `.btn.btn--sm` that send at once |
+| `.assistant__turn` + `.assistant__meta` | A bot answer and the line under it: "Looked at: …" and the `.assistant__copy` link |
+| `.chat__msg--rich` | A bot bubble drawn from a markdown subset after escaping: paragraphs, lists, `.chat__heading`, `code`, http(s) links, and `.chat__table`, which scrolls inside the bubble with numbers right-aligned (`td.num`) |
+| `.assistant__failed` | A turn without an answer (`--bad-soft` bubble), with "Try again" in `.assistant__meta` when it is the last message |
+| `.assistant__action` (`--pending` `--confirmed` `--failed` `--cancelled` `--expired`) | Confirm-before-execute card: `.assistant__action-head` (label, title, status pill), `.assistant__action-details`, `.assistant__quote` for a reply's exact text, a `.hint` on expired and failed ones, `.assistant__action-buttons` |
+| `.assistant__composer-hint` | Under the composer: the Enter / Shift+Enter hint and, near the limit, a character count |
 
 User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that. The customer inbox has its own components (next section).
+
+### Persona studio
+
+```html
+<div class="persona-studio">
+  <div class="persona-studio__main">
+    <div class="settings-tabs" role="tablist">…Behavior · Knowledge · Instructions · History…</div>
+    <div class="persona-studio__pane" role="tabpanel"><!-- panels --></div>
+  </div>
+  <aside class="persona-studio__test">
+    <section class="panel"><!-- head: title, .pill--warn "Unsaved changes" (hidden when none), Clear; body: .chip-picks, .chat__log, .chat__form --></section>
+  </aside>
+</div>
+```
+
+Two columns (editor, test chat at up to 400px) with the chat sticky at the top; one column under 1100px, the chat after the editor. The main column and its pane are grids with a 16px gap, so panels inside need no margins. Its "Unsaved changes" pill toggles with `hidden` (`.persona-studio .pill[hidden]`).
 
 ## Conversations inbox
 
@@ -858,7 +884,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 | `.conds` > `.cond-row` (`--exit`) | Condition rows: field · operator · value · remove `.iconbtn`; with two or more, a `.sel--inline` match select sits on top |
 | `.chip-picks` | Multi-select chips (weekdays, statuses, an AI task's actions); picked = `.chip.is-on` + `aria-pressed`. "Describe it" reuses the row for its examples, which fill the textarea instead of staying picked |
 | `.ai-outputs` > `.ai-output` (`__desc` `__options`) | An AI task's fields to return, one row each: mono name, type select, what it should contain, remove `.iconbtn` (not on the last row), and a full-width options input under a choice. On narrow screens the description drops to its own line. A ghost "Add a field" button ends the list |
-| `.persona-agents` | Persona page panel: a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
+| `.persona-agents` | Mount point at the end of the Persona page's Behavior tab: a `.panel` with a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
 | `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
 | `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing. `--blank` cards ("Describe it", "Start from scratch") come first and have no recipe |
 | `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |

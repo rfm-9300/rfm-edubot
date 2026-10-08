@@ -632,6 +632,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl .num, .tbl .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .tbl .num  { text-align: right; font-weight: 600; }
 .tbl .id   { font-family: var(--mono); font-size: 12px; color: var(--ink-2); font-weight: 500; }
+.tbl .nowrap { white-space: nowrap; }
+.tbl .long { min-width: 11em; }
 .tbl td.check { width: 36px; }
 .tbl td.check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
 .tbl .name { font-weight: 800; color: var(--ink); }
@@ -1251,9 +1253,26 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 }
 .chat__form { display: flex; gap: 10px; margin-top: 14px; }
 .chat__input { flex: 1; border-radius: 999px; }
+/* A line about the chat rather than in it: a handoff in the persona test, an error. */
+.chat__note { align-self: center; max-width: 92%; color: var(--ink-mute); font-size: 12px; font-weight: 600; line-height: 1.45; text-align: center; }
 
 @media (max-width: 620px) {
   .chat__form { align-items: stretch; flex-direction: column; }
+}
+
+/* ── Persona studio (/app → Persona): editor tabs beside a test chat that stays in view ── */
+.persona-studio { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 400px); gap: 18px; align-items: start; }
+.persona-studio__main, .persona-studio__pane { display: grid; gap: 16px; min-width: 0; }
+.persona-studio__main .settings-tabs { margin-bottom: 0; }
+/* Sticks just under the sticky top bar (64px in the minimal skin) and scrolls when the screen is shorter than the panel. */
+.persona-studio__test { position: sticky; top: 80px; max-height: calc(100vh - 96px); overflow-y: auto; min-width: 0; }
+.persona-studio__test .chat__log { min-height: 240px; max-height: 420px; }
+.persona-studio__test .chat__form { margin-top: 0; }
+.persona-studio .pill[hidden] { display: none; }
+
+@media (max-width: 1100px) {
+  .persona-studio { grid-template-columns: minmax(0, 1fr); }
+  .persona-studio__test { position: static; }
 }
 
 /* ── Conversations inbox (/app): list + thread, both scroll inside a fixed-height shell ── */
@@ -1741,20 +1760,67 @@ html[data-theme="dark"] .pulse--urgent { background: color-mix(in srgb, var(--ba
 .assistant__thread { display: grid; gap: 3px; width: 100%; padding: 11px 12px; text-align: left; color: var(--ink); border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); cursor: pointer; }
 .assistant__thread:hover, .assistant__thread.is-active { border-color: var(--accent); box-shadow: var(--shadow-sm); }
 .assistant__thread strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
-.assistant__thread span { color: var(--ink-mute); font-family: var(--mono); font-size: 9.5px; }
+.assistant__thread > span:not(.pill) { color: var(--ink-mute); font-family: var(--mono); font-size: 9.5px; }
 .assistant__chat { display: flex; flex-direction: column; min-width: 0; padding: 18px; }
 .assistant__log { flex: 1; max-height: 560px; min-height: 420px; }
 .assistant__input { height: auto; min-height: 40px; max-height: 140px; padding: 9px 14px; border-radius: 18px; resize: none; overflow-y: auto; line-height: 1.45; }
 .assistant__action { align-self: flex-start; display: grid; gap: 10px; width: min(520px, 88%); padding: 14px; border: 1px solid var(--accent); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm); }
-.assistant__action > div:first-child { display: grid; gap: 3px; }
+.assistant__action-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.assistant__action-head > div { display: grid; gap: 3px; min-width: 0; }
 .assistant__action-label { color: var(--ink-mute); font-size: 10px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; }
 .assistant__action-details { display: grid; gap: 4px; margin: 0; padding-left: 18px; color: var(--ink-mute); font-size: 12px; }
-.assistant__action-buttons { display: flex; justify-content: flex-end; gap: 8px; }
+.assistant__action-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.assistant__action .hint { margin: 0; }
+.assistant__action--confirmed { border-color: var(--ok); }
+.assistant__action--failed { border-color: var(--bad); }
+.assistant__action--cancelled, .assistant__action--expired { border-color: var(--line); box-shadow: none; }
+.assistant__quote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--accent-deep); border-radius: var(--r-sm); background: var(--surface-2); color: var(--ink); font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.assistant__head { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-width: 0; margin-bottom: 12px; }
+.assistant__head .actions { flex: none; align-items: center; }
+.assistant__title { min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-size: 15px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+.assistant__search { width: 100%; }
+.assistant__thread { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; }
+.assistant__thread strong, .assistant__thread > span:not(.pill) { grid-column: 1; }
+.assistant__pending { grid-column: 2; grid-row: 1 / span 2; }
+.assistant__turn { align-self: flex-start; display: grid; gap: 4px; min-width: 0; max-width: 88%; }
+.assistant__turn .chat__msg { max-width: 100%; }
+.assistant__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0 6px; color: var(--ink-mute); font-size: 11px; }
+.assistant__copy { padding: 0; border: 0; background: none; color: var(--ink-mute); font: inherit; text-decoration: underline; cursor: pointer; }
+.assistant__copy:hover { color: var(--ink); }
+.assistant__copy:focus-visible { outline: none; border-radius: var(--r-xs); box-shadow: var(--focus-ring); }
+.assistant__failed { border-color: var(--bad); background: var(--bad-soft); color: var(--bad-ink); }
+.assistant__older { align-self: center; }
+.assistant__welcome { display: grid; gap: 8px; justify-items: center; max-width: 520px; margin: auto; padding: 24px 10px; text-align: center; }
+.assistant__welcome p { margin: 0; color: var(--ink-mute); font-size: 13px; }
+.assistant__welcome .assistant__welcome-title { color: var(--ink); font-size: 16px; font-weight: 700; }
+.assistant__starters { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 8px; }
+.assistant__starters .btn { height: auto; min-height: 30px; padding-block: 6px; white-space: normal; text-align: left; }
+.assistant__composer-hint { display: flex; justify-content: space-between; gap: 10px; margin: 6px 4px 0; color: var(--ink-mute); font-size: 11px; }
+.assistant__count { font-family: var(--mono); }
+.chat__msg--rich { white-space: normal; }
+.chat__msg--rich > :first-child { margin-top: 0; }
+.chat__msg--rich > :last-child { margin-bottom: 0; }
+.chat__msg--rich p { margin: 0 0 8px; }
+.chat__msg--rich ul, .chat__msg--rich ol { display: grid; gap: 2px; margin: 0 0 8px; padding-left: 20px; }
+.chat__msg--rich .chat__heading { margin: 10px 0 6px; font-weight: 800; }
+.chat__msg--rich code { padding: 1px 5px; border-radius: var(--r-xs); background: var(--surface-2); font-family: var(--mono); font-size: 12px; }
+.chat__msg--rich a { color: var(--accent-deep); text-decoration: underline; }
+.chat__table { margin: 0 0 8px; overflow-x: auto; border: 1px solid var(--line-soft); border-radius: var(--r-md); }
+.chat__table table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.chat__table th, .chat__table td { padding: 6px 10px; border-bottom: 1px solid var(--line-soft); text-align: left; white-space: nowrap; }
+.chat__table th { background: var(--surface-2); color: var(--ink-mute); font-size: 11px; font-weight: 700; }
+.chat__table tbody tr:last-child td { border-bottom: 0; }
+.chat__table td.num { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 760px) {
   .assistant { grid-template-columns: 1fr; min-height: 0; }
   .assistant__threads { flex-direction: row; overflow-x: auto; }
   .assistant__thread { min-width: 180px; }
   .assistant__log { min-height: 360px; }
+  .assistant__turn, .assistant__action { width: 100%; max-width: 100%; }
+}
+@media (max-width: 620px) {
+  .assistant__head { flex-wrap: wrap; }
+  .assistant__composer-hint span:first-child { display: none; }
 }
 
 /* Bookings calendar */
@@ -2195,7 +2261,6 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .ai-outputs { display: grid; justify-items: start; gap: 8px; }
 .ai-output { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 0.9fr) minmax(0, 1.6fr) 30px; align-items: center; gap: 8px; width: 100%; }
 .ai-output__options { grid-column: 1 / -2; }
-.persona-agents { margin-bottom: 18px; }
 .inp-unit { display: flex; align-items: center; gap: 8px; }
 .inp-unit .inp { max-width: 120px; }
 .inp-unit__label { color: var(--ink-mute); font-size: 13px; }

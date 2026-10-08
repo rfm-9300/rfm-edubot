@@ -18,6 +18,8 @@ object UsageSources {
     const val PIPELINE = "pipeline"
     const val ASSISTANT = "assistant"
     const val AGENTS = "agents"
+    /** Writing the persona's instructions from its sources. */
+    const val PERSONA = "persona"
 }
 
 /**
