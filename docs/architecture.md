@@ -33,12 +33,17 @@ sequenceDiagram
         P->>R: tryAcquire(waId)
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message (skipped if already stored)
+        Note over P: System messages from PersonaPrompt: persona, platform rules, date, CRM and booking rules, handoff
         loop max 5 tool iterations
-            P->>AI: complete(contextMessages, crmTools)
+            P->>AI: complete(contextMessages, crmTools + handoff_to_human)
             AI-->>P: text reply or tool_calls
             P->>CRM: execute tool calls
             CRM->>DB: clients / quotes / invoices
             P->>AI: append tool results
+        end
+        opt handoff_to_human (persona setting, WhatsApp and Instagram)
+            P->>DB: pause auto-reply (autoReplyPausedBy = bot:handoff)
+            P->>DB: notification for the team
         end
         P->>DB: insert assistant Message
         P->>WA: sendText reply
@@ -665,6 +670,9 @@ sequenceDiagram
 | `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
 | `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId` |
 | `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
+| `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
+| `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
+| `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
 
 ## Dashboard AI Assistant
 
@@ -917,15 +925,84 @@ sequenceDiagram
   company uses the account. Tasks and notifications an automation made from an email keep what its
   steps wrote into them, like an AI summary: notifications expire after 90 days, tasks stay.
 
+## Persona
+
+How a company's bot talks to its customers, edited under **Persona** in `/app` (module `persona`).
+It has two parts, both injected into every customer chat: **settings** the company picks (bot
+name, language and whether to hold it, tone, form of address, reply length, emoji, greeting, rules,
+handoff) and **instructions**, free text that the synthesis writes from the company's sources
+(typed notes, uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand.
+Code: `persona/` (`PersonaRepository`, `PersonaCompiler`, `PersonaPrompt`, `PersonaValidation`,
+`PersonaFileExtractor`) and `dashboard/PersonaRoutes.kt`.
+
+```mermaid
+flowchart LR
+    NOTE["Note / file<br/>POST …/persona/sources(/file)"] --> SRC[(persona_sources)]
+    SRC -->|queue, 4 s debounce| PC["PersonaCompiler<br/>batches · condense · budget"]
+    PC -->|current file + new material| AI[AiClient]
+    AI --> PC
+    PC -->|SYNTHESIS / REBUILD| TP[(tenant_persona)]
+    EDIT["Settings / hand edit / restore<br/>PUT …/persona(/behavior)"] --> TP
+    TP --> VER[(persona_versions)]
+    TP -->|evict| TPF[TenantPipelineFactory]
+    TPF --> MP[MessagePipeline]
+    TP --> PP["PersonaPrompt<br/>persona block + platform rules"]
+    PP --> MP
+    PP --> TEST["Test chat<br/>POST …/persona/test (drafts)"]
+    PP --> AGT["Agents: Write with AI<br/>(address, rules, knowledge)"]
+    MP -->|handoff_to_human| PAUSE["Conversation paused<br/>+ team notification"]
+```
+
+- **What the model reads.** `PersonaPrompt.customerSystemMessages` builds the system messages of
+  every customer chat, and the dashboard test chat uses the same function: the `<persona>` block
+  (settings first, saying they win over the instructions, then the instructions; exactly the
+  instructions when no setting is set, or the neutral `DEFAULT_IDENTITY` when there is nothing),
+  then `SystemPrompts.CUSTOMER_GUARDRAILS` (customers can't change the bot's role or get its
+  instructions, no invented facts or unauthorized promises, the customer's language unless the
+  persona sets one), the date, the CRM rules for the company's modules, the booking note and the
+  handoff note. Agents' "Write with AI" steps that follow the Persona take only the form of
+  address, the rules and the instructions; the step's own Voice keeps tone, emoji, length and
+  language.
+- **Synthesis.** A note or file queues an incremental synthesis (status COMPILING at once, run
+  after a 4-second debounce): the current instructions plus the pending sources, the material in
+  `<material>` tags as data, in batches of at most 48,000 characters (a larger file goes in parts).
+  The target is 6,000 characters (12,000 when someone made the file longer by hand); a longer
+  answer gets one condensing pass and is then cut at a paragraph (`trimmed` in history). An empty
+  answer, a model failure or a spent monthly budget (`tenant_usage`, source `persona`) leaves the
+  previous persona in use with status ERROR and `lastError`. A synthesis that finds the persona
+  edited meanwhile starts again from the edit. **Rebuild** writes the instructions again from every
+  source, dropping hand edits (they stay in history). Removing a source already synthesized marks
+  the persona `stale` until a rebuild or a hand edit. At boot, `resumePending` queues every company
+  left COMPILING or with pending sources.
+- **History.** Every change is a version in `persona_versions` (instructions and settings, what
+  changed, who); a persona from before history is recorded once as BASELINE on its first change.
+  Restoring a version writes it back as a new one. Writes bump `version` atomically (pipeline
+  updates with `$literal` values, so text starting with `$` stays text).
+- **Handoff.** With the setting on, `handoff_to_human` is offered on every WhatsApp and Instagram
+  turn (website chats are read-only in the inbox, so they never hand over). Calling it pauses the
+  bot in that conversation (`autoReplyPausedBy = bot:handoff`, which also emits
+  `conversation.handoff` for agents), sends the company's handover message as written (or the
+  model's words when there is none) and notifies everyone (`conversation_handoff`, opening the
+  chat). The chat counts as waiting until a person writes (`Conversation.needsTeamReply`).
+- **Who changes it.** Anyone with the module reads the persona, its sources and history and uses
+  the test chat; changes need a company admin or an operator (`403 not_allowed` otherwise). The
+  test chat runs only read tools, refuses writes and only reports a handoff, so it changes nothing.
+- **Limits.** Instructions 12,000 characters; notes 20,000; uploads 10 MB with 200,000 characters
+  of extracted text; 100 sources and 600,000 characters across them; 25 rules of 300 characters;
+  the last 20 test messages of 4,000 characters. `GET /app/api/persona` returns them, and errors
+  carry `{error, field, limit}` for the dashboard to word.
+
 ## Context Building
 
 `MessagePipeline.buildContext()` assembles the LLM prompt in order:
-1. System prompt (`SystemPrompts.CRM_V1`)
+1. The system messages from `PersonaPrompt.customerSystemMessages` ([Persona](#persona)): persona
+   (or the neutral identity), platform rules, current date and time, CRM rules for the enabled
+   modules, the booking note and the handoff note
 2. Conversation summary (if any) wrapped in `<previous_context>`
-3. Last 10 persisted messages (user + assistant)
+3. Last 10 persisted messages (user + assistant), without the message being answered
 4. Current user message
 
-When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to OpenRouter. Tool results are appended as `tool` messages until the model returns a final text response or the five-iteration cap is reached.
+When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to OpenRouter (plus `handoff_to_human` on every turn when the persona's handoff is on). Tool results are appended as `tool` messages until the model returns a final text response or the five-iteration cap is reached. `OPENROUTER_BASE_URL` points the calls at another OpenAI-compatible endpoint (local or staging runs).
 
 ## Key Design Decisions
 
