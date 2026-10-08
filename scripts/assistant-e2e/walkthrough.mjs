@@ -136,6 +136,9 @@ async function open(token, theme = 'light') {
 }
 
 async function shot(page, name) {
+  await page.waitForFunction(
+    () => document.getAnimations().every(a => a.playState !== 'running' || a.effect?.getTiming().iterations === Infinity), { timeout: 3000 },
+  ).catch(() => {});
   await page.screenshot({ path: path.join(OUT, `${name}.png`) });
   await linger(1800);
 }
@@ -294,6 +297,7 @@ await check('an admin sets the instructions, style, language, answers-only and a
   await page.waitForSelector('#as-instructions');
   await page.type('#as-instructions', 'As faturas vencem 30 dias depois de emitidas. Indique sempre o número do cliente.');
   await page.select('#as-style', 'CONCISE');
+  expect((await text(page, '#as-style-hint')).includes('numa ou duas frases'), 'the style hint didn’t follow the choice');
   await page.select('#as-language', 'en');
   await page.click('#as-changes');
   await page.click('[data-area="payments"]');
