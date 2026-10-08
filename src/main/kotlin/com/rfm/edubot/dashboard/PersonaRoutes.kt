@@ -125,7 +125,7 @@ internal fun Route.personaRoutes(
             }
             if (!call.roomFor(repo, ctx.tenant.id, content.length)) return@post
             repo.addSource(ctx.tenant.id, SourceKind.TEXT_NOTE, content, noteLabel(content), ctx.author())
-            personaCompiler.enqueue(ctx.tenant)
+            personaCompiler.queue(ctx.tenant)
             call.reply(ctx, repo.findByTenant(ctx.tenant.id), HttpStatusCode.Accepted)
         }
         post("/sources/file") {
@@ -166,7 +166,7 @@ internal fun Route.personaRoutes(
             if (extracted.text.isBlank()) return@post call.problem(PersonaProblem("no_text", "file"), HttpStatusCode.UnprocessableEntity)
             if (!call.roomFor(repo, ctx.tenant.id, extracted.text.length)) return@post
             repo.addSource(ctx.tenant.id, SourceKind.FILE, extracted.text, name, ctx.author(), truncated = extracted.truncated)
-            personaCompiler.enqueue(ctx.tenant)
+            personaCompiler.queue(ctx.tenant)
             call.reply(ctx, repo.findByTenant(ctx.tenant.id), HttpStatusCode.Accepted)
         }
         get("/sources/{id}") {

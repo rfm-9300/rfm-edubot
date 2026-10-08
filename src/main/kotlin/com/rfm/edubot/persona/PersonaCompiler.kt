@@ -63,6 +63,12 @@ class PersonaCompiler(
         }
     }
 
+    /** [enqueue] for a source someone just added: the persona shows COMPILING at once, so the dashboard follows it. */
+    suspend fun queue(tenant: Tenant) {
+        repository.setStatus(tenant.id, PersonaStatus.COMPILING)
+        enqueue(tenant)
+    }
+
     /** Folds the pending sources in right away (the dashboard's "synthesize now" and retry). */
     suspend fun compileNow(tenant: Tenant, author: String?): CompileOutcome {
         pending.remove(tenant.id)?.cancel()
