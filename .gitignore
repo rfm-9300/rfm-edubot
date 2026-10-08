@@ -6,6 +6,9 @@
 *.hprof
 build/
 .gradle/
+# The browser walkthroughs' npm installs and screenshots.
+/scripts/*/node_modules/
+/scripts/*/out/
 .idea/
 mobile/local.properties
 mobile/build/
@@ -21,5 +24,3 @@ mobile/.kotlin
 /data/
 .playwright-mcp
 /src/main/resources/pdf/*
-/scripts/persona-e2e/node_modules/
-/scripts/persona-e2e/out/

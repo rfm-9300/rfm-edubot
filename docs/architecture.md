@@ -80,7 +80,7 @@ graph TD
         MR[MessageRepository]
         CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
-        DA[Dashboard AI Assistant<br/>persistent threads + confirmed actions]
+        DA[Dashboard AI Assistant<br/>threads, settings, confirmed changes]
         EV[DomainEventLog<br/>domain_events outbox]
     end
 
@@ -119,6 +119,7 @@ graph TD
     AR --> CRM
     AR --> DA
     DA --> AI & CRM & Mongo
+    DA --> OC
     DA --> AEX
     CRM --> EV
     EV --> ADP
@@ -649,8 +650,9 @@ sequenceDiagram
 | `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
-| `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user | `tenantId`, `ownerKey`, `updatedAt` |
-| `dashboard_assistant_messages` | User/assistant turns and pending confirmed-action payloads | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+| `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user; `renamed` once the person names one | `tenantId`, `ownerKey`, `updatedAt` |
+| `dashboard_assistant_messages` | User/assistant turns, proposed changes with their arguments, preview, status and result, failed turns' `error`, and the modules an answer read (`sources`) | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
+| `dashboard_assistant_settings` | A company's settings for its assistant: instructions, reply style, language, changes on or off, modules kept out | `_id` = tenant id |
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
 | `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
@@ -674,15 +676,102 @@ sequenceDiagram
 
 ## Dashboard AI Assistant
 
-The optional `ai-assistant` module uses the same `AiClient` plus CRM/`BookingTools` implementations as the
-messaging pipeline, but applies the signed-in tenant's enabled modules as a second capability filter.
-Read tools execute during the chat turn. Write tool calls are persisted as `PENDING` actions and are
-not executed until the owning dashboard user confirms the exact payload shown in the UI. Confirmation
-atomically claims the action before execution, preventing duplicate writes from repeated requests.
+The optional `ai-assistant` module is the team's assistant, not the customers': it answers questions
+about the company's data and proposes changes that a person confirms on a card in `/app`. Code:
+`dashboard/DashboardAssistant.kt` (service, repository, history, tool policy), `AssistantPrompt.kt`,
+`AssistantTools.kt`, `AssistantSettings.kt` and `DashboardAssistantRoutes.kt`; the page is `app/assistant.js`.
 
-Threads and messages are scoped by both `tenantId` and an owner key derived from the dashboard user,
-so users cannot open or confirm another user's assistant actions. Every assistant endpoint is also
-protected by dashboard JWT authentication and the normal server-side module gate.
+```mermaid
+sequenceDiagram
+    participant U as Dashboard user
+    participant S as DashboardAssistantService
+    participant AI as AiClient (OpenRouter)
+    participant T as Tools (assistant, CRM, bookings, agents)
+    participant DB as MongoDB
+    U->>S: POST /assistant/threads/{id}/messages
+    S->>DB: expire the thread's PENDING actions, store the message
+    alt monthly token budget spent
+        S->>DB: answer with error budget_exceeded (no model call)
+    else
+        S->>AI: AssistantPrompt + history (proposals as tool calls with their outcome) + allowed tools
+        loop up to 6 steps
+            AI-->>S: read calls
+            S->>T: run them, results back to the model
+            AI-->>S: write call
+            S->>T: check(): could it run?
+            alt it couldn't
+                S->>AI: the error, so the model asks for what's missing
+            else it could
+                S->>T: describe(): names behind ids, totals
+                S->>DB: PENDING action with its preview
+            end
+        end
+        S->>DB: the answer and the modules it read, or error model_unavailable / empty_reply
+    end
+    U->>S: POST /actions/{id}/confirm
+    S->>DB: claim PENDING → EXECUTING, run it, CONFIRMED or FAILED with the result
+    S->>AI: a follow-up on how it went
+```
+
+```mermaid
+stateDiagram-v2
+    [*] --> PENDING: proposed (checked, previewed)
+    PENDING --> EXECUTING: Confirm (atomic claim)
+    EXECUTING --> CONFIRMED: it ran
+    EXECUTING --> FAILED: refused or failed
+    PENDING --> CANCELLED: Cancel
+    PENDING --> EXPIRED: the person sends another message
+```
+
+**Prompt.** `AssistantPrompt` builds the system messages: who it works for (company, admin or member),
+the rules (base every figure on tool results, look records up before acting, call a write tool as soon
+as it has what it needs instead of asking in text, never claim a change that no result confirms, how
+earlier proposals ended), the date in the company's timezone, reply style and language, what it can use
+and what is kept out, answers-only mode, business notes (the client fields the company requires, invoice
+statuses, quote lines, catalog prices, the 24-hour WhatsApp window), the booking and agents notes, the
+untrusted-content rule, and last the company's instructions inside `<company_instructions>` (the tags
+are stripped from the text first). The customer bot's CRM prompt, with its "pode gerar" text
+confirmations, is not used here.
+
+**Settings.** One document per company in `dashboard_assistant_settings` (`GET`/`PUT
+/app/api/assistant/settings`, admins only for `PUT`): instructions (4000 characters), reply style
+(`CONCISE`, `BALANCED`, `DETAILED`), a fixed language or the message's, `allowChanges`, and
+`disabledModules`. With changes off no write tool is offered and a confirmation answers 403
+`changes_off`; a module kept out has no tools and the prompt says it isn't available.
+
+**Tools.** The CRM and booking tools the bot has, the agents tools (`AgentAssistant`), and
+`AssistantTools`, which only the dashboard gets: `get_business_overview` (Home's figures and attention
+list), `get_client` (the whole record with the company's own fields, money owed, quotes, unbilled work,
+next booking), `create_client` and `update_client` (checked like the client form: required fields,
+email, custom fields, phone already taken), `list_invoices` and `list_quotes` (status, client, issue or
+due dates, a summary of every match; a pending invoice past due counts as overdue, as on Home),
+`convert_quote_to_invoice` (`crm/QuoteInvoicing`, shared with the Quotes page), `list_services`,
+`list_payments` and `mark_payment_paid`, `list_suppliers`, `list_employees`, and `list_conversations`,
+`get_conversation` and `reply_to_conversation`. What customers wrote reaches the model inside
+`<untrusted_content>`. A reply goes out through `InboxService` from the person who confirmed it, so the
+24-hour window, the website's read-only chats and pausing the bot apply as in the Inbox. The
+assistant's `create_client`, `list_invoices` and `list_quotes` take the place of the bot's tools of the
+same name. Tools follow the modules on for the company minus those kept out; reads run at once, writes
+always wait for a card.
+
+**History.** The last 30 messages go back to the model. A proposal becomes the tool call it was, followed
+by its outcome (`waiting_for_confirmation`, the result once confirmed, the error once failed, `cancelled`,
+`expired`, results cut at 2000 characters), so later turns know what happened and which record was made.
+Failed turns are left out. Action ids are the assistant's own (`act_…`): providers don't promise unique
+call ids, and `action.id` is unique across the collection.
+
+**Errors, budget and threads.** A turn without an answer is stored with its reason (`model_unavailable`,
+`budget_exceeded`, `empty_reply`) and `POST /threads/{id}/retry` answers again. The assistant stops at
+the company's monthly token budget, like the bot, and records its tokens as `assistant`. Threads and
+messages are scoped by `tenantId` and the person's owner key (`assistantOwnerKey`), so no one opens,
+confirms or deletes another person's; every endpoint is behind the dashboard JWT and the module gate,
+and Home counts only the viewer's waiting changes. Threads can be renamed (`PATCH`, which keeps the name
+from then on), searched by title (`?q=`), deleted with their messages (`DELETE`) and paged backwards
+(`?before=` with `hasMore`); each lists its waiting changes (`pending`).
+
+Tests: `DashboardAssistantRoutesTest` (HTTP end to end with a scripted model), `AssistantToolsTest`,
+`AssistantPromptTest`, `AssistantHistoryTest`. `scripts/assistant-e2e/walkthrough.mjs` runs the page in
+Chrome against `fake-openrouter.py`.
 
 ## Agents and automations
 

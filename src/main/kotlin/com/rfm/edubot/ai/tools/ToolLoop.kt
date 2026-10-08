@@ -36,7 +36,18 @@ data class ToolLoopResult(
     val submitted: JsonObject? = null,
     val trace: List<ToolTraceEntry> = emptyList(),
     val usage: TokenCount = TokenCount(),
+    /** What the model wrote alongside the writes it proposed, if anything. */
+    val note: String? = null,
 )
+
+/**
+ * What the model may read of a tool's failure. Bad arguments say what was wrong, so it can correct them;
+ * anything else (the database, the network) says nothing about the system behind it.
+ */
+fun toolFailureMessage(e: Throwable): String = when (e) {
+    is IllegalArgumentException, is IllegalStateException, is NoSuchElementException -> e.message?.take(300) ?: "The tool failed."
+    else -> "The tool failed for a technical reason."
+}
 
 /**
  * The tool-calling loop shared by the dashboard assistant, the persona playground and agent AI steps:
@@ -130,7 +141,8 @@ class ToolLoop(private val aiClient: AiClient) {
                         }
                     }
                     if (submitted != null || (proposed && proposedResult == null)) {
-                        return ToolLoopResult(null, proposals.toList(), submitted, trace, usage)
+                        val note = response.message.content?.trim()?.takeIf { proposed && it.isNotEmpty() }
+                        return ToolLoopResult(null, proposals.toList(), submitted, trace, usage, note)
                     }
                 }
             }
@@ -148,7 +160,7 @@ class ToolLoop(private val aiClient: AiClient) {
 
     private suspend fun execute(tools: ToolPack, call: ToolCall, context: ToolCallContext): JsonObject =
         runCatching { tools.execute(call, context) }
-            .getOrElse { buildJsonObject { put("error", "tool_failed"); put("message", it.message ?: "tool failure") } }
+            .getOrElse { buildJsonObject { put("error", "tool_failed"); put("message", toolFailureMessage(it)) } }
 
     private fun toolResult(call: ToolCall, result: JsonObject) =
         ChatMessage(role = "tool", content = json.encodeToString(result), toolCallId = call.id)

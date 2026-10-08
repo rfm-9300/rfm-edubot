@@ -48,8 +48,9 @@ class OverviewService(private val mongo: MongoModule) {
     /**
      * [extended] adds the trend/agenda/feed blocks the minimal Home layout draws. They cost a few
      * extra queries, so the classic layout never asks for them. Blocks for hidden cards are skipped.
+     * [assistantOwnerKey] counts only that person's assistant changes waiting for a decision: no one else can see them.
      */
-    suspend fun build(tenant: Tenant, extended: Boolean = false): OverviewDto = coroutineScope {
+    suspend fun build(tenant: Tenant, extended: Boolean = false, assistantOwnerKey: String? = null): OverviewDto = coroutineScope {
         val modules = DashboardModules.effectiveFor(tenant).toSet()
         val window = OverviewMath.window(SystemClock.now(), TenantTimeZones.normalize(tenant.timezone))
         val tenantFilter = Filters.eq("tenantId", tenant.id)
@@ -89,9 +90,10 @@ class OverviewService(private val mongo: MongoModule) {
         val payments = async { if (DashboardModules.PAYMENTS in modules) payments(tenant.id, window) else null }
         val assistant = async {
             if (DashboardModules.AI_ASSISTANT in modules) {
+                val owner = assistantOwnerKey?.let { Filters.eq("ownerKey", it) }
                 OverviewAssistantDto(
                     pendingActions = coll("dashboard_assistant_messages").countDocuments(
-                        Filters.and(tenantFilter, Filters.eq("action.status", "PENDING")),
+                        Filters.and(listOfNotNull(tenantFilter, owner, Filters.eq("action.status", "PENDING"))),
                     ).toInt(),
                 )
             } else {

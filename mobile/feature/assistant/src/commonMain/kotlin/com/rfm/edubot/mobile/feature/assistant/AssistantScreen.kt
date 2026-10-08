@@ -55,6 +55,10 @@ import com.rfm.edubot.mobile.core.ui.ScreenHeader
 import com.rfm.edubot.mobile.core.ui.SecondaryButton
 import com.rfm.edubot.mobile.core.ui.Tone
 import com.rfm.edubot.mobile.core.ui.toneForStatus
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * The AI assistant.
@@ -124,11 +128,13 @@ fun AssistantScreen(
             contentPadding = PaddingValues(vertical = BotSpace.lg),
         ) {
             items(detail.messages, key = { it.id }) { message ->
-                MessageBubble(
-                    text = message.content,
-                    stamp = message.createdAt,
-                    fromCustomer = message.role == "user",
-                )
+                if (message.content.isNotBlank()) {
+                    MessageBubble(
+                        text = message.content,
+                        stamp = message.createdAt,
+                        fromCustomer = message.role == "user",
+                    )
+                }
                 message.action?.let { action ->
                     Spacer(Modifier.height(BotSpace.sm))
                     ActionCard(action, strings, assistant.busy, vm::decide)
@@ -165,7 +171,7 @@ private fun ActionCard(
         )
         Badge(strings.status(action.status), toneForStatus(action.status))
     }
-    action.preview?.takeIf { it.isNotBlank() }?.let {
+    action.preview?.summarise()?.let {
         Spacer(Modifier.height(BotSpace.xs))
         Text(it, style = MaterialTheme.typography.bodySmall, color = BotColors.inkSecondary)
     }
@@ -249,3 +255,9 @@ private fun Composer(
         }
     }
 }
+
+/** The preview's names, numbers and texts one per line, as the dashboard lists them; null when there are none. */
+private fun JsonObject.summarise(): String? =
+    values.mapNotNull { value -> (value as? JsonPrimitive)?.takeIf { it.booleanOrNull == null }?.contentOrNull?.takeIf(String::isNotBlank) }
+        .takeIf { it.isNotEmpty() }
+        ?.joinToString("\n")

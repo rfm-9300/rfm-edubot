@@ -44,6 +44,7 @@ import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentCancel
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
+import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SupplierRepository
@@ -167,7 +168,7 @@ internal fun Route.dashboardRoutes(
                 val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.OVERVIEW)) return@get call.respond(HttpStatusCode.Forbidden)
                 val extended = call.request.queryParameters["extended"] == "1"
-                call.respond(OverviewService(mongo).build(ctx.tenant, extended))
+                call.respond(OverviewService(mongo).build(ctx.tenant, extended, ctx.assistantOwnerKey()))
             }
             get("/contacts") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -501,7 +502,7 @@ internal fun Route.dashboardRoutes(
                 pipelineFactory.evict(updated.id)
                 call.respond(updated.documentTemplate.dto(updated.name))
             }
-            dashboardAssistantRoutes(mongo, aiClient, assistantExtension)
+            dashboardAssistantRoutes(mongo, aiClient, assistantExtension, inbox)
             crmRoutes(mongo, runtimeConfig, dashboardUsers, tenantRepository)
             installBookingRoutes {
                 val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.BOOKINGS) }
@@ -715,14 +716,14 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<ConvertQuoteRequest>()
             val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
-            val client = deps.clients.findById(quote.clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-            // A cancelled invoice frees its quote to be invoiced again.
-            if (deps.invoices.list(quote.clientId).any { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED }) {
-                return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
+            when (val outcome = QuoteInvoicing.invoice(deps.quotes, deps.invoices, deps.clients, quote.id, dueDate)) {
+                is QuoteInvoicing.Outcome.Invoiced -> call.respond(HttpStatusCode.Created, outcome.invoice.dto(outcome.client))
+                is QuoteInvoicing.Outcome.Refused -> when (outcome.reason) {
+                    QuoteInvoicing.ALREADY_INVOICED -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
+                    QuoteInvoicing.CLIENT_NOT_FOUND -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+                    else -> call.respond(HttpStatusCode.NotFound)
+                }
             }
-            val invoice = deps.invoices.create(quote.clientId, quote.id, quote.items, dueDate)
-            deps.quotes.update(quote.id, null, null, null, QuoteStatus.ACEITO)
-            call.respond(HttpStatusCode.Created, invoice.dto(client))
         }
         get("/quotes/{id}/pdf") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
