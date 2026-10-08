@@ -3,7 +3,7 @@ const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
-  persona: null, personaChat: [], assistantThreads: [], assistantThread: null, webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
+  persona: null, personaChat: [], webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
@@ -32,7 +32,6 @@ let state = {
   fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false },
 };
 let personaChatBusy = false;
-let assistantBusy = false;
 let fbSdkPromise = null;
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).
@@ -1085,12 +1084,7 @@ async function loadModule(tab) {
   }
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
   if (tab === 'persona') state.persona = await api('/app/api/persona');
-  if (tab === 'ai-assistant') {
-    if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
-    state.assistantThreads = await api('/app/api/assistant/threads');
-    if (state.assistantThread && !state.assistantThreads.some(t => t.id === state.assistantThread.thread.id)) state.assistantThread = null;
-    if (!state.assistantThread && state.assistantThreads.length) state.assistantThread = await api(`/app/api/assistant/threads/${state.assistantThreads[0].id}`);
-  }
+  if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
     state.whatsAppSignup = await api('/app/api/whatsapp/embedded-signup/config').catch(() => ({ enabled: false }));
@@ -1152,7 +1146,7 @@ function render() {
   if (state.active === 'payments') return renderPayments(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
-  if (state.active === 'ai-assistant') return renderAssistant(root);
+  if (state.active === 'ai-assistant') return window.AssistantUI.render(root);
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
@@ -1206,6 +1200,18 @@ function agentsDeps() {
       if (state.active !== 'overview') return renderNav();
       loadModule('overview').then(render).catch(() => renderNav());
     },
+  };
+}
+function assistantDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, hero,
+    fmtDate, fmtDay, fmtEUR, fmtMinutes, relTime,
+    hasModule, labels, STR, pdfButton, wirePdfButtons,
+    get state() { return state; },
+    statusLabel: recordStatusLabel,
+    openSubject: openAgentSubject,
+    canOpenSubject: canOpenAgentSubject,
+    onChange: () => renderNav(),
   };
 }
 // Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
@@ -7113,165 +7119,6 @@ function renderCatalog(root) {
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
 }
 
-function assistantActionLabel(action) {
-  const args = action.arguments || {};
-  const preview = action.preview || {};
-  const agent = preview.agent || args.agent_id || '';
-  const step = preview.action ? (window.AgentsUI?.actionLabel(preview.action) || preview.action) : '';
-  if (action.toolName === 'run_agent') return STR.assistantRunAgent({ agent, record: preview.record || '' });
-  if (action.toolName === 'pause_agent') return STR.assistantPauseAgent({ agent });
-  if (action.toolName === 'activate_agent') return STR.assistantActivateAgent({ agent });
-  if (action.toolName === 'approve_agent_item') return args.decision === 'reject' ? STR.assistantRejectAgentItem({ action: step }) : STR.assistantApproveAgentItem({ action: step });
-  if (action.toolName === 'draft_agent') return STR.assistantDraftAgent;
-  if (action.toolName === 'create_client') return STR.assistantCreateClient({ name: args.name || '' });
-  if (action.toolName === 'create_quote') return STR.assistantCreateQuote;
-  if (action.toolName === 'update_quote') return STR.assistantUpdateQuote({ id: args.quote_id || '' });
-  if (action.toolName === 'create_invoice') return STR.assistantCreateInvoice;
-  if (action.toolName === 'mark_invoice_paid') return STR.assistantMarkPaid({ id: args.invoice_id || '' });
-  if (action.toolName === 'create_booking') return STR.assistantCreateBooking;
-  if (action.toolName === 'reschedule_booking') return STR.assistantRescheduleBooking;
-  if (action.toolName === 'cancel_booking') return STR.assistantCancelBooking;
-  if (action.toolName === 'confirm_booking') return STR.assistantConfirmBooking;
-  return STR.assistantChangeData;
-}
-
-const ASSISTANT_AGENT_TOOLS = new Set(['run_agent', 'pause_agent', 'activate_agent', 'approve_agent_item', 'draft_agent']);
-
-/** An agent action's details come from the server's preview (names behind the ids), not from the arguments. */
-function assistantAgentDetails(action) {
-  const args = action.arguments || {};
-  const p = action.preview || {};
-  const details = [];
-  if (action.toolName === 'approve_agent_item') {
-    if (p.agent) details.push(STR.assistantAgentName({ name: p.agent }));
-    if (p.record) details.push(STR.assistantAgentRecord({ record: p.record }));
-    if (p.recipients?.length) details.push(STR.assistantAgentTo({ to: p.recipients.join(', ') }));
-    if (p.subject) details.push(STR.assistantAgentSubject({ subject: p.subject }));
-    if (p.body) details.push(STR.assistantAgentMessage({ text: p.body }));
-    if (args.decision === 'reject' && args.reason) details.push(STR.assistantAgentReason({ reason: args.reason }));
-  }
-  if (action.toolName === 'draft_agent' && args.request) details.push(STR.assistantAgentRequest({ text: args.request }));
-  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
-}
-
-function assistantActionDetails(action) {
-  if (ASSISTANT_AGENT_TOOLS.has(action.toolName)) return assistantAgentDetails(action);
-  const args = action.arguments || {};
-  const details = [];
-  if (args.name) details.push(`${STR.thName}: ${args.name}`);
-  if (args.phone) details.push(`${STR.thPhone}: ${args.phone}`);
-  if (args.address) details.push(`${STR.thAddress}: ${args.address}`);
-  if (args.client_id) details.push(STR.assistantClientRef({ id: args.client_id }));
-  if (args.quote_id) details.push(STR.assistantQuoteRef({ id: args.quote_id }));
-  if (args.invoice_id) details.push(STR.assistantInvoiceRef({ id: args.invoice_id }));
-  if (args.valid_until) details.push(STR.assistantValidUntil({ date: args.valid_until }));
-  if (args.due_date) details.push(STR.assistantDueDate({ date: args.due_date }));
-  if (args.status) details.push(STR.assistantNewStatus({ status: args.status }));
-  if (args.service_id) details.push(`${STR.bookingsService}: ${state.bookingServices.find(s => s.id === args.service_id)?.name || args.service_id}`);
-  if (args.start_at) details.push(`${STR.bookingsStart}: ${String(args.start_at).replace('T', ' ')}`);
-  if (args.contact_name) details.push(`${STR.bookingsContactName}: ${args.contact_name}`);
-  if (args.contact_phone) details.push(`${STR.bookingsContactPhone}: ${args.contact_phone}`);
-  if (args.booking_id) details.push(STR.assistantBookingRef({ id: args.booking_id }));
-  if (args.notes) details.push(`${STR.quoteNotes}: ${args.notes}`);
-  (args.items || []).forEach(item => details.push(`${item.description} · ${item.quantity || 1} × ${fmtEUR(item.price_eur)}`));
-  return details.map(detail => `<li>${escapeHTML(detail)}</li>`).join('');
-}
-
-function assistantDocumentDownload(action) {
-  if (action.status !== 'CONFIRMED') return '';
-  const result = action.result || {};
-  const id = result.id;
-  if (!id) return '';
-  const invoice = action.toolName === 'create_invoice' || result.type === 'invoice';
-  const quote = action.toolName === 'create_quote' || result.type === 'quote';
-  if (!invoice && !quote) return '';
-  const type = invoice ? 'invoices' : 'quotes';
-  const number = result.number || '';
-  const filename = `${invoice ? 'Fatura' : 'Orcamento'} ${number || id}.pdf`;
-  return `<div class="assistant__action-buttons">${pdfButton(id, type, true, STR.assistantDownloadPdf({ number }), filename)}</div>`;
-}
-
-/** After a confirmed draft or run, the way to what it made. */
-function assistantAgentLink(action) {
-  if (action.status !== 'CONFIRMED' || !hasModule('agents') || !window.AgentsUI) return '';
-  const result = action.result || {};
-  const ref = action.toolName === 'draft_agent' && result.agent_id ? `agent:${result.agent_id}`
-    : action.toolName === 'run_agent' && result.run_id ? `run:${result.run_id}` : '';
-  if (!ref) return '';
-  const label = ref.startsWith('agent:') ? STR.assistantOpenDraft : STR.assistantOpenRun;
-  return `<div class="assistant__action-buttons"><button class="btn btn--sm" type="button" data-assistant-agent-ref="${escapeHTML(ref)}">${escapeHTML(label)}</button></div>`;
-}
-
-async function openAssistantThread(id) {
-  state.assistantThread = await api(`/app/api/assistant/threads/${id}`);
-  render();
-}
-
-async function createAssistantThread() {
-  const thread = await api('/app/api/assistant/threads', { method: 'POST', body: JSON.stringify({ title: STR.assistantNewThread }) });
-  state.assistantThreads.unshift(thread);
-  state.assistantThread = { thread, messages: [] };
-  render();
-}
-
-function renderAssistant(root) {
-  const current = state.assistantThread;
-  const threadRows = state.assistantThreads.map(t => `<button class="assistant__thread ${current?.thread.id === t.id ? 'is-active' : ''}" data-assistant-thread="${t.id}" type="button"><strong>${escapeHTML(t.title)}</strong><span>${escapeHTML(fmtDate(t.updatedAt))}</span></button>`).join('');
-  const messages = (current?.messages || []).map(m => {
-    const bubble = m.content ? `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>` : '';
-    if (!m.action) return bubble;
-    const pending = m.action.status === 'PENDING';
-    const details = assistantActionDetails(m.action);
-    return `${bubble}<div class="assistant__action"><div><span class="assistant__action-label">${escapeHTML(STR.assistantProposedAction)}</span><strong>${escapeHTML(assistantActionLabel(m.action))}</strong></div>${details ? `<ul class="assistant__action-details">${details}</ul>` : ''}<span class="pill">${escapeHTML(STR['assistantStatus' + m.action.status] || m.action.status)}</span>${pending ? `<div class="assistant__action-buttons"><button class="btn btn--sm btn--ghost" data-assistant-cancel="${m.action.id}" type="button">${escapeHTML(STR.assistantCancel)}</button><button class="btn btn--sm btn--primary" data-assistant-confirm="${m.action.id}" type="button">${escapeHTML(STR.assistantConfirm)}</button></div>` : ''}${assistantDocumentDownload(m.action)}${assistantAgentLink(m.action)}</div>`;
-  }).join('');
-  root.innerHTML = `${hero(labels['ai-assistant'], STR.assistantDesc)}<div class="assistant"><aside class="assistant__sidebar"><button class="btn btn--primary" id="assistant-new" type="button">${escapeHTML(STR.assistantNewThread)}</button><div class="assistant__threads">${threadRows || `<p class="chat__empty">${escapeHTML(STR.assistantNoThreads)}</p>`}</div></aside><div class="panel assistant__chat"><div class="chat__log assistant__log" id="assistant-log">${messages || `<div class="chat__empty">${escapeHTML(STR.assistantEmpty)}</div>`}${assistantBusy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : ''}</div><form class="chat__form" id="assistant-form"><textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="4000" placeholder="${escapeHTML(STR.assistantPlaceholder)}" ${current && !assistantBusy ? '' : 'disabled'}></textarea><button class="btn btn--primary" type="submit" ${current && !assistantBusy ? '' : 'disabled'}>${escapeHTML(STR.send)}</button></form></div></div>`;
-  $('#assistant-new').addEventListener('click', createAssistantThread);
-  $$('[data-assistant-thread]').forEach(b => b.addEventListener('click', () => openAssistantThread(b.dataset.assistantThread)));
-  const log = $('#assistant-log'); log.scrollTop = log.scrollHeight;
-  const composer = $('#assistant-input');
-  const resizeComposer = () => {
-    composer.style.height = 'auto';
-    composer.style.height = `${Math.min(composer.scrollHeight, 140)}px`;
-  };
-  composer.addEventListener('input', resizeComposer);
-  resizeComposer();
-  composer.addEventListener('keydown', e => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      $('#assistant-form').requestSubmit();
-    }
-  });
-  $('#assistant-form').addEventListener('submit', async e => {
-    e.preventDefault();
-    if (!current || assistantBusy) return;
-    const input = $('#assistant-input'), content = input.value.trim();
-    if (!content) return;
-    input.value = '';
-    assistantBusy = true;
-    current.messages.push({ role: 'user', content });
-    renderAssistant(root);
-    try {
-      state.assistantThread = await api(`/app/api/assistant/threads/${current.thread.id}/messages`, { method: 'POST', body: JSON.stringify({ content }) });
-      state.assistantThreads = await api('/app/api/assistant/threads');
-    } catch { toast(STR.assistantError); }
-    finally { assistantBusy = false; render(); }
-  });
-  $$('[data-assistant-confirm]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantConfirm, 'confirm')));
-  $$('[data-assistant-cancel]').forEach(b => b.addEventListener('click', () => updateAssistantAction(current.thread.id, b.dataset.assistantCancel, 'cancel')));
-  $$('[data-assistant-agent-ref]', root).forEach(b => b.addEventListener('click', () => window.AgentsUI.openRef(b.dataset.assistantAgentRef)));
-  wirePdfButtons(root);
-}
-
-async function updateAssistantAction(threadId, actionId, decision) {
-  if (assistantBusy) return;
-  assistantBusy = true;
-  render();
-  try {
-    state.assistantThread = await api(`/app/api/assistant/threads/${threadId}/actions/${encodeURIComponent(actionId)}/${decision}`, { method: 'POST', body: '{}' });
-    state.assistantThreads = await api('/app/api/assistant/threads');
-  } catch { toast(STR.assistantActionError); }
-  finally { assistantBusy = false; render(); }
-}
 let personaPollTimer;
 async function refreshPersona() {
   state.persona = await api('/app/api/persona');
@@ -9055,6 +8902,7 @@ function openBookingAvailabilityForm() {
 async function init(relayed = false) {
   if (!relayed && handleOAuthPopup()) return;
   window.AgentsUI?.init(agentsDeps());
+  window.AssistantUI?.init(assistantDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
