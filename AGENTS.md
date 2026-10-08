@@ -88,6 +88,7 @@ Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+- `scripts/persona-e2e/` — browser walkthrough of the Persona page: start `python3 scripts/persona-e2e/fake-openrouter.py`, run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1` and a backoffice password, then in that folder `npm install && ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs` (exits non-zero on a failed check)
 
 ## Local Run Intent
 

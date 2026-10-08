@@ -21,3 +21,5 @@ mobile/.kotlin
 /data/
 .playwright-mcp
 /src/main/resources/pdf/*
+/scripts/persona-e2e/node_modules/
+/scripts/persona-e2e/out/
