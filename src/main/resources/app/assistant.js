@@ -251,7 +251,7 @@
     const locked = !s.canEdit;
     const off = attr => (locked ? ` ${attr}` : '');
     const styles = ['CONCISE', 'BALANCED', 'DETAILED'];
-    const languages = [['', T.languageAuto], ['pt-PT', 'Português (Portugal)'], ['en', 'English'], ['es', 'Español']];
+    const languages = [['', T.languageAuto], ...I18N.SUPPORTED.map(code => [code, I18N.LANG_NAMES[code] || code])];
     const form = document.createElement('form');
     form.className = 'form';
     form.innerHTML = `
@@ -440,9 +440,7 @@
       buttons.push(`<button class="btn btn--sm" type="button" data-assistant-open="${esc(`${subject.type}:${subject.id}`)}">${esc(T.open[subject.type])}</button>`);
     }
     if ((subject?.type === 'invoice' || subject?.type === 'quote') && d.hasModule(subject.type === 'invoice' ? 'invoices' : 'quotes')) {
-      const invoice = subject.type === 'invoice';
-      const number = result.number || '';
-      buttons.push(d.pdfButton(subject.id, invoice ? 'invoices' : 'quotes', true, d.STR.assistantDownloadPdf({ number }), `${invoice ? 'Fatura' : 'Orcamento'} ${number || subject.id}.pdf`));
+      buttons.push(d.pdfButton(subject.id, subject.type === 'invoice' ? 'invoices' : 'quotes', true, d.STR.assistantDownloadPdf({ number: result.number || '' })));
     }
     if (d.hasModule('agents') && window.AgentsUI) {
       const ref = action.toolName === 'draft_agent' && result.agent_id ? `agent:${result.agent_id}` : action.toolName === 'run_agent' && result.run_id ? `run:${result.run_id}` : '';
