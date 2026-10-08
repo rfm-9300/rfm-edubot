@@ -82,6 +82,7 @@ When Rodrigo says "create-mocks", "create mocks", "seed mocks", or asks to resto
 3. `./gradlew run` — app on port 8080
 4. Expose webhook: `cloudflared tunnel --url http://localhost:8080`
 5. Register tunnel URL + verify token in Meta Developer Dashboard
+6. Optional, without an OpenRouter key: start `python3 scripts/assistant-e2e/fake-openrouter.py`, set `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1`, and `node scripts/assistant-e2e/walkthrough.mjs` walks the AI Assistant page in Chrome
 
 ## Architecture
 See `docs/architecture.md` for full diagrams and component breakdown.

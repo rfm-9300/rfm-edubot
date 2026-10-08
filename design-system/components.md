@@ -567,8 +567,15 @@ When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a 
 | `.chat__typing` | Italic muted |
 | `.chat__form` + `.chat__input` | Composer (pill input) |
 | `.assistant` | Two-column assistant shell |
-| `.assistant__thread` / `.is-active` | Thread list item |
-| `.assistant__action` | Confirm-before-execute card |
+| `.assistant__thread` / `.is-active` | Thread list item: title, relative time, and a `.pill--warn.assistant__pending` count of the changes waiting in it |
+| `.assistant__search` | Conversation search over the list, once there are more than four (and while a search is on) |
+| `.assistant__head` | Above the log: `.assistant__title`, Rename and Delete; a plain `.pill` "Answers only" while changes are off |
+| `.assistant__welcome` + `.assistant__starters` | An empty conversation: a title, a line and starter questions as `.btn.btn--sm` that send at once |
+| `.assistant__turn` + `.assistant__meta` | A bot answer and the line under it: "Looked at: …" and the `.assistant__copy` link |
+| `.chat__msg--rich` | A bot bubble drawn from a markdown subset after escaping: paragraphs, lists, `.chat__heading`, `code`, http(s) links, and `.chat__table`, which scrolls inside the bubble with numbers right-aligned (`td.num`) |
+| `.assistant__failed` | A turn without an answer (`--bad-soft` bubble), with "Try again" in `.assistant__meta` when it is the last message |
+| `.assistant__action` (`--pending` `--confirmed` `--failed` `--cancelled` `--expired`) | Confirm-before-execute card: `.assistant__action-head` (label, title, status pill), `.assistant__action-details`, `.assistant__quote` for a reply's exact text, a `.hint` on expired and failed ones, `.assistant__action-buttons` |
+| `.assistant__composer-hint` | Under the composer: the Enter / Shift+Enter hint and, near the limit, a character count |
 
 User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert that. The customer inbox has its own components (next section).
 
