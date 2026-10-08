@@ -14,10 +14,15 @@ data class DashboardIdentity(
     val principalType: String = PRINCIPAL_TENANT,
     val companies: List<Company> = emptyList(),
     val companyLimit: Int = 1,
+    /** Set for an employee's own sign-in, whose [modules] are only their own pages. */
+    val employee: EmployeeIdentity? = null,
 ) {
     val isOperator: Boolean get() = principalType != PRINCIPAL_TENANT
 
     val isAdmin: Boolean get() = isOperator || user?.role == ROLE_ADMIN
+
+    /** Everything else answers 401 to this session, so the app must not call it. */
+    val isEmployee: Boolean get() = employee != null
 
     /** Whether the account can hold more than the company it is signed in to. */
     val canSwitchCompany: Boolean get() = companies.size > 1
@@ -52,6 +57,10 @@ data class ChannelAsset(
         const val WEB = "WEB"
     }
 }
+
+/** The employee record an employee's sign-in clocks in and registers services as. */
+@Serializable
+data class EmployeeIdentity(val id: String, val number: String, val name: String)
 
 @Serializable
 data class DashboardUser(

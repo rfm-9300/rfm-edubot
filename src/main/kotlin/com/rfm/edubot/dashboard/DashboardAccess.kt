@@ -10,7 +10,9 @@ import com.rfm.edubot.events.ActorType
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
+import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.response.respond
 import io.ktor.util.AttributeKey
 import org.bson.types.ObjectId
 
@@ -38,16 +40,28 @@ internal object DashboardAccessPolicy {
 }
 
 /**
- * What an employee's sign-in reaches: the services they register (`/app/api/portal/…`), their account and
- * `/me`, in the one company their employee record is in. Never a company module.
+ * What an employee's sign-in reaches: their own pages (`/app/api/portal/…`), their account and `/me`, in the
+ * one company their employee record is in. Never a company module.
  */
 internal object EmployeePortal {
-    /** The only page an employee's session has, in place of the company's modules. */
-    const val MODULE = "my-services"
+    /** The services they register; they become Serviços rows, so the company needs `services`. */
+    const val MY_SERVICES = "my-services"
 
-    /** Employees register work as Serviços rows, so the company needs both modules. */
-    fun isAvailable(tenant: Tenant): Boolean =
-        DashboardModules.effectiveFor(tenant).let { DashboardModules.EMPLOYEES in it && DashboardModules.SERVICES in it }
+    /** Their time clock and hours, with `timesheets`. */
+    const val MY_HOURS = "my-hours"
+
+    /** The pages an employee's session has, in place of the company's modules; the first is where it lands. */
+    fun pages(tenant: Tenant): List<String> {
+        val modules = DashboardModules.effectiveFor(tenant)
+        if (DashboardModules.EMPLOYEES !in modules) return emptyList()
+        return listOfNotNull(
+            MY_HOURS.takeIf { DashboardModules.TIMESHEETS in modules },
+            MY_SERVICES.takeIf { DashboardModules.SERVICES in modules },
+        )
+    }
+
+    /** Whether employees of [tenant] can sign in at all: only to reach one of their pages. */
+    fun isAvailable(tenant: Tenant): Boolean = pages(tenant).isNotEmpty()
 
     fun opens(tenant: Tenant, user: DashboardUser): Boolean =
         user.employeeId != null && user.employeeTenantId == tenant.id && isAvailable(tenant)
@@ -112,6 +126,28 @@ internal fun ApplicationCall.attachDashboardContext(context: DashboardContext) {
 
 /** The tenant and user the `dashboard` JWT validator authorized for this call. */
 internal fun ApplicationCall.dashboardContext(): DashboardContext? = attributes.getOrNull(DashboardContextKey)
+
+internal data class PortalSession(val ctx: DashboardContext, val employee: Employee) {
+    val tenant: Tenant get() = ctx.tenant
+}
+
+/**
+ * The signed-in employee, on one of [EmployeePortal]'s pages their company has. Anyone else gets 403, since
+ * these pages are only an employee's own.
+ */
+internal suspend fun ApplicationCall.portalSession(page: String): PortalSession? {
+    val ctx = dashboardContext()
+    val employee = ctx?.employee
+    if (ctx == null || employee == null) {
+        respond(HttpStatusCode.Forbidden, mapOf("error" to "employees_only"))
+        return null
+    }
+    if (page !in EmployeePortal.pages(ctx.tenant)) {
+        respond(HttpStatusCode.Forbidden, mapOf("error" to "page_unavailable"))
+        return null
+    }
+    return PortalSession(ctx, employee)
+}
 
 /** An employee's sign-in has none of the company's modules, only [EmployeePortal]'s pages. */
 internal fun DashboardContext.requireModule(id: String): Boolean = user?.isEmployee != true && id in DashboardModules.effectiveFor(tenant)

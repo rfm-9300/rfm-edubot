@@ -109,6 +109,28 @@ class DashboardModulesTest {
     }
 
     @Test
+    fun `the time clock is opt-in and brings the employees it records`() {
+        assertEquals(true, DashboardModules.TIMESHEETS in DashboardModules.optIn)
+        assertEquals(false, DashboardModules.TIMESHEETS in DashboardModules.effectiveFor(tenant(enabledModules = null)))
+        assertEquals(
+            listOf(DashboardModules.OVERVIEW, DashboardModules.TIMESHEETS, DashboardModules.EMPLOYEES),
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.TIMESHEETS))),
+        )
+    }
+
+    @Test
+    fun `an employee's pages follow the company's modules, the time clock first`() {
+        assertEquals(emptyList(), EmployeePortal.pages(tenant(listOf(DashboardModules.EMPLOYEES))))
+        assertEquals(listOf(EmployeePortal.MY_SERVICES), EmployeePortal.pages(tenant(listOf(DashboardModules.EMPLOYEES, DashboardModules.SERVICES))))
+        assertEquals(listOf(EmployeePortal.MY_HOURS), EmployeePortal.pages(tenant(listOf(DashboardModules.TIMESHEETS))))
+        assertEquals(
+            listOf(EmployeePortal.MY_HOURS, EmployeePortal.MY_SERVICES),
+            EmployeePortal.pages(tenant(listOf(DashboardModules.CLIENTS, DashboardModules.EMPLOYEES, DashboardModules.TIMESHEETS))),
+        )
+        assertEquals(false, EmployeePortal.isAvailable(tenant(listOf(DashboardModules.SERVICES))))
+    }
+
+    @Test
     fun `payments is an optional tenant module that also enables suppliers`() {
         assertEquals(true, DashboardModules.PAYMENTS in DashboardModules.optional)
         assertEquals(true, DashboardModules.SUPPLIERS in DashboardModules.optional)

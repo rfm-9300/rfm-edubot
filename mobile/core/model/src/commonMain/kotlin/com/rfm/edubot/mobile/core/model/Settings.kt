@@ -42,4 +42,9 @@ object DashboardModules {
     const val AI_ASSISTANT = "ai-assistant"
     const val AGENTS = "agents"
     const val SETTINGS = "settings"
+    const val TIMESHEETS = "timesheets"
+
+    /** An employee's own pages, the only modules their sign-in has. */
+    const val MY_HOURS = "my-hours"
+    const val MY_SERVICES = "my-services"
 }

@@ -272,7 +272,7 @@ Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions` `.nowrap
 
 A table can have more columns than its panel fits, as the `/app` directory lists can once someone adds columns; it then scrolls inside `.tbl-wrap`, and the browser squeezes every cell that may wrap down to its longest word. So values that must stay whole take `.nowrap` (phone numbers, NIFs, postal codes, dates, numbers), and text that wraps takes `.long`, an 11em minimum, so a name or an address breaks over a few lines rather than one word per line. `.id` codes take neither (they still break at the hyphen on a phone).
 
-A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill.
+A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill. A link inside a cell's text (a punch's place on the map) is `a.tbl__link`: `--info-ink`, underlined, with the focus ring.
 
 A table that has to read on a phone takes `.tbl--stack` (every backoffice table does) instead of scrolling sideways. Under 700px the head is hidden and each row becomes a card. A cell with `data-label` (its column heading, from the same catalog key as the `th`) shows that label above its value, and those cells share a grid of four columns, two under 560px. A cell without `data-label` spans the card: the row's name comes first, its actions last (left-aligned), and an empty state sits in the `colspan` cell. A long `.id` (a file name) spans too, an empty cell (no action on this row) disappears, and numbers align left.
 
@@ -388,9 +388,10 @@ The description cell is also the catalog picker, so it is a `.line__desc` wrappe
 
 The backoffice's tenant channels reuse the box as `.lines--channels`: platform select, external id, access token and `.l-rm`, with left-aligned headings. Under 560px a channel takes two lines, platform and external id over the access token, with remove beside both; the head follows the same grid, so "Access token" sits on its second line. A `.sel` inside a `.line` sits flush like the row's bare inputs (no border, radius or shadow; the cell takes the focus fill). Inputs in a row are bare `input`s (`.mono` for ids), not `.inp`, and carry an `aria-label` because the heading isn't their label. An empty list shows `.lines__empty` under the head (`hidden` hides it). In the minimal skin `.lines__head` is sentence case like table heads.
 
-Two more variants keep the channels' bare inputs with `aria-label`s, without a catalog combobox:
+More variants keep the channels' bare inputs with `aria-label`s, without a catalog combobox:
 
 - `.lines--services`: a supplier's usual services, as description, unit, usual price and `.l-rm`. On phones the description takes its own row, like `.line__desc`.
+- `.lines--breaks`: a shift's breaks in the Timesheets correction form, as from and to (`input type="time"`) and `.l-rm`, left-aligned headings, same columns on phones.
 - `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
 
 ```html
@@ -891,6 +892,29 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list. An AI task's fields are named by the user: their labels come from `app.agents.outputs.<name>` when there is one (summary, intent…), else the name as typed. Field names are normalized on change (accents dropped, anything else becomes `_`) so they stay usable as `{{steps.<id>.output.<name>}}`.
 
 A `dl.dash-facts` placed straight in a `.panel__body` drops its top margin and its first row's rule, so no second line runs just under the panel head's border (Agents Settings, the backoffice agents drawer).
+
+## Time clock
+
+The punch card on an employee's **My hours** ([patterns.md](patterns.md#my-hours-the-employees-time-clock)). Script: `app/timesheets.js`.
+
+```html
+<section class="panel clock" data-state="WORKING">
+  <div class="clock__head"><h2 class="panel__title">Time clock</h2><span class="pill pill--ok">Working</span></div>
+  <p class="clock__time">3 h 12 min</p>
+  <p class="clock__line">Working since 08:02</p>
+  <p class="clock__meta">Last: Clock in 08:02 · At Escritório Lisboa · ±8 m</p>
+  <div class="clock__actions">
+    <button class="btn btn--ghost" type="button">Start break</button>
+    <button class="btn btn--primary" type="button">Clock out</button>
+  </div>
+  <p class="hint">Your location is read only when you clock in or out, never in between.</p>
+</section>
+```
+
+- `data-state` is `OFF`, `WORKING` or `ON_BREAK`; `ON_BREAK` turns `.clock__time` to `--warn-ink`. Off, `.clock__time` is the company's current time; on, the time worked so far (tabular figures, ticking).
+- `.clock__actions` holds the buttons that fit the state, the main one `.btn--primary`. On phones they share the row.
+- A `.notice` inside the card sits flush (the "use the app" notice when the company requires the phone's biometrics, with the buttons `disabled`).
+- A forgotten clock-out is a `.notice--warn` above the card whose `form.notice__actions.clock__fix` holds a `.lbl`, a 120px time `.inp` and Save; on phones the notice stacks.
 
 ## Utilities
 

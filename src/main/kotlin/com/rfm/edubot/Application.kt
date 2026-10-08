@@ -45,6 +45,9 @@ import com.rfm.edubot.dashboard.dashboardImpersonationRoute
 import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
 import com.rfm.edubot.dashboard.employeeWorkRoutes
+import com.rfm.edubot.timesheets.TimesheetLocationRetention
+import com.rfm.edubot.timesheets.timeClockRoutes
+import com.rfm.edubot.timesheets.timesheetRoutes
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
@@ -225,6 +228,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     )
     EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
         .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
+    TimesheetLocationRetention(mongoModule).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 3.minutes)
     if (appConfig.google.inboxEnabled) {
         GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
             .job(SchedulerLease(mongoModule), appConfig.google.syncSeconds.seconds)
@@ -377,6 +381,8 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
             employees = employeeLookup,
         )
         employeeWorkRoutes(mongoModule, dashboardUserRepository, agentServices.notifications)
+        timeClockRoutes(mongoModule, agentServices.notifications)
+        timesheetRoutes(mongoModule)
         dashboardCompanyRoutes(
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,

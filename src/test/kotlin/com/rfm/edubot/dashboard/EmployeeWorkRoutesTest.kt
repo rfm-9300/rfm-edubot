@@ -244,7 +244,7 @@ class EmployeeWorkRoutesTest {
 
         val employeeToken = http.token(c.employeeEmail, EMPLOYEE_PASSWORD)
         val me = http.send("GET", "/app/api/me", employeeToken).obj()
-        assertEquals(listOf(EmployeePortal.MODULE), me["modules"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(listOf(EmployeePortal.MY_SERVICES), me["modules"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals("Ana Costa", me["employee"]!!.jsonObject.text("name"))
         assertEquals("TENANT_EMPLOYEE", me["user"]!!.jsonObject.text("role"))
 

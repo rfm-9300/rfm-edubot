@@ -57,10 +57,11 @@ fun SettingsScreen(
     onSwitchCompany: (String) -> Unit,
     onSignOut: () -> Unit,
 ) {
+    val employee = identity.employee
     val vm = viewModel<SettingsViewModel>(
         key = "settings:${identity.tenant.id}",
         factory = viewModelFactory {
-            initializer { SettingsViewModel(settings, identity.tenant.locale, onLocale) }
+            initializer { SettingsViewModel(settings, identity.tenant.locale, onLocale, employee = employee != null) }
         },
     )
     val state by vm.state.collectAsState()
@@ -69,7 +70,7 @@ fun SettingsScreen(
 
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 32.dp)) {
         item { ScreenHeader(strings[Txt.NAV_GROUP_SETUP], strings[Txt.SETTINGS_TITLE]) }
-        item { InfoPanel(identity.tenant.name, identity.tenant.slug) }
+        item { InfoPanel(identity.tenant.name, employee?.let { "${it.name} · ${it.number}" } ?: identity.tenant.slug) }
         state.error?.let { item { ErrorPanel(strings.error(it)) } }
         if (identity.isOperator) {
             item { InfoPanel(strings[Txt.SETTINGS_OPERATOR_SESSION], tone = Tone.Warn) }
@@ -94,7 +95,7 @@ fun SettingsScreen(
             )
         }
 
-        if (identity.companies.size > 1) {
+        if (employee == null && identity.companies.size > 1) {
             item { SectionLabel(strings[Txt.SETTINGS_COMPANIES]) }
             items(identity.companies, key = { it.id }) { company ->
                 val current = company.id == identity.tenant.id || company.slug == identity.tenant.slug
@@ -110,18 +111,21 @@ fun SettingsScreen(
             }
         }
 
-        item { SectionLabel(strings[Txt.SETTINGS_CHANNELS]) }
-        if (identity.tenant.channels.isEmpty()) {
-            item { InfoPanel(strings[Txt.SETTINGS_CHANNELS_EMPTY]) }
-        } else {
-            items(identity.tenant.channels, key = { it.platform + it.externalId }) { channel ->
-                ListRow(
-                    title = channel.displayName ?: channel.platform,
-                    detail = channel.platform,
-                    leading = channel.platform,
-                    status = "ACTIVE",
-                    statusLabel = strings.status("ACTIVE"),
-                )
+        // An employee has no say over the company's channels, so theirs skips the section.
+        if (employee == null) {
+            item { SectionLabel(strings[Txt.SETTINGS_CHANNELS]) }
+            if (identity.tenant.channels.isEmpty()) {
+                item { InfoPanel(strings[Txt.SETTINGS_CHANNELS_EMPTY]) }
+            } else {
+                items(identity.tenant.channels, key = { it.platform + it.externalId }) { channel ->
+                    ListRow(
+                        title = channel.displayName ?: channel.platform,
+                        detail = channel.platform,
+                        leading = channel.platform,
+                        status = "ACTIVE",
+                        statusLabel = strings.status("ACTIVE"),
+                    )
+                }
             }
         }
         state.widget?.publicKey?.let { key ->
@@ -139,7 +143,7 @@ fun SettingsScreen(
             }
         }
 
-        item { InfoPanel(strings[Txt.SETTINGS_WEB_FOR_MORE], tone = Tone.Info) }
+        if (employee == null) item { InfoPanel(strings[Txt.SETTINGS_WEB_FOR_MORE], tone = Tone.Info) }
         item {
             Spacer(Modifier.height(BotSpace.lg))
             SecondaryButton(

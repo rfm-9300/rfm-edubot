@@ -19,8 +19,9 @@ import io.ktor.http.contentType
 import io.ktor.http.isSuccess
 import io.ktor.serialization.kotlinx.json.json
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.jsonPrimitive
 
 /** Thrown inside [DashboardHttpClient]; repositories turn it into an `Outcome.Failure`. */
 class ApiException(val error: AppError) : Exception(error.toString())
@@ -110,15 +111,18 @@ class DashboardHttpClient internal constructor(
         STATUS_FORBIDDEN -> AppError.Forbidden
         STATUS_NOT_FOUND -> AppError.NotFound
         in STATUS_SERVER_ERROR..599 -> AppError.Unavailable(status)
-        else -> AppError.Rejected(errorCode(body), status)
+        else -> errorFields(body).let { fields -> AppError.Rejected(fields["error"].orEmpty(), status, fields - "error") }
     }
 
-    private fun errorCode(body: String?): String {
+    /** The plain fields of a `{"error": "code", …}` body; empty when it isn't one. */
+    private fun errorFields(body: String?): Map<String, String> {
         val text = body?.trim().orEmpty()
-        if (!text.startsWith("{")) return ""
+        if (!text.startsWith("{")) return emptyMap()
         return runCatching {
-            json.parseToJsonElement(text).jsonObject["error"]?.jsonPrimitive?.content.orEmpty()
-        }.getOrDefault("")
+            json.parseToJsonElement(text).jsonObject.mapNotNull { (key, value) ->
+                (value as? JsonPrimitive)?.takeIf { it !is JsonNull }?.let { key to it.content }
+            }.toMap()
+        }.getOrDefault(emptyMap())
     }
 
     fun close() = client.close()

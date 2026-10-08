@@ -42,15 +42,20 @@ const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const GOOGLE = I18N.section('app.integrations.google');
-// An employee's own sign-in (EmployeePortal on the server) has a single page: the services they register.
+// An employee's own sign-in (EmployeePortal on the server) has only their own pages: the services they
+// register and, with the time clock, their hours. `/me` lists the ones the company has.
 const PORTAL_TAB = 'my-services';
+const HOURS_TAB = 'my-hours';
 const PORTAL = I18N.section('app.portal');
+const TIME = I18N.section('app.time');
 const SUB = I18N.section('admin.submissions');
 const FIELDS = I18N.section('admin.fields');
 const COLUMNS = I18N.section('app.columns');
 const isPortal = () => !!state.me?.employee;
 // Registered services become Serviços rows, so the team reviews them with both modules on.
 const submissionsOn = () => hasModule('employees') && hasModule('services');
+// Employees sign in for their services or for the time clock.
+const employeePortalOn = () => submissionsOn() || hasModule('timesheets');
 const googleText = (key, params) => I18N.t(`app.integrations.google.${key}`, params);
 // Server error keys the catalog doesn't know read as the fallback.
 const googleTextOr = (key, fallback) => {
@@ -263,7 +268,21 @@ async function api(path, options = {}) {
   return res.json();
 }
 
-/** The error a failed response carries: its status, the server's `error` code and, when given, the field and limit it is about. */
+/** Downloads [path] with the session's token as [filename] (an export the browser can't fetch on its own). */
+async function downloadFile(path, filename) {
+  const blob = await apiBlob(path);
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
+}
+
+/** The error a failed response carries: its status, the server's `error` code, when given the field and limit it is about, and the parsed body. */
 async function apiError(res) {
   const err = new Error(`HTTP ${res.status}`);
   err.status = res.status;
@@ -272,6 +291,7 @@ async function apiError(res) {
   err.detail = body && typeof body.detail === 'string' ? body.detail : '';
   err.field = body && typeof body.field === 'string' ? body.field : '';
   err.limit = body && typeof body.limit === 'number' ? body.limit : null;
+  err.body = body;
   return err;
 }
 
@@ -609,7 +629,10 @@ function openAccountPassword() {
 // parts (kind + params); the text is written here in the reader's language.
 const NOTIFY = I18N.section('app.notifications');
 const NOTIFICATIONS_POLL_MS = 60000;
-const NOTIFICATION_TONES = { agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad', service_submitted: 'warn', conversation_handoff: 'warn' };
+const NOTIFICATION_TONES = {
+  agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad',
+  service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', conversation_handoff: 'warn',
+};
 let notifications = { items: [], unread: 0 };
 let notificationsAt = 0;
 let notificationsTimer = null;
@@ -679,6 +702,8 @@ function notificationText(n) {
       return { title: I18N.t('app.notifications.kinds.integration_reconnect', { name }), detail: line(p.account, NOTIFY.reconnectDetail) };
     }
     case 'service_submitted': return { title: kind('service_submitted'), detail: line(p.service, p.client) };
+    case 'time_device_enrolled': return { title: kind('time_device_enrolled'), detail: p.device || '' };
+    case 'time_missed_clock_out': return { title: kind('time_missed_clock_out'), detail: line(p.day ? fmtDay(p.day) : '', p.end ? `${TIME.overdueEnd} ${p.end}` : '') };
     case 'conversation_handoff': return { title: kind('conversation_handoff'), detail: line(p.reason, p.channel ? channelName(p.channel) : '') };
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
@@ -768,6 +793,14 @@ function openNotification(n) {
   const back = { key: 'notifications', label: NOTIFY.title, open: () => openNotifications() };
   if (n.ref?.startsWith('submission:')) {
     if (submissionsOn()) openFrom(back, () => openSubmissionDetail(n.ref.slice('submission:'.length)));
+    return;
+  }
+  if (n.ref?.startsWith('shift:')) {
+    if (hasModule('timesheets')) openFrom(back, () => window.TimesheetsUI.openShift(n.ref.slice('shift:'.length)));
+    return;
+  }
+  if (n.ref?.startsWith('employee:')) {
+    if (hasModule('employees')) openFrom(back, () => openPayeeDrawer('employee', n.ref.slice('employee:'.length)));
     return;
   }
   if (n.ref && hasModule('agents') && window.AgentsUI) {
@@ -957,11 +990,13 @@ function renderNav() {
   };
   const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
   if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
+  const shiftsToReview = window.TimesheetsUI?.badge();
+  if (shiftsToReview?.count) counts.timesheets = shiftsToReview.count;
   const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, employees: toApprove > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
   const groups = [
-    { id: 'home', items: ['overview', PORTAL_TAB] },
+    { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'payments', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
@@ -983,7 +1018,7 @@ function renderNav() {
 }
 
 async function setActive(tab) {
-  if (isPortal()) tab = PORTAL_TAB;
+  if (isPortal() && !state.me.modules.includes(tab)) tab = state.me.modules[0] || PORTAL_TAB;
   if (tab !== 'conversations') stopInboxPolling();
   state.active = tab;
   location.hash = tab;
@@ -1044,6 +1079,8 @@ async function loadModule(tab) {
     ]);
     state.portal = { submissions, clients, catalog };
   }
+  if (tab === HOURS_TAB) await window.TimesheetsUI.loadMine();
+  if (tab === 'timesheets') await window.TimesheetsUI.loadTeam();
   if (tab === 'payments') {
     const [payments, suppliers, employees] = await Promise.all([
       api('/app/api/crm/payments'),
@@ -1125,12 +1162,12 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB].includes(state.active)
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB].includes(state.active)
     || (state.active === 'agents' && !window.AgentsUI?.canManage());
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
-    agents: I18N.t('app.agents.newAgent'), [PORTAL_TAB]: PORTAL.newTitle,
+    agents: I18N.t('app.agents.newAgent'), [PORTAL_TAB]: PORTAL.newTitle, timesheets: TIME.addShift,
   };
   $('#btn-new .btn__label').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -1152,6 +1189,8 @@ function render() {
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
   if (state.active === PORTAL_TAB) return renderMyServices(root);
+  if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
+  if (state.active === 'timesheets') return window.TimesheetsUI.renderTeam(root);
   renderSettings(root);
 }
 
@@ -1201,6 +1240,18 @@ function agentsDeps() {
       if (state.active !== 'overview') return renderNav();
       loadModule('overview').then(render).catch(() => renderNav());
     },
+  };
+}
+// The company's admins (and operators opening its dashboard) change how it works for the whole team.
+const isCompanyAdmin = () => state.me?.principalType === 'operator-imp' || state.me?.user?.role === 'TENANT_ADMIN';
+function timesheetsDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, openFrom, linksBackTo, download: downloadFile,
+    hero, statCards, periodNav, detailMeta, recordTable, recordEmpty,
+    fmtDate, fmtDay, fmtDayKey, fmtWhen, relTime, uiLocale, tenantTz,
+    todayKey, addDayKey, periodKey, currentPeriodKey, shiftPeriodKey,
+    render, hasModule, isPortal, isAdmin: isCompanyAdmin, openPayeeDrawer, labels, STR, CRM,
+    get state() { return state; },
   };
 }
 function assistantDeps() {
@@ -1291,6 +1342,14 @@ function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, empty
 function updateSidebarKpis() {
   const label1 = $('#kpi-1-label') || $$('.kpi__label')[0];
   const label2 = $('#kpi-2-label') || $$('.kpi__label')[1];
+  const hours = isPortal() && (state.active === HOURS_TAB || !hasModule(PORTAL_TAB)) ? window.TimesheetsUI?.kpis() : null;
+  if (hours) {
+    if (label1) label1.textContent = hours[0].label;
+    if (label2) label2.textContent = hours[1].label;
+    $('#kpi-messages').textContent = hours[0].value;
+    $('#kpi-users').textContent = hours[1].value;
+    return;
+  }
   if (isPortal()) {
     const mine = state.portal.submissions;
     if (label1) label1.textContent = SUB.status.PENDING;
@@ -4911,15 +4970,17 @@ async function openPayeeDrawer(kind, ref) {
   const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
   const q = encodeURIComponent(id);
   const work = kind === 'employee' && submissionsOn();
-  const [payee, payments, submissions, access] = await Promise.all([
+  const signIn = kind === 'employee' && employeePortalOn();
+  const [payee, payments, submissions, access, time] = await Promise.all([
     api(`/app/api/crm/${cfg.path}/${q}`).catch(() => known),
     hasModule('payments') ? api(`/app/api/crm/payments?${cfg.filter}=${q}`).catch(() => []) : Promise.resolve([]),
     work ? api(`/app/api/crm/service-submissions?employeeId=${q}`).catch(() => []) : Promise.resolve([]),
-    work ? api(`/app/api/crm/employees/${q}/access`).catch(() => null) : Promise.resolve(null),
+    signIn ? api(`/app/api/crm/employees/${q}/access`).catch(() => null) : Promise.resolve(null),
+    kind === 'employee' && window.TimesheetsUI ? window.TimesheetsUI.loadRecord(id) : Promise.resolve(null),
   ]);
   if (gen !== drawerGen) return;
   if (!payee) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
-  payeeRecord = { kind, payee, payments: payments || [], submissions: submissions || [], access, el: body };
+  payeeRecord = { kind, payee, payments: payments || [], submissions: submissions || [], access, time, el: body };
   $('#drawer-title').textContent = payee.name;
   renderDrawerEyebrow(eyebrow(payee));
   renderPayeeRecord();
@@ -5007,7 +5068,8 @@ function renderPayeeRecord() {
     ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
     ${recordKpisHtml(cells)}
     ${recordAttentionHtml(attention)}
-    ${work ? employeeAccessHtml(p, r.access) : ''}
+    ${kind === 'employee' && employeePortalOn() ? employeeAccessHtml(p, r.access) : ''}
+    ${kind === 'employee' && r.time ? window.TimesheetsUI.recordHtml(p, r.time) : ''}
     ${work ? employeeWorkHtml(subs, r.access) : ''}
     ${kind === 'supplier' ? supplierServicesPanel(p) : ''}
     ${payments}
@@ -5028,6 +5090,12 @@ function renderPayeeRecord() {
   }));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => (b.dataset.recordAct === 'services' ? cfg.edit(p) : cfg.pay(p)))));
   $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
+  if (kind === 'employee' && r.time) {
+    window.TimesheetsUI.wireRecord(body, p, here(), async () => {
+      r.time = await window.TimesheetsUI.loadRecord(p.id);
+      renderPayeeRecord();
+    });
+  }
 }
 
 // A supplier's usual services, which a new payment to them offers as lines.
@@ -5228,11 +5296,17 @@ async function afterSubmissionDecision() {
   render();
 }
 
+// What an employee's sign-in is for: their hours, their services, or both, as the company has them.
+function signInPurpose(prefix, servicesOnly, name) {
+  if (!hasModule('timesheets')) return servicesOnly({ name });
+  return I18N.t(`app.time.${prefix}${submissionsOn() ? 'Both' : 'Hours'}`, { name });
+}
+
 function employeeAccessHtml(p, access) {
   if (!access) return '';
   const has = !!access.email;
   const on = has && access.active && !p.archivedAt;
-  const detail = !has ? SUB.accessNoneDetail({ name: p.name })
+  const detail = !has ? signInPurpose('accessNone', SUB.accessNoneDetail, p.name)
     : p.archivedAt ? SUB.accessArchived
     : !access.active ? SUB.accessOffDetail
     : access.lastLoginAt ? SUB.accessLastSignIn({ when: relTime(access.lastLoginAt) }) : SUB.accessNeverSignedIn;
@@ -5268,7 +5342,7 @@ function openEmployeeAccessForm(employee, access) {
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
-    <p class="hint">${escapeHTML(has ? SUB.accessEditIntro : SUB.accessGiveIntro({ name: employee.name }))}</p>
+    <p class="hint">${escapeHTML(has ? SUB.accessEditIntro : signInPurpose('accessIntro', SUB.accessGiveIntro, employee.name))}</p>
     <div class="form__row form__row--full"><label class="lbl" for="ea-email">${escapeHTML(SUB.accessEmail)} <span class="req">●</span></label>
       <input class="inp" id="ea-email" type="email" autocomplete="off" maxlength="254" required value="${escapeHTML(access?.email || '')}" /></div>
     <div class="form__row form__row--full"><label class="lbl" for="ea-password">${escapeHTML(has ? SUB.accessNewPassword : STR.accountNewPassword)}${has ? ` <span class="opt">${escapeHTML(STR.optional)}</span>` : ' <span class="req">●</span>'}</label>
@@ -9359,6 +9433,7 @@ function openBookingAvailabilityForm() {
 async function init(relayed = false) {
   if (!relayed && handleOAuthPopup()) return;
   window.AgentsUI?.init(agentsDeps());
+  window.TimesheetsUI?.init(timesheetsDeps());
   window.AssistantUI?.init(assistantDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
@@ -9368,6 +9443,7 @@ async function init(relayed = false) {
   $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
     if (state.active === PORTAL_TAB) return openSubmissionForm();
+    if (state.active === 'timesheets') return window.TimesheetsUI.newShift();
     if (state.active === 'clients') return openClientForm();
     if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined);
     if (state.active === 'catalog') return openCatalogForm();

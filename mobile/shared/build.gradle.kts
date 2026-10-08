@@ -40,6 +40,7 @@ kotlin {
             implementation(project(":feature:overview"))
             implementation(project(":feature:persona"))
             implementation(project(":feature:settings"))
+            implementation(project(":feature:timeclock"))
             api(libs.coroutines.core)
             implementation(libs.compose.runtime)
             implementation(libs.compose.foundation)

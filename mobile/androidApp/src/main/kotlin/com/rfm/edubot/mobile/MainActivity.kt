@@ -1,15 +1,16 @@
 package com.rfm.edubot.mobile
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.fragment.app.FragmentActivity
 import com.rfm.edubot.mobile.app.DashboardApp
 import com.rfm.edubot.mobile.app.MobileGraph
 import java.util.Locale
 
-class MainActivity : ComponentActivity() {
+/** A [FragmentActivity] because BiometricPrompt shows itself as a fragment. */
+class MainActivity : FragmentActivity() {
     private lateinit var voiceInput: AndroidVoiceInput
     private lateinit var graph: MobileGraph
 
@@ -34,6 +35,8 @@ class MainActivity : ComponentActivity() {
             tokenStore = AndroidTokenStore(applicationContext),
             snapshotStore = AndroidSnapshotStore(applicationContext),
             voiceInput = voiceInput,
+            location = AndroidLocationProvider(this),
+            signer = AndroidDeviceSigner(this),
         )
         onBackPressedDispatcher.addCallback(this, backCallback)
         setContent {

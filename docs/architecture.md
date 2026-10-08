@@ -82,6 +82,7 @@ graph TD
         RL[RateLimiter<br/>token bucket]
         DA[Dashboard AI Assistant<br/>threads, settings, confirmed changes]
         EV[DomainEventLog<br/>domain_events outbox]
+        TC[Time clock<br/>shifts, punches, work sites,<br/>phone keys, timesheets]
     end
 
     subgraph Automations["Agents runtime"]
@@ -118,6 +119,8 @@ graph TD
     MP --> PDF
     AR --> CRM
     AR --> DA
+    AR --> TC
+    TC --> NT
     DA --> AI & CRM & Mongo
     DA --> OC
     DA --> AEX
@@ -130,7 +133,7 @@ graph TD
     GI --> GAPI
     ES & GS --> EV
     UR & CR & MR & CRM & DS --> Mongo
-    EV & AEX & NT & GI & ES & GS --> Mongo
+    EV & AEX & NT & GI & ES & GS & TC --> Mongo
     Health --> Mongo
 ```
 
@@ -153,6 +156,7 @@ graph TD
 | `agents/` | Agents module: models and stores, registry (triggers, actions, validator, catalog), runtime (dispatcher, scheduler, starter, executor, guardrails, context builder), actions, templates, AI drafting and assistant tools, dashboard and backoffice routes |
 | `integrations/` | Connected accounts (`integration_connections`, `TokenCipher`), Google OAuth and token refresh, Gmail client and inbox sync, `EmailService`, email retention, integration and email routes |
 | `notifications/` | The dashboard bell: notifications per audience with read state, and their routes |
+| `timesheets/` | The time clock: shifts and punches with their rules (`ShiftRules`, `PunchPolicy`, `Geofence`), work sites, phone keys and signature checks (`DeviceKeys`), the employee's `/app/api/portal/time` and the team's `/app/api/timesheets` routes, CSV export, location retention |
 | `persistence/` | MongoDB wiring, index creation at startup |
 | `config/` | `AppConfig` (env/HOCON), `RuntimeConfig` + Mongo `platform_settings` overrides |
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes; `jobs/` has `PeriodicJob` and `SchedulerLease` (a Mongo lease, so one instance runs each background job) |
@@ -169,6 +173,9 @@ catalog lives in `DashboardModules`:
   `quotes`, `invoices`, `suppliers`, `employees`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
   Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
   Enabling `payments` also enables `suppliers` so outgoing bills always have a vendor directory.
+- Opt-in: `agents` and `timesheets` are left out of a legacy tenant's full catalog and are on only
+  when selected. Enabling `timesheets` also enables `employees`, since the people clocking in are
+  employee records.
 
 The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
 other module, so a tenant can be provisioned CRM-only.
@@ -394,8 +401,10 @@ Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the 
 
 ### Employee sign-in and registered services
 
-With the `employees` and `services` modules on, an employee can sign in to `/app` to register the work
-they did, and the team approves it into an ordinary Serviços row (`dashboard/EmployeeWorkRoutes.kt`).
+With the `employees` module on, an employee can sign in to `/app` to their own pages
+(`EmployeePortal.pages`): **My hours** with `timesheets` (the [time clock](#time-clock)), and **My
+services** with `services`, where they register the work they did and the team approves it into an
+ordinary Serviços row (`dashboard/EmployeeWorkRoutes.kt`). Without either page, employees can't sign in.
 
 - **Sign-in.** Admins (and operators opening the dashboard) give an employee a sign-in from the
   employee's record: `POST`/`PATCH`/`DELETE /app/api/crm/employees/{id}/access` (email and password;
@@ -405,14 +414,17 @@ they did, and the team approves it into an ordinary Serviços row (`dashboard/Em
   Members see it read-only. The backoffice's user endpoint refuses that role (`400 invalid_role`), since
   the sign-in belongs to an employee record. Deleting the employee deletes the sign-in.
 - **Locked to its own pages.** `DashboardAccessPolicy` lets an employee's token open only
-  `employeeTenantId`, and only while that company has `employees` and `services`; the `dashboard`
+  `employeeTenantId`, and only while that company has at least one employee page; the `dashboard`
   validator also needs the employee record, not archived. Turning the sign-in off, archiving or
-  deleting the employee, or turning a module off ends the session on the next request, and sign-in
+  deleting the employee, or turning the modules off ends the session on the next request, and sign-in
   refuses it (`403`). `requireModule` is always false for an employee, so every module route answers
   `403`, and the validator refuses the token (`401`) on any path but `/app/api/me`, `/app/api/account…`
   and `/app/api/portal/…`. That last check also covers the routes that check no module (channel
-  connects, email, notifications, company switch). `/me` answers `modules: ["my-services"]` and the
-  `employee` (id, number, name). Agents don't offer employees' sign-ins as task assignees.
+  connects, email, notifications, company switch). Each portal route then checks its own page
+  (`ApplicationCall.portalSession`): `403 employees_only` for anyone else's token, `403
+  page_unavailable` when the company has turned that page's module off. `/me` answers the pages as
+  `modules` (`["my-hours", "my-services"]`, the first is where the app lands) and the `employee` (id,
+  number, name). Agents don't offer employees' sign-ins as task assignees.
 - **Registering.** `/app/api/portal/clients` lists the active clients (id, number, name only),
   `/catalog` the catalog (or only the bookable services when the catalog module is off), and
   `/services` the employee's own submissions in `crm.service_submissions` (client, `performedAt`,
@@ -456,11 +468,79 @@ sequenceDiagram
     S-->>E: APPROVED (or REJECTED with the reason)
 ```
 
+### Time clock
+
+Opt-in `timesheets` module (`timesheets/`, plan and research in
+[`plan-time-clock.md`](plan-time-clock.md)): employees clock in and out and take breaks from **My
+hours** (web or the mobile app), and the team reviews, corrects, approves and exports their hours from
+**Timesheets**. The backend's clock is the record: a punch's time is when it arrives, never what the
+phone says, and nothing is queued offline.
+
+- **Shifts.** One `timesheets.shifts` document per shift, from clock-in to clock-out, with its punches
+  (`IN`, `BREAK_START`, `BREAK_END`, `OUT`), breaks and edit history. `day` is the local day the shift
+  started on in the company's timezone; a night shift ends on the next day. A partial unique index
+  (`one_open_shift`) keeps one open shift per employee, and every write is versioned, so two punches at
+  once leave one result (`409 already_clocked_in`, `not_clocked_in`, `on_break`, `not_on_break`).
+  Clocking out during a break ends the break.
+- **Rules** (`timesheets.settings`, admins edit, defaults below): location `OFF`/`OPTIONAL`/`REQUIRED`
+  (`OPTIONAL`), work sites `FLAG`/`BLOCK` (`FLAG`), phone biometrics `OFF`/`OPTIONAL`/`REQUIRED`
+  (`OPTIONAL`), the longest shift (12 h), and the daily (8 h) and weekly (40 h) hours that count
+  overtime. `PunchPolicy` applies them to each punch. Only a clock-in is refused for where it
+  happened (`400 location_required`, `409 outside_sites` naming the nearest site and its distance,
+  `409 mock_location`), because refusing a break or clock-out would leave someone clocked in.
+  Everything else is accepted and flagged for review: `NO_LOCATION`, `LOW_ACCURACY` (over 150 m),
+  `MOCK_LOCATION`, `OUTSIDE_SITE`, `UNVERIFIED`, `LONG_SHIFT`, `MISSED_CLOCK_OUT`, `EDITED`, `MANUAL`.
+- **Work sites** (`timesheets.sites`, admins edit): a name, an optional address and client, and a
+  circle (centre and 25–2000 m radius, 150 by default). `Geofence` stores the nearest site with each
+  located punch.
+- **Phone keys** (`timesheets.devices`). The app makes an EC P-256 key in the Android Keystore or the
+  iOS Secure Enclave that signs only after the phone's fingerprint or face check. Enrolling sends its
+  public key with a signature over a one-use nonce (`timesheets.challenges`, 2 minutes, TTL 5) and
+  makes it the employee's one phone (an earlier one is revoked as replaced; admins are told about a
+  new one). A punch then carries `verification` (key id, nonce, signature over `nonce:TYPE`). A
+  signature that fails is refused (`403`), never counted as unverified. The key id is the base64url
+  SHA-256 of the SubjectPublicKeyInfo; iOS's raw X9.63 point is completed into one. No biometric
+  data reaches the backend.
+- **Employee** (`/app/api/portal/time`, page `my-hours`): `GET` (state, open shift, overdue, today
+  and week, active sites, phones, server time), `/shifts` (30 days by default, at most 93),
+  `POST /challenge`, `POST /punches`, `POST /shifts/{id}/close` (a forgotten clock-out, once the shift
+  is past the longest-shift limit; the team is told, `time_missed_clock_out`), `PATCH /shifts/{id}`
+  (their note), `POST /devices`, `DELETE /devices/{keyId}`.
+- **Team** (`/app/api/timesheets`, admins and members): the period's shifts with per-employee totals
+  and overtime (`?from=&to=&employeeId=`), `/board` (who's working now), `/shifts/{id}` (punches,
+  places and history), `POST /shifts` (a manual shift), `PATCH /shifts/{id}` and
+  `POST /shifts/{id}/close` (each with a required reason, kept with the times before and after),
+  `POST /shifts/approve` (up to 500 ids), `/export.csv`, `/settings`, `/sites` and `/devices` (revoking
+  is for admins). An approved shift is final for the employee's note.
+- **Privacy.** Location is read only at a punch, never in between. `TimesheetLocationRetention`
+  (every 6 hours, on a scheduler lease) removes punch coordinates after 90 days and keeps the verdict (which
+  site, how far, inside or not), which is what the record needs. Each punch says whether it came from
+  the app or the web.
+
+```mermaid
+sequenceDiagram
+    participant P as Phone (mobile app)
+    participant S as Ktor
+    participant M as MongoDB
+    P->>S: GET /app/api/portal/time
+    S-->>P: policy, state, sites, active phones
+    Note over P: one location fix (unless location is OFF)
+    P->>S: POST /app/api/portal/time/challenge
+    S->>M: timesheets.challenges (nonce, 2 min)
+    S-->>P: nonce
+    Note over P: fingerprint or face unlocks the key,<br/>which signs "nonce:IN"
+    P->>S: POST /app/api/portal/time/punches {type, location, verification}
+    S->>M: consume the nonce, find the active phone key
+    Note over S: verify ECDSA P-256 signature,<br/>PunchPolicy: sites, accuracy, mock, rules
+    S->>M: timesheets.shifts (insert open shift, or update with version)
+    S-->>P: new status + shift (or 409 outside_sites with the nearest site)
+```
+
 ### Removing clients, suppliers and employees
 
 `DELETE /app/api/crm/{clients|suppliers|employees}/{id}` deletes the record only when no document
 refers to it: quotes, invoices, Serviços rows, bookings or linked payments for a client, payments
-for a supplier, payments, registered services or Serviços rows done for an employee. Otherwise it answers `409 in_use` and the record can only be archived
+for a supplier, payments, registered services, shifts or Serviços rows done for an employee. Otherwise it answers `409 in_use` and the record can only be archived
 (`POST …/{id}/archive`, undone by `POST …/{id}/restore`), so those documents keep their name and
 their PDFs keep generating (`crm/DirectoryRecords.kt`).
 
@@ -656,6 +736,11 @@ sequenceDiagram
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
 | `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
+| `timesheets.shifts` | One per shift: employee, local `day`, start/end, punches (time, channel, location and site verdict, verification, flags), breaks, worked minutes, flags, review, edit history, `version` | unique partial `(tenantId, employeeId)` where `OPEN` (`one_open_shift`); `tenantId+day`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` |
+| `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
+| `timesheets.devices` | Employees' phone keys for the time clock: key id, public key, platform, name, active or revoked (by whom) | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
+| `timesheets.challenges` | One-use nonces a phone signs, valid 2 minutes | TTL 5 minutes on `createdAt` |
+| `timesheets.settings` | A company's time clock rules | `_id` = tenant id |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
@@ -1052,13 +1137,15 @@ on `core:network` — that boundary is what keeps HTTP and bearer tokens out of 
 flowchart TD
   android[androidApp] --> shared
   ios[iosApp] --> shared
-  shared --> features["feature:* (11 modules)"]
+  shared --> features["feature:* (12 modules)"]
   features --> data["core:data — repositories + cache"]
   features --> ui["core:ui — tokens, theme, components"]
   features --> l10n["core:localization — Txt + 3 catalogs"]
   data --> network["core:network — DashboardHttpClient + per-area APIs"]
   network --> model["core:model — DTOs"]
-  data --> common["core:common — Outcome, AppError, SnapshotStore, TenantClock"]
+  data --> common["core:common — Outcome, AppError, SnapshotStore, TenantClock,<br/>LocationProvider, DeviceSigner"]
+  android -.->|"LocationManager · Keystore + BiometricPrompt"| common
+  ios -.->|"Core Location · Secure Enclave + LocalAuthentication"| common
 ```
 
 ### Modules
@@ -1068,7 +1155,9 @@ flowchart TD
   simulator; `edubot.kmp.compose.library` is the Compose variant (no JVM target — nothing ships a
   desktop app); `edubot.kmp.feature` adds the four core modules every screen needs.
 - `mobile/core/common` — `Outcome<T>`, `AppError`, `TokenStore`, `SnapshotStore`, `VoiceInput`, and
-  `TenantClock` (renders instants in the tenant's own timezone) plus euro formatting.
+  `TenantClock` (renders instants in the tenant's own timezone) plus euro formatting. For the time
+  clock, `LocationProvider` (one fix at a punch) and `DeviceSigner` (a key the phone's biometrics
+  unlock), with `DeviceKeys` naming keys and messages exactly as the backend does.
 - `mobile/core/model` — the dashboard DTOs, field-for-field with the server's.
 - `mobile/core/network` — `DashboardHttpClient` and one API interface per dashboard area
   (`SessionApi`, `InboxApi`, `CrmApi`, `BookingsApi`, `AgentsApi`, …). **No method takes a token.**
@@ -1078,13 +1167,17 @@ flowchart TD
 - `mobile/core/ui` — the design tokens, light and dark themes, and the shared components.
 - `mobile/core/testing` — `Samples` (representative records) and `FakeVoiceInput`.
 - `mobile/feature/*` — one module per area: `auth`, `overview`, `inbox`, `contacts`, `crm`,
-  `bookings`, `agents`, `notifications`, `assistant`, `persona`, `settings`. Each pairs a stateless
-  composable with a KMP `ViewModel` exposing an immutable `StateFlow`.
+  `bookings`, `agents`, `notifications`, `assistant`, `persona`, `settings`, `timeclock`. Each pairs a
+  stateless composable with a KMP `ViewModel` exposing an immutable `StateFlow`.
 - `mobile/shared` — the shell: `MobileGraph` (the object graph), `Navigator` (the back stack),
-  `ModuleRegistry` (the nav model), `DashboardSessionViewModel`, and `DashboardApp`. It is also the
-  iOS umbrella, exporting the core modules as the static `EduBotShared` framework.
+  `ModuleRegistry` (the nav model), `DashboardSessionViewModel`, `SessionViewModels` (the signed-in
+  screens' view models, cleared when a different session starts), and `DashboardApp`. It is also the
+  iOS umbrella, exporting the core modules as the static `EduBotShared` framework. `shared/iosMain`
+  holds the iOS platform services.
 - `mobile/androidApp` / `mobile/iosApp` — the entry points. Each supplies a `TokenStore` (encrypted
-  on Android, user defaults on iOS), a `SnapshotStore`, a `VoiceInput`, and the device locale.
+  on Android, user defaults on iOS), a `SnapshotStore`, a `VoiceInput`, a `LocationProvider`, a
+  `DeviceSigner`, and the device locale. Android's activity is a `FragmentActivity`, which
+  `BiometricPrompt` needs.
 
 A debug build can be pointed at a backend other than production:
 
@@ -1106,7 +1199,16 @@ rejected call ends the session everywhere rather than leaving one screen in an e
 
 A 403 is kept distinct: it means the tenant lacks the module or the user lacks the role, and must
 not sign anyone out. A 400 keeps the server's stable error code (`tax_id_required`,
-`address_required`, `id_taken`, …) so a form can point at the field that is wrong.
+`address_required`, `id_taken`, …) so a form can point at the field that is wrong, and the body's
+other plain fields (`outside_sites` names the nearest site and how far it is).
+
+An employee's sign-in (`DashboardIdentity.employee`) is refused with a 401 everywhere but `/me`,
+`/account…` and `/portal/…`, so for any other call the app would sign them out. `ModuleRegistry` takes
+`employee` and offers only their pages (`my-hours` lands; `my-services` is named as web-only) plus
+Settings; the shell shows no bell and polls no notifications for them; Settings skips the company's
+widget, channels and companies, and changes the language on the phone only. The signed-in screens'
+view models live in `SessionViewModels`, which is cleared when a different session starts: several
+of them poll, and one left from an admin's session would call with the next employee's token.
 
 ### Offline
 
@@ -1115,6 +1217,11 @@ refresh keeps the cached value and reports the error beside it. `ResourceState.f
 only while the backend has not confirmed what is on screen, which is what the "showing your last
 snapshot" notice is keyed on. Signing in, switching company and signing out all clear the cache so
 one account never sees another's data.
+
+The time clock is the exception: a punch's time is the backend's, so nothing is queued offline and
+the buttons need a connection. Its status and shifts are cached per employee
+(`timeclock.{employeeId}.…`), and `MobileGraph.timeClock(employeeId)` hands a new repository to
+whoever signs in next, so a phone shared at a site never shows one person's clock to another.
 
 ### Freshness
 
@@ -1134,5 +1241,29 @@ activity's `OnBackPressedDispatcher`.
 ### Not on mobile
 
 The agent builder, the document-template studio, the website-widget customiser, WhatsApp template
-CRUD, Instagram, the Google/Gmail integrations, and persona file uploads stay on the web dashboard.
-The app names them rather than hiding them.
+CRUD, Instagram, the Google/Gmail integrations, persona file uploads, the team's Timesheets (review,
+corrections, approvals, export, work sites and rules) and an employee's My services stay on the web
+dashboard. The app names them rather than hiding them.
+
+### Time clock on the phone
+
+`feature:timeclock` is an employee's home: state and running time, the buttons that fit (clock in;
+break or clock out; end break or clock out), a forgotten clock-out, today and the week against the
+company's hours, and their shifts. `TimeClockViewModel` gathers the evidence and stops early when the
+company's rules can't be met, so the employee reads why on the phone rather than as a refusal:
+
+1. A location fix, unless the company's location is `OFF`. Android asks every enabled provider
+   (fused, GPS with precise location, network) at once and takes the first fix, or a fix under two
+   minutes old; iOS makes one `requestLocation`. Both ask for "while using the app" only and report a
+   mocked or simulated fix as such. With location `REQUIRED`, or sites set to `BLOCK` on a clock-in,
+   no fix stops there.
+2. A signature, unless biometrics are `OFF`: a nonce from `/challenge`, then the platform's prompt
+   unlocks the key (`DeviceKeys.alias(employeeId)`, so two people sharing a phone don't share a key)
+   to sign `nonce:TYPE`. Cancelling stops quietly. Changed fingerprints or face invalidate the key
+   (Android's `KeyPermanentlyInvalidatedException`; on iOS a changed LocalAuthentication domain state),
+   and the app deletes it and asks to set up again. With biometrics `OPTIONAL`, a phone without them,
+   or one not set up, punches unverified and the team sees the flag.
+3. The punch. Its answer is the new status and shift, so nothing is fetched again.
+
+Setting up the phone makes the key and enrolls it with a signature over a fresh nonce, which also
+proves the key works.

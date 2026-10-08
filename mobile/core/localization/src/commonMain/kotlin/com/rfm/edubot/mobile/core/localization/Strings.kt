@@ -94,6 +94,9 @@ class Strings internal constructor(
         },
     )
 
+    /** A shift's alert (`OUTSIDE_SITE`, `UNVERIFIED`…); a code with no copy shows as itself. */
+    fun timeFlag(code: String): String = values["time.flag.$code"] ?: fallback["time.flag.$code"] ?: code
+
     /** Status enums arrive from the backend as names; a status with no copy shows title-cased. */
     fun status(status: String): String {
         val key = "status.${status.uppercase()}"
