@@ -134,7 +134,8 @@ object EmailSuggestions {
                     )
                 }
             }
-            if (person && (insights == null || intent == EmailIntents.QUOTE_REQUEST)) {
+            // A quote is for a client: its form picks one from the directory.
+            if (person && DashboardModules.CLIENTS in modules && (insights == null || intent == EmailIntents.QUOTE_REQUEST)) {
                 suggestions += EmailSuggestion(EmailActionTypes.QUOTE_CREATE, primary = intent == EmailIntents.QUOTE_REQUEST, prefill = quote(input))
             }
         }

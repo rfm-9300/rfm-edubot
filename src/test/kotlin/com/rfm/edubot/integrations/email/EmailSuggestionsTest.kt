@@ -174,6 +174,7 @@ class EmailSuggestionsTest {
     fun `machines' mail gets no person-to-person actions and modules decide the rest`() {
         assertTrue(build(email(automated = true)).isEmpty())
         assertEquals(listOf(EmailActionTypes.CLIENT_CREATE), build(email(), modules = setOf(DashboardModules.CLIENTS, DashboardModules.EMAIL)).types())
+        assertTrue(build(email(), modules = setOf(DashboardModules.QUOTES, DashboardModules.EMAIL)).none { it.type == EmailActionTypes.QUOTE_CREATE }, "a quote needs the client directory")
         assertTrue(build(email().copy(direction = EmailDirection.OUTBOUND)).isEmpty())
     }
 
