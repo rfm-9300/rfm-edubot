@@ -3,7 +3,7 @@ window.__I18N_CATALOGS = window.__I18N_CATALOGS || {};
 window.__I18N_CATALOGS['pt-PT'] = {
   common: {
     nav: {
-      overview: 'Início', conversations: 'Conversas', contacts: 'Contactos',
+      overview: 'Início', conversations: 'Conversas', contacts: 'Contactos', email: 'Email',
       clients: 'Clientes', services: 'Serviços', quotes: 'Orçamentos', invoices: 'Faturas', financeiro: 'Financeiro', suppliers: 'Fornecedores', employees: 'Colaboradores', payments: 'Pagamentos', catalog: 'Catálogo',
       persona: 'Persona', settings: 'Definições', 'ai-assistant': 'Assistente IA', bookings: 'Marcações', instagram: 'Instagram', agents: 'Agentes',
       timesheets: 'Registo de horas',

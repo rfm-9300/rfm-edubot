@@ -20,6 +20,8 @@ object UsageSources {
     const val AGENTS = "agents"
     /** Writing the persona's instructions from its sources. */
     const val PERSONA = "persona"
+    /** Reading received emails for the Email page's suggestions. */
+    const val EMAIL = "email"
 }
 
 /**

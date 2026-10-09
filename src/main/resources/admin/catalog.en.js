@@ -4,7 +4,7 @@ window.__I18N_CATALOGS = window.__I18N_CATALOGS || {};
 window.__I18N_CATALOGS['en'] = {
   common: {
     nav: {
-      overview: 'Home', conversations: 'Conversations', contacts: 'Contacts',
+      overview: 'Home', conversations: 'Conversations', contacts: 'Contacts', email: 'Email',
       clients: 'Clients', services: 'Services', quotes: 'Quotes', invoices: 'Invoices', financeiro: 'Finances', suppliers: 'Suppliers', employees: 'Employees', payments: 'Payments', catalog: 'Catalog',
       persona: 'Persona', settings: 'Settings', 'ai-assistant': 'AI Assistant', bookings: 'Bookings', instagram: 'Instagram', agents: 'Agents',
       timesheets: 'Timesheets',
