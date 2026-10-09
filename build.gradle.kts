@@ -47,7 +47,7 @@ dependencies {
     implementation("org.apache.pdfbox:pdfbox:3.0.3")
 
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
-    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.6.1")
+    implementation("org.jetbrains.kotlinx:kotlinx-datetime:0.8.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-slf4j:1.9.0")
 
     implementation("com.typesafe:config:1.4.3")
