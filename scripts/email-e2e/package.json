@@ -1,0 +1,13 @@
+{
+  "name": "email-e2e",
+  "private": true,
+  "type": "module",
+  "description": "Browser walkthrough of the dashboard's Email page against a running app and fake-services.py.",
+  "scripts": {
+    "walkthrough": "node walkthrough.mjs"
+  },
+  "dependencies": {
+    "mongodb": "^6.10.0",
+    "puppeteer-core": "^23.11.1"
+  }
+}
