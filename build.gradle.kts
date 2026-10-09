@@ -53,7 +53,7 @@ dependencies {
     implementation("com.typesafe:config:1.4.3")
     implementation("at.favre.lib:bcrypt:0.10.2")
 
-    implementation("net.logstash.logback:logstash-logback-encoder:8.0")
+    implementation("net.logstash.logback:logstash-logback-encoder:9.0")
 
     implementation("ch.qos.logback:logback-classic:1.5.12")
 
