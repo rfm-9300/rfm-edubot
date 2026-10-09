@@ -7,7 +7,7 @@ updated: 2026-10-09
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54 and #55.
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55 and #72.
 Local sessions push straight to `main`. What a session should know:
 
 - **The environment is configured in Cursor, not in the repo.** `main` has no
@@ -67,6 +67,11 @@ Local sessions push straight to `main`. What a session should know:
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's
-  Test job is the backstop.
+  Test job is the backstop. #72's VM (2026-10-09) had none of the documented setup: no Docker, no
+  boot script, no `.env`. With sudo, `apt-get install docker.io`, `dockerd` in the background, the
+  65536 nofile ulimit in `/etc/docker/daemon.json` and `api.version=1.44` in
+  `~/.docker-java.properties` gave it Mongo 7 and Testcontainers; `TEST_MONGO_URI` pointed at that
+  Mongo container is faster than a container per run. The backoffice password needs a BCrypt
+  `ADMIN_PASSWORD_HASH` in the hand-written `.env`.
 - About 25 Dependabot PRs (2026-09-25 and 2026-10-02) are unreviewed, among them Kotlin 2.4.20,
   Ktor 3.6.0, the Mongo driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1.
