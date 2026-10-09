@@ -95,6 +95,7 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
 - `scripts/persona-e2e/` — browser walkthrough of the Persona page: start `python3 scripts/persona-e2e/fake-openrouter.py`, run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1` and a backoffice password, then in that folder `npm install && ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs` (exits non-zero on a failed check)
+- `scripts/email-e2e/` — browser walkthrough of the Email page: start `python3 scripts/email-e2e/fake-services.py` (model and Gmail), run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1 GMAIL_API_URL=http://127.0.0.1:8099/gmail/v1 GMAIL_INBOX_ENABLED=true GMAIL_SYNC_SECONDS=15`, the three `GOOGLE_OAUTH_*` set to anything and an `INTEGRATIONS_ENCRYPTION_KEY`, then in that folder `npm install && INTEGRATIONS_ENCRYPTION_KEY=… node walkthrough.mjs` (exits non-zero on a failed check)
 
 ## Local Development - "run local"
 

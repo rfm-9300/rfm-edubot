@@ -87,6 +87,14 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   script, so its top-level functions (`openInvoiceDetail`, `openPaymentForm`…) can be called over CDP
   to open drawers.
 
+- **Walkthrough gotchas (2026-10-09, PR #72):** a new company's clients need a NIF and an address
+  (`ClientFields.DEFAULT` requires both), so seeding through `POST /app/api/crm/clients` without them
+  answers `400 tax_id_required`, and a client form opened in a walkthrough needs them typed in. The
+  drawer slides in, so a puppeteer click right after it opens can land beside its fields and the
+  typing goes nowhere: wait for it to settle, or focus fields through the DOM. List chips and rows
+  are redrawn whenever their data changes, so click them through the DOM and wait for the new state
+  (the chip's `is-on`), not just a row count the previous list may already have.
+
 ## Agent-rules gotcha: the GitNexus block is pinned (since 2026-09-29)
 
 `gitnexus analyze` rewrites the `<!-- gitnexus:start -->` … `<!-- gitnexus:end -->` block in

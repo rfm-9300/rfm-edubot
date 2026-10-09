@@ -96,6 +96,7 @@ graph TD
         GI[GoogleIntegration<br/>OAuth + token refresh]
         ES[EmailService<br/>Gmail send]
         GS[GmailSyncWorker<br/>inbox, on a lease]
+        EI[EmailInbox<br/>Email page: threads,<br/>suggested actions, replies]
     end
 
     subgraph External
@@ -128,12 +129,13 @@ graph TD
     EV --> ADP
     ADP & ASC --> AEX
     AEX --> CRM & AI & OC & ES & NT
-    AGR --> AEX & GI & ES
+    AGR --> AEX & GI & ES & EI
+    EI --> ES & AI & CRM
     ES & GS --> GI
     GI --> GAPI
     ES & GS --> EV
     UR & CR & MR & CRM & DS --> Mongo
-    EV & AEX & NT & GI & ES & GS & TC --> Mongo
+    EV & AEX & NT & GI & ES & GS & EI & TC --> Mongo
     Health --> Mongo
 ```
 
@@ -173,9 +175,10 @@ catalog lives in `DashboardModules`:
   `quotes`, `invoices`, `suppliers`, `employees`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
   Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
   Enabling `payments` also enables `suppliers` so outgoing bills always have a vendor directory.
-- Opt-in: `agents` and `timesheets` are left out of a legacy tenant's full catalog and are on only
-  when selected. Enabling `timesheets` also enables `employees`, since the people clocking in are
-  employee records.
+- Opt-in: `agents`, `timesheets` and `email` are left out of a legacy tenant's full catalog and are on
+  only when selected. Enabling `timesheets` also enables `employees`, since the people clocking in are
+  employee records. `email` shows the company's Gmail inbox to its whole team, so the platform turns it
+  on deliberately.
 
 The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
 other module, so a tenant can be provisioned CRM-only.
@@ -753,7 +756,7 @@ sequenceDiagram
 | `notifications` | Dashboard bell entries for all, admins or one user | `tenantId+audience+userId+createdAt`; TTL 90 days |
 | `outbound_log` | Every message agents and email send outside the company, claimed before the provider call | unique `idempotencyKey`; `tenantId+recipient+at`; TTL 30 days |
 | `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
-| `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId` |
+| `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record; for the Email page also the team's read state, the model's reading (dropped with the text) and the actions taken from it | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId`; `tenantId+date` |
 | `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
 | `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
 | `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
@@ -1009,6 +1012,59 @@ sequenceDiagram
   the account's mail, removes it from events, runs and approvals, and revokes the grant when no other
   company uses the account. Tasks and notifications an automation made from an email keep what its
   steps wrote into them, like an AI summary: notifications expire after 90 days, tasks stay.
+
+### Email page
+
+The opt-in `email` module (in `DashboardModules.optIn`, so legacy tenants with no module list don't
+get it) puts an **Email** page in the dashboard's Inbox group. It reads the same `email_messages`
+the inbox sync and the senders fill; it adds nothing to Gmail itself (`EmailInbox`,
+`EmailInboxRoutes` under `/app/api/email/inbox`, page in `app/email.js`).
+
+```mermaid
+flowchart LR
+    Sync["GmailSyncWorker"] --> Store[("email_messages")]
+    Send["EmailService<br/>Send by email, agents, replies"] --> Store
+    Store --> List["Thread list<br/>one row per Gmail thread"]
+    List --> Thread["Thread + newest received email"]
+    Thread --> Facts["EmailFacts<br/>ORC/FAT numbers, phones, NIF"]
+    Thread --> Read["EmailInsightsService<br/>forced submit_insights, email as untrusted content"]
+    Read --> Store
+    Facts & Read --> Suggest["EmailSuggestions<br/>client, quote, invoice paid, quote accepted,<br/>booking, supplier bill, task"]
+    Suggest --> Forms["Dashboard forms, prefilled<br/>a person saves"]
+    Forms --> CRM["CRM repositories"]
+    Forms --> Record["POST …/actions<br/>record checked, sender's mail filed under a new client"]
+    Record --> Store
+    Thread --> Reply["POST …/reply<br/>sendFrom the thread's account, threadId + In-Reply-To"]
+    Reply --> Send
+```
+
+- **Threads.** One aggregation groups a company's messages by account and Gmail thread (a message
+  without one is its own thread), newest activity first, with counts, unread received mail and the
+  client any message is filed under. Filters (unread, clients, new senders) apply to the grouped
+  thread; a search first finds the threads with a matching subject, address, name or snippet, then
+  shows them whole. Index `tenantId + date`.
+- **Read state** is the team's, not Gmail's: `readAt` on received messages, set when someone opens
+  the thread, unset by Mark unread. Machines' mail never counts as unread. The nav count is the
+  overview's `email.unread` until the page loads.
+- **What the email calls for.** For the thread's newest received email, `EmailFacts` reads quote and
+  invoice numbers (looked up in the company's records) and, outside quoted history and the company's
+  own numbers, phones and NIFs. When someone opens the email (machines' mail only on request),
+  `EmailInsightsService` asks the company's model for a summary, an intent, the sender's details,
+  lines, a date, an amount and a draft reply through a forced `submit_insights` tool, the email
+  wrapped as untrusted content. It checks the monthly token budget first, meters the use as
+  `email`, and keeps the result on the email (`insights`), where the 90-day retention drops it with
+  the text. Two people opening the email at once share one reading. `EmailSuggestions` turns both
+  into the actions the company's modules allow, primary ones first.
+- **Acting.** Every suggestion opens the dashboard's own form (client, quote, booking, supplier and
+  payment, task) or confirm (invoice paid, quote accepted) started from the email; nothing is saved
+  without a person. What it led to is recorded on the email (`actions`: type, status, the record and
+  its label, who), after checking the record is the company's and the module is on. A client created
+  or completed from an email gets the sender's mail, received and sent, filed under it.
+- **Replying** goes out through `EmailService.sendFrom` from the account the thread lives in, to the
+  newest received email's Reply-To or sender, with its `threadId` and `In-Reply-To`, under a key per
+  composer so a double press sends once.
+- **Local end-to-end runs** point `GMAIL_API_URL` at a stand-in (`scripts/email-e2e`), so the real
+  inbox sync and replies run without Google.
 
 ## Persona
 

@@ -16,7 +16,7 @@
 </head>
 <body>
   <h1>Privacy Policy</h1>
-  <p class="meta">Last updated: 30 September 2026</p>
+  <p class="meta">Last updated: 9 October 2026</p>
 
   <p>TheBotsLab (&ldquo;we&rdquo;, &ldquo;us&rdquo;) operates a CRM with a messaging assistant: a business
   receives and answers customer messages on <strong>WhatsApp</strong> and <strong>Instagram</strong>
@@ -50,8 +50,9 @@
   <h2>3. How we use it</h2>
   <p>Solely to deliver the service to the business: receive incoming messages, generate a relevant reply
   with an AI model, send that reply back on the same channel, run the automations the business turned
-  on, and send the emails the business or its automations write. We do <strong>not</strong> sell
-  personal data, use it for advertising, or build cross-site profiles.</p>
+  on, show the business the emails it received and suggest what to do about them, and send the emails
+  the business or its automations write. We do <strong>not</strong> sell personal data, use it for
+  advertising, or build cross-site profiles.</p>
 
   <h2>4. Third parties we share with</h2>
   <ul>
@@ -60,8 +61,9 @@
     <li><strong>Google</strong> — the Gmail API, to send email from an account the business connected
       (<a href="#google">section 5</a>).</li>
     <li><strong>OpenRouter / the underlying LLM provider</strong> — message text is sent to generate a
-      reply, and the text an automation step works on is sent to produce its result. We do not send
-      access tokens to the model provider.</li>
+      reply, the text an automation step works on is sent to produce its result, and a received email
+      someone in the business opens on the Email page is sent to summarize it and suggest actions. We do
+      not send access tokens to the model provider.</li>
     <li><strong>Our database (MongoDB)</strong> — message, account and business data is stored on
       infrastructure we control.</li>
   </ul>
@@ -80,12 +82,23 @@
       a quote), the test email they ask for, and the emails of automations the company set up and turned
       on. This scope does not let us read your mailbox.</li>
     <li><strong>Reading the inbox</strong> (scopes <code>gmail.readonly</code> and
-      <code>gmail.modify</code>) — only if the company turns on &ldquo;Use my inbox in automations&rdquo;,
-      which asks Google for this separately. We then read new messages in the inbox to link them to the
-      company&rsquo;s clients, show them on the client&rsquo;s record and start the automations the
-      company chose (for example, logging a supplier&rsquo;s bill). We don&rsquo;t read, send or change
-      anything else.</li>
+      <code>gmail.modify</code>) — only if the company turns on reading its inbox (&ldquo;Use my inbox in
+      automations&rdquo;, or &ldquo;Read this inbox&rdquo; on the Email page), which asks Google for this
+      separately. We then read new messages in the inbox to link them to the company&rsquo;s clients, show
+      them on the client&rsquo;s record and, if the company uses the Email page, to its team there, and
+      start the automations the company chose (for example, logging a supplier&rsquo;s bill). We don&rsquo;t
+      read, send or change anything else.</li>
   </ul>
+
+  <h3>Email page</h3>
+  <p>A company can use an Email page in its dashboard: the team reads the emails kept from its account,
+  answers them in their thread from that account, and sees what each email asks for. When someone opens
+  a received email there, or asks for suggested actions, its text is sent to the AI model provider to
+  summarize it and pick out what the dashboard needs (for example, the sender&rsquo;s details to add them
+  as a client, the lines of a quote they asked for, or the amount of a bill). The suggestions only fill
+  forms a person reviews and saves; nothing is created, changed or sent on its own. What the model read
+  is kept with the email and deleted with its text after 90 days. Emails a machine sent (newsletters,
+  notifications) are only read this way when someone asks.</p>
 
   <h3>How we store it</h3>
   <ul>
@@ -109,7 +122,8 @@
     <li>We use Gmail data only to provide the features described above, which the company can see and
       control in the dashboard.</li>
     <li>We don&rsquo;t transfer it to others, except to the AI model provider when an automation the
-      company set up works on an email (for example, drafting a reply), to produce that result only; as
+      company set up works on an email (for example, drafting a reply) or someone in the company opens an
+      email on the Email page to see a summary and suggested actions, to produce that result only; as
       needed for security or to comply with the law; or as part of a merger, acquisition or sale of our
       business, with your explicit consent beforehand.</li>
     <li>We never use Gmail data for advertising, and we never use it to develop, improve or train
