@@ -23,7 +23,7 @@ The Firebase/GCP project `thebotslab` serves Google sign-in for the backoffice a
   same evening, after Rodrigo confirmed Google sign-in works, so Google is the only way in; if it
   breaks, setting the hash again in `.env` is the way back in. The backoffice's platform-settings
   override for that key (Mongo `platform_settings`) would also re-enable it, and it was empty.
-  Allowed sign-in domains: `thebotslab.eu`, `thebotslab.pt` and both `www.` hosts (all four serve
+  Allowed sign-in domains: `thebotslab.pt`, `thebotslab.eu` and both `www.` hosts (all four serve
   the backoffice).
 - **Tenant dashboard sign-in with Google** (shipped 2026-09-29, `e888d1d`; verified in prod: the
   `googleUid` index exists, `/app/auth/config` offers Google, forged tokens get 401). Same project and verifier, without `ADMIN_EMAILS`: `FirebaseIdTokenVerifier.identify`

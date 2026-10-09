@@ -12,10 +12,11 @@ Production runs on `hillsong-vps` (the name is historical). The same box runs th
 
 ## Ops gotcha: public `/health` is not the bot
 
-`https://thebotslab.eu/health` and `/ready` return the marketing site's HTML with a 200 (checked
-2026-09-28): the shared `websites-thebots` Caddy does not route them to the bot, although the
-runbook's Caddy snippet lists them. A 200 there says nothing about the bot. Check health the way the
-runbook and `remote-deploy.sh` do, against the app container's IP over `ssh hillsong-vps`.
+`https://thebotslab.pt/health` and `/ready` (the same on `.eu`) return the marketing site's page:
+the shared `websites-thebots` Caddy does not route them to the bot, although the runbook's Caddy
+snippet lists them. The status was 200 when checked on 2026-09-28 and is 404 since at least
+2026-10-09; either way it says nothing about the bot. Check health the way the runbook and
+`remote-deploy.sh` do, against the app container's IP over `ssh hillsong-vps`.
 
 Log noise after a deploy (seen 2026-09-29): dozens of `WARN` lines are normal and not a regression
 signal. They are PDFBox falling back from Helvetica to LiberationSans (one pair per generated PDF),

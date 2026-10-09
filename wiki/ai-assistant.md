@@ -60,7 +60,7 @@ PR #55 (above) later gave the assistant its own prompt (`AssistantPrompt`) and i
 Tested as a real production tenant (zero channels connected — WhatsApp/Instagram/Site all
 "Não ligado" — so the internal dashboard Assistant, not the WhatsApp bot, was the only AI surface
 reachable). All findings below were fixed and deployed same-day, then re-verified live against
-production `thebotslab.eu`:
+production:
 
 - **The dashboard assistant runs on a different, much weaker system prompt than the WhatsApp bot.**
   `DashboardAssistantService.ASSISTANT_PROMPT`

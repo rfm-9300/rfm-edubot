@@ -81,6 +81,7 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 - Production app directory: `~/whatsapp-bot`
 - Production compose file: `docker-compose.prod.yml`
 - Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+- Public domain: `thebotslab.pt`. Use it in docs, links and new setups (OAuth redirect URIs, webhooks); `thebotslab.eu` serves the same routes but is not the reference.
 
 ### Deployment Guardrails
 - Do not reset MongoDB volumes, delete data, rotate secrets, or run destructive cleanup unless Rodrigo explicitly asks.

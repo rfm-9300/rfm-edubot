@@ -33,7 +33,7 @@ One image publish updates both surfaces.
 - Compose file: `docker-compose.prod.yml`
 - Image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
 - Health endpoints: `/health`, `/ready`
-- Public hostname: `thebotslab.eu` (Caddy in `websites-thebots`)
+- Public hostname: `thebotslab.pt` (Caddy in `websites-thebots`; `thebotslab.eu` serves the same routes)
 
 ## Automated path (merge to main)
 
@@ -161,8 +161,8 @@ ssh hillsong-vps "cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml
 
 Port `8080` is not published on the host. Probe the container IP (the remote
 script already does this) or use the command below. Do not use
-`https://thebotslab.eu/health` for this: the shared Caddy does not route `/health`
-or `/ready` to the bot, so it answers with the marketing site and a `200`.
+`https://thebotslab.pt/health` for this: the shared Caddy does not route `/health`
+or `/ready` to the bot, so it answers with the marketing site's page and a `404`.
 
 ```bash
 ssh hillsong-vps 'cid=$(cd ~/whatsapp-bot && docker compose -f docker-compose.prod.yml ps -q app); ip=$(docker inspect -f "{{range .NetworkSettings.Networks}}{{.IPAddress}}{{println}}{{end}}" "$cid" | awk "NF{print;exit}"); curl -fsS "http://$ip:8080/health" && echo && curl -fsS "http://$ip:8080/ready"'
@@ -189,7 +189,7 @@ Add path routes to `/root/websites-thebots/Caddyfile` so `/app`, `/backoffice`,
 and shared `/admin` assets/APIs are reachable:
 
 ```caddy
-thebotslab.eu {
+thebotslab.pt, thebotslab.eu {
   handle /admin* {
     reverse_proxy whatsapp-bot-app-1:8080
   }
@@ -219,6 +219,10 @@ thebotslab.eu {
   }
 
   handle /data-deletion {
+    reverse_proxy whatsapp-bot-app-1:8080
+  }
+
+  handle /integrations* {
     reverse_proxy whatsapp-bot-app-1:8080
   }
 
@@ -377,7 +381,7 @@ shows whether Google is offered. Refused tenant sign-ins are logged by `Dashboar
   `firebase apps:sdkconfig WEB --project thebotslab`) and `ADMIN_EMAILS`
   (comma-separated). After editing, recreate the app on the deployed tag:
   `cd ~/whatsapp-bot && TAG=$(cat .last-good-tag) docker compose -f docker-compose.prod.yml up -d app`.
-- Allowed sign-in domains (Firebase Auth): `thebotslab.eu`, `thebotslab.pt` and their
+- Allowed sign-in domains (Firebase Auth): `thebotslab.pt`, `thebotslab.eu` and their
   `www.` hosts. A new host must be added there first, or sign-in fails with
   `auth/unauthorized-domain`. `localhost` is not allowed.
 - Password login is off in production (since 2026-09-28): `ADMIN_PASSWORD_HASH` is not set.
@@ -405,7 +409,7 @@ A routine deploy needs none of this.
   runs of the last 7 days, pauses or resumes all its agents, and sets the limits only the platform
   controls (active agents, runs per day, emails per day).
 - **Google OAuth client**: a "Web application" client in the Google Cloud project with the
-  authorized redirect URI `https://<host>/integrations/google/callback`. Set
+  authorized redirect URI `https://thebotslab.pt/integrations/google/callback`. Set
   `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET` and `GOOGLE_OAUTH_REDIRECT` in the VPS
   `.env`, or in the backoffice's **Platform settings → Google**, which applies them without a
   restart. Consent screen, scopes, verification and the demo video:

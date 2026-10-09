@@ -92,7 +92,7 @@ jobs:
     timeout-minutes: 15
     environment:
       name: production
-      url: https://thebotslab.eu
+      url: https://thebotslab.pt
     steps:
       - uses: actions/checkout@v4
       - name: Require deploy secrets

@@ -25,12 +25,12 @@ incremental consent, so companies that only send never see them.
 2. **APIs & Services > Library**: enable the **Gmail API**.
 3. **OAuth consent screen** (Google Auth Platform > Branding):
    - App name `TheBotsLab`, support email `hello@thebotslab.pt`, logo (120x120, the brand mark).
-   - Home page `https://thebotslab.pt`, privacy policy `https://<host>/privacy`.
-   - Authorized domains: `thebotslab.pt` and the dashboard host's domain.
+   - Home page `https://thebotslab.pt`, privacy policy `https://thebotslab.pt/privacy`.
+   - Authorized domain: `thebotslab.pt`.
    - Developer contact: `hello@thebotslab.pt`.
 4. **Data access**: add `openid`, `email` and `gmail.send` (later `gmail.readonly` and `gmail.modify`).
 5. **Clients > Create client > Web application**, named `Gmail integration` (separate from the
-   Firebase sign-in client). Authorized redirect URI: `https://<host>/integrations/google/callback`.
+   Firebase sign-in client). Authorized redirect URI: `https://thebotslab.pt/integrations/google/callback`.
 6. Put the client in the app: backoffice **Platform settings > Google** (`GOOGLE_OAUTH_CLIENT_ID`,
    `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT`) or the same names as environment variables,
    plus `INTEGRATIONS_ENCRYPTION_KEY` (env only: `openssl rand -base64 32`). Without the key the
@@ -115,7 +115,7 @@ automation (for example the lead reply, answered in the same thread).
 - [ ] Gmail API enabled, consent screen branded, domains verified in Search Console.
 - [ ] Web client created with the production redirect URI; values set in Platform settings.
 - [ ] `INTEGRATIONS_ENCRYPTION_KEY` set in the production environment and backed up.
-- [ ] `/privacy` and `/data-deletion` reachable over HTTPS on the dashboard host.
+- [ ] `/privacy` and `/data-deletion` reachable over HTTPS on `thebotslab.pt`.
 - [ ] Brand + `gmail.send` verification submitted with the video; app switched to **In production**.
 - [ ] (Phase 4) `gmail.modify` given its use or dropped from `GoogleScopes.inbox`.
 - [ ] (Phase 4) Restricted scopes submitted; CASA passed; then inbox reading enabled (`GMAIL_INBOX_ENABLED=true`).
