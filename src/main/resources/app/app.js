@@ -3233,9 +3233,9 @@ function openTemplateEditor() {
           <p class="hint">${escapeHTML(STR.tplReviewHint)}</p>
         </div>
       </div>
-      <p class="hint hint--bad" id="wa-editor-error" role="alert" hidden></p>
     </form>
     <div class="drawer__foot">
+      <p class="hint hint--bad wa-editor__error" id="wa-editor-error" role="alert" hidden></p>
       <button type="button" class="btn btn--ghost" data-close>${escapeHTML(STR.cancel)}</button>
       <button type="submit" form="wa-editor-form" class="btn btn--accent" id="wa-editor-submit">${escapeHTML(STR.tplSubmit)}</button>
     </div>`;
@@ -3282,6 +3282,12 @@ function openTemplateEditor() {
     field('wa-editor-category-hint').textContent = field('wa-editor-category').value === 'MARKETING' ? STR.tplCategoryMarketingHint : STR.tplCategoryUtilityHint;
   };
   const error = message => { const el = field('wa-editor-error'); el.textContent = message; el.hidden = !message; };
+  const problemField = problem => {
+    if (problem === 'template_examples_missing') return $$('[data-example]', body).find(i => !i.value.trim());
+    if (problem === 'template_buttons_invalid') return $$('[data-button]', body).find(i => !i.value.trim() || i.value.length > 25) || $('[data-button]', body);
+    const id = { template_name_invalid: 'name', template_header_invalid: 'header', template_footer_invalid: 'footer' }[problem] || 'body';
+    return field(`wa-editor-${id}`);
+  };
 
   field('wa-editor-name').addEventListener('input', e => {
     const normalized = e.target.value.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[\s-]+/g, '_').replace(/[^a-z0-9_]/g, '');
@@ -3332,7 +3338,11 @@ function openTemplateEditor() {
     e.preventDefault();
     const d = draft();
     const problem = templateDraftProblem({ ...d, header: d.header || null, footer: d.footer || null });
-    if (problem) { error(inboxErrorText(problem)); return; }
+    if (problem) {
+      error(inboxErrorText(problem));
+      problemField(problem)?.focus();
+      return;
+    }
     const submit = field('wa-editor-submit');
     submit.disabled = true;
     submit.textContent = STR.inboxSending;
