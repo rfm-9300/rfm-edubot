@@ -9,8 +9,8 @@ is wired into clients, quotes, invoices, bookings, Home and the assistant. A com
 Google account so automations can send email first and, later, read it.
 
 This plan was written without access to Rodrigo's personal wiki or GitNexus (cloud VM), so it rests
-on the repo docs alone. Check `wiki/entities/whatsapp-bot.md` and
-`wiki/concepts/thebots-design-system.md` for conventions that might conflict.
+on the repo docs alone. Since 2026-10-09 the repo's own `wiki/` (start at `wiki/index.md`) holds the
+conventions it might conflict with.
 
 ---
 

@@ -1,3 +1,26 @@
+## Project wiki
+
+The repo keeps its own compiled knowledge in [`../wiki/`](../wiki/README.md), for this app and the
+backend it talks to, so every session, Cursor cloud agents included, can read it and update it in
+the same change as the code.
+
+Before substantial work:
+
+1. Read `../wiki/index.md`, one line per page.
+2. Open a page only when its line is clearly relevant. Never bulk-read.
+3. Pages that apply are **binding instructions**, not suggestions. `../wiki/kmp-engineering-guide.md`
+   binds all Kotlin Multiplatform work here; `../wiki/mobile.md` is this app's page.
+
+When the session produces durable knowledge (a decision, a convention, a gotcha, "why we do it
+this way"), update the page that owns the topic in the same commit or PR as the code and bump its
+`updated:` date; a new page also gets a line in `../wiki/index.md`. Format and rules:
+`../wiki/README.md`.
+
+**The repo is public, and so is the wiki.** Never write secrets, customer or tenant names,
+personal data, Meta/WhatsApp/Google account IDs or account state, production data, or unfixed
+security weaknesses into it, nor into commit messages or PR descriptions. Those go in Rodrigo's
+private vault (next section) when this session can reach it; otherwise tell Rodrigo in the chat.
+
 ## Personal wiki (second brain)
 
 Rodrigo keeps a compiled knowledge wiki, a git repo at `/Users/rodrigomartins/projects/my-wiki`
@@ -6,8 +29,8 @@ Canonical protocol: `<vault>/ops/bootstrap-prompt.md` (that file wins if this se
 
 If that path doesn't exist (Cursor cloud agents, other machines), `<vault>` is the `my-wiki`
 checkout next to this repo (a Cursor multi-repo environment clones it), or a fresh
-`git clone https://github.com/rfm-9300/my-wiki.git`. If neither works, tell Rodrigo and carry on
-without the wiki.
+`git clone https://github.com/rfm-9300/my-wiki.git`. If neither works, carry on without the
+vault, and tell Rodrigo unless this repo has its own project wiki (that wiki is then enough).
 
 ### Consult before substantial work
 
@@ -18,19 +41,21 @@ without the wiki.
 
 **This repo — start here when the index line matches the task:**
 
-- `wiki/notes/kmp-engineering-guide.md` — **binding** for all Kotlin Multiplatform work here
-- `wiki/entities/whatsapp-bot-mobile.md` — this app
-- `wiki/entities/whatsapp-bot.md` — Ktor backend it talks to
-- `wiki/notes/project-landscape.md`
+- `<vault>/wiki/entities/whatsapp-bot.md` — the product's private facts only (customers, accounts, production); engineering knowledge for this app and its backend is in the repo's `wiki/`
+- `<vault>/wiki/notes/project-landscape.md`
 
 ### Keep the wiki current
 
 Chat is ephemeral; the wiki is the compounding layer. When this session produces durable
-knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"):
+knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"),
+file it. If this repo has its own project wiki (a `## Project wiki` section in this file),
+knowledge about this codebase goes there, and the vault takes only cross-repo knowledge and facts
+too private for the repo. For the vault:
 
 1. Check the index — update an existing page if one exists; otherwise file a note via
    `<vault>/ops/workflows/file-note.md`.
-2. Write inside `<vault>`. Always bump `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
+2. Write inside `<vault>`. Always bump `<vault>/wiki/index.md` and append `<vault>/wiki/log.md`.
+   Never touch `raw/`.
 3. Commit only the vault files you changed and push to `main` (if the push is rejected, pull
    with `--rebase` and push again). Unpushed edits are invisible to other machines and cloud
    agents. Committing and pushing the vault is part of filing, even where this repo restricts

@@ -1,8 +1,9 @@
 # UI Design System — agent rules
 
-Parent repo `AGENTS.md` has the personal-wiki section. This file is UI-only; still read
-`/Users/rodrigomartins/projects/my-wiki/wiki/index.md` before substantial design work
-(`wiki/concepts/thebots-design-system.md`).
+The root `AGENTS.md` has the wiki sections. This file is UI-only; still read the repo's
+`wiki/index.md` before substantial design work (`wiki/dashboard-ui.md` holds the decisions behind
+these rules). The design language shared with Rodrigo's other repos is described in his private
+vault (`<vault>/wiki/concepts/thebots-design-system.md`), when a session can reach it.
 
 Follow these rules for any change under `src/main/resources/admin/`, `app/`, or `backoffice/`. Widget and legal pages have their own exceptions at the bottom.
 

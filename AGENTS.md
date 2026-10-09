@@ -1,5 +1,28 @@
 # AGENTS.md
 
+## Project wiki
+
+This repo keeps its own compiled knowledge in [`wiki/`](wiki/README.md): why the code is shaped
+the way it is, feature decisions, conventions and gotchas. It lives here so every session, Cursor
+cloud agents included, can read it and update it in the same change as the code.
+
+Before substantial work:
+
+1. Read `wiki/index.md`, one line per page.
+2. Open a page only when its line is clearly relevant. Never bulk-read.
+3. Pages that apply are **binding instructions**, not suggestions. `wiki/kmp-engineering-guide.md`
+   binds all work in `mobile/`.
+
+When the session produces durable knowledge about this codebase (an architecture decision, a
+convention, a gotcha, "why we do it this way"), update the page that owns the topic in the same
+commit or PR as the code and bump its `updated:` date; a new page also gets a line in
+`wiki/index.md`. Format and rules: `wiki/README.md`.
+
+**This repo is public, and so is the wiki.** Never write secrets, customer or tenant names,
+personal data, Meta/WhatsApp/Google account IDs or account state, production data, or unfixed
+security weaknesses into it, nor into commit messages or PR descriptions. Those go in Rodrigo's
+private vault (next section) when this session can reach it; otherwise tell Rodrigo in the chat.
+
 ## Personal wiki (second brain)
 
 Rodrigo keeps a compiled knowledge wiki, a git repo at `/Users/rodrigomartins/projects/my-wiki`
@@ -8,8 +31,8 @@ Canonical protocol: `<vault>/ops/bootstrap-prompt.md` (that file wins if this se
 
 If that path doesn't exist (Cursor cloud agents, other machines), `<vault>` is the `my-wiki`
 checkout next to this repo (a Cursor multi-repo environment clones it), or a fresh
-`git clone https://github.com/rfm-9300/my-wiki.git`. If neither works, tell Rodrigo and carry on
-without the wiki.
+`git clone https://github.com/rfm-9300/my-wiki.git`. If neither works, carry on without the
+vault, and tell Rodrigo unless this repo has its own project wiki (that wiki is then enough).
 
 ### Consult before substantial work
 
@@ -20,19 +43,22 @@ without the wiki.
 
 **This repo — start here when the index line matches the task:**
 
-- `wiki/entities/whatsapp-bot.md` — this product (Ktor JVM server + web UI)
-- `wiki/entities/whatsapp-bot-mobile.md` and `wiki/notes/kmp-engineering-guide.md` — **binding** when touching `mobile/`
-- `wiki/concepts/thebots-design-system.md` — admin/app/backoffice CSS
-- `wiki/notes/project-landscape.md` — shared `hillsong-vps`
+- `<vault>/wiki/entities/whatsapp-bot.md` — this product's private facts only (customers and tenants, Meta/WhatsApp and Google accounts, production data and infrastructure, open security gaps); its engineering knowledge is in this repo's `wiki/`
+- `<vault>/wiki/concepts/thebots-design-system.md` — the design language shared with other repos; this repo's binding UI rules are in `design-system/`
+- `<vault>/wiki/notes/project-landscape.md` — shared `hillsong-vps`
 
 ### Keep the wiki current
 
 Chat is ephemeral; the wiki is the compounding layer. When this session produces durable
-knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"):
+knowledge (architecture decisions, cross-repo conventions, gotchas, "why we do it this way"),
+file it. If this repo has its own project wiki (a `## Project wiki` section in this file),
+knowledge about this codebase goes there, and the vault takes only cross-repo knowledge and facts
+too private for the repo. For the vault:
 
 1. Check the index — update an existing page if one exists; otherwise file a note via
    `<vault>/ops/workflows/file-note.md`.
-2. Write inside `<vault>`. Always bump `wiki/index.md` and append `wiki/log.md`. Never touch `raw/`.
+2. Write inside `<vault>`. Always bump `<vault>/wiki/index.md` and append `<vault>/wiki/log.md`.
+   Never touch `raw/`.
 3. Commit only the vault files you changed and push to `main` (if the push is rejected, pull
    with `--rebase` and push again). Unpushed edits are invisible to other machines and cloud
    agents. Committing and pushing the vault is part of filing, even where this repo restricts
@@ -154,6 +180,7 @@ The product is intended to be multi-language. Do not hardcode user-facing string
 
 - Keep Mermaid diagrams updated
 - Update `docs/architecture.md` after major structural changes
+- Record decisions, conventions and gotchas in `wiki/` (see Project wiki)
 
 ## Stack
 - Kotlin 2.0.21, JVM 20
