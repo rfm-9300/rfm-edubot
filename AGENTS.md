@@ -91,6 +91,7 @@ Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (
 - Production app directory on the VPS: `~/whatsapp-bot`
 - Production compose file: `docker-compose.prod.yml`
 - Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+- Public domain: `thebotslab.pt`. Use it in docs, links and new setups (OAuth redirect URIs, webhooks); `thebotslab.eu` serves the same routes but is not the reference.
 
 ## Deployment Rules
 

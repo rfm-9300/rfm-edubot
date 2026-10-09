@@ -43,15 +43,16 @@ business days, with no security assessment); only inbox reading needs the restri
 yearly CASA. Three things stand in the way, and `docs/google-oauth-verification.md` misses all three:
 
 - **The OAuth callback wasn't routed** (fixed the same day at Rodrigo's request). The VPS Caddy
-  didn't proxy `/integrations*`, so `https://thebotslab.eu/integrations/google/callback` answered
+  didn't proxy `/integrations*`, so `https://thebotslab.pt/integrations/google/callback` answered
   with the marketing site's 404 and no Gmail connect could finish. A `handle /integrations*` block
   now sends it to the app (with no parameters it answers 302 to
   `/app/?google=error&reason=missing_params`), and the runbook's Caddy block has it too.
 - **The home page fails Google's rules.** Google wants the privacy policy on the home page's domain,
-  and the home page to describe the app and link to that policy. The doc pairs home page
-  `thebotslab.pt` with `/privacy` on the dashboard host (`thebotslab.eu`), and the marketing home
-  page (both domains serve the same studio page) neither describes the CRM nor links any policy.
-  The name also differs: `thebots.lab` on the site, `TheBotsLab` in the doc and on `/privacy`.
+  and the home page to describe the app and link to that policy. Everything Google sees now uses
+  `thebotslab.pt`, the primary domain: home page, `/privacy` and the redirect URI (the doc used to
+  put `/privacy` on the dashboard host). The marketing home page (both domains serve the same studio
+  page) still neither describes the CRM nor links any policy, and the name differs: `thebots.lab` on
+  the site, `TheBotsLab` in the doc and on `/privacy`.
 - **The consent screen is shared with Firebase sign-in.** Publishing status is per project, and
   Google sign-in for `/app` and the backoffice uses project `thebotslab` too, so moving it to Testing
   (the doc assumes Testing before verification) would lock every non-test user out of Google

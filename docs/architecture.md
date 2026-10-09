@@ -1113,7 +1113,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 ```
 GitHub Actions (merge to main) → GHCR image
                                       ↓
-thebotslab.eu → websites-thebots Caddy (TLS) → whatsapp-bot app :8080
+thebotslab.pt → websites-thebots Caddy (TLS) → whatsapp-bot app :8080
                                                     ↓
                                                MongoDB :27017
 ```
