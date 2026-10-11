@@ -27,6 +27,16 @@ class DashboardModulesTest {
     }
 
     @Test
+    fun `email is opt-in so older tenants don't get a Gmail inbox page without the backoffice`() {
+        assertEquals(true, DashboardModules.EMAIL in DashboardModules.optIn)
+        assertEquals(false, DashboardModules.EMAIL in DashboardModules.effectiveFor(tenant(enabledModules = null)))
+        assertEquals(
+            DashboardModules.alwaysOn + DashboardModules.EMAIL,
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.EMAIL))),
+        )
+    }
+
+    @Test
     fun `effective modules keep core modules and discard unknown values`() {
         assertEquals(
             DashboardModules.alwaysOn + DashboardModules.PERSONA,

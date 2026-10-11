@@ -244,12 +244,7 @@ object EmailReplyAction : AgentAction {
 
     private fun recipient(email: EmailMessage): String = EmailAddresses.normalize(email.replyTo) ?: email.from
 
-    /** `Re: ` once, whatever the sender's mail program called it. */
-    internal fun subject(original: String): String {
-        val trimmed = original.trim()
-        return if (REPLY_PREFIX.containsMatchIn(trimmed)) trimmed else "Re: $trimmed".trim().take(EmailMessage.MAX_SUBJECT)
-    }
+    internal fun subject(original: String): String = EmailMessage.replySubject(original)
 
     const val AUTOMATED = "automated_sender"
-    private val REPLY_PREFIX = Regex("^(re|res|aw|sv)\\s*:", RegexOption.IGNORE_CASE)
 }

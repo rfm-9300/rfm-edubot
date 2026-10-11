@@ -21,6 +21,7 @@ object DashboardModules {
     const val INSTAGRAM = "instagram"
     const val AGENTS = "agents"
     const val TIMESHEETS = "timesheets"
+    const val EMAIL = "email"
 
     /**
      * Only the dashboard landing page is mandatory — it is the fallback view every tenant needs.
@@ -30,7 +31,7 @@ object DashboardModules {
     val alwaysOn = listOf(OVERVIEW)
     val optional = listOf(
         CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, EMPLOYEES, PAYMENTS, CATALOG,
-        AI_ASSISTANT, BOOKINGS, INSTAGRAM, AGENTS, TIMESHEETS,
+        AI_ASSISTANT, BOOKINGS, INSTAGRAM, AGENTS, TIMESHEETS, EMAIL,
     )
     val catalog = alwaysOn + optional
 
@@ -38,8 +39,10 @@ object DashboardModules {
      * Modules a tenant only gets once the backoffice selects them. A null selection (tenants stored
      * before module selection existed) means "the whole catalog" and must not pick these up. The time
      * clock records where employees punch, which a company has to decide on and tell its workers about.
+     * The Email page shows a company's Gmail inbox to its whole team, and reading it needs Google's
+     * restricted scopes, so the platform turns it on deliberately.
      */
-    val optIn = listOf(AGENTS, TIMESHEETS)
+    val optIn = listOf(AGENTS, TIMESHEETS, EMAIL)
 
     fun availableFor(): List<String> = catalog
 

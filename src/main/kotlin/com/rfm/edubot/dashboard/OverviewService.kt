@@ -23,6 +23,7 @@ import com.rfm.edubot.crm.paidPartExpression
 import com.rfm.edubot.instagram.InstagramCommentRepository
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationConnectionRepository
+import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.oauth.InstagramOAuthScopes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaRepository
@@ -79,6 +80,7 @@ class OverviewService(private val mongo: MongoModule) {
         }
         val calendar = async { if (DashboardModules.BOOKINGS in modules) calendar(tenant.id, window) else null }
         val social = async { if (DashboardModules.INSTAGRAM in modules) social(tenant) else null }
+        val email = async { if (DashboardModules.EMAIL in modules) OverviewEmailDto(unread = EmailMessageRepository(mongo).unreadThreads(tenant.id)) else null }
         val catalog = async {
             if (DashboardModules.CATALOG in modules) OverviewCatalogDto(items = coll("crm.standard_items").countDocuments(tenantFilter)) else null
         }
@@ -190,6 +192,7 @@ class OverviewService(private val mongo: MongoModule) {
                 inbox = inboxDto,
                 calendar = calendarDto,
                 social = socialDto,
+                email = email.await(),
                 catalog = catalogDto,
                 services = servicesDto,
                 suppliers = suppliersDto,

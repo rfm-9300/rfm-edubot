@@ -537,3 +537,6 @@ role gate, company isolation, validation, OAuth state and scopes) and regression
   inbox's `sendTemplate` and template sync.
 - **Phase 6 — extensions**: if/else branches, webhooks, email as a Conversations channel, Google
   Calendar sync, per-user Google connections, mobile approvals + push, the receptionist as an agent.
+  Received mail got its own Inbox page instead of a Conversations channel: the opt-in `email` module
+  (Email page: threads, replies and the dashboard actions each email calls for), in
+  [architecture.md](architecture.md) → "Email page".

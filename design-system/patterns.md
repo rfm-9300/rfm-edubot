@@ -280,6 +280,18 @@ A company emails from its own Gmail or Workspace account ([components.md](compon
 
 Nothing here shows while the platform has no Google OAuth client (`configured` false).
 
+## Email page (the company's inbox)
+
+Opt-in `email` module, in the Inbox group after Contacts ([components.md](components.md#email-page)). `app/email.js` is mounted by `app.js` (`EmailUI.init(deps)`) like Agents and the Assistant, and gets the dashboard's forms through its deps. Strings live under `app.email.*`.
+
+1. `.view__hero`, then one setup `.notice` when something keeps new mail away, with the one action that fixes it for admins: no Google client on the platform (no action), no account (Connect Gmail, asking to read the inbox when the platform allows it), an account to reconnect, reading not available on the platform yet (sent mail still shows), reading off (Read this inbox: `PATCH {inboxSync}` or Google's consent first), reading paused (the reason from `inbox.errors.*`), first check still to come. Members get the same notices without buttons.
+2. The split `.inbox` as in Conversations: chips All / Unread (with its count) / Clients / New senders, an account `.sel` once there are two, the top-bar search queried on the server after a pause in typing. The list refreshes every 30 s while the tab is visible; a new message in the open thread reloads it.
+3. Opening a thread marks it read for the team (`POST …/read`), and the newest thread opens by itself on a wide screen. Mark unread puts back the newest received email. Older messages fold; the newest opens.
+4. **What to do**: for the newest received email the page asks the model to read it once (`POST …/insights`, kept on the email) unless a machine sent it, where Suggest actions does it on request. While it reads, the suggestions that need no model are already there (add the sender, quotes and invoices it names). Each suggestion opens the dashboard's own form started from the email, never saving on its own: client (or completing a client's record, from the full record so nothing is cleared), quote (its client first if the sender isn't one yet, then the lines asked for), booking, supplier then bill, follow-up task. Marking an invoice paid or a quote accepted goes through `.confirm`. What a form saved is recorded on the email (`POST …/actions`) and shows as done with Open; Not needed hides a suggestion for the whole team. After a done action the nav's counts reload.
+5. **Reply**: "Reply to …" (the Reply-To or sender of the newest received email), the model's draft behind Use the suggested reply (added to the box, never sent by itself), Ctrl/Cmd+Enter or Send. The composer picks one request id per thread, so pressing Send twice sends once. Without an account that can send, a `.composer__notice` says why, with Open settings for admins. Errors read from `app.integrations.google.sendErrors.*`.
+
+Agent runs, approvals and tasks about an email open its thread here (`openAgentSubject` → `EmailUI.focus`), and the client record's email drawer has Open in Email.
+
 ## Account (tenant user)
 
 The top-bar avatar (`#btn-account`) opens the signed-in user's account as a `.record` drawer, not a Settings tab: Settings is an optional module, and every user needs a way to their sign-in. It has a `.record-card` (initials, email, role · tenant) and a "How you sign in" `.panel` with two `.worklist__item` rows, Google and Password (dot tone + `.pill--ok` when on, plain pill when off), then a `.hint` with the next step. Each row opens a small form drawer through the drawer trail (back link "Account"); after a change the form closes and the account drawer comes back with fresh data.

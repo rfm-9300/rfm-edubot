@@ -24,6 +24,7 @@ data class OverviewDto(
     val inbox: OverviewInboxDto? = null,
     val calendar: OverviewCalendarDto? = null,
     val social: OverviewSocialDto? = null,
+    val email: OverviewEmailDto? = null,
     val catalog: OverviewCatalogDto? = null,
     val services: OverviewServicesDto? = null,
     val suppliers: OverviewSuppliersDto? = null,
@@ -185,6 +186,12 @@ data class OverviewSocialDto(
     val unreplied: Int,
     val connected: Boolean,
     val commentsEnabled: Boolean,
+)
+
+/** The Email page's figure: threads with received mail nobody on the team has opened. */
+@Serializable
+data class OverviewEmailDto(
+    val unread: Int,
 )
 
 @Serializable

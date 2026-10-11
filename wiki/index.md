@@ -15,7 +15,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [catalog-services-bookings.md](catalog-services-bookings.md) — catalog titles and codes, Serviços rows, the line items editor, bookings as catalog services
 - [billing-and-pdfs.md](billing-and-pdfs.md) — quotes, invoices (ATCUD, installments, cancel and delete), payments, euro rounding, PDF generation
 - [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md) — employee sign-ins, service submissions, the opt-in time clock
-- [inbox-and-channels.md](inbox-and-channels.md) — Conversations inbox (AI pause, 24-hour window, ticks, templates, media), website widget, Instagram
+- [inbox-and-channels.md](inbox-and-channels.md) — Conversations inbox (AI pause, 24-hour window, ticks, templates, media), the Email page (Gmail threads, suggested dashboard actions), website widget, Instagram
 - [whatsapp-and-meta.md](whatsapp-and-meta.md) — Embedded Signup, webhook fields, display names, payment methods, App Review, template permissions
 - [ai-persona-and-bot.md](ai-persona-and-bot.md) — the customer-facing bot: persona studio, prompts, tools, human handoff
 - [ai-assistant.md](ai-assistant.md) — the dashboard AI Assistant: its prompt, checked cards, settings, history

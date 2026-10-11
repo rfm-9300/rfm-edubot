@@ -252,10 +252,10 @@ private fun UpdateConnectionRequest.applyTo(current: EmailSettings): SettingsUpd
     )
 }
 
-private fun DashboardContext.canManageIntegrations(): Boolean =
+internal fun DashboardContext.canManageIntegrations(): Boolean =
     principalType == DashboardAccessPolicy.OPERATOR_IMPERSONATION || user?.role == DashboardUserRole.TENANT_ADMIN
 
-private fun DashboardContext.canConnect(): Boolean =
+internal fun DashboardContext.canConnect(): Boolean =
     principalType == DashboardAccessPolicy.TENANT_USER && user?.role == DashboardUserRole.TENANT_ADMIN
 
 private suspend fun ApplicationCall.integrationsContext(): DashboardContext? {

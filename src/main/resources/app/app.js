@@ -992,10 +992,12 @@ function renderNav() {
   if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
   const shiftsToReview = window.TimesheetsUI?.badge();
   if (shiftsToReview?.count) counts.timesheets = shiftsToReview.count;
-  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, employees: toApprove > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert };
+  const unreadEmail = window.EmailUI?.badge()?.count ?? o.email?.unread ?? 0;
+  if (unreadEmail) counts.email = unreadEmail;
+  const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, employees: toApprove > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert, email: unreadEmail > 0 };
   const groups = [
     { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB] },
-    { id: 'groupInbox', items: ['conversations', 'contacts', 'instagram'] },
+    { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
@@ -1020,6 +1022,7 @@ function renderNav() {
 async function setActive(tab) {
   if (isPortal() && !state.me.modules.includes(tab)) tab = state.me.modules[0] || PORTAL_TAB;
   if (tab !== 'conversations') stopInboxPolling();
+  if (tab !== 'email') window.EmailUI?.stop();
   state.active = tab;
   location.hash = tab;
   $('#search').value = '';
@@ -1148,6 +1151,7 @@ async function loadModule(tab) {
     state.fetched.bookings = true;
   }
   if (tab === 'agents') await window.AgentsUI.load();
+  if (tab === 'email') await window.EmailUI.load();
   if (tab === 'instagram') {
     try { state.instagram = await api('/app/api/instagram?refresh=1'); }
     catch { toast(STR.instagramSyncFailed); state.instagram = await api('/app/api/instagram').catch(() => state.instagram); }
@@ -1188,6 +1192,7 @@ function render() {
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
+  if (state.active === 'email') return window.EmailUI.render(root);
   if (state.active === PORTAL_TAB) return renderMyServices(root);
   if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
   if (state.active === 'timesheets') return window.TimesheetsUI.renderTeam(root);
@@ -1203,7 +1208,7 @@ function recordStatusLabel(entity, status) {
   if (entity === 'booking') return bookingStatusLabel(status);
   return status;
 }
-const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations' };
+const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations', email: 'email' };
 const AGENT_SUBJECT_OPENERS = {
   client: id => openClientDrawer(id),
   quote: id => openQuoteDetail(id),
@@ -1222,7 +1227,15 @@ async function openAgentSubject(subject, back) {
     await setActive('conversations');
     return;
   }
+  if (subject.type === 'email') return openEmailPage(subject.id);
   openFrom(back, () => AGENT_SUBJECT_OPENERS[subject.type](subject.id));
+}
+// The Email page with the thread of the email [id] open.
+async function openEmailPage(id) {
+  closeDrawer({ dismissed: true });
+  window.EmailUI.focus(id);
+  if (state.active === 'email') render();
+  else await setActive('email');
 }
 function agentsDeps() {
   return {
@@ -1264,6 +1277,23 @@ function assistantDeps() {
     openSubject: openAgentSubject,
     canOpenSubject: canOpenAgentSubject,
     onChange: () => renderNav(),
+  };
+}
+// The Email page opens the dashboard's own forms, started from what an email says, and opens the records they made.
+function emailDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, closeDrawer, hero, render, renderNav, setActive,
+    fmtDate, fmtDay, fmtTime, fmtEUR, relTime, localDay, uiLocale, newRequestId,
+    hasModule, labels, STR, isAdmin: isCompanyAdmin, isNarrow: isNarrowInbox, statusLabel: recordStatusLabel,
+    get state() { return state; },
+    // A record made from an email changes the nav's counts (clients, quotes, payments…), which come from Home's figures.
+    refreshCounts: async () => { state.overview = await api('/app/api/overview').catch(() => state.overview); renderNav(); },
+    googleTextOr, connectGoogle, openSettingsAccount: async id => { state.settingsSection = 'channels'; await setActive('settings'); if (id) openEmailAccount(id); },
+    openClientForm, openClientDrawer, openQuoteForm, openQuoteDetail, openInvoiceDetail, openPaymentForm, openPaymentDetail, openSupplierForm,
+    openBookingById, openBookingForm: async (opts) => { await ensureBookingData(); openBookingForm(null, opts); },
+    openTask: (subject, opts) => window.AgentsUI?.openTask(null, subject, opts),
+    openRecord: subject => openAgentSubject(subject, null),
+    canOpenRecord: subject => canOpenAgentSubject(subject),
   };
 }
 // Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
@@ -4878,8 +4908,11 @@ function wireDuplicatePhone(form, editingId) {
   if (input.value) check();
 }
 
-async function openClientForm(client) {
+// `opts.prefill` starts a new client with values from elsewhere (an email's sender); `opts.onSaved(client)`
+// runs after a save instead of opening the record, for flows that continue from where they started.
+async function openClientForm(client, opts = {}) {
   const editing = client && client.id ? client : null;
+  const values = editing || opts.prefill || {};
   await loadClientFields();
   const field = ({ id, label, value, attrs = '', cls = 'inp', required = false, full = false }) => `<div class="form__row${full ? ' form__row--full' : ''}"><label class="lbl" for="${id}">${escapeHTML(label)}${required ? ' <span class="req">●</span>' : ''}</label>
     <input class="${cls}" id="${id}" value="${escapeHTML(value || '')}" ${required ? 'required ' : ''}${attrs} /></div>`;
@@ -4887,19 +4920,19 @@ async function openClientForm(client) {
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${field({ id: 'cf-name', label: STR.clientFormName, value: editing?.name, required: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
-      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: editing?.taxId, cls: 'inp inp--mono', required: clientFieldRequired('taxId'), attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
+      ${field({ id: 'cf-name', label: STR.clientFormName, value: values.name, required: true, attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhName)}"` })}
+      ${field({ id: 'cf-tax', label: STR.clientFormTaxId, value: values.taxId, cls: 'inp inp--mono', required: clientFieldRequired('taxId'), attrs: `maxlength="32" autocomplete="off" placeholder="${escapeHTML(STR.clientPhTaxId)}"` })}
       <div class="form__row"><label class="lbl" for="cf-phone">${escapeHTML(STR.clientFormPhone)} <span class="req">●</span></label>
-        <input class="inp inp--mono" id="cf-phone" type="tel" required maxlength="40" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(editing?.phone || '')}" />
+        <input class="inp inp--mono" id="cf-phone" type="tel" required maxlength="40" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPhone)}" value="${escapeHTML(values.phone || '')}" />
         <p class="hint hint--warn" id="cf-dup" hidden></p></div>
-      ${field({ id: 'cf-email', label: STR.clientFormEmail, value: editing?.email, required: clientFieldRequired('email'), attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
-      ${field({ id: 'cf-contact', label: STR.clientFormContact, value: editing?.contactPerson, full: true, required: clientFieldRequired('contactPerson'), attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhContact)}"` })}
-      ${field({ id: 'cf-address', label: STR.clientFormAddress, value: editing?.address, full: true, required: clientFieldRequired('address'), attrs: `maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}"` })}
-      ${field({ id: 'cf-postal', label: STR.clientFormPostalCode, value: editing?.postalCode, cls: 'inp inp--mono', required: clientFieldRequired('postalCode'), attrs: `maxlength="20" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPostalCode)}"` })}
-      ${field({ id: 'cf-city', label: STR.clientFormCity, value: editing?.city, required: clientFieldRequired('city'), attrs: `maxlength="100" autocomplete="off" placeholder="${escapeHTML(STR.clientPhCity)}"` })}
+      ${field({ id: 'cf-email', label: STR.clientFormEmail, value: values.email, required: clientFieldRequired('email'), attrs: `type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(STR.clientPhEmail)}"` })}
+      ${field({ id: 'cf-contact', label: STR.clientFormContact, value: values.contactPerson, full: true, required: clientFieldRequired('contactPerson'), attrs: `maxlength="120" autocomplete="off" placeholder="${escapeHTML(STR.clientPhContact)}"` })}
+      ${field({ id: 'cf-address', label: STR.clientFormAddress, value: values.address, full: true, required: clientFieldRequired('address'), attrs: `maxlength="300" autocomplete="off" placeholder="${escapeHTML(STR.clientPhAddress)}"` })}
+      ${field({ id: 'cf-postal', label: STR.clientFormPostalCode, value: values.postalCode, cls: 'inp inp--mono', required: clientFieldRequired('postalCode'), attrs: `maxlength="20" autocomplete="off" placeholder="${escapeHTML(STR.clientPhPostalCode)}"` })}
+      ${field({ id: 'cf-city', label: STR.clientFormCity, value: values.city, required: clientFieldRequired('city'), attrs: `maxlength="100" autocomplete="off" placeholder="${escapeHTML(STR.clientPhCity)}"` })}
       ${clientCustomFields().map(f => customFieldInput(f, editing?.customFields?.[f.key])).join('')}
       <div class="form__row form__row--full"><label class="lbl" for="cf-notes">${escapeHTML(STR.clientFormNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-        <textarea class="txt" id="cf-notes" maxlength="4000" placeholder="${escapeHTML(STR.clientPhNotes)}">${escapeHTML(editing?.notes || '')}</textarea>
+        <textarea class="txt" id="cf-notes" maxlength="4000" placeholder="${escapeHTML(STR.clientPhNotes)}">${escapeHTML(values.notes || '')}</textarea>
         <p class="hint">${escapeHTML(STR.clientNotesHint)}</p></div>
     </div>
     <div class="actions">
@@ -4930,6 +4963,7 @@ async function openClientForm(client) {
         ? await api(`/app/api/crm/clients/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) })
         : await api('/app/api/crm/clients', { method: 'POST', body: JSON.stringify(payload) });
       toast(editing ? STR.clientUpdated : STR.clientCreated({ name: saved.name }));
+      if (opts.onSaved) { closeDrawer(); return opts.onSaved(saved); }
       if (state.active === 'clients') { await loadModule('clients').catch(() => {}); render(); }
       if (editing) closeDrawer();
       else openClientDrawer(saved);
@@ -5158,22 +5192,24 @@ function supplierServicesField(services) {
   return { html, wire, collect };
 }
 
-async function openSupplierForm(supplier) {
+// `opts.prefill` and `opts.onSaved(supplier)` work as on the client form.
+async function openSupplierForm(supplier, opts = {}) {
   const t = CRM.suppliers;
   const editing = supplier && supplier.id ? supplier : null;
+  const values = editing || opts.prefill || {};
   const services = supplierServicesField(editing?.services);
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__row"><label class="lbl" for="sf-name">${escapeHTML(t.formName)} <span class="req">●</span></label>
-      <input class="inp" id="sf-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(editing?.name || '')}" /></div>
+      <input class="inp" id="sf-name" required placeholder="${escapeHTML(t.phName)}" value="${escapeHTML(values.name || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-type">${escapeHTML(t.formType)}</label>
-      <input class="inp" id="sf-type" list="sf-type-options" maxlength="60" autocomplete="off" placeholder="${escapeHTML(t.phType)}" value="${escapeHTML(editing?.type || '')}" />
+      <input class="inp" id="sf-type" list="sf-type-options" maxlength="60" autocomplete="off" placeholder="${escapeHTML(t.phType)}" value="${escapeHTML(values.type || '')}" />
       <datalist id="sf-type-options">${supplierTypes(state.suppliers || []).map(v => `<option value="${escapeHTML(v)}"></option>`).join('')}</datalist></div>
     <div class="form__row"><label class="lbl" for="sf-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
-      <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
+      <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(values.phone || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
-      <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(editing?.address || '')}" /></div>
+      <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(values.address || '')}" /></div>
     ${services.html}
     <div class="actions">
       <button class="btn btn--primary" type="submit">${escapeHTML(editing ? STR.clientSaveChanges : t.save)}</button>
@@ -5202,6 +5238,7 @@ async function openSupplierForm(supplier) {
       } else {
         const created = await api('/app/api/crm/suppliers', { method: 'POST', body: JSON.stringify(payload) });
         closeDrawer();
+        if (opts.onSaved) { toast(t.created); return opts.onSaved(created); }
         await loadModule('suppliers');
         toast(t.created);
         if (hasModule('payments') && state.active === 'payments') return openPaymentForm(created.id);
@@ -5951,6 +5988,8 @@ function wirePdfButtons(root) {
   });
 }
 
+// `opts.items` and `opts.notes` start the quote with what was asked for (an email's request); `opts.onSaved(quote)`
+// runs after it is created instead of showing the quotes list.
 async function openQuoteForm(opts = {}) {
   let clients, catalog;
   try {
@@ -5970,9 +6009,9 @@ async function openQuoteForm(opts = {}) {
     </div>
     ${li.html}
     <div class="form__row form__row--full"><label class="lbl" for="q-notes">${escapeHTML(STR.quoteNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-      <textarea class="txt" id="q-notes" placeholder="${escapeHTML(STR.quoteNotesPh)}"></textarea></div>
+      <textarea class="txt" id="q-notes" placeholder="${escapeHTML(STR.quoteNotesPh)}">${escapeHTML(opts.notes || '')}</textarea></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(STR.quoteSave)}</button>`;
-  li.wire(form);
+  li.wire(form, { initial: opts.items || [] });
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const clientId = $('#f-client', form).value;
@@ -5982,8 +6021,9 @@ async function openQuoteForm(opts = {}) {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      await api('/app/api/crm/quotes', { method: 'POST', body: JSON.stringify({ clientId, items, notes: $('#q-notes', form).value.trim() || null, validUntil: $('#q-valid', form).value || null }) });
+      const saved = await api('/app/api/crm/quotes', { method: 'POST', body: JSON.stringify({ clientId, items, notes: $('#q-notes', form).value.trim() || null, validUntil: $('#q-valid', form).value || null }) });
       closeDrawer();
+      if (opts.onSaved) { toast(STR.quoteCreated); return opts.onSaved(saved); }
       await loadModule('quotes');
       render();
       toast(STR.quoteCreated);
@@ -6038,7 +6078,9 @@ async function openInvoiceForm(opts = {}) {
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
-async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient = null) {
+// `opts.items`, `opts.dueDate` and `opts.notes` start it from a bill someone received; `opts.onSaved(payment)`
+// runs after it is created instead of showing the payments list.
+async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient = null, opts = {}) {
   const t = CRM.payments;
   const employeesOn = hasModule('employees');
   const clientsOn = hasModule('clients');
@@ -6059,7 +6101,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
   if (!presetSupplierId && !presetEmployeeId && !suppliers.length && employees.length) payee = 'employee';
   const selectedSupplier = presetSupplierId || (!presetEmployeeId ? state.filterPaymentSupplier || '' : '');
   const li = lineItemsField(catalog);
-  const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
+  const due = opts.dueDate || new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   const kindSwitch = employeesOn
     ? `<div class="form__row form__row--full"><span class="lbl">${escapeHTML(t.payee)}</span><div class="actions">
         <button class="chip ${payee === 'supplier' ? 'is-on' : ''}" type="button" data-payee="supplier">${escapeHTML(t.paySupplier)}</button>
@@ -6081,7 +6123,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     <div id="payment-lines">${li.html}</div>
     ${employeesOn ? generalPaymentFields() : ''}
     <div class="form__row form__row--full"><label class="lbl" for="p-notes">${escapeHTML(t.notes)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
-      <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}"></textarea></div>
+      <textarea class="txt" id="p-notes" placeholder="${escapeHTML(t.notesPh)}">${escapeHTML(opts.notes || '')}</textarea></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(t.save)}</button>`;
   // The picked supplier's usual services, as ticks. A ticked service adds a line tagged with it, so
   // unticking removes that line and removing the line unticks it.
@@ -6143,7 +6185,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     }
     showPayee(btn.dataset.payee);
   }));
-  lines = li.wire(form, { onChange: syncServices });
+  lines = li.wire(form, { onChange: syncServices, initial: opts.items || [] });
   // Lines the previous supplier's services added go with it.
   $('#f-supplier', form)?.addEventListener('change', () => {
     paymentLines().filter(row => row.dataset.fromService).forEach(row => row.remove());
@@ -6177,8 +6219,9 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId }
       : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId };
     try {
-      await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
+      const saved = await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
       closeDrawer();
+      if (opts.onSaved) { toast(t.created); return opts.onSaved(saved); }
       await loadModule('payments');
       render();
       toast(t.created);
@@ -7012,8 +7055,12 @@ function openEmailMessage(m) {
     </dl>
     ${m.bodyPurged ? `<p class="hint">${escapeHTML(GOOGLE.purged)}</p>` : `<div class="email-body">${escapeHTML(m.body ?? m.snippet ?? '')}</div>`}
     ${attachments.length ? `<p class="hint">${escapeHTML(googleText('attachments', { files: attachments.join(', ') }))}</p>` : ''}
-    ${doc && !linksBackTo(doc.key) ? `<div class="detail__foot"><button class="btn btn--sm btn--ghost" type="button" data-email-doc>${escapeHTML(doc.label)}</button></div>` : ''}`;
+    ${(doc && !linksBackTo(doc.key)) || hasModule('email') ? `<div class="detail__foot">
+      ${doc && !linksBackTo(doc.key) ? `<button class="btn btn--sm btn--ghost" type="button" data-email-doc>${escapeHTML(doc.label)}</button>` : ''}
+      ${hasModule('email') ? `<button class="btn btn--sm btn--ghost" type="button" data-email-page>${escapeHTML(I18N.t('app.email.openInEmail'))}</button>` : ''}
+    </div>` : ''}`;
   $('[data-email-doc]', form)?.addEventListener('click', () => openFrom(here, doc.open));
+  $('[data-email-page]', form)?.addEventListener('click', () => openEmailPage(m.id));
   openDrawer(m.subject || GOOGLE.msgEyebrow, form, false, { eyebrow: GOOGLE.msgEyebrow });
 }
 
@@ -8299,6 +8346,7 @@ async function googleOutcome(status, reason) {
   }
   await refreshGoogle();
   if (state.active === 'settings') render();
+  if (state.active === 'email') await window.EmailUI?.refresh();
 }
 
 // Google sent the whole page back (no popup): read the outcome once and drop it from the address.
@@ -8336,7 +8384,7 @@ function emailInboxPanelHtml(account) {
       `<button class="btn btn--sm btn--ghost" type="button" data-ga-inbox="off">${escapeHTML(I.turnOff)}</button>`,
     ].filter(Boolean).join('');
   return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(I.title)}</h2>${pill}</header>
-    <div class="panel__body form">${detail}<p class="hint">${escapeHTML(I.hint)}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</div></section>`;
+    <div class="panel__body form">${detail}<p class="hint">${escapeHTML(hasModule('email') ? I.hintEmailPage : I.hint)}</p>${actions ? `<div class="actions">${actions}</div>` : ''}</div></section>`;
 }
 
 function openEmailAccount(id) {
@@ -9149,14 +9197,17 @@ function invoiceBooking(b) {
   openDrawer(STR.bookingsInvoice, form);
 }
 
+// `opts.prefill` ({ date, time, serviceId, contactName, contactPhone, notes }) starts a new booking from a request
+// someone sent; `opts.onSaved(booking)` runs after it is created instead of refreshing the calendar.
 function openBookingForm(booking = null, opts = {}) {
   const editing = booking && booking.id ? booking : null;
+  const pre = editing ? {} : (opts.prefill || {});
   const services = state.bookingServices.filter(s => s.active || s.id === editing?.serviceId);
   if (!services.length) return openBookingServicesForm();
-  const startLocal = editing ? bookingLocal(editing) : (opts.slot || '');
+  const startLocal = editing ? bookingLocal(editing) : (opts.slot || (pre.date ? `${pre.date}T${pre.time || ''}` : ''));
   const dateVal = startLocal ? startLocal.slice(0, 10) : todayKey();
   const timeVal = startLocal ? startLocal.slice(11, 16) : '';
-  const preset = services.find(s => s.id === editing?.serviceId) || (services.length === 1 ? services[0] : null);
+  const preset = services.find(s => s.id === (editing?.serviceId || pre.serviceId)) || (services.length === 1 ? services[0] : null);
   let clientId = editing?.clientId || opts.client?.id || '';
   let clientName = opts.client?.name || '';
   const form = document.createElement('form');
@@ -9179,16 +9230,16 @@ function openBookingForm(booking = null, opts = {}) {
       <div class="form__row"><label class="lbl" for="bk-price">${escapeHTML(STR.bookingsPrice)}</label>
         <input class="inp inp--mono inp--right" type="number" min="0" step="0.01" id="bk-price" value="${editing ? (bookingPrice(editing) ?? '') : (preset?.priceEur ?? '')}" /></div>
       <div class="form__row form__row--full suggest-host"><label class="lbl" for="bk-name">${escapeHTML(STR.bookingsContactName)} <span class="req">●</span></label>
-        <input class="inp" id="bk-name" autocomplete="off" required value="${escapeHTML(editing?.contactName || opts.client?.name || '')}" />
+        <input class="inp" id="bk-name" autocomplete="off" required value="${escapeHTML(editing?.contactName || opts.client?.name || pre.contactName || '')}" />
         <div class="suggest" id="bk-suggest-name" hidden></div></div>
       <div class="form__row form__row--full suggest-host"><label class="lbl" for="bk-phone">${escapeHTML(STR.bookingsContactPhone)} <span class="req">●</span></label>
-        <input class="inp inp--mono" id="bk-phone" autocomplete="off" required value="${escapeHTML(editing?.contactPhone || opts.client?.phone || '')}" />
+        <input class="inp inp--mono" id="bk-phone" autocomplete="off" required value="${escapeHTML(editing?.contactPhone || opts.client?.phone || pre.contactPhone || '')}" />
         <div class="suggest" id="bk-suggest-phone" hidden></div>
         <p class="hint" id="bk-client-hint"></p></div>
       ${editing ? `<div class="form__row form__row--full"><label class="lbl" for="bk-status">${escapeHTML(STR.bookingsStatus)}</label>
         <select class="sel" id="bk-status">${BOOKING_STATUSES.map(s => `<option value="${s}" ${editing.status === s ? 'selected' : ''}>${escapeHTML(bookingStatusLabel(s))}</option>`).join('')}</select></div>` : ''}
       <div class="form__row form__row--full"><label class="lbl" for="bk-notes">${escapeHTML(STR.bookingsNotes)} <span class="opt">${escapeHTML(STR.bookingsOptional)}</span></label>
-        <textarea class="txt" id="bk-notes">${escapeHTML(editing?.notes || '')}</textarea></div>
+        <textarea class="txt" id="bk-notes">${escapeHTML(editing?.notes || pre.notes || '')}</textarea></div>
     </div>
     <div class="actions">
       <button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsSave)}</button>
@@ -9303,10 +9354,12 @@ function openBookingForm(booking = null, opts = {}) {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      if (editing) await api(`/app/api/bookings/${encodeURIComponent(editing.id)}`, { method: 'POST', body: JSON.stringify(payload) });
-      else await api('/app/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
+      const saved = editing
+        ? await api(`/app/api/bookings/${encodeURIComponent(editing.id)}`, { method: 'POST', body: JSON.stringify(payload) })
+        : await api('/app/api/bookings', { method: 'POST', body: JSON.stringify(payload) });
       closeDrawer();
       toast(editing ? STR.bookingsUpdated : STR.bookingsCreated);
+      if (!editing && opts.onSaved) return opts.onSaved(saved);
       await afterBookingChange();
     } catch (err) {
       btn.disabled = false;
@@ -9435,6 +9488,7 @@ async function init(relayed = false) {
   window.AgentsUI?.init(agentsDeps());
   window.TimesheetsUI?.init(timesheetsDeps());
   window.AssistantUI?.init(assistantDeps());
+  window.EmailUI?.init(emailDeps());
   I18N.applyDom(document);
   $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });

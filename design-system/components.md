@@ -649,6 +649,49 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 
 Rules: status and time lines are mono; everything else is sans. Media is fetched with the bearer token and shown from a blob URL; only JPEG/PNG/WebP/GIF, audio and video render inline, anything else downloads. The window pill is `.pill--ok` (open), `.pill--warn` (under 2 h left) or plain `.pill` (closed). Under 620px the composer buttons become icon-only and keep their label for screen readers.
 
+## Email page
+
+`/app` → Email (`app/email.js`). The same `.inbox` grid and thread parts as Conversations (`.inbox__list`, `.inbox-row`, `.thread-head`, `.thread-log`, `.composer`), with email cards instead of bubbles and a "What to do" panel at the top of the thread. A setup `.notice` (connect Gmail, reconnect, turn on reading, first check) sits in `.email-setup` above the grid and hides under 920px while a thread is open.
+
+```html
+<li><button class="inbox-row email-row is-unread" data-em-thread="…">
+  <span class="inbox-avatar">MS</span>
+  <span class="inbox-row__main">
+    <span class="inbox-row__top"><span class="email-row__who"><span class="inbox-row__name">Maria Silva</span><span class="email-row__count">3</span></span><time class="inbox-row__time">5 min</time></span>
+    <span class="email-row__subject">Pedido de orçamento</span>
+    <span class="inbox-row__bottom"><span class="inbox-row__preview">Bom dia, …</span><span class="email-row__intent">Quote request</span><span class="inbox-row__badge">1</span></span>
+  </span>
+</button></li>
+
+<section class="email-actions">
+  <header class="email-actions__head"><h3 class="email-actions__title">What to do</h3><span class="pill pill--info">Quote request</span><span class="email-actions__tools"><button class="btn btn--sm btn--ghost">Read again</button></span></header>
+  <div class="email-actions__summary"><span class="inbox-ico">…</span><div><p>Summary</p><p class="hint">Read by AI…</p></div></div>
+  <ul class="email-actions__list">
+    <li class="email-action is-primary"><span class="email-action__icon">…</span><span class="email-action__main"><span class="email-action__title">Add Maria Silva as a client</span><span class="email-action__detail">maria@… · 912 345 678</span></span><span class="email-action__side"><button class="iconbtn email-action__dismiss">×</button><button class="btn btn--sm btn--primary">Add client</button></span></li>
+    <li class="email-action is-done">… <span class="pill pill--ok">Done</span><button class="btn btn--sm btn--ghost">Open</button></li>
+  </ul>
+  <div class="email-actions__docs"><span class="email-actions__docs-label">Mentioned in this email</span><button class="chip">FAT-001 · Pending · 615,00 €</button></div>
+</section>
+
+<details class="email-msg email-msg--out" open>
+  <summary class="email-msg__head"><span class="email-msg__from"><strong>Obras Lopes</strong> <span class="email-msg__addr">obras@…</span></span><span class="email-msg__side"><span class="pill pill--info">Sent</span><time class="email-msg__date">…</time></span><span class="email-msg__peek">snippet, shown while folded</span></summary>
+  <p class="email-msg__meta">To … · Sent by …</p>
+  <div class="email-msg__body">…</div>
+  <p class="email-msg__files"><span class="inbox-ico">…</span><span>orcamento.pdf</span></p>
+</details>
+```
+
+| Class | Role |
+|---|---|
+| `.email-row` (`.is-automated`) + `__who` `__count` `__subject` `__intent` | A thread row: the name with a message-count badge (hairline pill, mono, kept apart from the time), the subject line under it, the model's intent as an `--info-soft` tag. Automatic mail (newsletters, notifications) gets a muted avatar |
+| `.email-thread` | The thread log with a wider gap between cards |
+| `.email-actions` `__head` `__title` `__tools` `__summary` `__reading` `__list` `__docs` `__docs-label` | The "What to do" card: intent pill and Read again / Suggest actions in the head, the model's summary on `--surface-2` with its spark icon in `--accent-deep` (`--accent` on dark), a pulsing "Reading…" line while it reads, the suggestions, and chips for the quotes and invoices the email names |
+| `.email-action` (`.is-primary` `.is-done`) + `__icon` `__main` `__title` `__detail` `__side` `__dismiss` | One suggestion: icon well on `--accent-soft`, a title and what its form starts with, then Not needed (`.iconbtn`) and the action (`.btn--primary` when primary). Primary rows get the strong hairline; done rows are dashed with an `--ok-soft` icon, a `.pill--ok` and Open. Under 560px the buttons drop under the text |
+| `.email-msg` (`--out`) + `__head` `__from` `__addr` `__side` `__date` `__peek` `__meta` `__body` `__files` | An email as a native `<details>` card: older ones fold to their head and a one-line peek, the newest (and unread ones) start open. The body is escaped plain text, `pre-wrap` |
+| `.email-reply` `__head` `__to` `__row` `__input` | The composer as a column: "Reply to …" with Use the suggested reply, then the textarea (grows to 240px) and Send. Ctrl/Cmd+Enter sends; Enter is a new line |
+
+Rules: everything an email says is escaped text, never HTML. The dismiss button's `aria-label` names the action it hides. The model's intent and summary are labelled as AI's reading; forms opened from a suggestion still validate as they always do.
+
 ## Work queue
 
 Home uses `.queue` / `.setup-list` of `.queue__item` buttons: a leading `.queue__icon` (emoji, decorative), a title + detail block, then an optional trailing `.queue__meta` column with a status pill or timestamp:
@@ -826,12 +869,13 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 
 ## Email (Google)
 
-Gmail shows up in four places, all built from existing parts ([patterns.md](patterns.md#email-google)); strings live under `app.integrations.google.*`.
+Gmail shows up in five places, all built from existing parts ([patterns.md](patterns.md#email-google)); strings live under `app.integrations.google.*`, and the Email page's under `app.email.*` (its classes: [Email page](#email-page)).
 
 - **Settings → Channels**: one "Email (Google)" row per connected account in the channels `.tbl`: the account in `.mono`, the status as text when it can send, `.pill--warn` when it needs reconnecting, `.pill--bad` when access was removed, and `.pill--info` Default once there are two accounts. While the platform lets companies read inboxes, a connected account that automations read gets `.pill--accent` "Reads the inbox" after its status, or `.pill--warn` "Inbox paused" once a check failed. Actions: Reconnect (`.btn--primary`, admins), Manage (admins and operators), and a ghost "Add account" on the last row. With no account the row offers Connect, or a muted "a company admin connects it". The row is hidden while the platform has no Google OAuth client.
 - **Account drawer** (Settings): a `.notice--warn` with Reconnect while the account can't send (a test email Google refuses reopens the drawer in that state), a `dl.dash-facts` (account, connected by, sent today of the daily limit), the Inbox panel below, then the form: sender name, reply-to, signature (`.txt`) and, with several accounts, a `.form__check` "Send from this account by default". `.actions`: Save, Send a test email (ghost), Disconnect (ghost; the confirm carries `.btn--danger`).
 - **Send by email** (quote and invoice `.detail__foot`): a drawer form with To, Cc, Subject, Message (`.txt`), a `.form__check` for the PDF (its file name in the label) and a `.hint` naming the sending account (and, for a pending quote, that sending marks it sent). A client without an email gets a `.hint--warn` under To. When nothing can send, a `.notice--warn` names the sending account that needs reconnecting (or says none is connected yet), with Open Settings, and Send stays disabled.
-- **Client record → Emails**: a `.worklist` of messages, newest first (dot `info` sent, `accent` received; title: subject; detail: recipient · attachments · snippet; when: relative date), or `.empty`. A row opens the message drawer, titled with the subject: `.detail__head` (sender name + direction pill), `dl.dash-facts` (from address, to, cc, date, sent by), the text in `.email-body` (or a `.hint` once the retention period dropped it) and "Open the quote / invoice" in `.detail__foot`.
+- **Client record → Emails**: a `.worklist` of messages, newest first (dot `info` sent, `accent` received; title: subject; detail: recipient · attachments · snippet; when: relative date), or `.empty`. A row opens the message drawer, titled with the subject: `.detail__head` (sender name + direction pill), `dl.dash-facts` (from address, to, cc, date, sent by), the text in `.email-body` (or a `.hint` once the retention period dropped it) and "Open the quote / invoice" and, with the `email` module, "Open in Email" in `.detail__foot`.
+- **Email page** (Inbox group, `email` module): the company's threads, replies and the actions each email calls for ([Email page](#email-page)). With the module on, the Inbox panel's hint says new mail shows there (`inbox.hintEmailPage`).
 
 ```html
 <div class="email-body">Olá Ana,

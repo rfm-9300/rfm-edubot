@@ -4,7 +4,51 @@ updated: 2026-10-09
 
 # Conversations inbox and channels
 
-Where customer chats arrive and how the team answers them: the Conversations inbox, WhatsApp templates and media, the website widget and Instagram. Connecting WhatsApp, and Meta's platform rules, are in [whatsapp-and-meta.md](whatsapp-and-meta.md).
+Where customer chats and emails arrive and how the team answers them: the Conversations inbox, the Email page, WhatsApp templates and media, the website widget and Instagram. Connecting WhatsApp, and Meta's platform rules, are in [whatsapp-and-meta.md](whatsapp-and-meta.md); connecting Gmail and inbox sync in [agents-automations.md](agents-automations.md).
+
+## Email page: the company's Gmail, turned into dashboard actions (PR #72, opened 2026-10-09)
+
+Rodrigo asked for an "email" section in the Inbox group, next to Conversations and Contacts, on the
+same Google account linking as Agents, that turns what emails say into actions in the dashboard.
+Built by a Cursor cloud agent; `docs/architecture.md` → "Email page" has the flow and
+`design-system/patterns.md` → "Email page" the screen. Decisions that matter later:
+
+- **Its own opt-in module, `email`** (in `DashboardModules.optIn`, like `agents` and `timesheets`).
+  Gmail is dormant in prod and inbox reading waits for Google's restricted-scope review, so legacy
+  tenants with a null module list must not get a page that can't work; and the page shows the
+  company's mailbox to every team member with the module, a step past "automations read it".
+- **No new store.** The page reads `email_messages` (inbox sync plus what the dashboard and agents
+  send) grouped by account + Gmail thread in one aggregation. A row is opened by its newest message
+  id; any message id of a thread works for the thread endpoints. Read state is the team's (`readAt`),
+  never written to Gmail, so `gmail.modify` is still unused (mirroring "read" to Gmail would be its
+  first real use).
+- **Suggestions = deterministic facts + one AI reading.** `EmailFacts` (quote/invoice numbers in the
+  company's `ORC-`/`FAT-` format, phones, NIFs with a check digit) works without a model and skips
+  quoted history and the company's own numbers, so a reply quoting our signature doesn't offer our
+  phone as the sender's. The model reads the newest received email once, when someone opens it
+  (machines' mail only on request), through a forced `submit_insights` tool with the email as
+  untrusted content; the result is cached on the email, dropped with its text by the 90-day
+  retention, metered as `email` use against the monthly budget. Chose auto-read-on-open over a button
+  for every email; `/privacy` was updated to say so (Gmail text now reaches the model outside
+  automations too).
+- **Actions never save on their own.** Each suggestion opens the existing form prefilled (client,
+  quote with the requested lines, booking, supplier then payment, Agents task) or a confirm (invoice
+  paid, quote accepted); the forms gained `prefill`/`onSaved` options instead of new endpoints, so
+  validation, required client fields and domain events stay where they were. The page then records
+  `{type, status, recordId}` on the email; the server checks the record is the company's and the
+  module is on, and a client made from an email gets the sender's mail (received and sent) filed
+  under it. Completing a client's record loads the full client first: the client form PATCHes every
+  field and an empty one clears it.
+- **Supplier bills aren't clients.** With the model reading a supplier bill, "add the sender as a
+  client" isn't offered; suppliers have no email field, so the supplier is matched by name.
+- **Replies** go through `EmailService.sendFrom` from the thread's account with `threadId` and
+  `In-Reply-To`, keyed per composer like "Send by email". `EmailMessage.replySubject` now holds the
+  "Re:" rule for both this and the `email.reply` step.
+- **Verified with a stand-in Gmail:** `GMAIL_API_URL` (default Google's) lets
+  `scripts/email-e2e` run the real inbox sync and replies against `fake-services.py`, which also
+  answers `submit_insights`. Its connection is written to Mongo with tokens sealed in the app's
+  `TokenCipher` format (`v1:<keyId>:<base64(iv+ciphertext+tag)>`, the header as AAD), so the token
+  provider never tries to refresh against Google.
 
 ## Conversations inbox: agent replies, delivery ticks, templates, media (shipped 2026-09-30, `ac4fef7`)
 

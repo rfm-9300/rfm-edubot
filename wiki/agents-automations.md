@@ -32,6 +32,11 @@ section the ops. Rodrigo asked to merge it the same day. What matters later:
   so use it or drop it before that submission. Gmail push (Pub/Sub) isn't built; inboxes are polled.
 - Merging it: `main` had moved 3 commits; the only conflict was `ClientServiceRepository` (domain
   events next to the new service lines). 551 tests green on the merge, local boot and smoke clean.
+- **The inbox sync also feeds the Email page** (opt-in `email` module, PR #72; see
+  [inbox-and-channels.md](inbox-and-channels.md)). Turning reading on now means the team sees the
+  mail there and the model reads an email when someone opens it, so `/privacy` section 5 and the
+  restricted-scope text in `docs/google-oauth-verification.md` describe both uses. `gmail.modify` is
+  still unused: the page keeps its own read state instead of marking mail read in Gmail.
 
 Production rollout (2026-10-01): backup `mongo-20261001T145548Z.archive.gz` right before the merge;
 CI deployed `c1cf5c3`, Mongo not bounced, 0 `ERROR` lines, the new indexes created (the "Missing

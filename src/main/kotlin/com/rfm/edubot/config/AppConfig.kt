@@ -42,6 +42,8 @@ data class AppConfig(
         val inboxEnabled: Boolean = false,
         /** How often connected inboxes are polled for new mail. */
         val syncSeconds: Int = 60,
+        /** Where the Gmail API is; blank means Google's. Local end-to-end runs point it at a stand-in. */
+        val gmailApiUrl: String = "",
     ) {
         val oauthEnabled: Boolean get() = clientId.isNotBlank() && clientSecret.isNotBlank() && redirectUri.isNotBlank()
     }
@@ -228,6 +230,7 @@ data class AppConfig(
                     pubsubTopic = getOptional(config, "app.google.gmail.pubsubTopic").trim(),
                     inboxEnabled = getOptional(config, "app.google.gmail.inboxEnabled").trim().lowercase() in setOf("true", "1", "yes"),
                     syncSeconds = getOptional(config, "app.google.gmail.syncSeconds").trim().toIntOrNull()?.coerceIn(15, 3600) ?: 60,
+                    gmailApiUrl = getOptional(config, "app.google.gmail.apiUrl").trim().trimEnd('/'),
                 ),
                 integrations = IntegrationsConfig(encryptionKey = getOptional(config, "app.integrations.encryptionKey").trim()),
             )

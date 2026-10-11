@@ -11,7 +11,7 @@ application client, authorization code, `access_type=offline`), one grant per co
 | --- | --- | --- | --- |
 | `openid`, `email` | non-sensitive | at connect | Identify the connected account and show its address in Settings. |
 | `https://www.googleapis.com/auth/gmail.send` | **sensitive** | at connect | Send the emails a person or an automation of the company writes. |
-| `https://www.googleapis.com/auth/gmail.readonly` | **restricted** | only with "Use my inbox in automations" | Read new inbox messages to link them to clients and start the company's email automations. |
+| `https://www.googleapis.com/auth/gmail.readonly` | **restricted** | only with "Use my inbox in automations" (or "Read this inbox" on the Email page) | Read new inbox messages to link them to clients, show them to the company's team on the Email page with the dashboard actions they call for, and start the company's email automations. |
 | `https://www.googleapis.com/auth/gmail.modify` | **restricted** | same, together with `gmail.readonly` | Planned: mark the inbox messages an automation handled. Not used yet (see below). |
 
 Sending needs brand verification plus sensitive-scope verification. Inbox reading needs
@@ -58,8 +58,12 @@ automations", we read the messages that arrive in its inbox from then on (not it
 spam, or promotions from strangers), link them to the company's clients by sender address, show
 them on the client's record, and run the email automations the company chose (for example, logging
 a supplier's bill or replying to a new lead in its thread; replies go out with `gmail.send`).
-We keep a message's text for 90 days and never keep attachment contents. Nothing in the mailbox is
-changed or deleted.
+With the Email page (an opt-in dashboard module), the company's team also reads those messages
+there and answers them in their thread; when someone opens a received email, its text goes to the
+AI model provider to summarize it and suggest dashboard actions (add the sender as a client, prepare
+a quote, register a supplier's bill…), which only fill forms a person reviews and saves.
+We keep a message's text for 90 days, and what the model read with it, and never keep attachment
+contents. Nothing in the mailbox is changed or deleted.
 
 `gmail.modify` is requested with `gmail.readonly`, as the plan pairs them, but no feature uses it
 yet. Before the restricted-scope submission, either give it its use (labelling the messages an
@@ -70,11 +74,11 @@ automation handled) or drop it from `GoogleScopes.inbox`: reviewers refuse scope
 | Requirement | How |
 | --- | --- |
 | Disclose the use and link the policy | `/privacy` section 5 carries Google's Limited Use sentence and the link (`LegalRoutesTest`). |
-| Use only for user-facing features | Sends come from dashboard buttons or the company's own automations (`EmailService`, `email.send`). |
+| Use only for user-facing features | Sends come from dashboard buttons (Send by email, the Email page's reply) or the company's own automations (`EmailService`, `email.send`). The Email page's AI reading runs when someone opens an email there, and its result is shown on that page only (`EmailInsightsService`). |
 | Tokens protected | AES-256-GCM at rest (`TokenCipher`), never sent to the browser (`IntegrationConnectionDto`). |
-| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`), with what automation runs and approvals made of it; runs and events never store the text itself; attachment contents never stored. Tasks and notifications an automation made from an email keep what its steps wrote into them (an AI summary, say), and neither the retention job nor a disconnect clears them: notifications expire after 90 days, tasks stay. |
+| Keep no more than needed | Email text dropped 90 days after its date (`EmailRetention`), with what the Email page's model read in it and what automation runs and approvals made of it; runs and events never store the text itself; attachment contents never stored. Tasks and notifications an automation made from an email keep what its steps wrote into them (an AI summary, say), and neither the retention job nor a disconnect clears them: notifications expire after 90 days, tasks stay. |
 | Delete on request | Disconnect deletes tokens and kept mail, redacts the account's emails from the activity log, runs and approvals, and revokes the grant (`DELETE /app/api/integrations/{id}`, `EmailService.forget`); `/data-deletion` explains it. |
-| No ads, no model training | Stated on `/privacy`; Gmail text reaches the LLM provider only inside a step the company set up. |
+| No ads, no model training | Stated on `/privacy`; Gmail text reaches the LLM provider only inside a step the company set up, or when someone opens a received email on the Email page. |
 | No human reading | Stated on `/privacy`; support access only when the company asks. |
 | Least privilege | Send-only at connect; restricted scopes only after the company opts in. |
 
@@ -98,7 +102,9 @@ automation handled) or drop it from `GoogleScopes.inbox`: reviewers refuse scope
 For the restricted-scope video (Phase 4), also: open **Manage** on the account, turn on **Use my
 inbox in automations**, show Google's second consent screen (reading email), send a test email from
 the synthetic client's address, and show it on the client's **Emails** tab and the run of an email
-automation (for example the lead reply, answered in the same thread).
+automation (for example the lead reply, answered in the same thread). With the Email page, also open
+**Email**, open that email, show the summary and suggested actions, add a quote from one (saving the
+form yourself), and send a reply from the page.
 
 ## Restricted scopes and CASA (Phase 4)
 

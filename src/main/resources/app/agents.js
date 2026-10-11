@@ -1787,14 +1787,16 @@
     }
   }
 
-  async function openTask(task, subject = null) {
+  /** A new task (no [task]) may start from [opts.draft] ({ title, detail, dueDate }); [opts.onSaved] gets the created task. */
+  async function openTask(task, subject = null, opts = {}) {
     await ensurePeople();
     const isNew = !task;
-    const t = task || { title: '', detail: '', status: 'OPEN', subject };
+    const draft = opts.draft || {};
+    const t = task || { title: draft.title || '', detail: draft.detail || '', status: 'OPEN', subject };
     const here = task ? { key: `task:${task.id}`, label: task.title, open: () => openTask(task) } : null;
     const form = document.createElement('form');
     form.className = 'form';
-    const due = t.dueAt ? d.localDay(t.dueAt) : '';
+    const due = t.dueAt ? d.localDay(t.dueAt) : (isNew && draft.dueDate) || '';
     const open = t.status === 'OPEN';
     form.innerHTML = `<div class="form__grid">
         <div class="form__row form__row--full"><label class="lbl" for="ag-task-title">${esc(tr('inbox.taskTitle'))} <span class="req">*</span></label><input class="inp" id="ag-task-title" maxlength="200" required value="${esc(t.title)}" /></div>
@@ -1827,14 +1829,16 @@
       if (!body.title) return d.toast(tr('inbox.titleRequired'));
       if (button) button.disabled = true;
       try {
+        let created = null;
         if (isNew) {
           const { clearAssignee, clearDue, ...create } = body;
-          await d.api('/app/api/agents/tasks', { method: 'POST', body: JSON.stringify({ ...create, subjectType: subject?.type, subjectId: subject?.id }) });
+          created = await d.api('/app/api/agents/tasks', { method: 'POST', body: JSON.stringify({ ...create, subjectType: subject?.type, subjectId: subject?.id }) });
         } else {
           await d.api(`/app/api/agents/tasks/${encodeURIComponent(task.id)}`, { method: 'PATCH', body: JSON.stringify(body) });
         }
         d.toast(extra.status === 'DONE' ? tr('inbox.taskDone') : tr('inbox.taskSaved'));
         d.closeDrawer();
+        if (created) opts.onSaved?.(created);
         await refresh();
       } catch {
         if (button) button.disabled = false;
