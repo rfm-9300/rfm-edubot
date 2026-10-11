@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-12
 ---
 
 # Cross-cutting gotchas
@@ -32,16 +32,25 @@ failure, no skip, it just does not run. Two `InstagramClientTest` cases had neve
 (found 2026-09-28; they pass once fixed). Use `runBlocking<Unit> { ... }` or end on an assertion, and
 check by comparing `@Test` counts with the `tests=` counts in `build/test-results/test/*.xml`.
 
-## Local test gotcha: Testcontainers vs Docker Desktop
+## Testcontainers and Docker Engine 29
 
-On Rodrigo's Mac, Docker Desktop's engine 29.x (min API 1.40) rejects the API version
-Testcontainers 1.20.3 asks for, so every Testcontainers test (`DeduplicationServiceTest`,
-`OverviewServiceTest`) fails in `DockerClientProviderStrategy` with an empty 400 `/info`.
-`DOCKER_API_VERSION` did not help; this does, without repo changes:
-`JAVA_TOOL_OPTIONS="-Dapi.version=1.44" ./gradlew test --no-daemon`. The Cursor cloud environment
-pins it the same way through `~/.docker-java.properties` (`api.version=1.44`). The durable fix is
-bumping Testcontainers (not done yet; Dependabot's 1.21.4 PRs #19 and #32 are open); CI is
-unaffected as far as known.
+The tests use Testcontainers 1.21.4 since 2026-10-12. Docker Engine 29 refuses API versions below
+1.40 and 1.20.3 asked for 1.32, so every test that needs the shared Mongo container (`TestMongo`)
+failed with "Could not find a valid Docker environment" (underneath, an empty 400 from `/info` in
+`DockerClientProviderStrategy`). 1.21.4, the last 1.x release, asks for 1.44 and falls back to 1.32
+only for older engines.
+
+- **CI**: GitHub moves `ubuntu-latest` from Ubuntu 24.04 (Docker 28.0.4) to 26.04 (Docker 29.4.2)
+  from 2026-10-19, and the Test job gates the image build and the deploy. On an `ubuntu-26.04` runner
+  (2026-10-11) the suite failed with 1.20.3 (59 failures, 48 of them whole test classes that couldn't
+  start) and passed all 796 tests with 1.21.4.
+- **Before the bump**, Rodrigo's Mac hit it first with Docker Desktop 29.x and got by with
+  `JAVA_TOOL_OPTIONS="-Dapi.version=1.44" ./gradlew test --no-daemon` (`DOCKER_API_VERSION` did not
+  help), and the Cursor cloud environment pins the same through `~/.docker-java.properties`. 1.21.4
+  already asks for 1.44, so neither should be needed (the CI check ran without one); both are harmless.
+- Testcontainers 2.x prefixes every module (`org.testcontainers:testcontainers-mongodb`), moves the
+  container classes to new packages and drops JUnit 4, so moving to it touches every Mongo-backed
+  test, not only `build.gradle.kts`.
 
 ## The git-ignored PDF logo breaks `processResources`
 

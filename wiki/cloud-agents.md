@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-12
 ---
 
 # Cursor cloud agents on this repo
@@ -73,5 +73,7 @@ Local sessions push straight to `main`. What a session should know:
   `~/.docker-java.properties` gave it Mongo 7 and Testcontainers; `TEST_MONGO_URI` pointed at that
   Mongo container is faster than a container per run. The backoffice password needs a BCrypt
   `ADMIN_PASSWORD_HASH` in the hand-written `.env`.
-- About 25 Dependabot PRs (2026-09-25 and 2026-10-02) are unreviewed, among them Kotlin 2.4.20,
-  Ktor 3.6.0, the Mongo driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1.
+- The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
+  driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed
+  unmerged on 2026-10-06, and the 2026-10-09 batch on 2026-10-11. Only Testcontainers went in, by hand
+  on 2026-10-12, ahead of CI's move to Docker Engine 29 ([gotchas.md](gotchas.md)).
