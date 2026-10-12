@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-12
 ---
 
 # Production ops and deploy lore
@@ -20,8 +20,11 @@ snippet lists them. The status was 200 when checked on 2026-09-28 and is 404 sin
 
 Log noise after a deploy (seen 2026-09-29): dozens of `WARN` lines are normal and not a regression
 signal. They are PDFBox falling back from Helvetica to LiberationSans (one pair per generated PDF),
-PDFBox rebuilding its font cache once per new container, and `Missing config keys:
-[app.admin.adminPasswordHash]` (password login is off in prod). Count `"level":"ERROR"` instead.
+PDFBox rebuilding its font cache once per new container, and the startup `Missing config keys`
+line. It names `app.admin.adminPasswordHash` (password login is off in prod) and, while Gmail isn't
+configured in `.env` ([agents-automations.md](agents-automations.md)), the three
+`app.google.oauth.*` keys and `app.integrations.encryptionKey` (seen 2026-10-11). Count
+`"level":"ERROR"` instead.
 
 ## Ops gotcha: the VPS's `:latest` is not what is deployed
 
