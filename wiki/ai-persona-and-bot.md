@@ -6,7 +6,7 @@ updated: 2026-10-13
 
 How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
 
-## Chat flows: ManyChat-style menus before the AI (2026-10-13)
+## Chat flows: ManyChat-style menus before the AI (PR #74, shipped 2026-10-13)
 
 Rodrigo asked to copy a ManyChat Instagram flow for a company moving off ManyChat: greeting and
 topic keywords open a menu, buttons lead through sub-menus to a last message with a link. Nothing in
@@ -51,7 +51,7 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
   Ids are lowercase letters, digits, `-` and `_`. Instagram's limits apply: 13 buttons per step,
   titles of 20 characters, texts of 1,000 bytes.
 
-### Edited in the Persona page's Menus tab (2026-10-13)
+### Edited in the Persona page's Menus tab (PR #75, 2026-10-13)
 
 Asked for the same day ("add it as a tab on the Persona page"), so a company edits its own menus.
 `docs/architecture.md` → "Chat flows" has the endpoints and `design-system/patterns.md` → "Persona" the
