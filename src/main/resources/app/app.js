@@ -2725,7 +2725,7 @@ function inboxBubble(m) {
     : author === 'agent' ? inboxAgentLabel(m.agentUserId, m.agentName)
     : author === 'automation' ? m.agentName || '' : '';
   const label = [who, m.kind === 'template' ? tApp('inboxTemplateLabel', { name: m.templateName || '' }) : ''].filter(Boolean).join(' · ');
-  // An agent from the Agents module sent it, not a person or the receptionist AI.
+  // An agent from the Agents module or a chat flow sent it, not a person or the receptionist AI.
   const tag = author === 'automation' ? `<span class="bubble__tag">${escapeHTML(STR.inboxAutomation)}</span>` : '';
   const media = INBOX_MEDIA_KINDS.includes(m.kind) && !m.pending
     ? `<div class="bubble__media-box" data-media="${escapeHTML(m.id)}" data-kind="${escapeHTML(m.kind)}">${mediaBoxHtml(m)}</div>` : '';

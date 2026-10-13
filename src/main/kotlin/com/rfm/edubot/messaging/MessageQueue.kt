@@ -18,6 +18,8 @@ data class InboundMessage(
     val registerOnly: Boolean = false,
     /** Set for photos, voice notes, videos, documents and stickers; [messageText] is then the caption. */
     val media: InboundMedia? = null,
+    /** The payload of the Instagram quick reply the customer tapped; [messageText] is then its title. */
+    val quickReplyPayload: String? = null,
 )
 
 /** [kind] is "image", "audio", "video", "document" or "sticker"; [mediaId] is Meta's id for downloading it. */

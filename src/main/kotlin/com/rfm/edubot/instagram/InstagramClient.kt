@@ -4,6 +4,7 @@ import com.rfm.edubot.channel.ChannelCapabilities
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.OutboundDeliveryException
 import com.rfm.edubot.channel.ProfileLookupClient
+import com.rfm.edubot.channel.QuickReply
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
@@ -29,7 +30,17 @@ private data class InstagramSendMessageRequest(
 private data class InstagramRecipient(val id: String)
 
 @Serializable
-private data class InstagramMessage(val text: String)
+private data class InstagramMessage(
+    val text: String,
+    @kotlinx.serialization.SerialName("quick_replies") val quickReplies: List<InstagramQuickReply>? = null,
+)
+
+@Serializable
+private data class InstagramQuickReply(
+    @kotlinx.serialization.SerialName("content_type") val contentType: String = "text",
+    val title: String,
+    val payload: String,
+)
 
 @Serializable
 private data class InstagramProfile(val name: String? = null, val username: String? = null)
@@ -113,16 +124,16 @@ class InstagramClient(
 
     override val capabilities = ChannelCapabilities(supportsDocuments = false)
 
-    override suspend fun sendText(to: String, text: String) {
+    override suspend fun sendText(to: String, text: String) = send(to, InstagramMessage(text))
+
+    override suspend fun sendQuickReplies(to: String, text: String, replies: List<QuickReply>) =
+        send(to, InstagramMessage(text, replies.map { InstagramQuickReply(title = it.title, payload = it.payload) }.ifEmpty { null }))
+
+    private suspend fun send(to: String, message: InstagramMessage) {
         if (accessToken.isBlank()) {
             throw OutboundDeliveryException("Instagram account $instagramAccountId has no access token")
         }
-        val body = json.encodeToString(
-            InstagramSendMessageRequest(
-                recipient = InstagramRecipient(to),
-                message = InstagramMessage(text),
-            )
-        )
+        val body = json.encodeToString(InstagramSendMessageRequest(recipient = InstagramRecipient(to), message = message))
         val response: HttpResponse = client.post("$baseUrl/messages") {
             header("Authorization", "Bearer $accessToken")
             header("Content-Type", "application/json")

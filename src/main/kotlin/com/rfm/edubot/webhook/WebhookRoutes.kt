@@ -209,6 +209,7 @@ private suspend fun handleInstagramWebhook(
                 timestamp = entry.time?.toString().orEmpty(),
                 eventId = mid,
                 registerOnly = message.isSelf,
+                quickReplyPayload = message.quickReply?.payload,
             )
             if (deduplicationService.isDuplicate(mid, body, tenant.id, inbound)) {
                 log.debug("Skipping duplicate Instagram message: mid={}", mid)

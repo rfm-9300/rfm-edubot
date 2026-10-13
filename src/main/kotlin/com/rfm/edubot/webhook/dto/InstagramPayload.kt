@@ -66,7 +66,12 @@ data class InstagramMessage(
     val text: String? = null,
     @SerialName("is_echo") val isEcho: Boolean = false,
     @SerialName("is_self") val isSelf: Boolean = false,
+    /** Set when the customer tapped a quick reply; [text] is then that reply's title. */
+    @SerialName("quick_reply") val quickReply: InstagramQuickReply? = null,
 )
+
+@Serializable
+data class InstagramQuickReply(val payload: String? = null)
 
 @Serializable
 data class InstagramRead(val mid: String? = null)

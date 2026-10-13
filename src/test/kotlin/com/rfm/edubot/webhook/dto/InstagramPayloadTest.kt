@@ -46,4 +46,15 @@ class InstagramPayloadTest {
         assertEquals("Hello", event.message!!.text)
         assertTrue(payload.entry.single().commentEvents.isEmpty())
     }
+
+    @Test
+    fun `a tapped quick reply carries its payload beside the reply's title`() {
+        val payload = json.decodeFromString<InstagramPayload>(
+            """{"object":"instagram","entry":[{"id":"account-id","messaging":[{"sender":{"id":"user-1"},"recipient":{"id":"account-id"},"message":{"mid":"mid-1","text":"Unhas","quick_reply":{"payload":"flow:servicos:unhas"}}}]}]}"""
+        )
+
+        val message = payload.entry.single().events.single().message!!
+        assertEquals("Unhas", message.text)
+        assertEquals("flow:servicos:unhas", message.quickReply?.payload)
+    }
 }

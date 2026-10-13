@@ -7,6 +7,8 @@ import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.channel.ChannelCapabilities
 import com.rfm.edubot.channel.OutboundClient
+import com.rfm.edubot.channel.OutboundDeliveryException
+import com.rfm.edubot.channel.QuickReply
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
@@ -25,6 +27,11 @@ import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
+import com.rfm.edubot.flows.ChatFlow
+import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.ChatFlows
+import com.rfm.edubot.flows.FlowButton
+import com.rfm.edubot.flows.FlowStep
 import com.rfm.edubot.ratelimit.RateDecision
 import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.tenant.model.Platform
@@ -33,6 +40,7 @@ import io.mockk.coEvery
 import io.mockk.coVerify
 import io.mockk.every
 import io.mockk.mockk
+import io.mockk.verify
 import kotlinx.coroutines.runBlocking
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.buildJsonObject
@@ -523,5 +531,140 @@ class MessagePipelineTest {
         coVerify(exactly = 1) { responder.sendText(u.waId, "Oi!") }
         coVerify(exactly = 1) { tenantUsage.recordUsage(150L) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    private val menuFlow = ChatFlow(
+        id = "servicos",
+        name = "Menu de serviços",
+        channels = setOf(Platform.INSTAGRAM),
+        keywords = listOf("Olá"),
+        steps = listOf(
+            FlowStep("menu", "Qual dos serviços lhe interessa?", listOf(FlowButton("Unhas", "contacto"), FlowButton("Pele", "contacto"))),
+            FlowStep("contacto", "Fale com a nossa equipa"),
+        ),
+    )
+
+    private fun instagram(text: String, payload: String? = null) = inbound(text).copy(platform = Platform.INSTAGRAM, quickReplyPayload = payload)
+
+    private fun pipelineWith(flows: ChatFlows?): MessagePipeline {
+        val chatFlows = mockk<ChatFlowRepository>()
+        coEvery { chatFlows.find() } returns flows
+        return MessagePipeline(
+            users = users,
+            conversations = conversations,
+            messages = messages,
+            rateLimiter = rateLimiter,
+            aiClient = aiClient,
+            deduplicationService = deduplicationService,
+            crmTools = crmTools,
+            clientRepository = clientRepository,
+            quoteRepository = quoteRepository,
+            invoiceRepository = invoiceRepository,
+            pdfGenerator = pdfGenerator,
+            chatFlows = chatFlows,
+        )
+    }
+
+    /** A new customer whose chat the pipeline creates, and who is under the rate limit. */
+    private fun newCustomer(): Pair<User, Conversation> {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        coEvery { conversations.findByWaId(any(), any()) } returns null
+        val convo = conversation(u.id)
+        coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
+        every { rateLimiter.tryAcquire(any()) } returns RateDecision.Accept
+        return u to convo
+    }
+
+    @Test
+    fun `a keyword starts a chat flow, which answers with quick replies instead of the AI`() = runBlocking {
+        val (u, convo) = newCustomer()
+        coEvery { responder.sendQuickReplies(any(), any(), any()) } returns Unit
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insert(capture(stored)) } answers { firstArg() }
+
+        pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Olá, bom dia"), responder)
+
+        coVerify(exactly = 1) {
+            responder.sendQuickReplies(
+                u.waId,
+                "Qual dos serviços lhe interessa?",
+                listOf(QuickReply("Unhas", "flow:servicos:contacto"), QuickReply("Pele", "flow:servicos:contacto")),
+            )
+        }
+        coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { conversations.recordInbound(convo.id, any()) }
+        val reply = stored.single()
+        assertEquals(MessageAuthor.AUTOMATION, reply.author)
+        assertEquals("Menu de serviços", reply.agentName)
+        assertEquals("flow:servicos", reply.origin)
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    @Test
+    fun `a tapped quick reply moves the customer to its step, and a step without buttons goes as plain text`() = runBlocking {
+        val (u, _) = newCustomer()
+
+        pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Unhas", payload = "flow:servicos:contacto"), responder)
+
+        coVerify(exactly = 1) { responder.sendText(u.waId, "Fale com a nossa equipa") }
+        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any()) }
+        coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    @Test
+    fun `on a team-only channel, a message no flow answers waits for the team`() = runBlocking {
+        val (_, convo) = newCustomer()
+
+        pipelineWith(ChatFlows(listOf(menuFlow), teamOnlyChannels = setOf(Platform.INSTAGRAM))).handle(instagram("Têm vaga no sábado?"), responder)
+
+        coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
+        coVerify(exactly = 1) { conversations.recordInbound(convo.id, any()) }
+        verify(exactly = 0) { rateLimiter.tryAcquire(any()) }
+        coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
+        coVerify(exactly = 0) { responder.sendText(any(), any()) }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    @Test
+    fun `without team-only channels, a message no flow answers still gets the AI`() = runBlocking {
+        val (u, _) = newCustomer()
+        coEvery { aiClient.complete(any(), any(), any(), any()) } returns
+            AiResponse.Text(content = "Olá! Em que posso ajudar?", usage = null, responseId = "resp-1")
+
+        pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Têm vaga no sábado?"), responder)
+
+        coVerify(exactly = 1) { responder.sendText(u.waId, "Olá! Em que posso ajudar?") }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    @Test
+    fun `a conversation a person took over gets no chat flow either`() = runBlocking {
+        val u = user()
+        coEvery { users.findOrCreate(any(), any(), any()) } returns u
+        coEvery { conversations.findByWaId(any(), any()) } returns conversation(u.id, autoReplyEnabled = false)
+
+        pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Olá"), responder)
+
+        coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
+        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any()) }
+        coVerify(exactly = 0) { responder.sendText(any(), any()) }
+        coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
+    }
+
+    @Test
+    fun `a flow reply Instagram refuses is stored as failed, and the event is marked failed`() = runBlocking {
+        newCustomer()
+        val stored = mutableListOf<Message>()
+        coEvery { messages.insert(capture(stored)) } answers { firstArg() }
+        coEvery { messages.markSendFailed(any(), any(), any()) } returns null
+        coEvery { responder.sendQuickReplies(any(), any(), any()) } throws OutboundDeliveryException("Instagram API error: 400")
+
+        pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Olá"), responder)
+
+        coVerify(exactly = 1) { messages.markSendFailed(stored.single().id, null, "Instagram API error: 400") }
+        coVerify(exactly = 1) { deduplicationService.markFailed("evt-1") }
+        coVerify(exactly = 0) { deduplicationService.markProcessed(any()) }
     }
 }

@@ -19,6 +19,7 @@ import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.messaging.MessagePipeline
 import com.rfm.edubot.notifications.NotificationAudience
 import com.rfm.edubot.notifications.NotificationKinds
@@ -104,6 +105,7 @@ class TenantPipelineFactory(
             documentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name),
             openrouterModel = tenant.openrouterModel,
             persona = persona,
+            chatFlows = ChatFlowRepository(mongo, tenant.id),
             enabledModules = modules,
             tenantUsage = TenantUsageRepository(mongo, tenant.id),
             monthlyTokenBudget = tenant.monthlyTokenBudget,

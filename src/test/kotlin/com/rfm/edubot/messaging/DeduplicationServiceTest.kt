@@ -157,6 +157,16 @@ class DeduplicationServiceTest {
     }
 
     @Test
+    fun `a queued quick reply tap keeps its payload after a restart`() = runBlocking {
+        val service = freshService()
+        val tap = queued("evt-tap").copy(registerOnly = false, messageText = "Unhas", quickReplyPayload = "flow:servicos:unhas")
+        service.isDuplicate(tap.eventId, "{}", tap.tenantId, tap)
+
+        val now = Clock.System.now()
+        assertEquals(listOf(tap), service.unprocessedInbound(now - 1.minutes, now + 1.minutes))
+    }
+
+    @Test
     fun `finished events, events with no queued message, and events outside the window are not re-queued`() = runBlocking {
         val service = freshService()
         val processed = queued("evt-processed")
