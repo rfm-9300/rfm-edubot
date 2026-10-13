@@ -392,6 +392,7 @@ More variants keep the channels' bare inputs with `aria-label`s, without a catal
 
 - `.lines--services`: a supplier's usual services, as description, unit, usual price and `.l-rm`. On phones the description takes its own row, like `.line__desc`.
 - `.lines--breaks`: a shift's breaks in the Timesheets correction form, as from and to (`input type="time"`) and `.l-rm`, left-aligned headings, same columns on phones.
+- `.lines--replies`: a Persona menu message's buttons, as title (a bare `input` with the 20-character `maxlength`) and "Leads to" (a flush `.sel` of the menu's messages plus "New message…") and `.l-rm`; same grid as `.lines--breaks`. Its foot holds "Add button" and the count; an empty list says the menu ends there.
 - `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
 
 ```html
@@ -586,7 +587,7 @@ User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert
 ```html
 <div class="persona-studio">
   <div class="persona-studio__main">
-    <div class="settings-tabs" role="tablist">…Behavior · Knowledge · Instructions · History…</div>
+    <div class="settings-tabs" role="tablist">…Behavior · Knowledge · Instructions · Menus · History…</div>
     <div class="persona-studio__pane" role="tabpanel"><!-- panels --></div>
   </div>
   <aside class="persona-studio__test">

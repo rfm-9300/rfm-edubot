@@ -1082,7 +1082,8 @@ How a company's bot talks to its customers, edited under **Persona** in `/app` (
 It has two parts, both injected into every customer chat: **settings** the company picks (bot
 name, language and whether to hold it, tone, form of address, reply length, emoji, greeting, rules,
 handoff) and **instructions**, free text that the synthesis writes from the company's sources
-(typed notes, uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand.
+(typed notes, uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand. Its
+Menus tab edits the [chat flows](#chat-flows) that answer Instagram before the AI.
 Code: `persona/` (`PersonaRepository`, `PersonaCompiler`, `PersonaPrompt`, `PersonaValidation`,
 `PersonaFileExtractor`) and `dashboard/PersonaRoutes.kt`.
 
@@ -1147,10 +1148,25 @@ flowchart LR
 
 Fixed messages with quick replies that answer customers before the AI, the way ManyChat keyword
 automations do: a keyword opens a menu, and each tap leads to the next step. Code: `flows/`
-(`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline` and
-`InstagramClient.sendQuickReplies`. There is no editor yet. A company's flows are one `chat_flows`
-document written by hand ([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape),
-read on every message, so a change applies without a restart.
+(`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline`,
+`InstagramClient.sendQuickReplies`, and the Persona page's **Menus** tab (`dashboard/PersonaMenus.kt`,
+`app.js`). A company's flows are one `chat_flows` document
+([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape), read on every message,
+so a saved change applies at once.
+
+- **Editing.** `GET /app/api/persona/menus` (anyone with the `persona` module) returns every
+  readable flow, problems included (`ChatFlowRepository.load`), so a flow that can't run is shown and
+  fixed rather than dropped by the next save; the pipeline reads `find`, which leaves such flows out.
+  `PUT` (admins and operators) trims the input, drops blank and repeated keywords, puts every flow on
+  Instagram and checks `ChatFlows.saveProblem()`: the tab's limits (10 menus, 30 messages, 50 keywords
+  of 60 characters, names of 60), then `ChatFlow.problems()`. A refusal is
+  `400 {error: "menu_problem", problem, menu, step, limit}`, positions in what was sent; the tab
+  checks the same rules in the same order before sending, with the same wording.
+- **Test chat.** `POST /app/api/persona/test` runs the menus before the AI, through the same
+  `replyTo`, with the tab's unsaved menus when it sends them (`flows`) and a tapped button's `payload`.
+  A menu reply returns its text, `menu` and `quickReplies` without calling the model; an AI reply says
+  `teamOnly` when Instagram would leave that message for the team. Unsaved menus with a problem
+  answer `menu_problem` like a save.
 
 ```mermaid
 flowchart TD

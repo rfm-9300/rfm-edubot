@@ -27,7 +27,7 @@ let state = {
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
   settingsSection: 'channels', overviewLayout: null, overviewExtended: false,
   // Persona page: the open tab, unsaved edits ({ behavior, compiledInstructions }, either may be absent) and the history list.
-  personaTab: 'behavior', personaDraft: {}, personaVersions: null, personaPreview: null,
+  personaTab: 'behavior', personaDraft: {}, personaVersions: null, personaPreview: null, personaFlows: null,
   whatsAppSignup: { enabled: false },
   // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
   integrations: null, email: null,
@@ -1124,7 +1124,10 @@ async function loadModule(tab) {
     if (hasModule('payments')) state.fetched.payments = true;
   }
   if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
-  if (tab === 'persona') state.persona = await api('/app/api/persona');
+  if (tab === 'persona') {
+    state.persona = await api('/app/api/persona');
+    if (state.personaTab === 'menus') await loadPersonaMenus().catch(() => { state.personaFlows = { failed: true }; });
+  }
   if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
@@ -7250,7 +7253,7 @@ function renderCatalog(root) {
 // unsaved edits (state.personaDraft) so a change can be tried before it reaches customers.
 const PS = I18N.section('app.personaStudio');
 const ps = (key, params) => I18N.t(`app.personaStudio.${key}`, params);
-const PERSONA_TABS = ['behavior', 'knowledge', 'instructions', 'history'];
+const PERSONA_TABS = ['behavior', 'knowledge', 'instructions', 'menus', 'history'];
 const PERSONA_OPTIONS = {
   tone: ['FRIENDLY', 'PROFESSIONAL', 'FORMAL', 'CASUAL', 'EMPATHETIC'],
   addressForm: ['INFORMAL', 'FORMAL'],
@@ -7368,6 +7371,7 @@ function personaNotices(p) {
 function personaPane(tab, p) {
   if (tab === 'knowledge') return personaKnowledgePane(p);
   if (tab === 'instructions') return personaInstructionsPane(p);
+  if (tab === 'menus') return personaMenusPane(p);
   if (tab === 'history') return personaHistoryPane(p);
   return personaBehaviorPane(p);
 }
@@ -7553,6 +7557,397 @@ function personaHistoryPane(p) {
     </section>`;
 }
 
+// ── Persona → Menus: fixed messages with buttons that answer Instagram before the AI ──
+// The server's chat flows (`/app/api/persona/menus`). Unsaved edits live in state.personaDraft.menus, a
+// copy of the saved menus taken on the first edit, so Discard goes back and the test chat can try them.
+const PM = I18N.section('app.personaStudio.menus');
+const pm = (key, params) => I18N.t(`app.personaStudio.menus.${key}`, params);
+const utf8Bytes = text => new TextEncoder().encode(text || '').length;
+/** A keyword as the server matches it: lowercase words without accents or punctuation. */
+const menuWords = text => (text || '').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const menuNewId = prefix => `${prefix}-${Math.random().toString(36).slice(2, 8)}`;
+
+async function loadPersonaMenus() {
+  state.personaFlows = await api('/app/api/persona/menus');
+}
+
+/** The menus as they stand: the unsaved draft, else the saved ones. */
+function personaMenus() {
+  return state.personaDraft?.menus || { flows: state.personaFlows?.flows || [], teamOnlyChannels: state.personaFlows?.teamOnlyChannels || [] };
+}
+
+/** The draft to change, started as a copy of the saved menus. */
+function editPersonaMenus() {
+  if (!state.personaDraft.menus) state.personaDraft.menus = JSON.parse(JSON.stringify(personaMenus()));
+  return state.personaDraft.menus;
+}
+
+/** Keyword lines as the server keeps them: trimmed, without blanks or repeats. */
+function menuKeywords(lines = []) {
+  const seen = new Set();
+  return lines.map(k => k.trim()).filter(k => {
+    const words = menuWords(k);
+    if (!words || seen.has(words)) return false;
+    seen.add(words);
+    return true;
+  });
+}
+
+function personaMenusPayload(m) {
+  return {
+    flows: (m.flows || []).map(f => ({
+      id: f.id,
+      name: (f.name || '').trim(),
+      enabled: !!f.enabled,
+      keywords: menuKeywords(f.keywords),
+      steps: (f.steps || []).map(s => ({ id: s.id, text: (s.text || '').trim(), buttons: (s.buttons || []).map(b => ({ title: (b.title || '').trim(), next: b.next || '' })) })),
+    })),
+    teamOnlyChannels: [...(m.teamOnlyChannels || [])].sort(),
+  };
+}
+
+/** Drops the draft once it matches the saved menus again, so an edit undone by hand isn't left "unsaved". */
+function settlePersonaMenus() {
+  const saved = { flows: state.personaFlows?.flows || [], teamOnlyChannels: state.personaFlows?.teamOnlyChannels || [] };
+  const draft = state.personaDraft.menus;
+  if (draft && JSON.stringify(personaMenusPayload(draft)) === JSON.stringify(personaMenusPayload(saved))) delete state.personaDraft.menus;
+  paintPersonaDraft();
+}
+
+/** The first reason the menus can't be saved, in the server's order and with its codes. */
+function personaMenusProblem(m, limits = {}) {
+  const flows = m.flows || [];
+  if (flows.length > limits.menus) return { problem: 'menus', limit: limits.menus };
+  for (const [menu, f] of flows.entries()) {
+    const name = (f.name || '').trim();
+    if (!name || name.length > limits.nameChars) return { problem: 'name', menu, limit: limits.nameChars };
+    const keywords = menuKeywords(f.keywords);
+    if (keywords.length > limits.keywords) return { problem: 'keywords_limit', menu, limit: limits.keywords };
+    if (keywords.some(k => k.length > limits.keywordChars)) return { problem: 'keyword', menu, limit: limits.keywordChars };
+    const steps = f.steps || [];
+    if (steps.length > limits.steps) return { problem: 'steps_limit', menu, limit: limits.steps };
+    if (!keywords.length) return { problem: 'keywords', menu };
+    if (!steps.length) return { problem: 'steps', menu };
+    const ids = steps.map(s => s.id);
+    for (const [step, s] of steps.entries()) {
+      const text = (s.text || '').trim();
+      const buttons = s.buttons || [];
+      if (!text || utf8Bytes(text) > limits.textBytes) return { problem: 'text', menu, step, limit: limits.textBytes };
+      if (buttons.length > limits.buttons) return { problem: 'buttons', menu, step, limit: limits.buttons };
+      if (buttons.some(b => !personaMenuTitleOk(b.title, limits))) return { problem: 'title', menu, step, limit: limits.titleChars };
+      if (buttons.some(b => !ids.includes(b.next))) return { problem: 'next', menu, step };
+    }
+  }
+  return null;
+}
+const personaMenuTitleOk = (title, limits) => { const t = (title || '').trim(); return !!t && t.length <= limits.titleChars; };
+
+/** "Menu name, message 2: …" for a problem found here or by the server (`menu_problem`). */
+function personaMenusErrorText(problem = {}, m = personaMenus()) {
+  const flow = (m.flows || [])[problem.menu];
+  const menu = flow ? (flow.name || '').trim() || pm('defaultName', { n: problem.menu + 1 }) : '';
+  const key = `app.personaStudio.menus.errors.${problem.problem}`;
+  const text = I18N.t(key, { menu, step: problem.step != null ? problem.step + 1 : '', limit: problem.limit != null ? fmtCount(problem.limit) : '' });
+  return text === key ? PS.errorGeneric : text;
+}
+
+/** Scrolls to the field a problem is about and puts the cursor in it. */
+function focusPersonaMenuProblem(problem, limits) {
+  if (problem?.menu == null) return;
+  const base = `pm-${problem.menu}`;
+  const card = problem.step != null ? `${base}-${problem.step}` : null;
+  const pick = selector => $$(selector);
+  const el = {
+    name: () => $(`#${base}-name`),
+    keywords: () => $(`#${base}-keywords`),
+    keywords_limit: () => $(`#${base}-keywords`),
+    keyword: () => $(`#${base}-keywords`),
+    text: () => card && $(`#${card}-text`),
+    title: () => card && pick(`#${card} [data-button-field="title"]`).find(i => !personaMenuTitleOk(i.value, limits)),
+    next: () => card && pick(`#${card} [data-button-field="next"]`).find(s => !s.value),
+    buttons: () => card && $(`#${card}`),
+  }[problem.problem]?.();
+  if (!el) return;
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  if (typeof el.focus === 'function') el.focus({ preventScroll: true });
+}
+
+function personaMenuTargetLabel(step, n) {
+  const line = (step.text || '').split('\n').map(t => t.trim()).find(Boolean) || '';
+  const short = line.length > 40 ? `${line.slice(0, 39).trimEnd()}…` : line;
+  return short ? `${n} · ${short}` : pm('message', { n });
+}
+
+function personaMenuTargets(steps, current, edit) {
+  const known = steps.some(s => s.id === current);
+  return `${known ? '' : `<option value="" selected>${escapeHTML(PM.pickMessage)}</option>`}${steps.map((s, n) => `<option value="${escapeHTML(s.id)}"${s.id === current ? ' selected' : ''}>${escapeHTML(personaMenuTargetLabel(s, n + 1))}</option>`).join('')}${edit ? `<option value="__new">${escapeHTML(PM.newMessage)}</option>` : ''}`;
+}
+
+/** Instagram's limit is in bytes, so the counter only shows once a message gets close to it. */
+function personaMenuSizeHint(text, limits) {
+  const max = limits.textBytes || 1000;
+  const n = utf8Bytes((text || '').trim());
+  const tone = n > max ? ' hint--bad' : n > max * 0.8 ? ' hint--warn' : '';
+  return { cls: `hint${tone}`, show: !!tone, text: pm('textSize', { n: fmtCount(n), max: fmtCount(max) }) };
+}
+
+function personaMenuStep(flow, i, step, j, limits, edit) {
+  const off = edit ? '' : ' disabled';
+  const id = `pm-${i}-${j}`;
+  const steps = flow.steps;
+  const linked = j === 0 || steps.some(s => (s.buttons || []).some(b => b.next === step.id));
+  const summary = j === 0 ? `<span class="flow__card-summary muted">${escapeHTML(PM.first)}</span>`
+    : `<span class="flow__card-summary">${linked ? '' : `<span class="pill pill--warn">${escapeHTML(PM.unlinked)}</span>`}</span>`;
+  const tools = edit ? `<span class="flow__card-tools">
+      <button class="iconbtn" type="button" data-step-up="${i}:${j}"${j ? '' : ' disabled'} aria-label="${escapeHTML(PM.moveUp)}">↑</button>
+      <button class="iconbtn" type="button" data-step-down="${i}:${j}"${j < steps.length - 1 ? '' : ' disabled'} aria-label="${escapeHTML(PM.moveDown)}">↓</button>
+      <button class="iconbtn" type="button" data-step-remove="${i}:${j}"${steps.length > 1 ? '' : ' disabled'} aria-label="${escapeHTML(PM.removeMessage)}">×</button>
+    </span>` : '';
+  const buttons = step.buttons || [];
+  const rows = buttons.map((b, k) => `<div class="line">
+      <input id="${id}-b${k}" data-button-field="title" data-at="${i}:${j}:${k}" maxlength="${limits.titleChars || 20}" value="${escapeHTML(b.title || '')}" aria-label="${escapeHTML(PM.buttonAria)}"${off} />
+      <select class="sel" id="${id}-n${k}" data-button-field="next" data-at="${i}:${j}:${k}" aria-label="${escapeHTML(PM.leadsToAria)}"${off}>${personaMenuTargets(steps, b.next, edit)}</select>
+      ${edit ? `<button class="l-rm" type="button" data-button-remove="${i}:${j}:${k}" aria-label="${escapeHTML(PM.removeButton)}">×</button>` : '<span></span>'}
+    </div>`).join('');
+  const addButton = edit && buttons.length < (limits.buttons || 13)
+    ? `<button type="button" class="btn btn--sm btn--ghost" data-button-add="${i}:${j}"><span class="btn__plus">+</span> ${escapeHTML(PM.addButton)}</button>` : '<span></span>';
+  const size = personaMenuSizeHint(step.text, limits);
+  return `${j ? '<div class="flow__connector" aria-hidden="true"></div>' : ''}<div class="flow__card" id="${id}">
+      <div class="flow__card-head"><span class="flow__index">${j + 1}</span><span class="flow__title">${escapeHTML(pm('message', { n: j + 1 }))}</span>${summary}${tools}</div>
+      <div class="form__row form__row--full"><label class="visually-hidden" for="${id}-text">${escapeHTML(PM.textLabel)}</label>
+        <textarea class="txt" id="${id}-text" data-step-field="text" data-at="${i}:${j}" rows="3" placeholder="${escapeHTML(PM.textPh)}"${off}>${escapeHTML(step.text || '')}</textarea>
+        <p class="${size.cls}" data-step-size${size.show ? '' : ' hidden'}>${escapeHTML(size.text)}</p></div>
+      <div class="lines lines--replies">
+        <div class="lines__head"><span>${escapeHTML(PM.thButton)}</span><span>${escapeHTML(PM.thLeadsTo)}</span><span></span></div>
+        ${rows}
+        <p class="lines__empty"${buttons.length ? ' hidden' : ''}>${escapeHTML(PM.noButtons)}</p>
+        <div class="lines__foot">${addButton}<span class="hint">${escapeHTML(pm('buttonsCount', { n: fmtCount(buttons.length), max: fmtCount(limits.buttons || 13), chars: fmtCount(limits.titleChars || 20) }))}</span></div>
+      </div>
+    </div>`;
+}
+
+function personaMenuPanel(flow, i, limits, edit) {
+  const off = edit ? '' : ' disabled';
+  const id = `pm-${i}`;
+  const steps = flow.steps || [];
+  const tools = edit ? `<div class="panel__tools"><button type="button" class="btn btn--sm btn--ghost" data-menu-remove="${i}">${escapeHTML(PM.remove)}</button></div>` : '';
+  const addStep = edit && steps.length < (limits.steps || 30)
+    ? `<div><button type="button" class="btn btn--sm btn--ghost" data-step-add="${i}"><span class="btn__plus">+</span> ${escapeHTML(PM.addMessage)}</button></div>` : '';
+  return `<section class="panel" data-menu="${i}">
+    <header class="panel__head"><h2 class="panel__title" data-menu-title="${i}">${escapeHTML((flow.name || '').trim() || pm('defaultName', { n: i + 1 }))}</h2><span class="pill${flow.enabled ? ' pill--ok' : ''}" data-menu-pill="${i}">${escapeHTML(flow.enabled ? PM.on : PM.off)}</span>${tools}</header>
+    <div class="panel__body form">
+      <div class="form__grid">
+        <div class="form__row"><label class="lbl" for="${id}-name">${escapeHTML(PM.name)}</label>
+          <input class="inp" id="${id}-name" data-menu-field="name" maxlength="${limits.nameChars || 60}" autocomplete="off" value="${escapeHTML(flow.name || '')}"${off} />
+          <p class="hint">${escapeHTML(PM.nameHint)}</p></div>
+        <div class="form__row"><span class="lbl">${escapeHTML(PM.state)}</span>
+          <label class="form__check"><input type="checkbox" id="${id}-enabled" data-menu-field="enabled"${flow.enabled ? ' checked' : ''}${off} /> ${escapeHTML(PM.enabled)}</label></div>
+        <div class="form__row form__row--full"><label class="lbl" for="${id}-keywords">${escapeHTML(PM.keywords)}</label>
+          <textarea class="txt" id="${id}-keywords" data-menu-field="keywords" rows="4" placeholder="${escapeHTML(PM.keywordsPh)}"${off}>${escapeHTML((flow.keywords || []).join('\n'))}</textarea>
+          <p class="hint">${escapeHTML(pm('keywordsHint', { max: fmtCount(limits.keywords || 50) }))}</p></div>
+      </div>
+      <div class="form__row form__row--full"><span class="lbl">${escapeHTML(PM.messages)}</span><p class="hint">${escapeHTML(PM.messagesHint)}</p></div>
+      <div class="flow flow--edit">${steps.map((step, j) => personaMenuStep(flow, i, step, j, limits, edit)).join('')}</div>
+      ${addStep}
+    </div>
+  </section>`;
+}
+
+function personaMenusPane(p) {
+  const saved = state.personaFlows;
+  if (!saved) return `<section class="panel"><div class="panel__body"><p class="hint">${escapeHTML(PM.loading)}</p></div></section>`;
+  if (saved.failed) {
+    return `<section class="panel"><div class="panel__body"><div class="empty"><p class="empty__title">${escapeHTML(PM.loadFailed)}</p>
+      <div class="empty__actions"><button type="button" class="btn btn--sm" data-menus-retry>${escapeHTML(PS.retry)}</button></div></div></div></section>`;
+  }
+  const { flows, teamOnlyChannels } = personaMenus();
+  const limits = saved.limits || {};
+  const edit = !!saved.canEdit && p.canEdit !== false;
+  const teamOnly = (teamOnlyChannels || []).includes('INSTAGRAM');
+  const notice = saved.instagramConnected ? '' : personaNotice('info', PM.igMissingTitle, PM.igMissingDesc,
+    `<div class="notice__actions"><button type="button" class="btn btn--sm" data-menus-settings>${escapeHTML(PM.openSettings)}</button></div>`);
+  // Menus written outside the dashboard have no author: the support team wrote them.
+  const meta = saved.updatedAt ? `<span class="panel__meta">${escapeHTML(pm('savedBy', { when: relTime(saved.updatedAt), who: personaAuthor(saved.updatedBy || 'operator') }))}</span>` : '';
+  const intro = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PM.title)} <span class="tag">${fmtCount(flows.length)}</span></h2>${meta}</header>
+      <div class="panel__body form">
+        <p class="hint">${escapeHTML(PM.intro)} ${escapeHTML(PM.desktopHint)}</p>
+        <div class="form__row"><label class="lbl" for="pm-fallback">${escapeHTML(PM.fallbackLabel)}</label>
+          <select class="sel" id="pm-fallback"${edit ? '' : ' disabled'}><option value="ai"${teamOnly ? '' : ' selected'}>${escapeHTML(PM.fallbackAi)}</option><option value="team"${teamOnly ? ' selected' : ''}>${escapeHTML(PM.fallbackTeam)}</option></select>
+          <p class="hint">${escapeHTML(PM.fallbackHint)}</p></div>
+      </div>
+    </section>`;
+  const empty = flows.length ? '' : `<section class="panel"><div class="panel__body"><div class="empty"><p class="empty__title">${escapeHTML(PM.emptyTitle)}</p><p class="empty__desc">${escapeHTML(PM.emptyDesc)}</p>
+      ${edit ? `<div class="empty__actions"><button type="button" class="btn btn--primary" data-menu-add><span class="btn__plus">+</span> ${escapeHTML(PM.add)}</button></div>` : ''}</div></div></section>`;
+  const add = edit && flows.length && flows.length < (limits.menus || 10)
+    ? `<div><button type="button" class="btn btn--ghost" data-menu-add><span class="btn__plus">+</span> ${escapeHTML(PM.add)}</button></div>` : '';
+  const actions = edit ? `<div class="actions"><button class="btn btn--primary" type="submit" data-pm-save>${escapeHTML(PM.save)}</button><button class="btn btn--ghost" type="button" data-pm-discard${state.personaDraft?.menus ? '' : ' disabled'}>${escapeHTML(PS.discard)}</button></div>` : '';
+  return `${notice}<form class="form" id="persona-menus-form" novalidate>${intro}${empty}${flows.map((f, i) => personaMenuPanel(f, i, limits, edit)).join('')}${add}${actions}</form>`;
+}
+
+function wirePersonaMenus(root) {
+  $('[data-menus-settings]', root)?.addEventListener('click', async () => {
+    state.settingsSection = 'channels';
+    await setActive('settings');
+  });
+  $('[data-menus-retry]', root)?.addEventListener('click', async () => {
+    state.personaFlows = null;
+    render();
+    await loadPersonaMenus().catch(err => { personaFail(err); state.personaFlows = { failed: true }; });
+    render();
+  });
+  const form = $('#persona-menus-form', root);
+  const saved = state.personaFlows;
+  if (!form || !saved?.canEdit) return;
+  const limits = saved.limits || {};
+  const at = el => (el.dataset.at || '').split(':').map(Number);
+  const menuOf = el => Number(el.closest('[data-menu]')?.dataset.menu);
+  const redraw = focusId => {
+    render();
+    if (focusId) document.getElementById(focusId)?.focus();
+  };
+
+  form.addEventListener('input', e => {
+    const el = e.target;
+    if (el.dataset.menuField === 'name') {
+      const i = menuOf(el);
+      editPersonaMenus().flows[i].name = el.value;
+      const title = $(`[data-menu-title="${i}"]`, form);
+      if (title) title.textContent = el.value.trim() || pm('defaultName', { n: i + 1 });
+    } else if (el.dataset.menuField === 'keywords') {
+      editPersonaMenus().flows[menuOf(el)].keywords = el.value.split('\n');
+    } else if (el.dataset.stepField === 'text') {
+      const [i, j] = at(el);
+      const step = editPersonaMenus().flows[i].steps[j];
+      step.text = el.value;
+      const size = $(`#pm-${i}-${j} [data-step-size]`, form);
+      const hint = personaMenuSizeHint(el.value, limits);
+      if (size) { size.className = hint.cls; size.hidden = !hint.show; size.textContent = hint.text; }
+      $$(`[data-menu="${i}"] option[value="${CSS.escape(step.id)}"]`, form).forEach(o => { o.textContent = personaMenuTargetLabel(step, j + 1); });
+    } else if (el.dataset.buttonField === 'title') {
+      const [i, j, k] = at(el);
+      editPersonaMenus().flows[i].steps[j].buttons[k].title = el.value;
+    } else {
+      return;
+    }
+    settlePersonaMenus();
+  });
+
+  form.addEventListener('change', e => {
+    const el = e.target;
+    if (el.id === 'pm-fallback') {
+      const m = editPersonaMenus();
+      const others = (m.teamOnlyChannels || []).filter(c => c !== 'INSTAGRAM');
+      m.teamOnlyChannels = el.value === 'team' ? [...others, 'INSTAGRAM'] : others;
+    } else if (el.dataset.menuField === 'enabled') {
+      const i = menuOf(el);
+      editPersonaMenus().flows[i].enabled = el.checked;
+      const pill = $(`[data-menu-pill="${i}"]`, form);
+      if (pill) { pill.textContent = el.checked ? PM.on : PM.off; pill.classList.toggle('pill--ok', el.checked); }
+    } else if (el.dataset.buttonField === 'next') {
+      const [i, j, k] = at(el);
+      const flow = editPersonaMenus().flows[i];
+      if (el.value === '__new') {
+        const step = { id: menuNewId('msg'), text: '', buttons: [] };
+        flow.steps.push(step);
+        flow.steps[j].buttons[k].next = step.id;
+        settlePersonaMenus();
+        return redraw(`pm-${i}-${flow.steps.length - 1}-text`);
+      }
+      flow.steps[j].buttons[k].next = el.value;
+      settlePersonaMenus();
+      // Redrawn so "No button leads here" and the "Choose a message" placeholder follow the pick.
+      return renderKeepingFocus();
+    } else {
+      return;
+    }
+    settlePersonaMenus();
+  });
+
+  form.addEventListener('click', async e => {
+    const b = e.target.closest('button');
+    if (!b || !form.contains(b)) return;
+    const d = b.dataset;
+    if (d.menuAdd != null) {
+      const m = editPersonaMenus();
+      m.flows.push({ id: menuNewId('menu'), name: pm('defaultName', { n: m.flows.length + 1 }), enabled: true, keywords: [], steps: [{ id: menuNewId('msg'), text: '', buttons: [] }] });
+      settlePersonaMenus();
+      return redraw(`pm-${m.flows.length - 1}-keywords`);
+    }
+    if (d.menuRemove != null) {
+      const i = Number(d.menuRemove);
+      const name = (personaMenus().flows[i]?.name || '').trim() || pm('defaultName', { n: i + 1 });
+      if (!(await confirmDialog({ title: pm('removeTitle', { name }), body: PM.removeBody, okLabel: PM.remove }))) return;
+      editPersonaMenus().flows.splice(i, 1);
+      settlePersonaMenus();
+      return redraw();
+    }
+    if (d.stepAdd != null) {
+      const i = Number(d.stepAdd);
+      const steps = editPersonaMenus().flows[i].steps;
+      steps.push({ id: menuNewId('msg'), text: '', buttons: [] });
+      settlePersonaMenus();
+      return redraw(`pm-${i}-${steps.length - 1}-text`);
+    }
+    if (d.stepUp != null || d.stepDown != null) {
+      const [i, j] = (d.stepUp ?? d.stepDown).split(':').map(Number);
+      const to = d.stepUp != null ? j - 1 : j + 1;
+      const steps = editPersonaMenus().flows[i].steps;
+      if (to < 0 || to >= steps.length) return;
+      [steps[j], steps[to]] = [steps[to], steps[j]];
+      settlePersonaMenus();
+      return redraw();
+    }
+    if (d.stepRemove != null) {
+      const [i, j] = d.stepRemove.split(':').map(Number);
+      const flow = editPersonaMenus().flows[i];
+      const [gone] = flow.steps.splice(j, 1);
+      flow.steps.forEach(s => (s.buttons || []).forEach(btn => { if (btn.next === gone.id) btn.next = ''; }));
+      settlePersonaMenus();
+      return redraw();
+    }
+    if (d.buttonAdd != null) {
+      const [i, j] = d.buttonAdd.split(':').map(Number);
+      const buttons = editPersonaMenus().flows[i].steps[j].buttons;
+      buttons.push({ title: '', next: '' });
+      settlePersonaMenus();
+      return redraw(`pm-${i}-${j}-b${buttons.length - 1}`);
+    }
+    if (d.buttonRemove != null) {
+      const [i, j, k] = d.buttonRemove.split(':').map(Number);
+      editPersonaMenus().flows[i].steps[j].buttons.splice(k, 1);
+      settlePersonaMenus();
+      return redraw();
+    }
+    if (d.pmDiscard != null) {
+      delete state.personaDraft.menus;
+      return redraw();
+    }
+  });
+
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const m = personaMenus();
+    const problem = personaMenusProblem(m, limits);
+    if (problem) {
+      toast(personaMenusErrorText(problem, m));
+      return focusPersonaMenuProblem(problem, limits);
+    }
+    const save = $('[data-pm-save]', form);
+    save.disabled = true;
+    try {
+      state.personaFlows = await api('/app/api/persona/menus', { method: 'PUT', body: JSON.stringify(personaMenusPayload(m)) });
+    } catch (err) {
+      save.disabled = false;
+      if (err?.code !== 'menu_problem') return personaFail(err);
+      toast(personaMenusErrorText(err.body, m));
+      return focusPersonaMenuProblem(err.body, limits);
+    }
+    delete state.personaDraft.menus;
+    toast(PM.saved);
+    render();
+  });
+}
+
 function personaBehaviorFacts(b = {}) {
   const choice = field => (b[field] ? ps(`options.${field}.${b[field]}`) : null);
   return dashFacts([
@@ -7644,8 +8039,11 @@ async function uploadPersonaFile(file) {
   return res.json();
 }
 
+/** Whether test messages go with unsaved changes: settings, instructions or menus. */
+const personaTestDirty = () => !!personaDraftPayload() || !!state.personaDraft?.menus;
+
 function personaTestPanel() {
-  const dirty = !!personaDraftPayload();
+  const dirty = personaTestDirty();
   return `<section class="panel">
     <header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.testTitle)}</h2>
       <div class="panel__tools"><span class="pill pill--warn" id="persona-test-draft"${dirty ? '' : ' hidden'}>${escapeHTML(PS.testDraft)}</span><button class="btn btn--sm btn--ghost" type="button" id="persona-chat-clear">${escapeHTML(STR.clear)}</button></div></header>
@@ -7669,15 +8067,25 @@ function renderPersonaChatLog(busy = false) {
     log.innerHTML = `<div class="chat__empty">${escapeHTML(STR.chatEmpty)}</div>`;
     return;
   }
-  log.innerHTML = msgs.map(m => {
+  log.innerHTML = msgs.map((m, index) => {
     if (m.role === 'note') return `<div class="chat__note">${escapeHTML(m.content)}</div>`;
     const bubble = `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>`;
-    return m.handoff ? `${bubble}<div class="chat__note">${escapeHTML(m.reason ? ps('handoffNoteReason', { reason: m.reason }) : PS.handoffNote)}</div>` : bubble;
+    // Like on Instagram, a menu's buttons only stay under its latest message.
+    const replies = index === msgs.length - 1 && !busy && m.quickReplies?.length
+      ? `<div class="chip-picks" role="group" aria-label="${escapeHTML(PM.repliesAria)}">${m.quickReplies.map((q, k) => `<button type="button" class="chip" data-quick-reply="${k}">${escapeHTML(q.title)}</button>`).join('')}</div>`
+      : '';
+    const notes = [
+      m.handoff && (m.reason ? ps('handoffNoteReason', { reason: m.reason }) : PS.handoffNote),
+      m.menu && pm('testMenu', { name: m.menu }),
+      m.teamOnly && PM.testTeamOnly,
+    ].filter(Boolean);
+    return bubble + replies + notes.map(n => `<div class="chat__note">${escapeHTML(n)}</div>`).join('');
   }).join('') + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }
 
-async function sendPersonaTest(text) {
+/** Sends a test message; [payload] is a tapped menu button's, which moves the menu on like on Instagram. */
+async function sendPersonaTest(text, payload) {
   const content = (text || '').trim();
   if (personaChatBusy || !content) return;
   state.personaChat.push({ role: 'user', content });
@@ -7686,12 +8094,16 @@ async function sendPersonaTest(text) {
   if (send) send.disabled = true;
   renderPersonaChatLog(true);
   const draft = personaDraftPayload();
+  const flows = state.personaDraft.menus ? personaMenusPayload(state.personaDraft.menus) : null;
   try {
     const messages = state.personaChat.filter(m => m.role === 'user' || m.role === 'assistant').map(({ role, content: c }) => ({ role, content: c }));
-    const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify(draft ? { messages, draft } : { messages }) });
-    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason });
+    const body = { messages, ...(draft && { draft }), ...(flows && { flows }), ...(payload && { payload }) };
+    const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify(body) });
+    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason, menu: res.menu, quickReplies: res.quickReplies || [], teamOnly: !!res.teamOnly });
   } catch (err) {
-    if (err?.message !== 'unauthorized') state.personaChat.push({ role: 'note', content: personaErrorText(err?.code, err) });
+    if (err?.message !== 'unauthorized') {
+      state.personaChat.push({ role: 'note', content: err?.code === 'menu_problem' ? personaMenusErrorText(err.body) : personaErrorText(err?.code, err) });
+    }
   } finally {
     personaChatBusy = false;
     renderPersonaChatLog();
@@ -7704,7 +8116,9 @@ async function sendPersonaTest(text) {
 /** Keeps the "testing unsaved changes" pill and the discard buttons in step with the draft, without a redraw. */
 function paintPersonaDraft() {
   const pill = $('#persona-test-draft');
-  if (pill) pill.hidden = !personaDraftPayload();
+  if (pill) pill.hidden = !personaTestDirty();
+  const menus = $('[data-pm-discard]');
+  if (menus) menus.disabled = !state.personaDraft?.menus;
   const behavior = $('[data-pb-discard]');
   if (behavior) behavior.disabled = !state.personaDraft?.behavior;
   const instructions = $('[data-pi-discard]');
@@ -7718,9 +8132,15 @@ function wirePersona(root, tab, p) {
       render();
       await loadPersonaVersions().catch(err => { personaFail(err); state.personaVersions = []; });
     }
+    if (state.personaTab === 'menus' && (!state.personaFlows || state.personaFlows.failed)) {
+      state.personaFlows = null;
+      render();
+      await loadPersonaMenus().catch(err => { personaFail(err); state.personaFlows = { failed: true }; });
+    }
     if (state.personaTab === 'instructions') state.personaPreview = null;
     render();
   }));
+  if (tab === 'menus') wirePersonaMenus(root);
   $$('[data-persona-compile]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(false)));
   $$('[data-persona-rebuild]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(true)));
 
@@ -7856,6 +8276,12 @@ function wirePersona(root, tab, p) {
   $$('[data-restore]', root).forEach(b => b.addEventListener('click', () => restorePersonaVersion(b.dataset.restore)));
 
   renderPersonaChatLog(personaChatBusy);
+  $('#persona-chat-log', root).addEventListener('click', e => {
+    const chip = e.target.closest('[data-quick-reply]');
+    const last = state.personaChat[state.personaChat.length - 1];
+    const reply = chip && last?.quickReplies?.[Number(chip.dataset.quickReply)];
+    if (reply) sendPersonaTest(reply.title, reply.payload);
+  });
   $('#persona-chat-clear', root).addEventListener('click', () => { state.personaChat = []; renderPersonaChatLog(); });
   $$('[data-persona-try]', root).forEach(b => b.addEventListener('click', () => sendPersonaTest(ps(`try.${b.dataset.personaTry}`))));
   $('#persona-chat-form', root).addEventListener('submit', e => {

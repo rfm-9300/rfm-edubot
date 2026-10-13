@@ -6,7 +6,7 @@ updated: 2026-10-13
 
 How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
 
-## Chat flows: ManyChat-style menus before the AI (2026-10-13)
+## Chat flows: ManyChat-style menus before the AI (PR #74, shipped 2026-10-13)
 
 Rodrigo asked to copy a ManyChat Instagram flow for a company moving off ManyChat: greeting and
 topic keywords open a menu, buttons lead through sub-menus to a last message with a link. Nothing in
@@ -33,11 +33,10 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
   company: whatever no flow answers waits in the inbox. There is no other tenant-wide AI switch.
 - **A person's reply stops the flow too**, because the paused-conversation check runs first: once the
   team answers in the inbox, that customer gets no menu until someone presses Resume.
-- **No editor yet.** A company's flows are one `chat_flows` document (unique `tenantId`), written by
-  hand with `mongosh` after a backup, the way prod imports are done
-  ([crm-directories.md](crm-directories.md)). It is read on every message, so a change applies at
-  once; a flow with problems is skipped and logged (`Skipping chat flow`). A keyword starts a flow at
-  its first step, and each button names the step it leads to:
+- **Stored** as one `chat_flows` document per company (unique `tenantId`), read on every message, so
+  a saved change applies at once; a flow with problems is skipped and logged (`Skipping chat flow`).
+  The first company's flows were written with `mongosh` after a backup, before the editor existed. A
+  keyword starts a flow at its first step, and each button names the step it leads to:
 
   ```js
   { tenantId: ObjectId("…"), teamOnlyChannels: ["INSTAGRAM"], flows: [{
@@ -51,6 +50,34 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
 
   Ids are lowercase letters, digits, `-` and `_`. Instagram's limits apply: 13 buttons per step,
   titles of 20 characters, texts of 1,000 bytes.
+
+### Edited in the Persona page's Menus tab (PR #75, 2026-10-13)
+
+Asked for the same day ("add it as a tab on the Persona page"), so a company edits its own menus.
+`docs/architecture.md` → "Chat flows" has the endpoints and `design-system/patterns.md` → "Persona" the
+screen. Decisions:
+
+- **Built from existing parts:** each message is an Agents builder card (`.flow--edit`) and its buttons a
+  `.lines--replies` box, the line-items editor's newest variant. "New message…" in a button's Leads to
+  adds a message, links the button and moves the cursor there, so a whole menu is built by typing.
+- **The editor reads every flow, the pipeline only the ones that run** (`ChatFlowRepository.load` and
+  `find`). With `find` behind the tab, a hand-written flow with a problem would have been hidden and
+  then deleted by the next save; now it shows, to be fixed.
+- **One set of rules, checked on both sides:** `ChatFlows.saveProblem()` (the tab's limits, then
+  `ChatFlow.problems()`) and the same checks, order and codes in `app.js`. Either way the toast names
+  the menu and message and the cursor goes to the field. A refusal is `menu_problem` with positions,
+  so the persona's `{error, field}` errors stayed as they were.
+- **The test chat plays the menus,** through the server's own `replyTo`, with unsaved menus and the
+  tapped button's payload: the tab sits beside the test chat, and an AI answer to "Olá" there would
+  contradict what Instagram customers get. Buttons show under the latest reply only, as on Instagram.
+  With the AI off on Instagram, an AI reply carries a note saying Instagram would leave it for the team.
+- **Like the rest of the persona,** admins and operators save and members read. A save replaces the
+  whole document and the last one wins: there are no versions, unlike the persona's instructions.
+- **Ids are kept:** new menus and messages get `menu-xxxxxx` and `msg-xxxxxx`, and existing ids never
+  change, because quick replies already sent carry them in their payloads.
+- Checked in Chrome with `scripts/persona-e2e/walkthrough.mjs` (now with a Menus section: build, the
+  empty-message catch, the unsaved menu in the test chat, save, team-only, reload, dark, a 375px phone,
+  a member), plus pt-PT by hand.
 
 ## Persona studio: settings, history, safe synthesis, handoff (PR #54, shipped 2026-10-08, `131ba11`)
 
