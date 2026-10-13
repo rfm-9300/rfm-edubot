@@ -30,9 +30,15 @@ sequenceDiagram
     loop Consumer → ConversationLanes (one conversation at a time per lane, 16 lanes)
         Q->>P: handle(inbound)
         P->>DB: findOrCreate User
+        P->>DB: chat_flows (keyword or tapped quick reply → flow step)
+        Note over P: No step on a team-only channel: store the message for the team and stop
         P->>R: tryAcquire(waId)
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message (skipped if already stored)
+        opt a chat flow step answers
+            P->>DB: insert automation Message (origin flow:<id>)
+            P->>WA: sendQuickReplies (Instagram), then markProcessed without the AI
+        end
         Note over P: System messages from PersonaPrompt: persona, platform rules, date, CRM and booking rules, handoff
         loop max 5 tool iterations
             P->>AI: complete(contextMessages, crmTools + handoff_to_human)
@@ -80,6 +86,7 @@ graph TD
         MR[MessageRepository]
         CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
+        CF[ChatFlowRepository<br/>menus before the AI]
         DA[Dashboard AI Assistant<br/>threads, settings, confirmed changes]
         EV[DomainEventLog<br/>domain_events outbox]
         TC[Time clock<br/>shifts, punches, work sites,<br/>phone keys, timesheets]
@@ -114,7 +121,7 @@ graph TD
     WR --> DS
     WR --> MQ
     MQ --> MP
-    MP --> UR & CR & MR & CRM & RL & DS
+    MP --> UR & CR & MR & CRM & RL & DS & CF
     MP --> AI
     MP --> OC
     MP --> PDF
@@ -134,7 +141,7 @@ graph TD
     ES & GS --> GI
     GI --> GAPI
     ES & GS --> EV
-    UR & CR & MR & CRM & DS --> Mongo
+    UR & CR & MR & CRM & DS & CF --> Mongo
     EV & AEX & NT & GI & ES & GS & EI & TC --> Mongo
     Health --> Mongo
 ```
@@ -150,7 +157,8 @@ graph TD
 | `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
 | `admin/` | Internal admin REST endpoints and static admin panel routing |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
-| `channel/` | `OutboundClient` interface and per-channel capability flags used by the pipeline |
+| `channel/` | `OutboundClient` interface (text, documents, Instagram quick replies) and per-channel capability flags used by the pipeline |
+| `flows/` | Chat flows: menus with quick replies that answer before the AI, their keyword matching and limits, and the `chat_flows` reader |
 | `instagram/` | Instagram DM Graph API outbound adapter plus post/comment inbox (webhook ingest, Graph list/reply) |
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
@@ -646,7 +654,8 @@ reconnect before comments work. App Review for that permission is a separate sub
 website chat is read-only). `InboxService` (`dashboard/`) holds the rules; the routes are thin.
 
 - **Who wrote it.** Outbound messages carry `author` (`AI` from `MessagePipeline`, `AGENT` from the
-  dashboard) plus the agent's user id and email. Rows stored before this have no author and show as AI.
+  dashboard, `AUTOMATION` from Agents and [chat flows](#chat-flows)) plus the agent's user id and
+  email, or the automation's name in `agentName`. Rows stored before this have no author and show as AI.
 - **Human takeover.** An agent reply (text or template) sets `autoReplyEnabled = false` with
   `autoReplyPausedBy`/`autoReplyPausedAt`, so the AI stops answering that customer until someone
   presses Resume. Paused conversations still store inbound messages (the pipeline's paused branch).
@@ -761,6 +770,7 @@ sequenceDiagram
 | `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
 | `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
 | `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
+| `chat_flows` | One per company: its [chat flows](#chat-flows) (keywords, steps, quick replies) and the channels where the AI stays off (`teamOnlyChannels`) | unique `tenantId` |
 
 ## Dashboard AI Assistant
 
@@ -1132,6 +1142,42 @@ flowchart LR
   of extracted text; 100 sources and 600,000 characters across them; 25 rules of 300 characters;
   the last 20 test messages of 4,000 characters. `GET /app/api/persona` returns them, and errors
   carry `{error, field, limit}` for the dashboard to word.
+
+## Chat flows
+
+Fixed messages with quick replies that answer customers before the AI, the way ManyChat keyword
+automations do: a keyword opens a menu, and each tap leads to the next step. Code: `flows/`
+(`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline` and
+`InstagramClient.sendQuickReplies`. There is no editor yet. A company's flows are one `chat_flows`
+document written by hand ([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape),
+read on every message, so a change applies without a restart.
+
+```mermaid
+flowchart TD
+    IN[Customer message] --> TAP{"Tapped a quick reply<br/>whose step exists?"}
+    TAP -->|yes| STEP[Send that step]
+    TAP -->|no| KW{"Text holds a<br/>flow keyword?"}
+    KW -->|yes| FIRST["Send the flow's first step"]
+    KW -->|no| TEAM{"Channel team-only?"}
+    TEAM -->|yes| STORE["Store for the team, no reply"]
+    TEAM -->|no| AI["AI reply as usual"]
+    STEP & FIRST --> SEND["Step text + quick replies<br/>payload flow:flow-id:step-id"]
+```
+
+- **Where it runs.** After the paused-conversation check, so a chat a person took over gets no flow
+  either. The step goes out after the rate limit passes and the customer's message is stored, and the
+  AI isn't called. It is stored as an `AUTOMATION` message with the flow's name in `agentName` and
+  `origin = flow:<id>`, so the inbox shows it with the Automation tag.
+- **Matching.** Keywords match whole words, ignoring case, accents and punctuation: "Oi" is found in
+  "Oi, tudo bem?" but not in "Depois". A tap is routed by its payload, never by its title, so a
+  button labelled "Sobrancelha/Formação" moves on even when "Formação" also starts the flow. A
+  payload whose flow or step is gone falls back to keyword matching on the title.
+- **Instagram only.** Quick replies are an Instagram feature (13 per message, titles of 20
+  characters, messages of 1,000 bytes; Instagram's desktop site doesn't show them). The WhatsApp
+  client can't send interactive buttons yet, so `ChatFlow.problems()` refuses other channels, and a
+  flow with problems is skipped and logged on every message.
+- **Team-only channels.** `teamOnlyChannels` turns the AI off on a channel: a message no flow
+  answers is stored without a reply, before the rate limiter, and waits in the inbox.
 
 ## Context Building
 

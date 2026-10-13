@@ -17,7 +17,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md) — employee sign-ins, service submissions, the opt-in time clock
 - [inbox-and-channels.md](inbox-and-channels.md) — Conversations inbox (AI pause, 24-hour window, ticks, templates, media), the Email page (Gmail threads, suggested dashboard actions), website widget, Instagram
 - [whatsapp-and-meta.md](whatsapp-and-meta.md) — Embedded Signup, webhook fields, display names, payment methods, App Review, template permissions
-- [ai-persona-and-bot.md](ai-persona-and-bot.md) — the customer-facing bot: persona studio, prompts, tools, human handoff
+- [ai-persona-and-bot.md](ai-persona-and-bot.md) — the customer-facing bot: persona studio, prompts, tools, human handoff, chat flows (menus before the AI)
 - [ai-assistant.md](ai-assistant.md) — the dashboard AI Assistant: its prompt, checked cards, settings, history
 - [agents-automations.md](agents-automations.md) — the opt-in Agents module, domain events, background jobs, Gmail and Google verification
 - [auth-and-access.md](auth-and-access.md) — Google sign-in for the backoffice and `/app`, admin emails, where the access rules live

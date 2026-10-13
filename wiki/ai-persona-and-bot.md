@@ -1,10 +1,56 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-13
 ---
 
 # Customer-facing bot and persona
 
-How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
+How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
+
+## Chat flows: ManyChat-style menus before the AI (2026-10-13)
+
+Rodrigo asked to copy a ManyChat Instagram flow for a company moving off ManyChat: greeting and
+topic keywords open a menu, buttons lead through sub-menus to a last message with a link. Nothing in
+the product could do that, so `flows/` adds menu flows that answer before the AI.
+`docs/architecture.md` → "Chat flows" has the routing. What matters later:
+
+- **Not the Agents module.** An event trigger's keywords are case-insensitive substrings
+  (`AgentDispatcher`), so "oi" fires inside "depois" and a menu label containing a greeting keyword
+  restarts the menu; and an agent's reply to `message.received` goes out beside the AI's, not instead
+  of it. Flows run inside `MessagePipeline` and skip the AI. Their keywords match whole words,
+  ignoring case, accents and punctuation, and a tap routes by its payload (`flow:<flow>:<step>`),
+  never by its title.
+- **Quick replies, not button templates.** A quick-reply tap arrives as an ordinary `messages`
+  webhook (the title as text, plus `quick_reply.payload`), which the app already subscribes to. A
+  button template's tap is a postback, which would need the `messaging_postbacks` webhook field and
+  its own parsing. The cost: quick replies vanish once tapped and Instagram's desktop site doesn't
+  show them, so a desktop customer sees only the text and their typed answer waits for the team.
+- **Instagram conversation starters aren't read.** Their taps are postbacks too, so a company that
+  kept ManyChat's starters on its profile gets those taps dropped. Typing the same question still
+  works when the question is a keyword.
+- **Instagram only** for now: `ChatFlow.problems()` refuses other channels until the WhatsApp client
+  sends interactive buttons (3 reply buttons of 20 characters would fit the same model).
+- **Team-only channels** (`teamOnlyChannels`) turn the AI off on a channel, as Rodrigo chose for that
+  company: whatever no flow answers waits in the inbox. There is no other tenant-wide AI switch.
+- **A person's reply stops the flow too**, because the paused-conversation check runs first: once the
+  team answers in the inbox, that customer gets no menu until someone presses Resume.
+- **No editor yet.** A company's flows are one `chat_flows` document (unique `tenantId`), written by
+  hand with `mongosh` after a backup, the way prod imports are done
+  ([crm-directories.md](crm-directories.md)). It is read on every message, so a change applies at
+  once; a flow with problems is skipped and logged (`Skipping chat flow`). A keyword starts a flow at
+  its first step, and each button names the step it leads to:
+
+  ```js
+  { tenantId: ObjectId("…"), teamOnlyChannels: ["INSTAGRAM"], flows: [{
+      id: "servicos", name: "Menu de serviços", enabled: true, channels: ["INSTAGRAM"],
+      keywords: ["Olá", "Bom dia", "Quanto custa a limpeza de pele?"],
+      steps: [
+        { id: "menu", text: "Qual dos serviços…?", buttons: [{ title: "Unhas", next: "contacto" }] },
+        { id: "contacto", text: "Fale connosco: https://…", buttons: [] },
+      ] }] }
+  ```
+
+  Ids are lowercase letters, digits, `-` and `_`. Instagram's limits apply: 13 buttons per step,
+  titles of 20 characters, texts of 1,000 bytes.
 
 ## Persona studio: settings, history, safe synthesis, handoff (PR #54, shipped 2026-10-08, `131ba11`)
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-13
 ---
 
 # Conversations inbox and channels
@@ -101,7 +101,8 @@ is the allowed-origin list; changing embed appearance requires copying the updat
 The widget defers its WebSocket connection until first open, reuses a browser session ID, and
 becomes a full-screen dialog below 480px.
 
-Instagram DMs are a messaging channel (same Conversations inbox as WhatsApp). The optional
+Instagram DMs are a messaging channel (same Conversations inbox as WhatsApp); chat flows answer
+them with quick-reply menus before the AI ([ai-persona-and-bot.md](ai-persona-and-bot.md)). The optional
 dashboard module `instagram` is a separate comments inbox for that account's public posts:
 webhook-stored comments, Graph list/reply, reconnect required after adding
 `instagram_business_manage_comments`. Do not route post comments through `MessagePipeline`.
