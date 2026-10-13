@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-13
 ---
 
 # Agents (automations) and Gmail
@@ -42,26 +42,38 @@ Production rollout (2026-10-01): backup `mongo-20261001T145548Z.archive.gz` righ
 CI deployed `c1cf5c3`, Mongo not bounced, 0 `ERROR` lines, the new indexes created (the "Missing
 config keys" WARN now lists the unset Google keys too).
 
-Google approval check (2026-10-09, Rodrigo asked for a walkthrough; nothing changed yet). Sending
+Google approval (checked 2026-10-09, again 2026-10-11 to 13, both at Rodrigo's request). Sending
 needs brand verification plus sensitive-scope verification of `gmail.send` (Google quotes 3–5
 business days, with no security assessment); only inbox reading needs the restricted tier and the
-yearly CASA. Three things stand in the way, and `docs/google-oauth-verification.md` misses all three:
+yearly CASA. `docs/google-oauth-verification.md` is the procedure. It was rewritten on 2026-10-13
+for Google's current flow and for these points, which its first version missed:
 
-- **The OAuth callback wasn't routed** (fixed the same day at Rodrigo's request). The VPS Caddy
+- **The OAuth callback wasn't routed** (fixed 2026-10-09 at Rodrigo's request). The VPS Caddy
   didn't proxy `/integrations*`, so `https://thebotslab.pt/integrations/google/callback` answered
   with the marketing site's 404 and no Gmail connect could finish. A `handle /integrations*` block
   now sends it to the app (with no parameters it answers 302 to
   `/app/?google=error&reason=missing_params`), and the runbook's Caddy block has it too.
-- **The home page fails Google's rules.** Google wants the privacy policy on the home page's domain,
-  and the home page to describe the app and link to that policy. Everything Google sees now uses
-  `thebotslab.pt`, the primary domain: home page, `/privacy` and the redirect URI (the doc used to
-  put `/privacy` on the dashboard host). The marketing home page (both domains serve the same studio
-  page) still neither describes the CRM nor links any policy, and the name differs: `thebots.lab` on
-  the site, `TheBotsLab` in the doc and on `/privacy`.
+- **The home page is a product page in the marketing repo.** Google wants a public home page that
+  describes the app, carries its name and links the consent screen's privacy policy URL, on that
+  policy's domain. The studio landing page at `https://thebotslab.pt/` does none of it (it describes
+  the studio, opens in Portuguese, links no policy and calls itself `thebots.lab`), so the consent
+  screen's home page is `https://thebotslab.pt/crm/`: `src/pages/crm.astro` in `websites-thebots`
+  (added 2026-10-13), an English page that names the app `TheBotsLab` as `/privacy` does. It
+  describes only sending, the scope under review; it must be live before the branding check, and it
+  has to describe the Email page and inbox automations before the restricted-scope submission.
 - **The consent screen is shared with Firebase sign-in.** Publishing status is per project, and
   Google sign-in for `/app` and the backoffice uses project `thebotslab` too, so moving it to Testing
-  (the doc assumes Testing before verification) would lock every non-test user out of Google
-  sign-in (agent inference; the console wasn't checked). Stay In production and click through
-  Google's unverified-app screen while testing; each account counts toward a lifetime cap of 100
-  new users until verification. Adding a redirect URI or renaming the app after approval means
-  verifying again.
+  would lock every non-test user out of Google sign-in (inferred from Google's docs, not tried). The
+  doc used to assume Testing before verification; it now says stay In production and click through
+  Google's unverified-app screen while testing, which lets 100 new users in total through until
+  verification. Publishing new branding changes the sign-in screen as well.
+- **Brand verification is a button now.** **Verify Branding** on the Branding page runs an automated
+  check (minutes; a manual review, if asked for, takes 2–3 business days), and **Publish branding**
+  must follow within 7 days. The Verification Center takes a scope request only once branding is
+  published. Adding a redirect URI or renaming the app after approval means verifying again.
+- **Smaller traps the doc now lists:** the account that verified a domain in Search Console must
+  also be an Owner or Editor of the project; the support email dropdown offers only the signed-in
+  account and the Google Groups it manages; authorized domains include every web client's redirect
+  domains, so the Firebase client's `thebotslab.firebaseapp.com` may be flagged; Google wants the
+  video to show the Google sign-in flow when the app has one; and CASA's free self-scan is
+  deprecated, so an authorized lab verifies the evidence and charges for it.
