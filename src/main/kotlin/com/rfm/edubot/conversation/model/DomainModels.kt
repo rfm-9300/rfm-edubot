@@ -19,8 +19,8 @@ enum class MessageStatus {
 }
 
 /**
- * Who wrote an outbound message: the reply bot, a person in the inbox, or an automation agent.
- * Null on customer messages and on rows stored before it existed.
+ * Who wrote an outbound message: the reply bot, a person in the inbox, or an automation (an agent or
+ * a chat flow). Null on customer messages and on rows stored before it existed.
  */
 enum class MessageAuthor { AI, AGENT, AUTOMATION }
 
@@ -101,7 +101,7 @@ data class Message(
     /** Meta's error code and text when [status] is FAILED. */
     val errorCode: Int? = null,
     val errorText: String? = null,
-    /** `agent:<id>` on messages an automation agent sent. */
+    /** `agent:<id>` on messages an automation agent sent, `flow:<id>` on a chat flow's. */
     val origin: String? = null,
 )
 

@@ -30,6 +30,8 @@ import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.TokenUsage
 import com.rfm.edubot.conversation.model.UserRole
+import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.FlowReply
 import com.rfm.edubot.persona.PersonaHandoff
 import com.rfm.edubot.persona.PersonaPrompt
 import com.rfm.edubot.persona.TenantPersona
@@ -65,6 +67,7 @@ class MessagePipeline(
     private val documentTemplate: DocumentTemplate = DocumentTemplate(),
     private val openrouterModel: String? = null,
     private val persona: TenantPersona? = null,
+    private val chatFlows: ChatFlowRepository? = null,
     private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
     private val tenantUsage: TenantUsageRepository? = null,
     private val monthlyTokenBudget: Long = Long.MAX_VALUE,
@@ -168,6 +171,30 @@ class MessagePipeline(
                 return
             }
 
+            val flows = chatFlows?.find()
+            val flowReply = flows?.replyTo(inbound.platform, inbound.messageText, inbound.quickReplyPayload)
+            if (flowReply == null && flows != null && inbound.platform in flows.teamOnlyChannels) {
+                val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
+                val stored = messages.insertIfAbsent(
+                    Message(
+                        tenantId = inbound.tenantId,
+                        conversationId = conversation.id,
+                        channel = inbound.platform,
+                        waId = user.waId,
+                        role = UserRole.USER,
+                        waMessageId = inbound.waMessageId,
+                        content = MessageContent.Text(inbound.messageText),
+                        status = MessageStatus.RECEIVED,
+                        createdAt = SystemClock.now(),
+                    )
+                )
+                if (stored) conversations.recordInbound(conversation.id)
+                conversations.bumpActivity(conversation.id)
+                deduplicationService.markProcessed(inbound.eventId)
+                log.info("No flow answers and the AI is off on this channel; stored for the team: platform={}, waId={}", inbound.platform, inbound.waId)
+                return
+            }
+
             val rateResult = rateLimiter.tryAcquire("${inbound.platform.name}:${user.waId}")
             if (rateResult is RateDecision.Reject) {
                 log.warn("Rate limited user: waId={}", inbound.waId)
@@ -191,6 +218,11 @@ class MessagePipeline(
             )
             // A message re-queued after a restart may already be stored; carry on so it still gets its reply.
             if (messages.insertIfAbsent(userMessage)) conversations.recordInbound(conversation.id)
+
+            if (flowReply != null) {
+                replyWithFlow(flowReply, conversation, inbound, user.waId, responder)
+                return
+            }
 
             if (tenantUsage != null && tenantUsage.tokensUsedThisMonth() >= monthlyTokenBudget) {
                 log.warn(
@@ -527,10 +559,38 @@ class MessagePipeline(
         return "[The customer sent a $kind you cannot open${caption?.takeIf { it.isNotBlank() }?.let { ": \"$it\"" }.orEmpty()}]"
     }
 
+    /** Answers with a flow's step instead of the AI, stored for the inbox as an automation's message. */
+    private suspend fun replyWithFlow(reply: FlowReply, conversation: Conversation, inbound: InboundMessage, waId: String, responder: OutboundClient) {
+        val text = reply.step.text
+        val message = Message(
+            tenantId = inbound.tenantId,
+            conversationId = conversation.id,
+            channel = inbound.platform,
+            waId = waId,
+            role = UserRole.ASSISTANT,
+            content = MessageContent.Text(text),
+            status = MessageStatus.DELIVERED,
+            createdAt = SystemClock.now(),
+            author = MessageAuthor.AUTOMATION,
+            agentName = reply.flow.name,
+            origin = "flow:${reply.flow.id}",
+        )
+        messages.insert(message)
+        val quickReplies = reply.quickReplies
+        deliver(message) {
+            if (quickReplies.isEmpty()) responder.sendText(waId, text) else responder.sendQuickReplies(waId, text, quickReplies)
+        }
+        conversations.bumpActivity(conversation.id)
+        deduplicationService.markProcessed(inbound.eventId)
+        log.info("Answered with a chat flow: flow={}, step={}, waId={}", reply.flow.id, reply.step.id, waId)
+    }
+
+    private suspend fun sendReply(reply: Message, text: String, responder: OutboundClient) = deliver(reply) { responder.sendText(reply.waId, text) }
+
     /** Sends a stored reply. If the channel refuses it, the reply turns FAILED so the inbox doesn't show it as delivered. */
-    private suspend fun sendReply(reply: Message, text: String, responder: OutboundClient) {
+    private suspend fun deliver(reply: Message, send: suspend () -> Unit) {
         try {
-            responder.sendText(reply.waId, text)
+            send()
         } catch (e: Exception) {
             when (e) {
                 is WhatsAppApiException -> messages.markSendFailed(reply.id, e.code, e.detail)

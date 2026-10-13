@@ -1,13 +1,17 @@
 package com.rfm.edubot.instagram
 
 import com.rfm.edubot.channel.OutboundDeliveryException
+import com.rfm.edubot.channel.QuickReply
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.mock.MockEngine
 import io.ktor.client.engine.mock.respond
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
+import io.ktor.http.content.TextContent
 import io.ktor.http.headersOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -135,6 +139,40 @@ class InstagramClientTest {
 
         val result = InstagramClient("account-token", "ig-account-1", httpClient = http).listMedia()
         assertEquals(InstagramGraphResult.PermissionDenied, result)
+    }
+
+    @Test
+    fun `quick replies go under the text as text replies with their payloads`() = runBlocking {
+        val bodies = mutableListOf<JsonElement>()
+        val client = InstagramClient("account-token", "ig-account-1", httpClient = recording(bodies))
+
+        client.sendQuickReplies("user-1", "Qual serviço?", listOf(QuickReply("Unhas", "flow:servicos:unhas"), QuickReply("Pele", "flow:servicos:pele")))
+
+        val expected = """
+            {"recipient":{"id":"user-1"},"message":{"text":"Qual serviço?","quick_replies":[
+              {"content_type":"text","title":"Unhas","payload":"flow:servicos:unhas"},
+              {"content_type":"text","title":"Pele","payload":"flow:servicos:pele"}
+            ]}}
+        """
+        assertEquals(Json.parseToJsonElement(expected), bodies.single())
+    }
+
+    @Test
+    fun `plain text carries no quick replies`() = runBlocking {
+        val bodies = mutableListOf<JsonElement>()
+
+        InstagramClient("account-token", "ig-account-1", httpClient = recording(bodies)).sendText("user-1", "Olá")
+
+        assertEquals(Json.parseToJsonElement("""{"recipient":{"id":"user-1"},"message":{"text":"Olá"}}"""), bodies.single())
+    }
+
+    private fun recording(bodies: MutableList<JsonElement>) = HttpClient(MockEngine) {
+        engine {
+            addHandler { request ->
+                bodies += Json.parseToJsonElement((request.body as TextContent).text)
+                respond("""{"recipient_id":"user-1","message_id":"message-1"}""", headers = jsonHeaders)
+            }
+        }
     }
 
     private val jsonHeaders = headersOf(HttpHeaders.ContentType, "application/json")
