@@ -4,6 +4,7 @@ import com.mongodb.MongoWriteException
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.testing.TestMongo
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.runBlocking
 import org.bson.Document
 import org.bson.types.ObjectId
@@ -12,6 +13,7 @@ import org.junit.jupiter.api.BeforeAll
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 /** How a company's flows are read from its hand-written `chat_flows` document, against a real MongoDB. */
@@ -92,6 +94,47 @@ class ChatFlowRepositoryTest {
         collection.insertOne(Document("tenantId", ObjectId()).append("flows", listOf(flow("servicos", step("menu", "Qual serviço?")))))
 
         assertNull(ChatFlowRepository(mongo, ObjectId()).find())
+    }
+
+    @Test
+    fun `the editor sees a flow with problems so it can be fixed, while customers only get the flows that can run`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        collection.insertOne(
+            Document("tenantId", tenantId).append("flows", listOf(flow("broken", step("menu", "Qual serviço?", "Unhas" to "nowhere")), flow("servicos", step("menu", "Qual serviço?")))),
+        )
+        val repo = ChatFlowRepository(mongo, tenantId)
+
+        assertEquals(listOf("broken", "servicos"), repo.load()!!.flows.map { it.id })
+        assertEquals(listOf("servicos"), repo.find()!!.flows.map { it.id })
+    }
+
+    @Test
+    fun `saving replaces the company's flows in the same shape and records who saved them`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val repo = ChatFlowRepository(mongo, tenantId)
+        val menu = ChatFlow(
+            id = "servicos",
+            name = "Menu",
+            channels = setOf(Platform.INSTAGRAM),
+            keywords = listOf("Olá", "Bom dia"),
+            steps = listOf(FlowStep("menu", "Qual serviço?", listOf(FlowButton("Unhas", "contacto"))), FlowStep("contacto", "Fale connosco")),
+        )
+
+        val saved = repo.save(ChatFlows(listOf(menu), setOf(Platform.INSTAGRAM)), "ana@clinica.pt")
+        assertEquals(listOf(menu), saved.flows)
+        assertEquals(setOf(Platform.INSTAGRAM), saved.teamOnlyChannels)
+        assertEquals("ana@clinica.pt", saved.updatedBy)
+        assertNotNull(saved.updatedAt)
+        val createdAt = collection.find(Document("tenantId", tenantId)).first().getDate("createdAt")
+
+        val again = repo.save(ChatFlows(listOf(menu.copy(name = "Menu novo"))), "operator")
+        assertEquals("Menu novo", again.flows.single().name)
+        assertEquals(emptySet(), again.teamOnlyChannels)
+        assertEquals("operator", again.updatedBy)
+        val doc = collection.find(Document("tenantId", tenantId)).first()
+        assertEquals(createdAt, doc.getDate("createdAt"))
+        assertEquals(1L, collection.countDocuments(Document("tenantId", tenantId)))
+        assertEquals(flow("servicos", step("menu", "Qual serviço?")).keys, doc.getList("flows", Document::class.java).single().keys, "the same shape as a document written by hand")
     }
 
     @Test

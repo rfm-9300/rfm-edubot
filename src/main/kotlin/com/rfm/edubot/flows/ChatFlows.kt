@@ -2,18 +2,22 @@ package com.rfm.edubot.flows
 
 import com.rfm.edubot.channel.QuickReply
 import com.rfm.edubot.tenant.model.Platform
+import kotlinx.datetime.Instant
 import java.text.Normalizer
 import java.util.Locale
 
 /**
  * A company's menu flows: fixed messages with quick replies that answer customers before the AI, the way
- * ManyChat keyword automations do. One `chat_flows` document per company, written by hand while there is
- * no editor (wiki/inbox-and-channels.md has its shape).
+ * ManyChat keyword automations do. One `chat_flows` document per company, edited in the Persona page's
+ * Menus tab (wiki/ai-persona-and-bot.md has its shape).
  */
 data class ChatFlows(
     val flows: List<ChatFlow> = emptyList(),
     /** Channels where the AI never answers on its own, so a message no flow answers waits for the team. */
     val teamOnlyChannels: Set<Platform> = emptySet(),
+    val updatedAt: Instant? = null,
+    /** The dashboard user's email, or `operator`. */
+    val updatedBy: String? = null,
 ) {
     /**
      * The step that answers a customer's [text] on [platform]: the one a tapped quick reply's [payload] leads
@@ -28,6 +32,48 @@ data class ChatFlows(
         val said = FlowText.normalize(text)
         val flow = live.firstOrNull { flow -> flow.keywords.any { FlowText.containsPhrase(said, it) } } ?: return null
         return flow.steps.firstOrNull()?.let { FlowReply(flow, it) }
+    }
+
+    /** The first reason these flows can't be saved: the Menus tab's own limits, then what [ChatFlow.problems] finds. */
+    fun saveProblem(): FlowProblem? {
+        if (flows.size > ChatFlowLimits.MAX_FLOWS) return FlowProblem("menus", limit = ChatFlowLimits.MAX_FLOWS)
+        if (flows.map { it.id }.toSet().size != flows.size) return FlowProblem("invalid")
+        flows.forEachIndexed { menu, flow ->
+            if (flow.name.isBlank() || flow.name.length > ChatFlowLimits.MAX_NAME_CHARS) return FlowProblem("name", menu, limit = ChatFlowLimits.MAX_NAME_CHARS)
+            if (flow.keywords.size > ChatFlowLimits.MAX_KEYWORDS) return FlowProblem("keywords_limit", menu, limit = ChatFlowLimits.MAX_KEYWORDS)
+            if (flow.keywords.any { it.length > ChatFlowLimits.MAX_KEYWORD_CHARS }) return FlowProblem("keyword", menu, limit = ChatFlowLimits.MAX_KEYWORD_CHARS)
+            if (flow.steps.size > ChatFlowLimits.MAX_STEPS) return FlowProblem("steps_limit", menu, limit = ChatFlowLimits.MAX_STEPS)
+            flow.problems().firstOrNull()?.let { return FlowProblem.of(it, flow, menu) }
+        }
+        return null
+    }
+}
+
+/** What the Menus tab lets a company build, on top of Instagram's limits in [ChatFlow]. */
+object ChatFlowLimits {
+    const val MAX_FLOWS = 10
+    const val MAX_STEPS = 30
+    const val MAX_KEYWORDS = 50
+    const val MAX_KEYWORD_CHARS = 60
+    const val MAX_NAME_CHARS = 60
+}
+
+/** Why flows can't be saved. [menu] and [step] are positions in what was sent, for the editor to point at. */
+data class FlowProblem(val code: String, val menu: Int? = null, val step: Int? = null, val limit: Int? = null) {
+    companion object {
+        /** A [ChatFlow.problems] entry (`code` or `code:stepId`) of the flow at position [menu]. */
+        fun of(problem: String, flow: ChatFlow, menu: Int): FlowProblem {
+            val code = problem.substringBefore(':')
+            val step = flow.steps.indexOfFirst { it.id == problem.substringAfter(':', "") }.takeIf { it >= 0 }
+            return when (code) {
+                "keywords", "steps" -> FlowProblem(code, menu)
+                "text" -> FlowProblem(code, menu, step, ChatFlow.MAX_TEXT_BYTES)
+                "buttons" -> FlowProblem(code, menu, step, ChatFlow.MAX_BUTTONS)
+                "title" -> FlowProblem(code, menu, step, ChatFlow.MAX_TITLE)
+                "next" -> FlowProblem(code, menu, step)
+                else -> FlowProblem("invalid", menu)
+            }
+        }
     }
 }
 

@@ -13,6 +13,8 @@ import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
+import com.rfm.edubot.flows.ChatFlow
+import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaCompiler
 import com.rfm.edubot.persona.PersonaLimits
@@ -22,6 +24,7 @@ import com.rfm.edubot.persona.SourceKind
 import com.rfm.edubot.plugins.configureSerialization
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRepository
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.testing.FakeModel
 import com.rfm.edubot.testing.TestMongo
@@ -287,6 +290,36 @@ class PersonaRoutesTest {
         if (draft != null) put("draft", draft)
     }
 
+    private fun menus(vararg flows: JsonObject, teamOnly: List<String> = emptyList()) = buildJsonObject {
+        putJsonArray("flows") { flows.forEach { add(it) } }
+        putJsonArray("teamOnlyChannels") { teamOnly.forEach { add(it) } }
+    }
+
+    private fun menu(
+        id: String = "servicos",
+        name: String = "Menu de serviços",
+        keywords: List<String> = listOf("Olá"),
+        steps: List<JsonObject> = listOf(menuStep("menu", "Qual serviço?", "Unhas" to "contacto"), menuStep("contacto", "Fale connosco")),
+    ) = buildJsonObject {
+        put("id", id)
+        put("name", name)
+        put("enabled", true)
+        putJsonArray("keywords") { keywords.forEach { add(it) } }
+        putJsonArray("steps") { steps.forEach { add(it) } }
+    }
+
+    private fun menuStep(id: String, text: String, vararg buttons: Pair<String, String>) = buildJsonObject {
+        put("id", id)
+        put("text", text)
+        putJsonArray("buttons") { buttons.forEach { (title, next) -> addJsonObject { put("title", title); put("next", next) } } }
+    }
+
+    private fun testChat(vararg pairs: Pair<String, String>, flows: JsonObject? = null, payload: String? = null) = buildJsonObject {
+        putJsonArray("messages") { pairs.forEach { (role, content) -> addJsonObject { put("role", role); put("content", content) } } }
+        if (flows != null) put("flows", flows)
+        if (payload != null) put("payload", payload)
+    }
+
     private fun docx(vararg paragraphs: String): ByteArray {
         val out = ByteArrayOutputStream()
         ZipOutputStream(out).use { zip ->
@@ -316,7 +349,7 @@ class PersonaRoutesTest {
             "GET" to "/app/api/persona/sources/${ObjectId().toHexString()}", "DELETE" to "/app/api/persona/sources/${ObjectId().toHexString()}",
             "POST" to "/app/api/persona/compile", "POST" to "/app/api/persona/rebuild", "GET" to "/app/api/persona/versions",
             "GET" to "/app/api/persona/versions/1", "POST" to "/app/api/persona/versions/1/restore", "POST" to "/app/api/persona/preview",
-            "POST" to "/app/api/persona/test",
+            "POST" to "/app/api/persona/test", "GET" to "/app/api/persona/menus", "PUT" to "/app/api/persona/menus",
         )
         for ((method, path) in calls) assertEquals(HttpStatusCode.Forbidden, send(method, path, token, buildJsonObject { }).status, "$method $path")
         assertEquals(HttpStatusCode.Forbidden, upload(token, "a.txt", "x".toByteArray()).status)
@@ -736,6 +769,99 @@ class PersonaRoutesTest {
         val overBudget = send("POST", "/app/api/persona/test", token(broke.admin.email), messages("user" to "Olá"))
         assertEquals(HttpStatusCode.Conflict, overBudget.status)
         assertEquals("token_budget", overBudget.error().first)
+    }
+
+    @Test
+    fun `menus start empty, members only read them, and admins save them the way customers get them`() = personaTest {
+        val c = company()
+        val admin = token(c.admin.email)
+        val empty = send("GET", "/app/api/persona/menus", admin).obj()
+        assertEquals(0, empty["flows"]!!.jsonArray.size)
+        assertEquals(true, empty.bool("canEdit"))
+        assertEquals(false, empty.bool("instagramConnected"))
+        assertNull(empty.text("updatedAt"))
+        assertEquals(ChatFlow.MAX_BUTTONS, empty.obj("limits").int("buttons"))
+
+        val member = token(c.member.email)
+        assertEquals(false, send("GET", "/app/api/persona/menus", member).obj().bool("canEdit"))
+        val refused = send("PUT", "/app/api/persona/menus", member, menus(menu()))
+        assertEquals(HttpStatusCode.Forbidden, refused.status)
+        assertEquals("not_allowed", refused.error().first)
+        assertNull(ChatFlowRepository(mongo, c.id).load())
+
+        val saved = send(
+            "PUT", "/app/api/persona/menus", admin,
+            menus(menu(name = "  Menu de serviços ", keywords = listOf(" Olá ", "", "ola", "?!", "Bom dia")), teamOnly = listOf("INSTAGRAM")),
+        ).obj()
+        val flow = saved["flows"]!!.jsonArray.single().jsonObject
+        assertEquals("Menu de serviços", flow.text("name"))
+        assertEquals(listOf("Olá", "Bom dia"), flow["keywords"]!!.jsonArray.map { it.jsonPrimitive.content }, "trimmed, without blanks or repeats")
+        assertEquals(listOf("INSTAGRAM"), saved["teamOnlyChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(c.admin.email, saved.text("updatedBy"))
+
+        val stored = ChatFlowRepository(mongo, c.id).find()!!
+        assertEquals(setOf(Platform.INSTAGRAM), stored.teamOnlyChannels)
+        assertEquals(setOf(Platform.INSTAGRAM), stored.flows.single().channels)
+        assertEquals("contacto", stored.replyTo(Platform.INSTAGRAM, "Unhas", "flow:servicos:contacto")?.step?.id)
+        assertEquals("Menu de serviços", send("GET", "/app/api/persona/menus", member).obj()["flows"]!!.jsonArray.single().jsonObject.text("name"))
+    }
+
+    @Test
+    fun `a menu that can't run is refused with what is wrong and where, and nothing is saved`() = personaTest {
+        val c = company()
+        val token = token(c.admin.email)
+        suspend fun refused(body: JsonObject): JsonObject {
+            val response = send("PUT", "/app/api/persona/menus", token, body)
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            return response.obj().also { assertEquals("menu_problem", it.text("error")) }
+        }
+
+        val noKeywords = refused(menus(menu(keywords = listOf("?!"))))
+        assertEquals("keywords" to 0, noKeywords.text("problem") to noKeywords.int("menu"))
+        val leadsNowhere = refused(menus(menu(), menu(id = "outro", steps = listOf(menuStep("menu", "Qual?", "Unhas" to "nowhere")))))
+        assertEquals(Triple("next", 1, 0), Triple(leadsNowhere.text("problem"), leadsNowhere.int("menu"), leadsNowhere.int("step")))
+        val longTitle = refused(menus(menu(steps = listOf(menuStep("menu", "Qual?", "x".repeat(21) to "menu")))))
+        assertEquals("title" to ChatFlow.MAX_TITLE, longTitle.text("problem") to longTitle.int("limit"))
+        assertEquals("invalid_request", send("PUT", "/app/api/persona/menus", token, buildJsonObject { put("flows", 3) }).error().first)
+        assertNull(ChatFlowRepository(mongo, c.id).load())
+    }
+
+    @Test
+    fun `in the test chat menus answer before the AI, buttons move them on, and unsaved menus can be tried`() = personaTest {
+        val c = company()
+        val token = token(c.admin.email)
+        send("PUT", "/app/api/persona/menus", token, menus(menu()))
+
+        val opened = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá, bom dia")).obj()
+        assertEquals("Qual serviço?", opened.text("reply"))
+        assertEquals("Menu de serviços", opened.text("menu"))
+        assertEquals(listOf("Unhas" to "flow:servicos:contacto"), opened["quickReplies"]!!.jsonArray.map { it.jsonObject.text("title") to it.jsonObject.text("payload") })
+        assertTrue(chats.isEmpty(), "a menu reply never calls the model")
+
+        val tapped = send(
+            "POST", "/app/api/persona/test", token,
+            testChat("user" to "Olá", "assistant" to "Qual serviço?", "user" to "Unhas", payload = "flow:servicos:contacto"),
+        ).obj()
+        assertEquals("Fale connosco", tapped.text("reply"))
+        assertEquals(0, tapped["quickReplies"]!!.jsonArray.size)
+
+        val ai = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?")).obj()
+        assertEquals("Olá! Como posso ajudar?", ai.text("reply"))
+        assertNull(ai.text("menu"))
+        assertEquals(false, ai.bool("teamOnly"))
+
+        val tried = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?", flows = menus(menu(keywords = listOf("sábado"))))).obj()
+        assertEquals("Qual serviço?", tried.text("reply"))
+        assertEquals(true, tried.bool("draft"))
+        assertEquals(listOf("Olá"), ChatFlowRepository(mongo, c.id).load()!!.flows.single().keywords, "trying menus saves nothing")
+
+        val teamOnly = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?", flows = menus(menu(), teamOnly = listOf("INSTAGRAM")))).obj()
+        assertEquals("Olá! Como posso ajudar?", teamOnly.text("reply"), "WhatsApp and the website still get the AI")
+        assertEquals(true, teamOnly.bool("teamOnly"))
+
+        val broken = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(keywords = listOf("?!")))))
+        assertEquals(HttpStatusCode.BadRequest, broken.status)
+        assertEquals("keywords", broken.obj().text("problem"))
     }
 
     @Test

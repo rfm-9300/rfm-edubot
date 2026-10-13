@@ -3,8 +3,9 @@
 // It creates its own company and users through the backoffice API, then drives Chrome through
 // settings (tested unsaved), notes and PDF/Word/Markdown uploads, the test chat (handoff and a
 // prompt-injection try), hand edits and the preview, history and restore, removing a source and
-// rebuilding, a signed WhatsApp message that hands a chat to the team (bell + inbox), dark theme,
-// a narrow window and a member's read-only view.
+// rebuilding, a signed WhatsApp message that hands a chat to the team (bell + inbox), Instagram
+// menus (built, caught when incomplete, tried unsaved in the test chat, saved, team-only), dark
+// theme, a narrow window and a phone, and a member's read-only view.
 //
 // Run the app with OPENROUTER_BASE_URL pointing at fake-openrouter.py (its replies are what this
 // expects) and a password for the backoffice, then:
@@ -300,12 +301,69 @@ try {
   await click('[data-inbox-filter="needs"]', 1200);
   expect((await page.$$eval('.inbox-row__name', ns => ns.map(n => n.innerText.trim()))).includes('Marta Silva'), 'the chat waits in Needs reply');
 
-  note('9. Dark theme and a narrow window');
+  note('9. Menus that answer Instagram before the AI');
   await openPersona();
+  await tab('menus');
+  await page.waitForSelector('#persona-menus-form');
+  expect((await notices()).includes('Instagram isn’t connected'), 'the tab says menus only answer Instagram');
+  expect((await text('.persona-studio__pane')).includes('No menus yet'), 'a company starts without menus');
+  await click('[data-menu-add]', 800);
+  expect(await page.$eval('#pm-0-name', el => el.value) === 'Menu 1', 'a new menu gets a name');
+  await type('#pm-0-keywords', 'Hello\nGood morning', 20);
+  await type('#pm-0-0-text', 'Hello! Which service would you like to know about?', 8);
+  await click('[data-button-add="0:0"]', 800);
+  await type('#pm-0-0-b0', 'Whitening', 20);
+  await page.select('#pm-0-0-n0', '__new');
+  await pause(900);
+  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', '"New message…" adds a message and moves to it');
+  await click('[data-pm-save]', 300);
+  expect((await toast()).includes('message 2: write the message'), 'an empty message is caught before saving');
+  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', 'and the cursor goes to it');
+  await type('#pm-0-1-text', 'Whitening costs 120 €. Call us to book.', 8);
+  expect(await page.$eval('#persona-test-draft', el => !el.hidden), 'the test chat says it uses the unsaved menu');
+  await shot('menus-draft');
+  await click('#persona-chat-clear', 300);
+  await type('#persona-chat-input', 'Hello there', 20);
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('#persona-chat-log [data-quick-reply]', { timeout: 15000 });
+  await pause(500);
+  const opened = await text('#persona-chat-log');
+  expect(opened.includes('Which service would you like to know about?') && opened.includes('Answered by the menu “Menu 1”'), 'a keyword opens the unsaved menu in the test chat');
+  await click('#persona-chat-log [data-quick-reply="0"]', 300);
+  await page.waitForFunction(() => document.querySelector('#persona-chat-log').innerText.includes('Whitening costs 120'), { timeout: 15000 });
+  await pause(500);
+  expect(!(await page.$('#persona-chat-log [data-quick-reply]')), 'tapping a button moves the menu on, and the last message has no buttons');
+  await shot('menus-test-chat');
+  await click('[data-pm-save]', 300);
+  expect((await toast()).startsWith('Menus saved'), 'saving the menus is confirmed');
+  await pause(1000);
+  expect(await page.$eval('#persona-test-draft', el => el.hidden), 'nothing is left unsaved');
+  await page.select('#pm-fallback', 'team');
+  await pause(300);
+  await click('[data-pm-save]', 1300);
+  await click('#persona-chat-clear', 300);
+  await type('#persona-chat-input', 'Do you open on Saturdays?', 20);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('#persona-chat-log .chat__note').length > 0, { timeout: 20000 });
+  await pause(500);
+  expect((await text('#persona-chat-log')).includes('On Instagram this gets no automatic reply'), 'with the AI off on Instagram, the test chat says so');
+  await page.reload({ waitUntil: 'networkidle2' });
+  await pause(1500);
+  await openPersona();
+  await tab('menus');
+  await page.waitForSelector('#pm-0-name');
+  const kept = await page.evaluate(() => [document.querySelector('#pm-0-1-text').value, document.querySelector('#pm-fallback').value, document.querySelector('#pm-0-0-n0').selectedOptions[0].textContent]);
+  expect(kept[0] === 'Whitening costs 120 €. Call us to book.' && kept[1] === 'team' && kept[2].startsWith('2 · Whitening costs'), `the saved menu reads back after a reload (${kept.join(' | ')})`);
+  await shot('menus-saved');
+
+  note('10. Dark theme, a narrow window and a phone');
   await tab('behavior');
   await click('#btn-theme', 1200);
   await shot('dark');
+  await tab('menus');
+  await shot('menus-dark');
   await click('#btn-theme', 800);
+  await tab('behavior');
   const cdp = await page.target().createCDPSession();
   const { windowId } = await cdp.send('Browser.getWindowForTarget');
   await cdp.send('Browser.setWindowBounds', { windowId, bounds: { width: 820, height: 1100 } });
@@ -315,8 +373,15 @@ try {
   await shot('narrow');
   await cdp.send('Browser.setWindowBounds', { windowId, bounds: { left: 0, top: 0, width: 1920, height: 1160 } });
   await pause(1000);
+  await tab('menus');
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 375, height: 812, deviceScaleFactor: 2, mobile: true });
+  await pause(1500);
+  expect(!(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)), 'the menus scroll no sideways on a 375px phone');
+  await shot('menus-phone');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  await pause(1000);
 
-  note('10. A member');
+  note('11. A member');
   await click('#btn-logout', 1000);
   await login(company.member);
   await openPersona();
@@ -327,6 +392,9 @@ try {
   await tab('history');
   await page.waitForSelector('[data-version]');
   expect((await page.$$('[data-restore]')).length === 0, 'no restoring');
+  await tab('menus');
+  await page.waitForSelector('#pm-0-name');
+  expect(await page.$eval('#pm-0-name', el => el.disabled) && !(await page.$('[data-pm-save]')) && !(await page.$('[data-menu-add]')), 'menus are read-only');
   expect((await tryChip('who')).includes("I'm Sofia"), 'members still use the test chat');
   await shot('member');
 } catch (e) {

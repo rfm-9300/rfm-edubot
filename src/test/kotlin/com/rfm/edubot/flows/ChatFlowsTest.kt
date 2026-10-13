@@ -84,4 +84,22 @@ class ChatFlowsTest {
         assertEquals(listOf("keywords"), flow.copy(keywords = listOf("?!")).problems())
         assertEquals(listOf("duplicate_step"), flow.copy(steps = flow.steps + flow.steps.last()).problems())
     }
+
+    @Test
+    fun `saving checks the editor's limits, then Instagram's, and says which menu and message`() {
+        fun problem(vararg menus: ChatFlow) = ChatFlows(menus.toList()).saveProblem()
+        val longTitle = flow.copy(steps = listOf(flow.steps[0].copy(buttons = listOf(FlowButton("x".repeat(21), "pele")))) + flow.steps.drop(1))
+        val leadsNowhere = flow.copy(id = "outro", steps = flow.steps.mapIndexed { i, s -> if (i == 2) s.copy(buttons = listOf(FlowButton("Microblading", "nowhere"))) else s })
+
+        assertNull(flows.saveProblem())
+        assertEquals(FlowProblem("name", 0, limit = ChatFlowLimits.MAX_NAME_CHARS), problem(flow.copy(name = " ")))
+        assertEquals(FlowProblem("keywords", 0), problem(flow.copy(keywords = emptyList())))
+        assertEquals(FlowProblem("keywords_limit", 0, limit = ChatFlowLimits.MAX_KEYWORDS), problem(flow.copy(keywords = List(51) { "palavra $it" })))
+        assertEquals(FlowProblem("keyword", 0, limit = ChatFlowLimits.MAX_KEYWORD_CHARS), problem(flow.copy(keywords = listOf("x".repeat(61)))))
+        assertEquals(FlowProblem("title", 0, 0, ChatFlow.MAX_TITLE), problem(longTitle))
+        assertEquals(FlowProblem("next", 1, 2), problem(flow, leadsNowhere))
+        assertEquals(FlowProblem("menus", limit = ChatFlowLimits.MAX_FLOWS), problem(*Array(11) { flow.copy(id = "m$it") }))
+        assertEquals(FlowProblem("invalid"), problem(flow, flow))
+        assertEquals(FlowProblem("invalid", 0), problem(flow.copy(id = "Serviços")))
+    }
 }

@@ -21,6 +21,7 @@ import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
+import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.Checked
 import com.rfm.edubot.persona.PersonaBehavior
@@ -43,6 +44,7 @@ import com.rfm.edubot.persona.SourceKind
 import com.rfm.edubot.persona.TenantPersona
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.TenantPipelineFactory
+import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -229,6 +231,17 @@ internal fun Route.personaRoutes(
             pipelineFactory.evict(ctx.tenant.id)
             call.reply(ctx, restored)
         }
+        get("/menus") {
+            val ctx = call.personaContext() ?: return@get
+            call.respond(menusDto(ChatFlowRepository(mongo, ctx.tenant.id).load(), ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null))
+        }
+        put("/menus") {
+            val ctx = call.personaEditor() ?: return@put
+            val flows = call.body<MenusInput>()?.toChatFlows() ?: return@put
+            flows.saveProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
+            val saved = ChatFlowRepository(mongo, ctx.tenant.id).save(flows, ctx.author())
+            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null))
+        }
         post("/preview") {
             val ctx = call.personaContext() ?: return@post
             val request = call.body<PersonaPreviewRequest>() ?: return@post
@@ -244,6 +257,25 @@ internal fun Route.personaRoutes(
                 .takeLast(PersonaLimits.MAX_TEST_MESSAGES)
                 .map { it.copy(content = it.content.take(PersonaLimits.MAX_TEST_MESSAGE_CHARS)) }
             if (history.isEmpty()) return@post call.problem(PersonaProblem("messages_required", "messages"))
+            // Menus answer before the AI, as they do on Instagram; unsaved ones are tried as they are.
+            val menus = request.flows?.toChatFlows() ?: ChatFlowRepository(mongo, ctx.tenant.id).find()
+            if (request.flows != null) menus?.saveProblem()?.let { return@post call.respond(HttpStatusCode.BadRequest, it.dto()) }
+            val last = history.last()
+            val menuReply = if (last.role == "assistant") null else menus?.replyTo(Platform.INSTAGRAM, last.content, request.payload)
+            if (menuReply != null) {
+                return@post call.respond(
+                    PersonaTestResponse(
+                        reply = menuReply.step.text,
+                        handoff = false,
+                        handoffReason = null,
+                        draft = request.flows != null,
+                        version = repo.findByTenant(ctx.tenant.id)?.version ?: 0,
+                        menu = menuReply.flow.name,
+                        quickReplies = menuReply.quickReplies.map { it.dto() },
+                        teamOnly = false,
+                    ),
+                )
+            }
             val persona = call.draftPersona(repo, ctx.tenant.id, request.draft) ?: return@post
             val usage = TenantUsageRepository(mongo, ctx.tenant.id)
             if (usage.tokensUsedThisMonth() >= ctx.tenant.monthlyTokenBudget) {
@@ -265,6 +297,9 @@ internal fun Route.personaRoutes(
                     handoffReason = outcome.handoffReason,
                     draft = request.draft != null,
                     version = persona.version,
+                    menu = null,
+                    quickReplies = emptyList(),
+                    teamOnly = menus?.teamOnlyChannels?.contains(Platform.INSTAGRAM) == true,
                 ),
             )
         }
@@ -408,8 +443,25 @@ private class PlaygroundHandoff : ToolPack {
 @Serializable private data class PersonaUpdateRequest(val compiledInstructions: String)
 @Serializable private data class PersonaSourceRequest(val content: String)
 @Serializable private data class PersonaTestMessage(val role: String, val content: String)
-@Serializable private data class PersonaTestRequest(val messages: List<PersonaTestMessage> = emptyList(), val draft: PersonaDraftInput? = null)
-@Serializable private data class PersonaTestResponse(val reply: String, val handoff: Boolean, val handoffReason: String?, val draft: Boolean, val version: Int)
+/** [flows] are the Menus tab's unsaved menus; [payload] is the quick reply the tester tapped for the last message. */
+@Serializable private data class PersonaTestRequest(
+    val messages: List<PersonaTestMessage> = emptyList(),
+    val draft: PersonaDraftInput? = null,
+    val flows: MenusInput? = null,
+    val payload: String? = null,
+)
+
+/** [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram. */
+@Serializable private data class PersonaTestResponse(
+    val reply: String,
+    val handoff: Boolean,
+    val handoffReason: String?,
+    val draft: Boolean,
+    val version: Int,
+    val menu: String?,
+    val quickReplies: List<QuickReplyDto>,
+    val teamOnly: Boolean,
+)
 @Serializable private data class PersonaPreviewRequest(val draft: PersonaDraftInput? = null)
 @Serializable private data class PersonaPreviewDto(val block: String?, val chars: Int, val tokenEstimate: Int)
 @Serializable private data class PersonaErrorDto(val error: String, val field: String? = null, val limit: Int? = null)

@@ -989,10 +989,14 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 .lines--installments .line { grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--installments .lines__head > span:nth-child(3) { text-align: left; padding-left: 10px; }
 .line__index { display: grid; align-items: center; padding: 0 12px; border-right: 1px solid var(--line-soft); color: var(--ink-mute); font-size: 12.5px; font-weight: 700; }
-/* A shift's breaks: from, to, remove. Same columns on phones. */
+/* A shift's breaks (from, to) and a Persona menu message's buttons (title, leads to): two fields and remove.
+   Same columns on phones. */
 .lines--breaks .lines__head,
-.lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-.lines--breaks .lines__head > span { text-align: left; }
+.lines--breaks .line,
+.lines--replies .lines__head,
+.lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.lines--breaks .lines__head > span,
+.lines--replies .lines__head > span { text-align: left; }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
 @media (max-width: 560px) {
   .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
@@ -1014,8 +1018,10 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
   .lines--services .line > [data-k="description"] { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .lines--installments .lines__head, .lines--installments .line { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .lines--installments .lines__head > span:first-child { grid-column: auto; }
-  .lines--breaks .lines__head, .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-  .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child { grid-column: auto; }
+  .lines--breaks .lines__head, .lines--breaks .line,
+  .lines--replies .lines__head, .lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child,
+  .lines--replies .lines__head > span:first-child, .lines--replies .line > input:first-child { grid-column: auto; }
 }
 /* iOS zooms the page into a focused field whose text is under 16px. */
 @media (pointer: coarse) {
