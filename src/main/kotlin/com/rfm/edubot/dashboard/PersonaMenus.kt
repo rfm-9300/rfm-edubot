@@ -38,13 +38,13 @@ internal data class MenuLimitsDto(
     val textBytes: Int,
 )
 
-/** What each saved menu sent in the last [days] days; a menu that sent nothing isn't listed. */
+/** What each saved menu sent in the last [days] days; a menu that sent nothing, nor tried to, isn't listed. */
 @Serializable
 internal data class MenuUsageDto(val days: Int, val menus: List<MenuSentDto>)
 
-/** [steps] counts per message id, only for messages stored with their step. */
+/** [sent] went out and [failed] were refused by Instagram; [steps] counts the sent ones per message id, for messages stored with their step. */
 @Serializable
-internal data class MenuSentDto(val id: String, val sent: Int, val customers: Int, val lastSentAt: String, val steps: Map<String, Int>)
+internal data class MenuSentDto(val id: String, val sent: Int, val failed: Int, val customers: Int, val lastSentAt: String?, val steps: Map<String, Int>)
 
 @Serializable
 internal data class MenusDto(
@@ -105,7 +105,7 @@ internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: B
     usage = MenuUsageDto(
         days = ChatFlowUsage.DAYS,
         menus = flows?.flows.orEmpty().mapNotNull { flow ->
-            usage[flow.id]?.let { MenuSentDto(flow.id, it.sent, it.customers, it.lastSentAt.toString(), it.steps) }
+            usage[flow.id]?.let { MenuSentDto(flow.id, it.sent, it.failed, it.customers, it.lastSentAt?.toString(), it.steps) }
         },
     ),
 )

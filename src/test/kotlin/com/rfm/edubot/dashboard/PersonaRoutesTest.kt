@@ -816,16 +816,18 @@ class PersonaRoutesTest {
         send("PUT", "/app/api/persona/menus", token, menus(menu()))
         val ana = ObjectId()
         val rui = ObjectId()
-        suspend fun sent(tenant: ObjectId, conversation: ObjectId, origin: String?, daysAgo: Int = 0) {
+        val eva = ObjectId()
+        suspend fun sent(tenant: ObjectId, conversation: ObjectId, origin: String?, daysAgo: Int = 0, status: String = "DELIVERED") {
             mongo.database.getCollection<Document>("messages").insertOne(
-                Document("tenantId", tenant).append("conversationId", conversation).append("role", "ASSISTANT")
+                Document("tenantId", tenant).append("conversationId", conversation).append("role", "ASSISTANT").append("status", status)
                     .append("origin", origin).append("createdAt", Date((now - daysAgo.days).toEpochMilliseconds())),
             )
         }
         sent(c.id, ana, "flow:servicos:menu")
         sent(c.id, ana, "flow:servicos:contacto")
-        sent(c.id, rui, "flow:servicos:menu")
+        sent(c.id, rui, "flow:servicos:menu", status = "SENT")
         sent(c.id, rui, "flow:servicos", daysAgo = 2)
+        sent(c.id, eva, "flow:servicos:menu", status = "FAILED")
         sent(c.id, rui, "flow:servicos:menu", daysAgo = 31)
         sent(c.id, ana, "flow:removed:menu")
         sent(c.id, ana, "agent:${ObjectId().toHexString()}")
@@ -836,7 +838,7 @@ class PersonaRoutesTest {
         assertEquals(30, usage.int("days"))
         val servicos = usage["menus"]!!.jsonArray.single().jsonObject
         assertEquals("servicos", servicos.text("id"), "only the company's own menus that still exist")
-        assertEquals(4 to 2, servicos.int("sent") to servicos.int("customers"))
+        assertEquals(Triple(4, 1, 2), Triple(servicos.int("sent"), servicos.int("failed"), servicos.int("customers")), "a refused message is counted apart")
         assertEquals(mapOf("menu" to 2, "contacto" to 1), servicos.obj("steps").mapValues { it.value.jsonPrimitive.content.toInt() })
         assertNotNull(servicos.text("lastSentAt"))
         val afterSave = send("PUT", "/app/api/persona/menus", token, menus(menu(name = "Serviços"))).obj().obj("usage")

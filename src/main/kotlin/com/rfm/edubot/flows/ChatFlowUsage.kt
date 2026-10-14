@@ -5,11 +5,11 @@ import kotlinx.datetime.Instant
 import kotlin.time.Duration.Companion.days
 
 /**
- * What a flow sent lately, read back from the messages it stored: [sent] messages to [customers]
- * conversations, and per step id in [steps]. Messages stored before they carried their step only count
- * towards the flow.
+ * What a flow sent lately, read back from the messages it stored: [sent] messages that went out to [customers]
+ * conversations, [failed] ones the channel refused (an expired token, say), and the sent ones per step id in
+ * [steps]. Messages stored before they carried their step only count towards the flow.
  */
-data class FlowUsage(val sent: Int, val customers: Int, val lastSentAt: Instant, val steps: Map<String, Int>)
+data class FlowUsage(val sent: Int, val failed: Int, val customers: Int, val lastSentAt: Instant?, val steps: Map<String, Int>)
 
 /** The Menus tab's usage figures. */
 object ChatFlowUsage {
@@ -26,10 +26,13 @@ object ChatFlowUsage {
             .groupBy({ it.first }) { it.second to it.third }
             .mapValues { (_, rows) ->
                 FlowUsage(
-                    sent = rows.sumOf { it.second.count },
-                    customers = rows.map { it.second.conversationId }.toSet().size,
-                    lastSentAt = rows.maxOf { it.second.lastAt },
-                    steps = rows.filter { it.first != null }.groupBy({ it.first!! }) { it.second.count }.mapValues { it.value.sum() },
+                    sent = rows.sumOf { it.second.delivered },
+                    failed = rows.sumOf { it.second.failed },
+                    customers = rows.filter { it.second.delivered > 0 }.map { it.second.conversationId }.toSet().size,
+                    lastSentAt = rows.mapNotNull { it.second.lastDeliveredAt }.maxOrNull(),
+                    steps = rows.filter { it.first != null && it.second.delivered > 0 }
+                        .groupBy({ it.first!! }) { it.second.delivered }
+                        .mapValues { it.value.sum() },
                 )
             }
 
