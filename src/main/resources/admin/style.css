@@ -989,12 +989,12 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 .lines--installments .line { grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--installments .lines__head > span:nth-child(3) { text-align: left; padding-left: 10px; }
 .line__index { display: grid; align-items: center; padding: 0 12px; border-right: 1px solid var(--line-soft); color: var(--ink-mute); font-size: 12.5px; font-weight: 700; }
-/* A shift's breaks (from, to) and a Persona menu message's buttons (title, leads to): two fields and remove.
-   Same columns on phones. */
+/* A shift's breaks (from, to): two fields and remove. A Persona menu message's buttons (title, leads to):
+   two fields, go to that message and remove. Same columns on phones. */
 .lines--breaks .lines__head,
-.lines--breaks .line,
+.lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--replies .lines__head,
-.lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px 32px; }
 .lines--breaks .lines__head > span,
 .lines--replies .lines__head > span { text-align: left; }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
@@ -1018,8 +1018,8 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
   .lines--services .line > [data-k="description"] { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
   .lines--installments .lines__head, .lines--installments .line { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .lines--installments .lines__head > span:first-child { grid-column: auto; }
-  .lines--breaks .lines__head, .lines--breaks .line,
-  .lines--replies .lines__head, .lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .lines--breaks .lines__head, .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .lines--replies .lines__head, .lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px 32px; }
   .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child,
   .lines--replies .lines__head > span:first-child, .lines--replies .line > input:first-child { grid-column: auto; }
 }
@@ -1280,6 +1280,123 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 @media (max-width: 1100px) {
   .persona-studio { grid-template-columns: minmax(0, 1fr); }
   .persona-studio__test { position: static; }
+}
+
+/* ── Persona → Menus (app/menus.js): menus that open in place, keyword tokens, a map of where buttons lead ── */
+.flow-menu__head { row-gap: 6px; cursor: pointer; }
+.flow-menu:not(.is-open) .flow-menu__head { border-bottom: 0; }
+.flow-menu__body[hidden] { display: none; }
+.flow-menu__title { flex: 1 1 260px; min-width: 0; margin: 0; }
+.flow-menu__toggle {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 2px 0;
+  border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.flow-menu__toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.flow-menu__chevron {
+  flex: none; width: 16px; height: 16px; background: var(--ink-mute); transition: transform 140ms;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m9 6 6 6-6 6'/></svg>") center / 16px no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m9 6 6 6-6 6'/></svg>") center / 16px no-repeat;
+}
+.flow-menu.is-open .flow-menu__chevron { transform: rotate(90deg); }
+.flow-menu__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
+.flow-menu__pills { display: flex; flex-wrap: wrap; gap: 6px; }
+/* Under the name: chevron (16) + gap (10) + position (24) + gap (10). */
+.flow-menu__summary { flex-basis: 100%; margin: 0; padding-left: 60px; color: var(--ink-mute); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+.flow-menu__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.flow-menu__stat { color: var(--ink-mute); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.flow-menu__notes { display: grid; gap: 4px; }
+.flow-menu__notes:empty, .flow-menu__map:empty { display: none; }
+.flow-menu__map { display: grid; gap: 8px; }
+.flow-menus [data-pm-kpis]:empty { display: none; }
+@keyframes flow-flash { 0%, 50% { border-color: var(--focus-border); box-shadow: var(--focus-ring); } 100% { box-shadow: 0 0 0 transparent; } }
+.flow__card.is-flash { animation: flow-flash 1.6s ease-out; }
+
+/* A message's buttons: title, leads to, go to that message, remove. */
+.line .l-go { display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--ink-mute); font-size: 14px; cursor: pointer; }
+.line .l-go:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
+.line .l-go:disabled { color: var(--ink-faint); opacity: 0.5; cursor: default; }
+.line .l-go:focus-visible, .line .l-rm:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus-border); }
+
+/* Where each button leads, as a tree from the first message. Messages shorten to fit; a very deep tree scrolls inside the box. */
+.flow-map { padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--surface-2); overflow-x: auto; font-size: 13px; }
+.flow-map__list { margin: 2px 0 0 11px; padding: 0; list-style: none; }
+.flow-map__branch { position: relative; padding: 3px 0 3px 20px; }
+.flow-map__branch::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; border-left: 1px solid var(--hairline-strong); }
+.flow-map__branch:last-child::before { bottom: auto; height: 16px; }
+.flow-map__branch::after { content: ""; position: absolute; top: 16px; left: 0; width: 14px; border-top: 1px solid var(--hairline-strong); }
+/* A button and where it leads on one line; only the message's text gives way. */
+.flow-map__row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.flow-map__row > * { flex: none; }
+.flow-map__row > .flow-map__msg { flex: 0 1 auto; }
+.flow-map__row > .flow-map__end { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.flow-map__btn { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border: 1px solid var(--hairline-strong); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.flow-map__btn::after { content: "→"; margin-left: 6px; color: var(--ink-faint); }
+.flow-map__msg {
+  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 26px; padding: 0 8px 0 2px;
+  border: 0; border-radius: 999px; background: none; color: var(--ink); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
+}
+.flow-map__msg:hover { background: var(--surface); }
+.flow-map__msg:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.flow-map__msg .flow__index { flex: none; width: 22px; height: 22px; font-size: 11px; }
+.flow-map__msg--ref { color: var(--ink-mute); font-weight: 500; }
+.flow-map__msg--ref .flow-map__text { max-width: 16ch; }
+.flow-map__text { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-map__back, .flow-map__end, .flow-map__note { color: var(--ink-mute); font-size: 12px; font-weight: 600; white-space: nowrap; }
+.flow-map__end { padding-left: 2px; }
+.flow-map__note { color: var(--warn-ink); }
+.flow-map__orphans { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 10px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); }
+
+/* Several short values typed into one field (a menu's keywords): each one a token, then the field. */
+.tokens {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-height: 40px; padding: 6px 8px;
+  border: 1.5px solid var(--line); border-radius: var(--r-sm); background: var(--surface); cursor: text;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.tokens:hover { border-color: var(--hairline-strong); }
+.tokens:focus-within { border-color: var(--focus-border); box-shadow: var(--focus-ring); }
+.tokens.is-readonly { background: var(--surface-2); cursor: default; }
+.tokens:has(.tokens__input[aria-invalid]:not(:focus)) { border-color: var(--bad); }
+.tokens__input { flex: 1 1 140px; min-width: 120px; height: 26px; padding: 0 4px; border: 0; outline: 0; background: transparent; color: var(--ink); font: inherit; font-size: 13.5px; }
+.tokens__input::placeholder { color: var(--ink-faint); }
+.tokens__input:disabled { cursor: not-allowed; }
+.token { display: inline-flex; align-items: center; max-width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface-2); color: var(--ink-2); font-size: 12.5px; font-weight: 600; }
+.token__text { min-width: 0; padding: 0 3px 0 9px; overflow: hidden; border: 0; background: none; color: inherit; font: inherit; text-overflow: ellipsis; white-space: nowrap; cursor: text; }
+span.token__text { padding-right: 9px; cursor: default; }
+.token__rm { display: grid; place-items: center; width: 22px; height: 22px; margin-right: 2px; border: 0; border-radius: 5px; background: none; color: var(--ink-faint); font-size: 14px; line-height: 1; cursor: pointer; }
+.token__rm:hover { background: var(--bad-soft); color: var(--bad-ink); }
+.token__rm:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.token--warn { border-color: transparent; background: var(--warn-soft); color: var(--warn-ink); }
+html[data-layout="minimal"] .tokens { min-height: 38px; border-width: 1px; border-radius: 8px; box-shadow: var(--shadow-sm); }
+html[data-layout="minimal"] .tokens:focus-within { box-shadow: var(--focus-ring); }
+
+/* A button that reads as a link inside a sentence: "Show", "From 1 · Prices". */
+.linkbtn { display: inline; padding: 0; border: 0; background: none; color: var(--ink-2); font: inherit; font-weight: 600; text-decoration: underline; text-decoration-color: var(--hairline-strong); text-underline-offset: 2px; cursor: pointer; }
+.linkbtn:hover { color: var(--ink); text-decoration-color: currentColor; }
+.linkbtn:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
+
+/* A form's Save and Discard: it rests at the form's end and follows the screen while there are unsaved changes. */
+.savebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; padding: 10px 12px 10px 16px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); }
+.savebar.is-dirty { position: sticky; bottom: 16px; z-index: 5; border-color: var(--hairline-strong); box-shadow: var(--shadow-md); }
+.savebar__status { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink-mute); font-size: 13px; font-weight: 600; }
+.savebar.is-dirty .savebar__status { color: var(--ink); }
+.savebar__dot { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--warn); }
+/* Toasts rise above a following save bar instead of covering its buttons. */
+html:has(.savebar.is-dirty) .toast { bottom: 92px; }
+
+/* A field a refused save points at; its own focus ring still wins. */
+.inp[aria-invalid]:not(:focus), .txt[aria-invalid]:not(:focus) { border-color: var(--bad); }
+.line input[aria-invalid]:not(:focus), .lines .line .sel[aria-invalid]:not(:focus) { box-shadow: inset 0 0 0 1.5px var(--bad); }
+
+@media (max-width: 560px) {
+  .flow-menu__title { flex-basis: 100%; }
+  .flow-menu__summary { padding-left: 0; }
+  .savebar { padding: 10px 12px; }
+  .savebar .actions { width: 100%; }
+  .savebar .actions .btn { flex: 1; }
+  html:has(.savebar.is-dirty) .toast { bottom: 128px; }
+}
+@media (pointer: coarse) {
+  .tokens__input { font-size: 16px; }
 }
 
 /* ── Conversations inbox (/app): list + thread, both scroll inside a fixed-height shell ── */
