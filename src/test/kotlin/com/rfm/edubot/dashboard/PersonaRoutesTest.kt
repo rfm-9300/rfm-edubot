@@ -474,7 +474,8 @@ class PersonaRoutesTest {
         assertEquals(true, source.bool("compiled"))
         assertEquals(c.admin.email, source.text("addedBy"))
         assertEquals("TEXT_NOTE", source.text("kind"))
-        verify { pipelines.evict(c.id) }
+        // The compiler evicts just after it marks the sources synthesized, which settled() can see first.
+        verify(timeout = 5_000) { pipelines.evict(c.id) }
         assertEquals("tenant/model", model.requests.single().model)
 
         assertEquals(Triple("content_required", "content", null), send("POST", "/app/api/persona/sources", token, note("   ")).error())
