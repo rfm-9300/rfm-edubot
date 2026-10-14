@@ -64,6 +64,14 @@ Local sessions push straight to `main`. What a session should know:
   a small time clock browser check) against a throwaway Mongo and the stand-in model. Once a real merge
   landed and `main`'s tree matched the simulated one, it rebuilt the next branch's merge from the
   tested tree with `git commit-tree`, so what CI tested is what had been verified locally.
+- **An agent asked to merge its own PR** (#76, 2026-10-14): its `gh` is read-only and its PR tool
+  has no merge action, but `main` isn't protected, so it pushes the merge itself. With `main`
+  unchanged since the branch was cut (otherwise it merges `main` into the branch and tests again)
+  and the PR's Test and GitGuardian green on the head commit, it marks the PR ready and pushes a
+  `--no-ff` merge commit to `main`, named like GitHub's (`Merge pull request #76 from
+  rfm-9300/<branch>`, then the PR title); GitHub then marks the PR merged. That push deploys like
+  any merge: the agent follows the Deploy WhatsApp Bot run, whose Deploy job checks `/health` and
+  `/ready` and rolls back on failure, but it can't reach the VPS itself.
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's
