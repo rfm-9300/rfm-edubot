@@ -34,6 +34,10 @@ import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 import java.util.Date
+import java.util.regex.Pattern
+
+/** [count] messages with this [origin] in one conversation, the newest at [lastAt]. */
+data class OriginCount(val origin: String, val conversationId: ObjectId, val count: Int, val lastAt: kotlinx.datetime.Instant)
 
 class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("users")
@@ -402,6 +406,33 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         )
         return collection.aggregate<Document>(pipeline).toList().associate { group ->
             group.getObjectId("_id") to kotlinx.datetime.Instant.fromEpochMilliseconds(group.get("at", Date::class.java).time)
+        }
+    }
+
+    /** Messages created since [since] whose `origin` starts with [prefix], counted per origin and conversation. */
+    suspend fun countByOrigin(prefix: String, since: kotlinx.datetime.Instant): List<OriginCount> {
+        val pipeline = listOf(
+            Document(
+                "\$match",
+                Document("tenantId", tenantId)
+                    .append("createdAt", Document("\$gte", since.toDate()))
+                    .append("origin", Document("\$regex", "^" + Pattern.quote(prefix))),
+            ),
+            Document(
+                "\$group",
+                Document("_id", Document("origin", "\$origin").append("conversationId", "\$conversationId"))
+                    .append("count", Document("\$sum", 1))
+                    .append("last", Document("\$max", "\$createdAt")),
+            ),
+        )
+        return collection.aggregate<Document>(pipeline).toList().map { group ->
+            val key = group.get("_id", Document::class.java)
+            OriginCount(
+                origin = key.getString("origin"),
+                conversationId = key.getObjectId("conversationId"),
+                count = (group["count"] as Number).toInt(),
+                lastAt = kotlinx.datetime.Instant.fromEpochMilliseconds(group.get("last", Date::class.java).time),
+            )
         }
     }
 

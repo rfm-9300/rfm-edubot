@@ -597,7 +597,7 @@ class MessagePipelineTest {
         val reply = stored.single()
         assertEquals(MessageAuthor.AUTOMATION, reply.author)
         assertEquals("Menu de serviços", reply.agentName)
-        assertEquals("flow:servicos", reply.origin)
+        assertEquals("flow:servicos:menu", reply.origin, "the step it sent, for the Menus tab's counts")
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
     }
 
