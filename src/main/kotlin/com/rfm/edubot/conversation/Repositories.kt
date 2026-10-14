@@ -34,6 +34,19 @@ import org.bson.conversions.Bson
 import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 import java.util.Date
+import java.util.regex.Pattern
+
+/**
+ * The messages with this [origin] in one conversation: [delivered] went out (or are on their way), [failed]
+ * were refused by the channel; [lastDeliveredAt] is the newest that wasn't refused.
+ */
+data class OriginCount(
+    val origin: String,
+    val conversationId: ObjectId,
+    val delivered: Int,
+    val failed: Int = 0,
+    val lastDeliveredAt: kotlinx.datetime.Instant?,
+)
 
 class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("users")
@@ -402,6 +415,37 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         )
         return collection.aggregate<Document>(pipeline).toList().associate { group ->
             group.getObjectId("_id") to kotlinx.datetime.Instant.fromEpochMilliseconds(group.get("at", Date::class.java).time)
+        }
+    }
+
+    /** Messages created since [since] whose `origin` starts with [prefix], counted per origin and conversation. */
+    suspend fun countByOrigin(prefix: String, since: kotlinx.datetime.Instant): List<OriginCount> {
+        val failed = Document("\$eq", listOf("\$status", MessageStatus.FAILED.name))
+        val pipeline = listOf(
+            Document(
+                "\$match",
+                Document("tenantId", tenantId)
+                    .append("createdAt", Document("\$gte", since.toDate()))
+                    .append("origin", Document("\$regex", "^" + Pattern.quote(prefix))),
+            ),
+            Document(
+                "\$group",
+                Document("_id", Document("origin", "\$origin").append("conversationId", "\$conversationId"))
+                    .append("delivered", Document("\$sum", Document("\$cond", listOf(failed, 0, 1))))
+                    .append("failed", Document("\$sum", Document("\$cond", listOf(failed, 1, 0))))
+                    // $max skips the nulls, so this is the newest message that wasn't refused.
+                    .append("last", Document("\$max", Document("\$cond", listOf(failed, null, "\$createdAt")))),
+            ),
+        )
+        return collection.aggregate<Document>(pipeline).toList().map { group ->
+            val key = group.get("_id", Document::class.java)
+            OriginCount(
+                origin = key.getString("origin"),
+                conversationId = key.getObjectId("conversationId"),
+                delivered = (group["delivered"] as Number).toInt(),
+                failed = (group["failed"] as Number).toInt(),
+                lastDeliveredAt = group.getDate("last")?.let { kotlinx.datetime.Instant.fromEpochMilliseconds(it.time) },
+            )
         }
     }
 

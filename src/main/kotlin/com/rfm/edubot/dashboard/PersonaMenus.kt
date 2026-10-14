@@ -3,11 +3,13 @@ package com.rfm.edubot.dashboard
 import com.rfm.edubot.channel.QuickReply
 import com.rfm.edubot.flows.ChatFlow
 import com.rfm.edubot.flows.ChatFlowLimits
+import com.rfm.edubot.flows.ChatFlowUsage
 import com.rfm.edubot.flows.ChatFlows
 import com.rfm.edubot.flows.FlowButton
 import com.rfm.edubot.flows.FlowProblem
 import com.rfm.edubot.flows.FlowStep
 import com.rfm.edubot.flows.FlowText
+import com.rfm.edubot.flows.FlowUsage
 import com.rfm.edubot.tenant.model.Platform
 import kotlinx.serialization.Serializable
 
@@ -36,6 +38,14 @@ internal data class MenuLimitsDto(
     val textBytes: Int,
 )
 
+/** What each saved menu sent in the last [days] days; a menu that sent nothing, nor tried to, isn't listed. */
+@Serializable
+internal data class MenuUsageDto(val days: Int, val menus: List<MenuSentDto>)
+
+/** [sent] went out and [failed] were refused by Instagram; [steps] counts the sent ones per message id, for messages stored with their step. */
+@Serializable
+internal data class MenuSentDto(val id: String, val sent: Int, val failed: Int, val customers: Int, val lastSentAt: String?, val steps: Map<String, Int>)
+
 @Serializable
 internal data class MenusDto(
     val flows: List<MenuDto>,
@@ -46,6 +56,7 @@ internal data class MenusDto(
     val updatedAt: String?,
     val updatedBy: String?,
     val limits: MenuLimitsDto,
+    val usage: MenuUsageDto,
 )
 
 /** `error` is always `menu_problem`; [problem] says what, [menu] and [step] where, as positions in what was sent. */
@@ -72,7 +83,7 @@ internal fun MenusInput.toChatFlows() = ChatFlows(
     teamOnlyChannels = teamOnlyChannels.mapNotNull { name -> Platform.entries.firstOrNull { it.name == name } }.toSet(),
 )
 
-internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: Boolean) = MenusDto(
+internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: Boolean, usage: Map<String, FlowUsage>) = MenusDto(
     flows = flows?.flows.orEmpty().map { flow ->
         MenuDto(flow.id, flow.name, flow.enabled, flow.keywords, flow.steps.map { step -> MenuStepDto(step.id, step.text, step.buttons.map { MenuButtonDto(it.title, it.next) }) })
     },
@@ -90,6 +101,12 @@ internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: B
         buttons = ChatFlow.MAX_BUTTONS,
         titleChars = ChatFlow.MAX_TITLE,
         textBytes = ChatFlow.MAX_TEXT_BYTES,
+    ),
+    usage = MenuUsageDto(
+        days = ChatFlowUsage.DAYS,
+        menus = flows?.flows.orEmpty().mapNotNull { flow ->
+            usage[flow.id]?.let { MenuSentDto(flow.id, it.sent, it.failed, it.customers, it.lastSentAt?.toString(), it.steps) }
+        },
     ),
 )
 

@@ -101,7 +101,7 @@ data class Message(
     /** Meta's error code and text when [status] is FAILED. */
     val errorCode: Int? = null,
     val errorText: String? = null,
-    /** `agent:<id>` on messages an automation agent sent, `flow:<id>` on a chat flow's. */
+    /** `agent:<id>` on messages an automation agent sent, `flow:<flow id>:<step id>` on a chat flow's (older ones lack the step). */
     val origin: String? = null,
 )
 

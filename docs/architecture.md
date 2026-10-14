@@ -36,7 +36,7 @@ sequenceDiagram
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message (skipped if already stored)
         opt a chat flow step answers
-            P->>DB: insert automation Message (origin flow:<id>)
+            P->>DB: insert automation Message (origin flow:<id>:<step>)
             P->>WA: sendQuickReplies (Instagram), then markProcessed without the AI
         end
         Note over P: System messages from PersonaPrompt: persona, platform rules, date, CRM and booking rules, handoff
@@ -1150,7 +1150,7 @@ Fixed messages with quick replies that answer customers before the AI, the way M
 automations do: a keyword opens a menu, and each tap leads to the next step. Code: `flows/`
 (`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline`,
 `InstagramClient.sendQuickReplies`, and the Persona page's **Menus** tab (`dashboard/PersonaMenus.kt`,
-`app.js`). A company's flows are one `chat_flows` document
+`flows/ChatFlowUsage.kt`, `app/menus.js`). A company's flows are one `chat_flows` document
 ([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape), read on every message,
 so a saved change applies at once.
 
@@ -1162,6 +1162,12 @@ so a saved change applies at once.
   of 60 characters, names of 60), then `ChatFlow.problems()`. A refusal is
   `400 {error: "menu_problem", problem, menu, step, limit}`, positions in what was sent; the tab
   checks the same rules in the same order before sending, with the same wording.
+- **Usage.** Both answers carry `usage`: per saved menu, over the last 30 days, the messages it sent,
+  the ones Instagram refused (`failed`, status `FAILED`, so an expired token shows instead of
+  inflating the figures), the conversations that got at least one, when it last sent, and per step.
+  `MessageRepository.countByOrigin` groups the flow messages (`origin` starting `flow:`) by origin
+  and conversation on the `tenantId + createdAt` index; `ChatFlowUsage` folds them per flow and step.
+  Messages stored before the step was kept (`origin = flow:<id>`) count towards their flow only.
 - **Test chat.** `POST /app/api/persona/test` runs the menus before the AI, through the same
   `replyTo`, with the tab's unsaved menus when it sends them (`flows`) and a tapped button's `payload`.
   A menu reply returns its text, `menu` and `quickReplies` without calling the model; an AI reply says
@@ -1183,7 +1189,8 @@ flowchart TD
 - **Where it runs.** After the paused-conversation check, so a chat a person took over gets no flow
   either. The step goes out after the rate limit passes and the customer's message is stored, and the
   AI isn't called. It is stored as an `AUTOMATION` message with the flow's name in `agentName` and
-  `origin = flow:<id>`, so the inbox shows it with the Automation tag.
+  `origin = flow:<flow id>:<step id>` (the payload's form), so the inbox shows it with the Automation
+  tag and the Menus tab can count each step.
 - **Matching.** Keywords match whole words, ignoring case, accents and punctuation: "Oi" is found in
   "Oi, tudo bem?" but not in "Depois". A tap is routed by its payload, never by its title, so a
   button labelled "Sobrancelha/Formação" moves on even when "Formação" also starts the flow. A

@@ -87,6 +87,7 @@ import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.time.Duration.Companion.days
 
 /**
  * The persona module end to end over HTTP: the real auth plugin, routes, repository and synthesis
@@ -473,7 +474,8 @@ class PersonaRoutesTest {
         assertEquals(true, source.bool("compiled"))
         assertEquals(c.admin.email, source.text("addedBy"))
         assertEquals("TEXT_NOTE", source.text("kind"))
-        verify { pipelines.evict(c.id) }
+        // The compiler evicts just after it marks the sources synthesized, which settled() can see first.
+        verify(timeout = 5_000) { pipelines.evict(c.id) }
         assertEquals("tenant/model", model.requests.single().model)
 
         assertEquals(Triple("content_required", "content", null), send("POST", "/app/api/persona/sources", token, note("   ")).error())
@@ -804,6 +806,44 @@ class PersonaRoutesTest {
         assertEquals(setOf(Platform.INSTAGRAM), stored.flows.single().channels)
         assertEquals("contacto", stored.replyTo(Platform.INSTAGRAM, "Unhas", "flow:servicos:contacto")?.step?.id)
         assertEquals("Menu de serviços", send("GET", "/app/api/persona/menus", member).obj()["flows"]!!.jsonArray.single().jsonObject.text("name"))
+    }
+
+    @Test
+    fun `menus come with what each one sent in the last 30 days, per message and per customer`() = personaTest {
+        val c = company()
+        val other = company()
+        val token = token(c.admin.email)
+        assertEquals(0, send("GET", "/app/api/persona/menus", token).obj().obj("usage")["menus"]!!.jsonArray.size)
+        send("PUT", "/app/api/persona/menus", token, menus(menu()))
+        val ana = ObjectId()
+        val rui = ObjectId()
+        val eva = ObjectId()
+        suspend fun sent(tenant: ObjectId, conversation: ObjectId, origin: String?, daysAgo: Int = 0, status: String = "DELIVERED") {
+            mongo.database.getCollection<Document>("messages").insertOne(
+                Document("tenantId", tenant).append("conversationId", conversation).append("role", "ASSISTANT").append("status", status)
+                    .append("origin", origin).append("createdAt", Date((now - daysAgo.days).toEpochMilliseconds())),
+            )
+        }
+        sent(c.id, ana, "flow:servicos:menu")
+        sent(c.id, ana, "flow:servicos:contacto")
+        sent(c.id, rui, "flow:servicos:menu", status = "SENT")
+        sent(c.id, rui, "flow:servicos", daysAgo = 2)
+        sent(c.id, eva, "flow:servicos:menu", status = "FAILED")
+        sent(c.id, rui, "flow:servicos:menu", daysAgo = 31)
+        sent(c.id, ana, "flow:removed:menu")
+        sent(c.id, ana, "agent:${ObjectId().toHexString()}")
+        sent(c.id, ana, null)
+        sent(other.id, ana, "flow:servicos:menu")
+
+        val usage = send("GET", "/app/api/persona/menus", token).obj().obj("usage")
+        assertEquals(30, usage.int("days"))
+        val servicos = usage["menus"]!!.jsonArray.single().jsonObject
+        assertEquals("servicos", servicos.text("id"), "only the company's own menus that still exist")
+        assertEquals(Triple(4, 1, 2), Triple(servicos.int("sent"), servicos.int("failed"), servicos.int("customers")), "a refused message is counted apart")
+        assertEquals(mapOf("menu" to 2, "contacto" to 1), servicos.obj("steps").mapValues { it.value.jsonPrimitive.content.toInt() })
+        assertNotNull(servicos.text("lastSentAt"))
+        val afterSave = send("PUT", "/app/api/persona/menus", token, menus(menu(name = "Serviços"))).obj().obj("usage")
+        assertEquals(4, afterSave["menus"]!!.jsonArray.single().jsonObject.int("sent"), "a save answers with the same figures")
     }
 
     @Test

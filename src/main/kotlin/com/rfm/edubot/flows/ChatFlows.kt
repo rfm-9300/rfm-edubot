@@ -133,11 +133,15 @@ data class FlowButton(val title: String, val next: String)
 data class FlowReply(val flow: ChatFlow, val step: FlowStep) {
     val quickReplies: List<QuickReply>
         get() = step.buttons.map { QuickReply(it.title, FlowPayload.of(flow.id, it.next)) }
+
+    /** What the stored message carries in `origin`, so the Menus tab can count each step it sent. */
+    val origin: String
+        get() = FlowPayload.of(flow.id, step.id)
 }
 
-/** What a flow's quick reply sends back: `flow:<flow id>:<step id>`. */
+/** What a flow's quick reply sends back, and a flow message's `origin`: `flow:<flow id>:<step id>`. */
 internal object FlowPayload {
-    private const val PREFIX = "flow:"
+    const val PREFIX = "flow:"
 
     fun of(flowId: String, stepId: String) = "$PREFIX$flowId:$stepId"
 

@@ -573,7 +573,7 @@ class MessagePipeline(
             createdAt = SystemClock.now(),
             author = MessageAuthor.AUTOMATION,
             agentName = reply.flow.name,
-            origin = "flow:${reply.flow.id}",
+            origin = reply.origin,
         )
         messages.insert(message)
         val quickReplies = reply.quickReplies

@@ -16,12 +16,14 @@ import com.rfm.edubot.ai.tools.ToolPack
 import com.rfm.edubot.bookings.BookingTools
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
+import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.ChatFlowUsage
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.Checked
 import com.rfm.edubot.persona.PersonaBehavior
@@ -233,14 +235,15 @@ internal fun Route.personaRoutes(
         }
         get("/menus") {
             val ctx = call.personaContext() ?: return@get
-            call.respond(menusDto(ChatFlowRepository(mongo, ctx.tenant.id).load(), ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null))
+            val flows = ChatFlowRepository(mongo, ctx.tenant.id).load()
+            call.respond(menusDto(flows, ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
         }
         put("/menus") {
             val ctx = call.personaEditor() ?: return@put
             val flows = call.body<MenusInput>()?.toChatFlows() ?: return@put
             flows.saveProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
             val saved = ChatFlowRepository(mongo, ctx.tenant.id).save(flows, ctx.author())
-            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null))
+            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
         }
         post("/preview") {
             val ctx = call.personaContext() ?: return@post
@@ -307,6 +310,9 @@ internal fun Route.personaRoutes(
 }
 
 private const val MULTIPART_OVERHEAD = 64 * 1024
+
+private suspend fun menuUsage(mongo: MongoModule, tenantId: ObjectId) =
+    ChatFlowUsage.of(MessageRepository(mongo, tenantId).countByOrigin(ChatFlowUsage.ORIGIN_PREFIX, ChatFlowUsage.since(SystemClock.now())))
 
 /** The caller's context when the company has the persona module; answers 403 otherwise. */
 private suspend fun ApplicationCall.personaContext(): DashboardContext? {

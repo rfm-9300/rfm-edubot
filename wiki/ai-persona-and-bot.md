@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-13
+updated: 2026-10-14
 ---
 
 # Customer-facing bot and persona
@@ -64,9 +64,10 @@ screen. Decisions:
   `find`). With `find` behind the tab, a hand-written flow with a problem would have been hidden and
   then deleted by the next save; now it shows, to be fixed.
 - **One set of rules, checked on both sides:** `ChatFlows.saveProblem()` (the tab's limits, then
-  `ChatFlow.problems()`) and the same checks, order and codes in `app.js`. Either way the toast names
-  the menu and message and the cursor goes to the field. A refusal is `menu_problem` with positions,
-  so the persona's `{error, field}` errors stayed as they were.
+  `ChatFlow.problems()`) and the same checks, order and codes in `app/menus.js` (`firstProblem`;
+  `app.js` until PR #76). Either way the toast names the menu and message and the cursor goes to
+  the field. A refusal is `menu_problem` with positions, so the persona's `{error, field}` errors
+  stayed as they were.
 - **The test chat plays the menus,** through the server's own `replyTo`, with unsaved menus and the
   tapped button's payload: the tab sits beside the test chat, and an AI answer to "Olá" there would
   contradict what Instagram customers get. Buttons show under the latest reply only, as on Instagram.
@@ -78,6 +79,46 @@ screen. Decisions:
 - Checked in Chrome with `scripts/persona-e2e/walkthrough.mjs` (now with a Menus section: build, the
   empty-message catch, the unsaved menu in the test chat, save, team-only, reload, dark, a 375px phone,
   a member), plus pt-PT by hand.
+
+### The Menus tab as a menu builder (PR #76, 2026-10-14)
+
+Asked to make the tab much better to use, with more features where useful. With three modest menus
+the #75 tab was a 5,400px form: every menu open, keywords in a textarea, no view of where buttons
+lead, Save at the very bottom. `design-system/patterns.md` → "Persona" has the screen. Decisions:
+
+- **Its own script:** `app/menus.js` (`MenusUI`), mounted by `app.js` like Agents and Email. The test
+  chat stays in `app.js` and asks `MenusUI.dirty()` and `draftPayload()` for the unsaved menus.
+- **Menus open in place:** one menu opens on load, several start folded, so the list is the
+  overview: position, On/Off, keywords, size, 30-day usage, and a live "n to fix" (blocks saving)
+  or "n to check" (a keyword clash, an unreachable message). Open state is kept by menu id.
+- **Order is priority, so clashes are shown:** `replyTo` takes the first live menu with a matching
+  keyword, so a keyword that holds an earlier live menu's keyword as whole words never reaches its
+  own menu ("Hello there" behind "Hello"). The tab flags it with the server's normalization and
+  ↑ ↓ reorder menus. The same matcher drives "Check a message" and picks Try it's keyword, and a
+  duplicate starts Off so it can't clash.
+- **Keywords are tokens, not lines:** Enter adds one, a pasted list adds one per line, leaving the
+  field adds what was typed. Commas don't split: splitting "Quanto custa, por favor" would add
+  "por favor", which matches nearly every message.
+- **The map** walks from message 1 in button order; a message reached again is a link back, and
+  messages no path reaches are listed and flagged on their card.
+- **Usage reads the messages menus already store:** the origin now carries the step
+  (`flow:<menu>:<message>`, the payload's form), and `ChatFlowUsage` counts 30 days on the existing
+  `tenantId + createdAt` index, so no new index. Older messages count towards their menu only. A
+  send Instagram refused (status `FAILED`) is counted apart, not as sent, or an expired token would
+  read as healthy figures. Locally every send is refused (fake tokens), which is what the
+  walkthrough checks.
+- **Saving:** problems show under their fields only after a refused save (the head's count is
+  always live). The save bar follows the screen only while something is unsaved, and toasts rise
+  above it: a toast at the bottom centre covered its Save button and took the click. Discard
+  confirms (it's always within reach now), Ctrl+S saves, leaving the page asks first, and edits
+  typed while a save is in flight stay unsaved instead of being dropped.
+- **Redraws never touch a field being typed in,** and a region is replaced only when its HTML
+  changed, so a button under the pointer isn't swapped out mid-click (a keyword committed on blur
+  re-rendered the tokens before the click on one's × landed).
+- Checked with `scripts/persona-e2e/walkthrough.mjs`, whose Menus section now also covers the
+  tokens, the map, problems under fields, Try it, a clash, the checker, reordering, duplicating,
+  discarding and a signed Instagram message showing up in usage; plus dark, a 375px phone, pt-PT
+  and a member.
 
 ## Persona studio: settings, history, safe synthesis, handoff (PR #54, shipped 2026-10-08, `131ba11`)
 

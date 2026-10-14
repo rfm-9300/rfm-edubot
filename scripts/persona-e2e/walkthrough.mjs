@@ -4,15 +4,18 @@
 // settings (tested unsaved), notes and PDF/Word/Markdown uploads, the test chat (handoff and a
 // prompt-injection try), hand edits and the preview, history and restore, removing a source and
 // rebuilding, a signed WhatsApp message that hands a chat to the team (bell + inbox), Instagram
-// menus (built, caught when incomplete, tried unsaved in the test chat, saved, team-only), dark
-// theme, a narrow window and a phone, and a member's read-only view.
+// menus (built with keyword tokens, mapped, caught when incomplete, tried unsaved in the test chat
+// and with Try it, saved, team-only; a keyword clash, the message checker, reordering, duplicating
+// and discarding; a signed Instagram message the menu answers, counted in its usage), dark theme,
+// a narrow window and a phone, and a member's read-only view.
 //
 // Run the app with OPENROUTER_BASE_URL pointing at fake-openrouter.py (its replies are what this
 // expects) and a password for the backoffice, then:
 //   cd scripts/persona-e2e && npm install && \
 //   ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs
 // Optional: APP_URL (http://localhost:8080), CHROME (google-chrome), HEADLESS=1, OUT (./out),
-// SLOW (ms between steps, 0 by default; ~800 makes it watchable).
+// SLOW (ms between steps, 0 by default; ~800 makes it watchable), IG_APP_SECRET (when the app has
+// one; Instagram webhooks are signed with it, else with WA_APP_SECRET).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -22,6 +25,7 @@ import puppeteer from 'puppeteer-core';
 const APP = (process.env.APP_URL || 'http://localhost:8080').replace(/\/$/, '');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const WA_APP_SECRET = process.env.WA_APP_SECRET;
+const IG_APP_SECRET = process.env.IG_APP_SECRET || WA_APP_SECRET;
 const OUT = path.resolve(process.env.OUT || 'out');
 const SLOW = Number(process.env.SLOW || 0);
 if (!ADMIN_PASSWORD || !WA_APP_SECRET) {
@@ -60,7 +64,7 @@ async function createCompany() {
   const member = { email: `member-${run}@sorriso.test`, password: `member-${run}-pw` };
   await http('POST', `/admin/api/tenants/${slug}/dashboard-users`, token, { ...admin, role: 'TENANT_ADMIN' });
   await http('POST', `/admin/api/tenants/${slug}/dashboard-users`, token, { ...member, role: 'TENANT_MEMBER' });
-  return { slug, phone, admin, member };
+  return { slug, phone, instagram: `persona-e2e-ig-${run}`, admin, member, backoffice: token };
 }
 
 /** A .docx with one paragraph per line: a zip of stored entries, which Word and the app both read. */
@@ -134,6 +138,20 @@ async function whatsappMessage(phone, text) {
     } }] }],
   });
   const signature = crypto.createHmac('sha256', WA_APP_SECRET).update(body).digest('hex');
+  const res = await fetch(`${APP}/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': `sha256=${signature}` }, body });
+  return res.status;
+}
+
+/** What Instagram posts when a customer writes to the company's account. */
+async function instagramMessage(account, text) {
+  const body = JSON.stringify({
+    object: 'instagram',
+    entry: [{ id: account, time: Math.floor(Date.now() / 1000), messaging: [{
+      sender: { id: 'persona-e2e-customer' }, recipient: { id: account }, timestamp: Date.now(),
+      message: { mid: `mid.persona-e2e.${Date.now()}`, text },
+    }] }],
+  });
+  const signature = crypto.createHmac('sha256', IG_APP_SECRET).update(body).digest('hex');
   const res = await fetch(`${APP}/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': `sha256=${signature}` }, body });
   return res.status;
 }
@@ -309,17 +327,24 @@ try {
   expect((await text('.persona-studio__pane')).includes('No menus yet'), 'a company starts without menus');
   await click('[data-menu-add]', 800);
   expect(await page.$eval('#pm-0-name', el => el.value) === 'Menu 1', 'a new menu gets a name');
+  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-keywords', 'and the cursor waits in its keywords');
   await type('#pm-0-keywords', 'Hello\nGood morning', 20);
   await type('#pm-0-0-text', 'Hello! Which service would you like to know about?', 8);
+  const keywords = await page.evaluate(() => state.personaDraft.menus.flows[0].keywords);
+  expect(keywords.join('|') === 'Hello|Good morning' && (await page.$$('[data-tokens="0"] .token')).length === 2, `Enter adds a keyword token, and leaving the field adds the one being typed (${keywords.join('|')})`);
+  expect(await page.$eval('[data-pm-savebar]', el => el.classList.contains('is-dirty')), 'the save bar follows the screen once something is unsaved');
   await click('[data-button-add="0:0"]', 800);
   await type('#pm-0-0-b0', 'Whitening', 20);
   await page.select('#pm-0-0-n0', '__new');
   await pause(900);
   expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', '"New message…" adds a message and moves to it');
+  expect((await text('.flow-map')).includes('Whitening') && (await text('[data-step-summary="0:1"]')).includes('1 · Whitening'), 'the map and the new message show the button that leads there');
   await click('[data-pm-save]', 300);
   expect((await toast()).includes('message 2: write the message'), 'an empty message is caught before saving');
   expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', 'and the cursor goes to it');
+  expect((await text('[data-issue="0:1:text"]')).startsWith('Write the message'), 'the message says under it what is missing');
   await type('#pm-0-1-text', 'Whitening costs 120 €. Call us to book.', 8);
+  expect(await page.$eval('[data-issue="0:1:text"]', el => el.hidden), 'and stops once it is written');
   expect(await page.$eval('#persona-test-draft', el => !el.hidden), 'the test chat says it uses the unsaved menu');
   await shot('menus-draft');
   await click('#persona-chat-clear', 300);
@@ -338,6 +363,9 @@ try {
   expect((await toast()).startsWith('Menus saved'), 'saving the menus is confirmed');
   await pause(1000);
   expect(await page.$eval('#persona-test-draft', el => el.hidden), 'nothing is left unsaved');
+  await click('[data-menu-try="0"]', 300);
+  await page.waitForFunction(() => document.querySelector('#persona-chat-log').innerText.includes('Answered by the menu “Menu 1”'), { timeout: 15000 });
+  expect((await page.$eval('#persona-chat-log .chat__msg--user', el => el.innerText.trim())) === 'Hello', 'Try it starts a test chat with one of the menu\'s keywords');
   await page.select('#pm-fallback', 'team');
   await pause(300);
   await click('[data-pm-save]', 1300);
@@ -347,6 +375,34 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('#persona-chat-log .chat__note').length > 0, { timeout: 20000 });
   await pause(500);
   expect((await text('#persona-chat-log')).includes('On Instagram this gets no automatic reply'), 'with the AI off on Instagram, the test chat says so');
+
+  await click('[data-menu-add]', 800);
+  await type('#pm-1-keywords', 'Hello there\n', 20);
+  await pause(300);
+  expect((await text('[data-kw-notes="1"]')).includes('“Hello there” opens “Menu 1” instead'), 'a keyword an earlier menu catches first is flagged');
+  expect(await page.$eval('[data-tokens="1"] .token', el => el.classList.contains('token--warn')), 'and its token is marked');
+  await type('#pm-probe', 'Hello there!', 20);
+  expect((await text('[data-pm-probe]')).startsWith('Opens “Menu 1”, through the keyword “Hello”'), 'the message checker names the menu that answers and its keyword');
+  await click('[data-menu-up="1"]', 800);
+  expect(!(await text('[data-kw-notes="0"]')).includes('instead') && (await text('[data-pm-probe]')).startsWith('Opens “Menu 2”'), 'moving the menu up lets its keyword answer');
+  await shot('menus-clash');
+  await click('[data-menu-duplicate="1"]', 900);
+  const copies = await page.evaluate(() => state.personaDraft.menus.flows.map(f => `${f.name}:${f.enabled}`));
+  expect(copies.length === 3 && copies[2] === 'Menu 1 (copy):false', `a duplicate is added under the menu, off (${copies.join(', ')})`);
+  await click('[data-pm-discard]', 300);
+  expect((await confirm()).startsWith('Discard your changes to the menus?'), 'discarding asks first');
+  await pause(800);
+  expect((await page.$$('.flow-menu')).length === 1 && !(await page.evaluate(() => !!state.personaDraft.menus)), 'and goes back to the saved menu');
+
+  // An Instagram customer writes; the menu answers before the AI and its usage counts it. Without a
+  // real token Instagram refuses the reply, which the figures count apart.
+  await http('POST', `/admin/api/tenants/${company.slug}/channels`, company.backoffice, { platform: 'INSTAGRAM', externalId: company.instagram, accessToken: 'persona-e2e' });
+  expect(await instagramMessage(company.instagram, 'Hello!') === 200, 'the signed Instagram webhook is accepted');
+  const used = await page.waitForFunction(async () => {
+    const usage = (await api('/app/api/persona/menus')).usage.menus[0];
+    return usage && usage.sent + usage.failed > 0 && usage;
+  }, { timeout: 30000, polling: 1000 }).then(h => h.jsonValue()).catch(() => null);
+  expect(!!used, `the menu's reply is in its usage (${JSON.stringify(used)})`);
   await page.reload({ waitUntil: 'networkidle2' });
   await pause(1500);
   await openPersona();
@@ -354,6 +410,9 @@ try {
   await page.waitForSelector('#pm-0-name');
   const kept = await page.evaluate(() => [document.querySelector('#pm-0-1-text').value, document.querySelector('#pm-fallback').value, document.querySelector('#pm-0-0-n0').selectedOptions[0].textContent]);
   expect(kept[0] === 'Whitening costs 120 €. Call us to book.' && kept[1] === 'team' && kept[2].startsWith('2 · Whitening costs'), `the saved menu reads back after a reload (${kept.join(' | ')})`);
+  expect(!(await notices()).includes('Instagram isn’t connected'), 'with Instagram connected, the tab stops saying it isn’t');
+  const summary = await text('[data-menu-summary="0"]');
+  expect(summary.includes('Sent once to 1 customer') || summary.includes('1 refused by Instagram'), `the menu's head counts what it sent (${summary})`);
   await shot('menus-saved');
 
   note('10. Dark theme, a narrow window and a phone');
@@ -395,6 +454,7 @@ try {
   await tab('menus');
   await page.waitForSelector('#pm-0-name');
   expect(await page.$eval('#pm-0-name', el => el.disabled) && !(await page.$('[data-pm-save]')) && !(await page.$('[data-menu-add]')), 'menus are read-only');
+  expect(!(await page.$('[data-menu-up="0"], [data-kw-remove]')) && await page.$eval('[data-menu-try="0"]', el => !el.disabled), 'members can\'t reorder or edit keywords, but can try a menu');
   expect((await tryChip('who')).includes("I'm Sofia"), 'members still use the test chat');
   await shot('member');
 } catch (e) {

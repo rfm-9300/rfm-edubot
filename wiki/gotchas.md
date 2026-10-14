@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-12
+updated: 2026-10-14
 ---
 
 # Cross-cutting gotchas
@@ -79,7 +79,7 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
 
 ## The `hidden` attribute loses to `display` rules
 
-`.form__row { display: flex }` beat the `hidden` attribute, so forms showed fields meant to be hidden (the payment form's supplier and employee fields, the catalog form's booking-only fields; see [crm-directories.md](crm-directories.md)), and `.topbar__search`'s `display: flex` kept the backoffice search visible on pages that hide it ([dashboard-ui.md](dashboard-ui.md)). Any class that sets `display` outranks the user-agent `[hidden]` rule, so the stylesheet adds overrides (`.form__row[hidden], .form__grid[hidden]`, `.topbar__search[hidden]`), and a new `display` rule on an element that gets hidden needs one too.
+`.form__row { display: flex }` beat the `hidden` attribute, so forms showed fields meant to be hidden (the payment form's supplier and employee fields, the catalog form's booking-only fields; see [crm-directories.md](crm-directories.md)), and `.topbar__search`'s `display: flex` kept the backoffice search visible on pages that hide it ([dashboard-ui.md](dashboard-ui.md)). Any class that sets `display` outranks the user-agent `[hidden]` rule, so the stylesheet adds overrides (`.form__row[hidden], .form__grid[hidden]`, `.topbar__search[hidden]`, `.flow-menu__body[hidden]` for a folded Persona menu, whose `.panel__body` is also a `.form` grid), and a new `display` rule on an element that gets hidden needs one too.
 
 ## Checking the UI locally
 

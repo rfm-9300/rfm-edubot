@@ -361,6 +361,22 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
 - Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns and one column on a phone. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
 - A field label with its own tools on the same line (All / None, Add channel): `.form__row-head` > `.lbl` + `.actions`.
+- Several short values typed into one field (a Persona menu's keywords): `div.tokens` holding one `.token` per value (`.token__text`, a button that takes the value back to edit, and `.token__rm` ×) and a bare `input.tokens__input` last, which carries the field's `id` for the label. It looks like `.inp`, grows in rows, and rings on `:focus-within`. `.token--warn` marks a value with a problem (its `title` says which); `.tokens.is-readonly` has no input and no ×. Enter adds, a pasted list adds a value per line; don't split on commas, since a value may contain one.
+- A field a refused save points at gets `aria-invalid` (red border on `.inp`, `.txt` and `.tokens`, a red inset in a `.line`; the focus ring still wins) and a `.hint--bad` under it saying what is wrong, until it's right.
+- `button.linkbtn`: a button that reads as a link inside a sentence or hint ("Show", "From 1 · Prices", "Hide map"): `--ink-2` text with a hairline underline, the focus ring. Not for actions that change data.
+
+### Save bar
+
+A long form whose changes are saved together (the Persona Menus tab) ends with a `.savebar`:
+
+```html
+<div class="savebar is-dirty">
+  <p class="savebar__status" aria-live="polite"><span class="savebar__dot" aria-hidden="true"></span>Unsaved changes · 2 to fix</p>
+  <div class="actions"><button class="btn btn--ghost" type="button">Discard changes</button><button class="btn btn--primary" type="submit">Save</button></div>
+</div>
+```
+
+It rests at the end of the form; with `.is-dirty` it is `position: sticky` 16px above the bottom of the screen, so Save stays in reach while scrolling, and toasts rise above it (`html:has(.savebar.is-dirty) .toast`). Clean, its status is muted and both buttons are `disabled`. Discard confirms through `.confirm`. On phones the buttons share the full width.
 
 ### Suggestions under a field
 
@@ -392,7 +408,7 @@ More variants keep the channels' bare inputs with `aria-label`s, without a catal
 
 - `.lines--services`: a supplier's usual services, as description, unit, usual price and `.l-rm`. On phones the description takes its own row, like `.line__desc`.
 - `.lines--breaks`: a shift's breaks in the Timesheets correction form, as from and to (`input type="time"`) and `.l-rm`, left-aligned headings, same columns on phones.
-- `.lines--replies`: a Persona menu message's buttons, as title (a bare `input` with the 20-character `maxlength`) and "Leads to" (a flush `.sel` of the menu's messages plus "New message…") and `.l-rm`; same grid as `.lines--breaks`. Its foot holds "Add button" and the count; an empty list says the menu ends there.
+- `.lines--replies`: a Persona menu message's buttons, as title (a bare `input` with the 20-character `maxlength`), "Leads to" (a flush `.sel` of the menu's messages plus "New message…"), `.l-go` (→, goes to that message; disabled until one is chosen) and `.l-rm`; four columns on phones too. Its foot holds "Add button" and the count; an empty list says the menu ends there.
 - `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
 
 ```html
@@ -533,7 +549,7 @@ Clients, suppliers and employees (and the backoffice's tenants, [patterns.md](pa
 </div>
 ```
 
-One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts. Under 560px a long toast wraps at the screen's width less 16px a side; centred from `left: 50%`, it would otherwise wrap at half the screen.
+One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide ~2800ms. Do not stack toasts. Under 560px a long toast wraps at the screen's width less 16px a side; centred from `left: 50%`, it would otherwise wrap at half the screen. While a `.savebar` follows the screen, toasts sit above it, or they would cover its Save button.
 
 ## Auth card
 
@@ -597,6 +613,34 @@ User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert
 ```
 
 Two columns (editor, test chat at up to 400px) with the chat sticky at the top; one column under 1100px, the chat after the editor. The main column and its pane are grids with a 16px gap, so panels inside need no margins. Its "Unsaved changes" pill toggles with `hidden` (`.persona-studio .pill[hidden]`).
+
+#### Menus tab (`app/menus.js`)
+
+```html
+<form class="form flow-menus">
+  <section class="panel"><!-- head: title + count .tag, saved-by .panel__meta; body: hint, .record-kpis, .form__grid (fallback .sel, "Check a message" .inp + result .hint) --></section>
+  <section class="panel flow-menu is-open">
+    <header class="panel__head flow-menu__head">
+      <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Welcome menu</span></button></h2>
+      <span class="flow-menu__pills"><span class="pill pill--ok">On</span><span class="pill pill--warn">2 to fix</span></span>
+      <div class="panel__tools"><!-- Try it, ↑ ↓ --></div>
+      <p class="flow-menu__summary">Hello · Hi · Good morning +2 · 7 messages · Sent 191 times to 41 customers in the last 30 days</p>
+    </header>
+    <div class="panel__body form flow-menu__body"><!-- name, state, .tokens keywords, .flow-menu__notes, the map, .flow.flow--edit cards, .flow-menu__foot --></div>
+  </section>
+  <div class="savebar">…</div>
+</form>
+```
+
+| Class | Role |
+|---|---|
+| `.flow-menu` (`.is-open`) | One menu, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, the head loses its bottom rule and the body (`[hidden]`, which needs `.flow-menu__body[hidden]` over `.form`'s grid) isn't drawn |
+| `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first menu with a matching keyword answers), the name, On/Off plus a `.pill--warn` "n to fix" or "n to check", and a muted line of keywords, size and 30-day usage (refusals in `.hint--warn`), under the name |
+| `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused, a clash in `.hint--warn`); "Sent n times" in a message card's head; the body's last row: Add message on the left, Duplicate and Remove menu on the right |
+| `.flow-map` > `__tree` / `__row` / `__list` > `__branch` | The menu's map: from message 1, each button (`__btn`, a quick-reply pill with →) and the message it leads to (`__msg`, a button with `.flow__index` and `__text`) on one `__row`, nested `__list`s drawn as a tree with hairlines. A message reached again is `__back` + `__msg--ref`; `__end` (gives way first on narrow screens) and `__note` (leads nowhere, `--warn-ink`) end a row; `__orphans` lists unreachable messages. Only the text shortens; a very deep tree scrolls inside the box |
+| `.flow__card.is-flash` | The message a map node, a From link or → just went to, ringed for a moment |
+
+Rules: the map, summaries and notes are redrawn as the draft changes, but never a field being typed in, and only when their HTML changed, so a button under the pointer isn't swapped out. Problems under fields show only after a refused save; the head's count is always live.
 
 ## Conversations inbox
 
