@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-17
 ---
 
 # Architecture review (2026-09-28)
@@ -65,4 +65,5 @@ Original findings (verified in code; the first four are the ones fixed above):
   OAuth popup, `api`, drawer, toast); its `fmtDate` hardcodes `pt-PT`. `doc-template.js` (an IIFE
   exposing only `window.DocTemplate`) is the in-repo precedent for an encapsulated module. The
   i18n catalogs are in full parity (1,249 keys each, no missing references from `app.js`), but
-  nothing in CI enforces it.
+  nothing in CI enforces it. By 2026-10-17 `app.js` had reached 9.6k lines, and PR #84 split it into
+  flat `app/*.js` scripts, which the existing route serves: [dashboard-frontend.md](dashboard-frontend.md).

@@ -46,6 +46,12 @@ Seeded collections:
 
 Bookings, agents, email and the employee's sign-in are seeded only when the database already has a tenant; they go to the first one. Start the app once before seeding a fresh database.
 
+Clients, quotes, invoices and the chats (`users`, `conversations`, `messages`, `webhook_events`) are written without a `tenantId`, so the dashboard shows none of them until they get one. Restart the app (its startup gives them the first tenant), or run the migration:
+
+```bash
+docker exec -i whatsapp-bot-mongo-1 mongosh --quiet wabot --file /dev/stdin < mocks/mongo/migrate-add-tenant-id.js
+```
+
 Suppliers and invoices:
 
 - Both suppliers have usual services (Tintas Norte's paints and transport, Andaimes & Cia's scaffolding), so a new payment to either offers them as lines. The ones without a price vary from job to job.

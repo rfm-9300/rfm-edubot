@@ -15,7 +15,8 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 - Escape dynamic values with `escapeHTML()` in JS templates.
 - Keep the shell: `aside.sidebar` + `main.main` > `header.topbar` + `section.view`.
 - Load `/admin/style.css` and `/admin/theme.js` on every dashboard page.
-- Load catalogs + `i18n.js` before the page’s `app.js`.
+- Load catalogs + `i18n.js` before the page’s own scripts.
+- In `/app`, put code in the script of the page it belongs to (`app/quotes.js`, `app/inbox.js`…; the map is in `wiki/dashboard-frontend.md`). Those scripts share one global scope: declare at their top level only, and wire things up in `app.js`’s `init()`.
 - Keep BEM-style names already in use (`block__elem--mod`).
 - After adding a token, class, or pattern, update this `design-system/` folder.
 
