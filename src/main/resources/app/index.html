@@ -55,6 +55,34 @@
     </div>
   </div>
   <div class="toast" id="toast" hidden></div>
+  <!-- The page's own scripts share one global scope and only declare things; app.js loads last and boots the page. -->
+  <script src="/app/core.js" defer></script>
+  <script src="/app/drawer.js" defer></script>
+  <script src="/app/components.js" defer></script>
+  <script src="/app/records.js" defer></script>
+  <script src="/app/directories.js" defer></script>
+  <script src="/app/account.js" defer></script>
+  <script src="/app/notifications.js" defer></script>
+  <script src="/app/companies.js" defer></script>
+  <script src="/app/home.js" defer></script>
+  <script src="/app/inbox.js" defer></script>
+  <script src="/app/whatsapp-templates.js" defer></script>
+  <script src="/app/instagram.js" defer></script>
+  <script src="/app/clients.js" defer></script>
+  <script src="/app/services.js" defer></script>
+  <script src="/app/billing.js" defer></script>
+  <script src="/app/quotes.js" defer></script>
+  <script src="/app/invoices.js" defer></script>
+  <script src="/app/financeiro.js" defer></script>
+  <script src="/app/payees.js" defer></script>
+  <script src="/app/submissions.js" defer></script>
+  <script src="/app/payments.js" defer></script>
+  <script src="/app/catalog.js" defer></script>
+  <script src="/app/bookings.js" defer></script>
+  <script src="/app/persona.js" defer></script>
+  <script src="/app/settings.js" defer></script>
+  <script src="/app/integrations.js" defer></script>
+  <!-- Self-contained modules: each exposes one window.*UI object that app.js hands its helpers to. -->
   <script src="/app/doc-template.js" defer></script>
   <script src="/app/agents.js" defer></script>
   <script src="/app/timesheets.js" defer></script>
