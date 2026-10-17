@@ -221,7 +221,7 @@ function lineItemsField(catalog) {
 
 async function openPdf(url, downloadName) {
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
-  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
+  if (res.status === 401) { signOut(); throw new Error('unauthorized'); }
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const blob = await res.blob();
   const objectUrl = URL.createObjectURL(blob);

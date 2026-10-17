@@ -453,7 +453,7 @@ async function init(relayed = false) {
   window.EmailUI?.init(emailDeps());
   window.MenusUI?.init(menusDeps());
   I18N.applyDom(document);
-  $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); });
+  $('#btn-logout').addEventListener('click', () => signOut());
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
   $('#btn-notifications').addEventListener('click', () => { drawerTrail = []; openNotifications(); });
   $('#brand').addEventListener('click', () => { drawerTrail = []; openCompanySwitcher(); });

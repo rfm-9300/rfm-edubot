@@ -1,27 +1,18 @@
 /* Connecting the company's accounts from Settings → Channels: Instagram (an OAuth popup), Gmail (Google's
    consent in a popup or a redirect, and whether it reads the inbox) and WhatsApp (Meta's Embedded Signup).
-   Also the OAuth popup's side: back on /app, it hands its outcome to the dashboard that opened it. */
-
-let fbSdkPromise = null;
+   Also the OAuth popup's side: back on /app, it hands its outcome to the dashboard that opened it. Meta's SDK
+   and Instagram's consent popup are in /admin/common.js, shared with the backoffice. */
 
 async function connectInstagram() {
   let res;
   try { res = await api('/app/api/instagram/connect'); }
   catch (e) { toast(e.message === 'unauthorized' ? STR.sessionExpired : STR.igUnavailable); return; }
-  const popup = window.open(res.authorizeUrl, 'ig-oauth', 'width=600,height=750');
-  if (!popup) { toast(STR.igAllowPopups); return; }
-  const onMsg = async ev => {
-    if (ev.origin !== window.location.origin || ev.data?.type !== 'ig-oauth') return;
-    window.removeEventListener('message', onMsg);
-    if (ev.data.status === 'connected') {
-      toast(STR.igConnected);
-      state.me = await api('/app/api/me');
-      if (state.active === 'settings') render();
-    } else {
-      toast(STR.igFailed(ev.data.reason));
-    }
-  };
-  window.addEventListener('message', onMsg);
+  const outcome = await instagramConsent(res.authorizeUrl);
+  if (!outcome) { toast(STR.igAllowPopups); return; }
+  if (outcome.status !== 'connected') { toast(STR.igFailed(outcome.reason)); return; }
+  toast(STR.igConnected);
+  state.me = await api('/app/api/me');
+  if (state.active === 'settings') render();
 }
 
 async function disconnectInstagram(ig) {
@@ -326,73 +317,6 @@ async function disconnectGoogle(account) {
   } catch (err) {
     if (err.message !== 'unauthorized') toast(GOOGLE.disconnectFailed);
   }
-}
-
-function loadFacebookSdk(appId, graphVersion) {
-  if (window.FB) {
-    window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
-    return Promise.resolve(window.FB);
-  }
-  if (fbSdkPromise) return fbSdkPromise;
-  fbSdkPromise = new Promise((resolve, reject) => {
-    window.fbAsyncInit = () => {
-      window.FB.init({ appId, version: graphVersion, cookie: true, xfbml: false });
-      resolve(window.FB);
-    };
-    const script = document.createElement('script');
-    script.id = 'facebook-jssdk';
-    script.src = 'https://connect.facebook.net/en_US/sdk.js';
-    script.async = true;
-    script.defer = true;
-    script.onerror = () => reject(new Error('facebook_sdk_load_failed'));
-    document.body.appendChild(script);
-  });
-  return fbSdkPromise;
-}
-
-function waitForWhatsAppSignupMessage() {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      window.removeEventListener('message', onMessage);
-      reject(new Error('signup_message_timeout'));
-    }, 5 * 60 * 1000);
-    const onMessage = ev => {
-      if (!['https://www.facebook.com', 'https://web.facebook.com'].includes(ev.origin)) return;
-      const data = typeof ev.data === 'string' ? (() => { try { return JSON.parse(ev.data); } catch (_) { return null; } })() : ev.data;
-      if (data?.type !== 'WA_EMBEDDED_SIGNUP') return;
-      if (data.event && data.event !== 'FINISH') {
-        clearTimeout(timer);
-        window.removeEventListener('message', onMessage);
-        reject(new Error(data.event === 'CANCEL' ? 'signup_cancelled' : 'signup_not_finished'));
-        return;
-      }
-      const wabaId = data.data?.waba_id || data.data?.wabaId;
-      const phoneNumberId = data.data?.phone_number_id || data.data?.phoneNumberId;
-      if (!wabaId || !phoneNumberId) return;
-      clearTimeout(timer);
-      window.removeEventListener('message', onMessage);
-      resolve({ wabaId, phoneNumberId });
-    };
-    window.addEventListener('message', onMessage);
-  });
-}
-
-function facebookLoginForBusiness(FB, configId) {
-  return new Promise((resolve, reject) => {
-    FB.login(response => {
-      const code = response?.authResponse?.code;
-      if (!code) {
-        reject(new Error(response?.status === 'not_authorized' ? 'not_authorized' : 'missing_code'));
-        return;
-      }
-      resolve(code);
-    }, {
-      config_id: configId,
-      response_type: 'code',
-      override_default_response_type: true,
-      extras: { setup: {} },
-    });
-  });
 }
 
 async function connectWhatsApp() {

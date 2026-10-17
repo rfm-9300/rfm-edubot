@@ -1,11 +1,10 @@
-/* The dashboard's foundation (/app): DOM shortcuts, the session token and the page's `state`, the catalog
-   sections, escaping and formatting (money, dates, periods, relative times), what invoices received and
-   owe, status labels and pills, and api(), toast() and confirmDialog().
+/* The dashboard's foundation (/app): the session token and the page's `state`, api() and signOut(), the
+   catalog sections, formatting (money, dates, periods, relative times), what invoices received and owe,
+   and status labels and pills. DOM shortcuts, escapeHTML(), toast() and confirmDialog() come from
+   /admin/common.js, which the backoffice loads too.
    The page's own scripts, from this one to app.js in index.html's order, are classic scripts sharing one
    global scope, so each can call what another declares. None runs anything at its top level that needs
    another script: they only declare, and app.js calls init() once all of them have loaded. */
-const $ = (sel, root = document) => root.querySelector(sel);
-const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
@@ -69,7 +68,6 @@ const googleTextOr = (key, fallback) => {
 // The i18n proxy answers a missing key with its own path, so check for that before trusting it.
 const catalogTextOr = (section, prefix, key, fallback) => (key && section[key] !== `${prefix}.${key}` ? section[key] : fallback);
 const tApp = (key, params) => I18N.t(`app.${key}`, params);
-const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 // AI chat bubbles render as plain pre-wrapped text (see .chat__msg in style.css), but the model
 // writes markdown (**bold**). Escape first, then turn only **bold** into <strong> — everything
 // else (numbered/bulleted lines, line breaks) already reads fine as plain text under pre-wrap.
@@ -296,13 +294,14 @@ const bookingErrorText = err => {
   return err?.status === 409 ? STR.bookingsConflict : STR.bookingsSaveFailed;
 };
 
-async function api(path, options = {}) {
-  const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(token ? { Authorization: `Bearer ${token}` } : {}) };
-  const res = await fetch(path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
-  if (!res.ok) throw await apiError(res);
-  if (res.status === 204) return null;
-  return res.json();
+function signOut() {
+  localStorage.removeItem('dashboardToken');
+  token = '';
+  renderLogin();
+}
+
+function api(path, options = {}) {
+  return apiFetch(path, options, token, signOut);
 }
 
 /** Downloads [path] with the session's token as [filename] (an export the browser can't fetch on its own). */
@@ -319,52 +318,12 @@ async function downloadFile(path, filename) {
   setTimeout(() => URL.revokeObjectURL(url), 60000);
 }
 
-/** The error a failed response carries: its status, the server's `error` code, when given the field and limit it is about, and the parsed body. */
-async function apiError(res) {
-  const err = new Error(`HTTP ${res.status}`);
-  err.status = res.status;
-  const body = await res.json().catch(() => null);
-  err.code = body && typeof body.error === 'string' ? body.error : '';
-  err.detail = body && typeof body.detail === 'string' ? body.detail : '';
-  err.field = body && typeof body.field === 'string' ? body.field : '';
-  err.limit = body && typeof body.limit === 'number' ? body.limit : null;
-  err.body = body;
-  return err;
-}
-
 /** Like api(), for binary responses (customer media). */
 async function apiBlob(path) {
   const res = await fetch(path, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
-  if (res.status === 401) { localStorage.removeItem('dashboardToken'); token = ''; renderLogin(); throw new Error('unauthorized'); }
+  if (res.status === 401) { signOut(); throw new Error('unauthorized'); }
   if (!res.ok) throw await apiError(res);
   return res.blob();
-}
-
-let toastTimer;
-function toast(msg) { const el = $('#toast'); el.innerHTML = `<span class="toast__dot"></span><span>${escapeHTML(msg)}</span>`; el.hidden = false; clearTimeout(toastTimer); toastTimer = setTimeout(() => { el.hidden = true; }, 2800); }
-
-function confirmDialog({ title, body, okLabel = STR.confirm, danger = true }) {
-  return new Promise(resolve => {
-    const root = $('#confirm');
-    if (!root) return resolve(false);
-    $('#confirm-title').textContent = title;
-    $('#confirm-body').textContent = body;
-    const ok = $('#confirm-ok');
-    ok.textContent = okLabel;
-    ok.classList.toggle('btn--danger', danger);
-    ok.classList.toggle('btn--primary', !danger);
-    root.hidden = false;
-    const cleanup = v => {
-      root.hidden = true;
-      ok.removeEventListener('click', onOk);
-      $$('[data-confirm-cancel]', root).forEach(b => b.removeEventListener('click', onCancel));
-      resolve(v);
-    };
-    const onOk = () => cleanup(true);
-    const onCancel = () => cleanup(false);
-    ok.addEventListener('click', onOk, { once: true });
-    $$('[data-confirm-cancel]', root).forEach(b => b.addEventListener('click', onCancel, { once: true }));
-  });
 }
 
 function quoteTone(status) { return { PENDENTE: 'warn', SENT: 'info', ACEITO: 'ok' }[status] || ''; }

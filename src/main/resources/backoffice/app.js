@@ -59,7 +59,7 @@ async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
   $('#btn-new').addEventListener('click', () => tenantForm());
-  $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('adminToken'); token = ''; renderLogin(); });
+  $('#btn-logout').addEventListener('click', () => signOut());
   $('#search').addEventListener('input', e => { state.search = e.target.value; if (currentView === 'tenants') renderTenants(); });
   $$('.nav__item[data-view]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();

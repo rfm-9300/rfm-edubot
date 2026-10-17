@@ -1,9 +1,6 @@
 /* Getting in: the sign-in screen (Google or email and password) and the account drawer, where the
-   signed-in user manages both ways of signing in. */
+   signed-in user manages both ways of signing in. Google's sign-in itself is in /admin/common.js. */
 
-const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
-let googleSignIn = null;
-let googleSdk = null;
 let authConfigLoad = null;
 
 function loadAuthConfig() {
@@ -11,33 +8,6 @@ function loadAuthConfig() {
     .then(r => (r.ok ? r.json() : {}))
     .catch(() => { authConfigLoad = null; return {}; });
   return authConfigLoad;
-}
-
-// Browsers only allow the sign-in popup straight from a click, so the SDK loads as soon as a screen
-// offering Google shows. The Firebase session only proves who you are: it stays in memory and the
-// dashboard keeps its own token.
-function prepareGoogleSignIn(config) {
-  googleSignIn = googleSignIn || Promise.all([import(`${FIREBASE_SDK}/firebase-app.js`), import(`${FIREBASE_SDK}/firebase-auth.js`)])
-    .then(([appSdk, authSdk]) => {
-      const app = appSdk.getApps().length ? appSdk.getApp() : appSdk.initializeApp(config);
-      const auth = authSdk.initializeAuth(app, { persistence: authSdk.inMemoryPersistence, popupRedirectResolver: authSdk.browserPopupRedirectResolver });
-      const provider = new authSdk.GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      googleSdk = { auth, provider, signInWithPopup: authSdk.signInWithPopup, signOut: authSdk.signOut };
-      return googleSdk;
-    });
-  googleSignIn.catch(() => { googleSignIn = null; });
-  return googleSignIn;
-}
-
-// Opens Google's account picker and returns an ID token for the chosen account.
-async function googleIdToken() {
-  const sdk = googleSdk || await googleSignIn;
-  if (!sdk) throw Object.assign(new Error('google_unavailable'), { code: 'google_unavailable' });
-  const result = await sdk.signInWithPopup(sdk.auth, sdk.provider);
-  const idToken = await result.user.getIdToken();
-  sdk.signOut(sdk.auth).catch(() => {});
-  return idToken;
 }
 
 function googlePopupErrorText(err) {

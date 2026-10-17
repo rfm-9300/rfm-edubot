@@ -1,24 +1,5 @@
 /* Signing in to the backoffice: with Google (an email on the admins list) or, while ADMIN_PASSWORD_HASH is
-   set, the platform password. Signed out, the top bar keeps only the theme switch. */
-
-const FIREBASE_SDK = 'https://www.gstatic.com/firebasejs/12.19.0';
-let googleSignIn = null;
-
-// Browsers only allow the sign-in popup straight from the click, so the SDK is loaded and set up
-// as soon as the login screen shows. The Firebase session is only used to prove who you are: it
-// stays in memory and the backoffice keeps its own admin token.
-function prepareGoogleSignIn(config) {
-  googleSignIn = googleSignIn || Promise.all([import(`${FIREBASE_SDK}/firebase-app.js`), import(`${FIREBASE_SDK}/firebase-auth.js`)])
-    .then(([appSdk, authSdk]) => {
-      const app = appSdk.getApps().length ? appSdk.getApp() : appSdk.initializeApp(config);
-      const auth = authSdk.initializeAuth(app, { persistence: authSdk.inMemoryPersistence, popupRedirectResolver: authSdk.browserPopupRedirectResolver });
-      const provider = new authSdk.GoogleAuthProvider();
-      provider.setCustomParameters({ prompt: 'select_account' });
-      return { auth, provider, signInWithPopup: authSdk.signInWithPopup, signOut: authSdk.signOut };
-    });
-  googleSignIn.catch(() => { googleSignIn = null; });
-  return googleSignIn;
-}
+   set, the platform password. Google's sign-in itself is in /admin/common.js, shared with /app. */
 
 // Signed out, the top bar keeps only the theme switch: the menu, search, New and Log out all need a session.
 // Signed in, setView shows search and New on the views that use them.
@@ -45,9 +26,7 @@ async function renderLogin() {
   const config = await fetch('/admin/auth/config').then(r => (r.ok ? r.json() : null)).catch(() => null);
   const google = config?.google || null;
   const passwordEnabled = config ? config.passwordEnabled : true;
-  const ready = google ? prepareGoogleSignIn(google) : null;
-  let loadedSdk = null;
-  ready?.then(sdk => { loadedSdk = sdk; }, () => {});
+  if (google) prepareGoogleSignIn(google).catch(() => {});
   $('#view').innerHTML = `
     <div class="auth"><div class="auth__card">
       <div class="auth__mark">BO</div>
@@ -66,10 +45,7 @@ async function renderLogin() {
     const button = e.currentTarget;
     button.disabled = true;
     try {
-      const sdk = loadedSdk || await ready;
-      const result = await sdk.signInWithPopup(sdk.auth, sdk.provider);
-      const idToken = await result.user.getIdToken();
-      sdk.signOut(sdk.auth).catch(() => {});
+      const idToken = await googleIdToken();
       const res = await fetch('/admin/auth/google', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idToken }) });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
