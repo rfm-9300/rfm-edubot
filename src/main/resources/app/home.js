@@ -9,12 +9,6 @@ function deltaHint(deltaPct, vs) {
   if (deltaPct < 0) return STR.deltaDown({ pct: Math.abs(deltaPct), vs });
   return STR.deltaFlat({ vs });
 }
-function highlightLabel(key) { return STR[`hl_${key}`] || key; }
-function highlightValue(h) {
-  if (h.cents != null) return centsEUR(h.cents);
-  if (h.pct != null) return `${h.pct}%`;
-  return String(h.count ?? 0);
-}
 function attentionTitle(item) {
   if (item.aggregate && item.kind === 'overdue_invoice' && typeof STR.overdueInvoiceN === 'function') return STR.overdueInvoiceN({ n: item.count });
   if (item.aggregate && item.kind === 'overdue_payment' && typeof STR.overduePaymentN === 'function') return STR.overduePaymentN({ n: item.count });
@@ -52,56 +46,10 @@ function attentionPill(kind) {
   };
   return map[kind] || '';
 }
-function healthPill(health) {
-  if (health === 'urgent') return 'pill--bad';
-  if (health === 'watch') return 'pill--warn';
-  return 'pill--ok';
-}
 function healthLabel(health) {
   if (health === 'urgent') return STR.healthUrgent;
   if (health === 'watch') return STR.healthWatch;
   return STR.healthOk;
-}
-function healthIcon(health) {
-  if (health === 'urgent') return '🚨';
-  if (health === 'watch') return '👀';
-  return '✅';
-}
-function attentionIcon(kind) {
-  const map = {
-    waiting_chat: '💬', overdue_invoice: '💶', due_soon_invoice: '⏰',
-    overdue_payment: '💸', due_soon_payment: '⏰',
-    pending_booking: '📅', instagram_comment: '📸', quote_expiring: '📝',
-    assistant_action: '✨', agent_approval: '🤖', agent_task_due: '📋', agent_failed: '⚠️',
-    integration_reconnect: '✉️', service_submission: '🧾',
-  };
-  return map[kind] || '•';
-}
-function attentionIconTone(kind) {
-  const pill = attentionPill(kind);
-  if (pill === 'pill--bad') return 'queue__icon--bad';
-  if (pill === 'pill--warn') return 'queue__icon--warn';
-  if (pill === 'pill--info') return 'queue__icon--info';
-  if (pill === 'pill--accent') return 'queue__icon--accent';
-  return '';
-}
-// Overdue invoices/payments are per-document and uncapped at the source — with a dozen
-// overdue invoices this list would be a dozen near-identical rows. Collapse each kind into
-// one row (count + total) instead; every other kind is already capped small (3-5) upstream
-// and stays specific because each one is its own distinct thing to act on.
-function aggregateAttention(attention, o) {
-  const rows = [];
-  if ((o.cash?.overdueCount || 0) > 0) {
-    rows.push({ kind: 'overdue_invoice', tab: 'invoices', aggregate: true, count: o.cash.overdueCount, amountCents: o.cash.overdueCents });
-  }
-  if ((o.payments?.overdueCount || 0) > 0) {
-    rows.push({ kind: 'overdue_payment', tab: 'payments', aggregate: true, count: o.payments.overdueCount, amountCents: o.payments.overdueCents });
-  }
-  return [...rows, ...attention.filter(n => n.kind !== 'overdue_invoice' && n.kind !== 'overdue_payment')];
-}
-function setupIcon(kind) {
-  const map = { wa: '📱', ig: '📸', widget: '🧩', persona: '🎭' };
-  return map[kind] || '⚙️';
 }
 function pulseLine(o) {
   const parts = [];
@@ -127,177 +75,6 @@ function homeCardCopy(id) {
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
 
-function snapshotPanel({ tab, kind, icon, title, figure, rows, meter }) {
-  const metrics = `<div class="snapshot__metrics">${rows.map(r => `<div class="snapshot__metric"><span class="snapshot__metric-label">${escapeHTML(r.label)}</span><span class="snapshot__metric-value">${escapeHTML(String(r.value))}</span></div>`).join('')}</div>`;
-  const pct = meter ? Math.max(0, Math.min(100, Math.round(meter.pct))) : null;
-  const meterHtml = pct != null ? `<div class="meter"><div class="meter__fill" style="width:${pct}%"></div></div>` : '';
-  return `<div class="panel snapshot" data-kind="${escapeHTML(kind)}">
-    <div class="snapshot__head">
-      <span class="snapshot__icon" aria-hidden="true">${icon}</span>
-      <div class="snapshot__head-text">
-        <h2 class="panel__title">${escapeHTML(title)}</h2>
-        <div class="snapshot__figure">${escapeHTML(String(figure))}</div>
-      </div>
-      <button type="button" class="btn btn--sm snapshot__open" data-go="${escapeHTML(tab)}">${escapeHTML(STR.openModule)}</button>
-    </div>
-    ${meterHtml}
-    ${metrics}
-  </div>`;
-}
-
-function renderOverview(root) {
-  if (isMinimalLayout()) return renderOverviewMinimal(root);
-  const o = state.overview || {};
-  const hidden = new Set(o.hiddenCards || []);
-  const highlights = hidden.has('highlights') ? [] : (o.highlights || []).map(h => ({
-    label: highlightLabel(h.key),
-    value: highlightValue(h),
-    hint: deltaHint(h.deltaPct, h.key === 'messages_today' ? STR.vsLastWeek : STR.vsLastMonth),
-    trend: h.deltaPct > 0 ? 'up' : h.deltaPct < 0 ? 'down' : '',
-  }));
-  const stats = highlights.length ? statCards(highlights, 'lg') : '';
-  const health = o.health || 'ok';
-  const pulseHtml = hidden.has('pulse')
-    ? ''
-    : `<div class="pulse pulse--${escapeHTML(health)}"><span class="pulse__icon" aria-hidden="true">${healthIcon(health)}</span><span class="pill ${healthPill(health)}">${escapeHTML(healthLabel(health))}</span><span class="pulse__text">${escapeHTML(pulseLine(o))}</span></div>`;
-  const attention = hidden.has('attention') ? [] : aggregateAttention(o.attention || [], o);
-  const needsHtml = hidden.has('attention')
-    ? ''
-    : (attention.length
-    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)} <span class="tag">${attention.length}</span></h2><div class="queue">${attention.map(n => {
-      const meta = n.amountCents != null ? `<span class="queue__meta"><span class="pill ${attentionPill(n.kind)}">${escapeHTML(centsEUR(n.amountCents))}</span></span>`
-        : (n.at ? `<span class="queue__meta">${escapeHTML(n.kind === 'waiting_chat' || n.kind === 'pending_booking' ? fmtDate(n.at) : fmtDay(n.at))}</span>` : '');
-      const detail = n.kind === 'assistant_action' ? '' : (n.detail || '');
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(n.tab)}" data-conversation="${n.kind === 'waiting_chat' ? escapeHTML(n.id || '') : ''}"${ATTENTION_SETTINGS[n.kind] ? ` data-settings="${ATTENTION_SETTINGS[n.kind]}"` : ''}><span class="queue__icon ${attentionIconTone(n.kind)}" aria-hidden="true">${attentionIcon(n.kind)}</span><div><strong>${escapeHTML(attentionTitle(n))}</strong><span>${escapeHTML(detail)}</span></div>${meta}</button>`;
-    }).join('')}</div></div>`
-    : `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.needsYou)}</h2><div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.needsYouEmpty)}</p><p class="empty__desc">${escapeHTML(STR.needsYouEmptyDesc)}</p></div></div></div>`);
-  const snapshots = [];
-  if ((o.cash || o.payments) && !hidden.has('financeiro')) {
-    const gained = o.cash?.collectedThisMonthCents || 0;
-    const spent = o.payments?.paidThisMonthCents || 0;
-    const financeRows = [];
-    if (o.cash) {
-      financeRows.push({ label: STR.financeGained, value: centsEUR(o.cash.collectedThisMonthCents) });
-      financeRows.push({ label: STR.financeReceivable, value: centsEUR(o.cash.outstandingCents) });
-    }
-    if (o.payments) {
-      financeRows.push({ label: STR.financeSpent, value: centsEUR(o.payments.paidThisMonthCents) });
-      financeRows.push({ label: STR.financePayable, value: centsEUR(o.payments.outstandingCents) });
-    }
-    const financeMeter = (gained || spent) ? { pct: (gained / (gained + spent)) * 100 } : null;
-    snapshots.push(snapshotPanel({
-      tab: 'financeiro', kind: 'financeiro', icon: '💶', title: STR.snapFinance,
-      figure: centsEUR(gained - spent), rows: financeRows, meter: financeMeter,
-    }));
-  }
-  if (o.pipeline && !hidden.has('pipeline')) {
-    snapshots.push(snapshotPanel({ tab: 'quotes', kind: 'pipeline', icon: '📝', title: STR.snapPipeline, figure: `${o.pipeline.winRatePct}%`, meter: { pct: o.pipeline.winRatePct }, rows: [
-      { label: STR.hl_pipeline_open, value: centsEUR(o.pipeline.openCents) },
-      { label: STR.pipelineDrafts, value: o.pipeline.pendingCount },
-      { label: STR.pipelineSent, value: o.pipeline.sentCount },
-      { label: STR.pipelineAccepted, value: o.pipeline.acceptedCount },
-      { label: STR.pipelineAcceptedMonth, value: centsEUR(o.pipeline.acceptedThisMonthCents) },
-      { label: STR.pipelineExpiring, value: o.pipeline.expiringSoonCount },
-      { label: STR.hl_win_rate, value: `${o.pipeline.winRatePct}%` },
-    ] }));
-  }
-  if (o.customers && !hidden.has('customers')) {
-    snapshots.push(snapshotPanel({ tab: 'clients', kind: 'customers', icon: '👥', title: STR.snapCustomers, figure: o.customers.total, rows: [
-      { label: STR.hl_clients, value: o.customers.total },
-      { label: STR.customersNewMonth, value: o.customers.newThisMonth },
-      { label: STR.customersNewLastMonth, value: o.customers.newLastMonth },
-    ] }));
-  }
-  if (o.services && !hidden.has('services')) {
-    snapshots.push(snapshotPanel({ tab: 'services', kind: 'services', icon: '🧾', title: STR.snapServices, figure: o.services.openCount, rows: [
-      { label: STR.servicesOpen, value: `${o.services.openCount} · ${centsEUR(o.services.openCents)}` },
-      { label: STR.servicesInvoicedMonth, value: `${o.services.invoicedThisMonthCount} · ${centsEUR(o.services.invoicedThisMonthCents)}` },
-    ] }));
-  }
-  if (o.suppliers && !hidden.has('suppliers')) {
-    snapshots.push(snapshotPanel({ tab: 'suppliers', kind: 'suppliers', icon: '🏭', title: STR.snapSuppliers, figure: o.suppliers.total, rows: [
-      { label: STR.snapSuppliers, value: o.suppliers.total },
-      { label: STR.suppliersNewMonth, value: o.suppliers.newThisMonth },
-      { label: STR.suppliersNewLastMonth, value: o.suppliers.newLastMonth },
-    ] }));
-  }
-  if (o.employees && !hidden.has('employees')) {
-    snapshots.push(snapshotPanel({ tab: 'employees', kind: 'employees', icon: '👷', title: STR.snapEmployees, figure: o.employees.total, rows: [
-      { label: STR.snapEmployees, value: o.employees.total },
-      { label: STR.employeesNewMonth, value: o.employees.newThisMonth },
-      { label: STR.employeesNewLastMonth, value: o.employees.newLastMonth },
-    ] }));
-  }
-  if (o.inbox && hasModule('conversations') && !hidden.has('inbox')) {
-    snapshots.push(snapshotPanel({ tab: 'conversations', kind: 'inbox', icon: '💬', title: STR.snapInbox, figure: o.inbox.waiting, rows: [
-      { label: STR.hl_waiting, value: o.inbox.waiting },
-      { label: STR.hl_messages_today, value: o.inbox.messagesToday },
-      { label: STR.inboxWeek, value: o.inbox.messagesThisWeek },
-      { label: STR.statConversations, value: o.inbox.conversations },
-      { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
-      { label: STR.inboxPaused, value: o.inbox.autoReplyPaused },
-    ] }));
-  } else if (o.inbox && hasModule('contacts') && !hidden.has('inbox')) {
-    snapshots.push(snapshotPanel({ tab: 'contacts', kind: 'contacts', icon: '📇', title: labels.contacts, figure: o.inbox.contacts, rows: [
-      { label: STR.hl_contacts, value: o.inbox.contacts },
-      { label: STR.inboxNewContacts, value: o.inbox.newContactsThisWeek },
-    ] }));
-  }
-  if (o.calendar && !hidden.has('calendar')) {
-    snapshots.push(snapshotPanel({ tab: 'bookings', kind: 'calendar', icon: '📅', title: STR.snapCalendar, figure: o.calendar.today, rows: [
-      { label: STR.hl_bookings_today, value: o.calendar.today },
-      { label: STR.snapCalendar, value: o.calendar.thisWeek },
-      { label: STR.calendarPending, value: o.calendar.pending },
-      { label: STR.calendarNext, value: o.calendar.next ? `${o.calendar.next.contactName} · ${fmtDate(o.calendar.next.startAt)}` : STR.calendarNone },
-    ] }));
-  }
-  if (o.social && !hidden.has('social')) {
-    snapshots.push(snapshotPanel({ tab: 'instagram', kind: 'social', icon: '📸', title: STR.snapSocial, figure: o.social.unreplied, rows: [
-      { label: STR.hl_instagram_unreplied, value: o.social.unreplied },
-      { label: STR.colStatus, value: o.social.connected ? STR.connected : STR.notConnected },
-    ] }));
-  }
-  if (o.catalog && !hidden.has('catalog')) {
-    snapshots.push(snapshotPanel({ tab: 'catalog', kind: 'catalog', icon: '🗂️', title: STR.snapCatalog, figure: o.catalog.items, rows: [
-      { label: STR.catalogItems, value: o.catalog.items },
-    ] }));
-  }
-  if (o.assistant && !hidden.has('assistant')) {
-    snapshots.push(snapshotPanel({ tab: 'ai-assistant', kind: 'assistant', icon: '✨', title: STR.snapAssistant, figure: o.assistant.pendingActions, rows: [
-      { label: STR.assistantPending, value: o.assistant.pendingActions },
-    ] }));
-  }
-  const setupMap = {
-    wa: { title: STR.waConnect, detail: STR.setupTitle },
-    ig: { title: STR.igConnect, detail: STR.setupTitle },
-    widget: { title: STR.setupWidget, detail: STR.settingsWidget },
-    persona: { title: STR.teachBot, detail: STR.personaDesc },
-  };
-  const setup = hidden.has('setup') ? [] : (o.setup || []);
-  const setupHtml = setup.length
-    ? `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.setupTitle)}</h2><div class="setup-list">${setup.map(s => {
-      const copy = setupMap[s.kind] || { title: s.kind, detail: STR.setupTitle };
-      return `<button type="button" class="queue__item" data-go="${escapeHTML(s.tab)}" data-settings="${escapeHTML(s.section || '')}"><span class="queue__icon queue__icon--info" aria-hidden="true">${setupIcon(s.kind)}</span><div><strong>${escapeHTML(copy.title)}</strong><span>${escapeHTML(copy.detail)}</span></div></button>`;
-    }).join('')}</div></div>`
-    : '';
-  const snapshotsOff = ['financeiro', 'pipeline', 'customers', 'services', 'suppliers', 'employees', 'inbox', 'calendar', 'social', 'catalog', 'assistant'].some(id => hidden.has(id));
-  const modulesHtml = snapshots.length
-    ? `<div class="home-grid">${snapshots.join('')}</div>`
-    : (snapshotsOff ? '' : `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`);
-  const customize = hasModule('settings')
-    ? `<button type="button" class="btn btn--sm home-customize" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>`
-    : '';
-  const heroHtml = `<div class="view__hero"><div><div class="home-title-row"><h1 class="view__title">${escapeHTML(labels.overview)}</h1>${customize}</div><p class="view__desc">${escapeHTML(STR.overviewDesc)}</p></div>${stats}</div>`;
-  root.innerHTML = heroHtml + pulseHtml + needsHtml + modulesHtml + setupHtml;
-  $$('[data-go]', root).forEach(b => b.addEventListener('click', async () => {
-    if (b.dataset.conversation) state.selectedConversation = b.dataset.conversation;
-    if (b.dataset.settings) state.settingsSection = b.dataset.settings;
-    await setActive(b.dataset.go);
-  }));
-}
-
-// Minimal layout Home: a denser CRM cockpit fed by /app/api/overview?extended=1. It honours the
-// same hidden-card ids as the classic Home, so Settings → Home works for both layouts.
 const wholeCentsEUR = c => fmtEURWhole(Number(c || 0) / 100);
 const RECENT_TONES = { invoice_paid: 'ok', invoice_issued: 'info', payment_paid: 'neutral', quote_accepted: 'ok', quote_created: 'accent', client_created: 'accent', booking_created: 'info' };
 function pctChange(current, previous) {
@@ -333,8 +110,8 @@ function sparkline(values, cls = '') {
   const line = values.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)} ${y(v).toFixed(1)}`).join(' ');
   return `<svg class="spark${cls ? ` ${cls}` : ''}" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-hidden="true"><path class="spark__area" d="${line} L${w} ${h} L0 ${h} Z"/><path class="spark__line" d="${line}"/></svg>`;
 }
-// Unlike the classic aggregateAttention, a single overdue document keeps its own row so it can
-// deep-link to that invoice/payment; only two or more collapse into one count row.
+// A single overdue document keeps its own row so it can deep-link to that invoice/payment; only two
+// or more collapse into one count row.
 function dashAttention(o) {
   const list = o.attention || [];
   const rows = [];
@@ -587,7 +364,7 @@ function dashRecentCard(o) {
   return dashCard({ order: 8, title: STR.dashRecent, body, flush: items.length > 0 });
 }
 
-function renderOverviewMinimal(root) {
+function renderOverview(root) {
   const o = state.overview || {};
   const hidden = new Set(o.hiddenCards || []);
   const money = !hidden.has('financeiro');

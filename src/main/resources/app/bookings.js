@@ -257,11 +257,6 @@ async function changeBookingStatus(id, status) {
   }
 }
 
-// The record opens over whatever page the user is on, so they keep their place.
-function openClientById(id) {
-  if (id && hasModule('clients')) openClientDrawer(id);
-}
-
 async function openBookingDetail(b) {
   let billing = '';
   if (b.clientServiceId && b.clientId && hasModule('services')) {

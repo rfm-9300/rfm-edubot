@@ -135,11 +135,7 @@ async function setActive(tab) {
 }
 
 async function loadModule(tab) {
-  if (tab === 'overview') {
-    const extended = isMinimalLayout();
-    state.overview = await api(overviewPath());
-    state.overviewExtended = extended;
-  }
+  if (tab === 'overview') state.overview = await api('/app/api/overview?extended=1');
   if (tab === 'contacts') state.contacts = await api('/app/api/contacts');
   if (tab === 'conversations') {
     state.conversations = await api('/app/api/conversations');

@@ -31,7 +31,7 @@ let state = {
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
-  settingsSection: 'channels', overviewLayout: null, overviewExtended: false,
+  settingsSection: 'channels', overviewLayout: null,
   // Persona page: the open tab, unsaved edits ({ behavior, compiledInstructions }, either may be absent) and the history list.
   personaTab: 'behavior', personaDraft: {}, personaVersions: null, personaPreview: null, personaFlows: null,
   whatsAppSignup: { enabled: false },
@@ -257,8 +257,6 @@ const channelName = platform => STR[`channel_${platform}`] || platform;
 const QUOTE_STATUSES = ['PENDENTE', 'SENT', 'ACEITO'];
 const INVOICE_STATUSES = ['PENDING', 'PAID', 'OVERDUE', 'CANCELLED'];
 const hasModule = id => (state.me?.modules || []).includes(id);
-const isMinimalLayout = () => document.documentElement.dataset.layout === 'minimal';
-const overviewPath = () => (isMinimalLayout() ? '/app/api/overview?extended=1' : '/app/api/overview');
 // Bookings work in tenant-local calendar days ('YYYY-MM-DD'), never the browser's zone, so the grid
 // and the times the server stores agree even when the operator sits in another timezone.
 const todayKey = () => localDay(new Date().toISOString());
