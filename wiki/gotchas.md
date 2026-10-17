@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-14
+updated: 2026-10-17
 ---
 
 # Cross-cutting gotchas
@@ -89,12 +89,20 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   stores whole numbers as Int32, and `MessageRepository`'s `getDouble` throws on them. Answer Meta-backed
   endpoints (templates, media) with CDP `Fetch.fulfillRequest` to see those screens without Meta, and
   give Chrome a fresh `--user-data-dir` each run: a reused profile restores the last tab and the script
-  can attach to the wrong page.
+  can attach to the wrong page. With a backoffice password set, the backoffice hands out the same
+  token: `POST /admin/api/tenants/{slug}/impersonate` with its own token answers `{ token }`.
+
+- **Mock data needs a restart to show (found 2026-10-17):** `create-mocks.js` writes the clients,
+  quotes, invoices and chats without a `tenantId` (only its newer collections go to the first tenant),
+  so the dashboard lists none of them until something gives them one. `TenantSeeder` does at every
+  startup (on a fresh database it also creates the "Default Tenant" those records join); otherwise run
+  `mocks/mongo/migrate-add-tenant-id.js`. Turn on the opt-in modules (Agents, Email, the time clock)
+  for that tenant in the backoffice to see their pages.
 
 - **Local UI-check gotchas:** a process started with `(cmd &)` inside an agent's tool shell dies when
-  that shell exits, so run `./gradlew run` as a background job of the tool. `app.js` is a classic
-  script, so its top-level functions (`openInvoiceDetail`, `openPaymentForm`…) can be called over CDP
-  to open drawers.
+  that shell exits, so run `./gradlew run` as a background job of the tool. `/app`'s own scripts are
+  classic scripts sharing one global scope ([dashboard-frontend.md](dashboard-frontend.md)), so their
+  top-level functions (`openInvoiceDetail`, `openPaymentForm`…) can be called over CDP to open drawers.
 
 - **Walkthrough gotchas (2026-10-09, PR #72):** a new company's clients need a NIF and an address
   (`ClientFields.DEFAULT` requires both), so seeding through `POST /app/api/crm/clients` without them

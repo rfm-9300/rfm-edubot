@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-14
+updated: 2026-10-17
 ---
 
 # Customer-facing bot and persona
@@ -87,7 +87,8 @@ the #75 tab was a 5,400px form: every menu open, keywords in a textarea, no view
 lead, Save at the very bottom. `design-system/patterns.md` → "Persona" has the screen. Decisions:
 
 - **Its own script:** `app/menus.js` (`MenusUI`), mounted by `app.js` like Agents and Email. The test
-  chat stays in `app.js` and asks `MenusUI.dirty()` and `draftPayload()` for the unsaved menus.
+  chat stays with the rest of Persona (`app/persona.js`, part of `app.js` until PR #84) and asks
+  `MenusUI.dirty()` and `draftPayload()` for the unsaved menus.
 - **Menus open in place:** one menu opens on load, several start folded, so the list is the
   overview: position, On/Off, keywords, size, 30-day usage, and a live "n to fix" (blocks saving)
   or "n to check" (a keyword clash, an unreachable message). Open state is kept by menu id.
