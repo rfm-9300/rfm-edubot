@@ -29,7 +29,7 @@ Head assets (order matters):
 3. `/admin/theme.js` (synchronous, in `<head>`)
 4. `/admin/catalog.en.js`, `catalog.pt.js`, `catalog.es.js`
 5. `/admin/i18n.js`
-6. Page script `defer` at end of `<body>`
+6. At the end of `<body>`, all with `defer`: `/admin/common.js`, then the page's own scripts, its `app.js` last
 
 `/app` and `/backoffice` both declare `<html data-layout="minimal">`, their fixed skin ([tokens.md](tokens.md#layout-skins-htmldata-layout)); there is no layout switch. Every screen of either must read well in the minimal skin in both themes. `/app`'s sidebar foot ends with the "Powered by The Bots Lab" credit ([components.md](components.md#sidebar-kpis)); the backoffice, The Bots Lab's own tool, leaves it out.
 

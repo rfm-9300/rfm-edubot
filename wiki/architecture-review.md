@@ -66,4 +66,6 @@ Original findings (verified in code; the first four are the ones fixed above):
   exposing only `window.DocTemplate`) is the in-repo precedent for an encapsulated module. The
   i18n catalogs are in full parity (1,249 keys each, no missing references from `app.js`), but
   nothing in CI enforces it. By 2026-10-17 `app.js` had reached 9.6k lines, and PR #84 split it into
-  flat `app/*.js` scripts, which the existing route serves: [dashboard-frontend.md](dashboard-frontend.md).
+  flat `app/*.js` scripts, which the existing route serves, split `backoffice/app.js` the same way, and
+  moved the helpers both copied into one `admin/common.js` (the drawers stay per page, and the
+  backoffice's `fmtDate` follows `I18N.locale()` by now): [dashboard-frontend.md](dashboard-frontend.md).

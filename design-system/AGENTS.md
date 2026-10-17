@@ -14,9 +14,9 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 - Put every user-facing string through i18n ([i18n.md](i18n.md)). Placeholder and “coming soon” copy counts.
 - Escape dynamic values with `escapeHTML()` in JS templates.
 - Keep the shell: `aside.sidebar` + `main.main` > `header.topbar` + `section.view`.
-- Load `/admin/style.css` and `/admin/theme.js` on every dashboard page.
+- Load `/admin/style.css`, `/admin/theme.js` and `/admin/common.js` on every dashboard page.
 - Load catalogs + `i18n.js` before the page’s own scripts.
-- In `/app`, put code in the script of the page it belongs to (`app/quotes.js`, `app/inbox.js`…; the map is in `wiki/dashboard-frontend.md`). Those scripts share one global scope: declare at their top level only, and wire things up in `app.js`’s `init()`.
+- Put code in the script of the page it belongs to (`app/quotes.js`, `backoffice/tenants.js`…; the map is in `wiki/dashboard-frontend.md`), and a helper both dashboards need in `admin/common.js` instead of a copy in each. A page’s scripts share one global scope with `admin/common.js`: declare at their top level only, and wire things up in the page’s `app.js` `init()`.
 - Keep BEM-style names already in use (`block__elem--mod`).
 - After adding a token, class, or pattern, update this `design-system/` folder.
 
