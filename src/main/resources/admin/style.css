@@ -2432,6 +2432,11 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .notice__list { margin: 2px 0 0; padding-left: 18px; }
 .notice__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .record > .notice, .builder > .notice, .form > .notice, .settings-stack > .notice { margin-bottom: 0; }
+/* Phones: the buttons go under the text instead of squeezing it into a narrow column. */
+@media (max-width: 560px) {
+  .notice:has(> .notice__actions) { flex-wrap: wrap; }
+  .notice:has(> .notice__actions) > .notice__text { flex-basis: 100%; }
+}
 
 .agent-icon { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent-deep); }
 .agent-icon svg { width: 18px; height: 18px; }
@@ -2859,6 +2864,15 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
   html[data-layout="minimal"] .view > .panel .tbl--stack tbody td { padding: 0; }
   html[data-layout="minimal"] .tbl--stack tbody tr:hover { background: var(--surface-2); }
   html[data-layout="minimal"] .tbl--stack td[data-label]::before { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+}
+/* Touch phones: small buttons, chips and toolbar selects grow to 36px and the drawer's close button to 40px,
+   so a thumb can hit them; the drawer's back link keeps its look with a taller hit area. */
+@media (max-width: 560px) and (pointer: coarse) {
+  .btn--sm, .chip, .panel__tools .sel, .panel__filters .sel,
+  html[data-layout="minimal"] :is(.btn--sm, .chip, .panel__tools .sel, .panel__filters .sel) { height: 36px; }
+  .drawer__head .iconbtn,
+  html[data-layout="minimal"] .drawer__head .iconbtn { width: 40px; height: 40px; }
+  .drawer__back { padding: 8px 0; margin: -8px 0; }
 }
 
 /* ── Minimal Home: dashboard building blocks ─────────────────── */
