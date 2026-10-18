@@ -35,7 +35,7 @@ class TenantUsageRepository(
     private val tenantId: ObjectId,
     private val clock: () -> Instant = SystemClock::now,
 ) {
-    private val collection = mongoModule.database.getCollection<Document>("tenant_usage")
+    private val collection = mongoModule.platform.getCollection<Document>("tenant_usage")
 
     suspend fun tokensUsedThisMonth(): Long = (thisMonth()?.get("tokensUsed") as? Number)?.toLong() ?: 0L
 

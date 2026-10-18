@@ -18,7 +18,7 @@ import org.bson.types.ObjectId
 import java.util.Date
 
 class DashboardUserRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.database.getCollection<Document>("dashboard_users")
+    private val collection = mongoModule.platform.getCollection<Document>("dashboard_users")
 
     suspend fun findByEmail(email: String): DashboardUser? =
         collection.find(Filters.eq("email", email.trim().lowercase())).firstOrNull()?.toDashboardUser()

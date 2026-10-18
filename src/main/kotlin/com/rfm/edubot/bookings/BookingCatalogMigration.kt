@@ -22,7 +22,7 @@ class BookingCatalogMigration(private val mongo: MongoModule) {
     private val legacy = mongo.database.getCollection<Document>("bookings.services")
     private val appointments = mongo.database.getCollection<Document>("bookings.appointments")
     private val clientServices = mongo.database.getCollection<Document>("crm.client_services")
-    private val tenants = mongo.database.getCollection<Document>("tenants")
+    private val tenants = mongo.platform.getCollection<Document>("tenants")
 
     /** Returns how many legacy services were moved. Failures are logged per service and retried on the next start. */
     suspend fun run(): Int {
