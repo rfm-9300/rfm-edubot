@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-17
 ---
 
 # Employee portal and time clock
@@ -94,8 +94,9 @@ Trabalho art. 202.º, Lei 58/2019 art. 28.º, CNPD on geolocation; Connecteam, J
 Merging it after #54 and #55: six files conflicted, all with additions on both sides that were kept
 together (the catalogs' `time` block beside the column picker's `columns`, notification kinds, tones
 and texts for the time clock and the handoff, `timesheetsDeps` beside `assistantDeps`, and both
-scripts in `index.html`). **Gotcha for later edits:** `/app`'s `api()` throws #54's `apiError(res)`,
-which since this merge also carries the parsed body as `err.body`. `timesheets.js` reads
+scripts in `index.html`). **Gotcha for later edits:** `/app`'s `api()` throws #54's `apiError(res)`
+(in `admin/common.js` since PR #84, shared with the backoffice), which since this merge also carries the
+parsed body as `err.body`. `timesheets.js` reads
 `err.body.distanceM` and `siteName` to say how far from which work site a clock-in was refused. CI
 deployed `ef78cbe`, health ok, 0 `ERROR` lines three and a half minutes after boot, past the retention
 job's first scheduled run.

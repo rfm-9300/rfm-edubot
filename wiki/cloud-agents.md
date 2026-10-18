@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-14
+updated: 2026-10-17
 ---
 
 # Cursor cloud agents on this repo
@@ -7,7 +7,7 @@ updated: 2026-10-14
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72 and #76.
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76 and #84.
 Local sessions push straight to `main`. What a session should know:
 
 - **The environment is configured in Cursor, not in the repo.** `main` has no
@@ -79,10 +79,14 @@ Local sessions push straight to `main`. What a session should know:
   boot script, no `.env`. With sudo, `apt-get install docker.io`, `dockerd` in the background, the
   65536 nofile ulimit in `/etc/docker/daemon.json` and `api.version=1.44` in
   `~/.docker-java.properties` gave it Mongo 7 and Testcontainers; `TEST_MONGO_URI` pointed at that
-  Mongo container is faster than a container per run. The backoffice password needs a BCrypt
-  `ADMIN_PASSWORD_HASH` in the hand-written `.env`. #76's VM (2026-10-14) was the same, and the same
-  steps worked (`docker run mongo:7` instead of Compose, which `docker.io` lacks; the hash from
-  `httpd:2.4-alpine htpasswd`). Point puppeteer at `/opt/google/chrome/chrome`: the
+  Mongo container is faster than a container per run, but only `TestMongo` reads it: 19 test classes
+  start their own `MongoDBContainer`, so the agent's user needs the Docker socket either way
+  (`sudo chmod 666 /var/run/docker.sock` when it isn't in the `docker` group). The backoffice password
+  needs a BCrypt `ADMIN_PASSWORD_HASH` in the hand-written `.env`. #76's VM (2026-10-14) was the same,
+  and the same steps worked (`docker run mongo:7` instead of Compose, which `docker.io` lacks; the hash
+  from `httpd:2.4-alpine htpasswd`). So was #84's (2026-10-17): plain `./gradlew test`, as CI runs it,
+  passed all 830 tests once the socket was readable, and its mock data only showed once migrated
+  ([gotchas.md](gotchas.md)). Point puppeteer at `/opt/google/chrome/chrome`: the
   `/usr/local/bin/google-chrome` there is a wrapper script that pins its own profile.
 - The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
   driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed

@@ -94,6 +94,15 @@
   </div>
 
   <div class="toast" id="toast" hidden></div>
+  <!-- The page's scripts share one global scope and only declare things; app.js loads last and boots the page. -->
+  <script src="/admin/common.js" defer></script>
+  <script src="/backoffice/core.js" defer></script>
+  <script src="/backoffice/login.js" defer></script>
+  <script src="/backoffice/tenants.js" defer></script>
+  <script src="/backoffice/tenant-form.js" defer></script>
+  <script src="/backoffice/admins.js" defer></script>
+  <script src="/backoffice/backups.js" defer></script>
+  <script src="/backoffice/platform-settings.js" defer></script>
   <script src="/backoffice/app.js" defer></script>
 </body>
 </html>

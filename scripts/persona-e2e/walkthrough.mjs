@@ -160,11 +160,14 @@ const company = await createCompany();
 const file = fixtures(path.join(OUT, 'fixtures'));
 note(`Company ${company.slug}`);
 
+// A profile left by an earlier run still holds that run's sign-in, which would open its dashboard instead of the login.
+const profile = path.join(OUT, 'chrome');
+fs.rmSync(profile, { recursive: true, force: true });
 const browser = await puppeteer.launch({
   executablePath: process.env.CHROME || 'google-chrome',
   headless: process.env.HEADLESS === '1' ? 'new' : false,
   defaultViewport: null,
-  args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${path.join(OUT, 'chrome')}`, '--window-position=0,0', '--window-size=1920,1160'],
+  args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', `--user-data-dir=${profile}`, '--window-position=0,0', '--window-size=1920,1160'],
 });
 const page = (await browser.pages())[0] || await browser.newPage();
 const errors = [];
