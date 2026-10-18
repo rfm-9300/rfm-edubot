@@ -171,10 +171,11 @@ function prepareGoogleSignIn(config) {
   return googleSignIn;
 }
 
-// Signed out, the top bar keeps only the theme switch: the menu, search, New and Log out all need a session.
+// Signed out, the top bar keeps only the theme switch: the menu, crumb, search, New and Log out all need a session.
 // Signed in, setView shows search and New on the views that use them.
 function showSessionControls(on) {
   $('#btn-nav').hidden = !on;
+  $('.topbar .crumb').hidden = !on;
   $('#btn-logout').hidden = !on;
   if (!on) {
     $('.topbar__search').hidden = true;
@@ -1345,7 +1346,10 @@ async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
   $('#btn-new').addEventListener('click', () => tenantForm());
-  $('#btn-logout').addEventListener('click', () => { localStorage.removeItem('adminToken'); token = ''; renderLogin(); });
+  // Phones log out from the menu (#nav-logout); the top bar's button is for wider screens.
+  const logout = () => { localStorage.removeItem('adminToken'); token = ''; renderLogin(); };
+  $('#btn-logout').addEventListener('click', logout);
+  $('#nav-logout').addEventListener('click', logout);
   $('#search').addEventListener('input', e => { state.search = e.target.value; if (currentView === 'tenants') renderTenants(); });
   $$('.nav__item[data-view]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();
