@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-18
 ---
 
 # Dashboard UI decisions
@@ -89,6 +89,58 @@ installment rows, and `.form__checks--wide` (the payment form's service ticks) d
 a phone. `main` was merged into the branch (`9218779`) and checked at 375px with no sideways
 scrolling. CI deployed `5b82fe9`, health ok, 0 `ERROR` lines. The agent ran no Kotlin tests because
 its VM had no Docker; CI ran them.
+
+Since then `/app`'s Timesheets and Persona tables took `.tbl--stack` too, and #86 (below) moved its
+breakpoint from 700px to 920px.
+
+## Backoffice on phones, second pass (PR #86, 2026-10-18)
+
+Rodrigo found the backoffice still not made for phones after #51: nothing scrolled sideways, but it
+was the desktop layout squeezed down. Measured in headless Chrome at 320, 375 and 414px with touch
+emulation, and at 768 and 1280px, in both themes:
+
+- **One sticky top-bar row.** The bar was two rows that never left the screen (about 140px of an
+  812px phone, 180px of a 640px one): menu, crumb, theme, Log out and New, then the search. The
+  backoffice's `.topbar--one-row` keeps the search on the first row; under 620px the bar is menu,
+  search and New, the search takes the crumb's place (the page title says the same), and the theme
+  switch and Log out sit at the end of the menu (`.sidebar__session`; `theme.js` paints and wires
+  any `[data-theme-toggle]` and closes the menu on `[data-nav-close]`). `/app` keeps two rows, since
+  its bar also holds the bell and the account. Signed out, the crumb is hidden too: it read
+  "Tenants" over the sign-in card.
+- **Shorter cards.** A tenant card was about 320px tall at 375px, two per screen: status, messages
+  and last activity each took half a line under a label, channel pills wrapped into three-line
+  blobs in half the width, and Open dashboard took its own line. It is about 230px now: the status
+  pill beside the name, the channels across the card (`.tbl__wide`), then messages, last activity
+  and Open dashboard on one line. Dashboard users and agents show their status the same way.
+  - The status pill is in the markup twice on purpose. CSS can't put a later cell beside the first
+    line of the first cell without guessing its width (a fixed corner column, or absolute
+    positioning with a padding reserve), so the name cell's `.tbl__title` repeats it as a
+    `.tbl__aside`, hidden in the table, and the card hides the column's cell (`.tbl__stack-hide`,
+    `display: none`, so a screen reader meets it once).
+  - **The flowing line is opt-in (`.tbl--flow`).** Tried first on every `.tbl--stack`, it broke
+    `/app`'s Timesheets cards: a shift with a break pushed its values onto other lines than the next
+    shift's, so the cards stopped lining up. Tables compared value by value keep the grid.
+- **Cards from 920px, not 700px.** At 768px (a tablet held upright) the tenant table was 848px wide in
+  a 734px panel: names one word per line, slugs broken at every hyphen, Open dashboard behind a
+  sideways scroll. Every `.tbl--stack` now stacks where the sidebar becomes a menu, which also turns
+  `/app`'s Timesheets table into cards on tablets (its Status column had scrolled out of view).
+- **Platform settings' Save follows the screen.** It sat at the top of a page about seven screens
+  long on a phone. It is now a `.savebar` at the end (Save, and Discard behind a confirm), sticky
+  while a field has a change, on the desktop too; the hero keeps Reload. Under 860px a key shares
+  its line with its pills and a lone Reveal or Clear sits beside the field, about 120px a row
+  instead of 200.
+- **Shared rules that reach `/app` on phones:** on touch phones (under 560px with `pointer: coarse`)
+  `.btn--sm`, `.chip` and toolbar selects are 36px, the drawer's × 40px, `.form__check` 32px; under
+  560px a `.notice`'s buttons go under its text; a `.dash-facts` value wraps (a channel's name and
+  id ran past a 320px screen and the panel clipped it); the top bar's search input fills its field.
+  Checked on `/app`'s Clients, a client record, Agents, Timesheets and Persona: only those controls
+  changed.
+
+The desktop at 1280px stayed pixel-identical (only the sidebar clock differed), Platform settings'
+Save apart. Still open: with the sidebar showing (920 to about 1200px) the tenant table, 896px
+wide, scrolls inside its panel, and the dashboard-users table scrolls inside the 640px desktop
+drawer when emails are long. Several pt-PT backoffice strings are English in the catalog ("Channels",
+"Platform", "unchanged", "+ Add channel"); some look deliberate ("Os channels são opcionais").
 
 ## Directory column picker (shipped 2026-10-07, `b84ef38`)
 

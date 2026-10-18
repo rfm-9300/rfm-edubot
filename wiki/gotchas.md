@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-14
+updated: 2026-10-18
 ---
 
 # Cross-cutting gotchas
@@ -90,6 +90,13 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   endpoints (templates, media) with CDP `Fetch.fulfillRequest` to see those screens without Meta, and
   give Chrome a fresh `--user-data-dir` each run: a reused profile restores the last tab and the script
   can attach to the wrong page.
+
+- **Phone checks need touch emulation:** the touch rules (`pointer: coarse`: 16px fields, 36px small
+  buttons and chips) only match with puppeteer's `setViewport({ hasTouch: true, isMobile: true })`; a
+  plain 375px window shows the desktop sizes. To sign in by script, set `adminToken` or
+  `dashboardToken` in `localStorage` on another page of the origin (`/health`), then open the
+  dashboard: a `goto` from `/backoffice/` to `/backoffice/#tenants` only changes the hash, so the
+  page never reloads and stays on the sign-in card.
 
 - **Local UI-check gotchas:** a process started with `(cmd &)` inside an agent's tool shell dies when
   that shell exits, so run `./gradlew run` as a background job of the tool. `app.js` is a classic
