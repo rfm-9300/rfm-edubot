@@ -27,7 +27,7 @@ import org.bson.types.ObjectId
 import java.util.Date
 
 class TenantRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.database.getCollection<Document>("tenants")
+    private val collection = mongoModule.platform.getCollection<Document>("tenants")
 
     suspend fun findByPhoneNumberId(phoneNumberId: String): Tenant? =
         collection.find(

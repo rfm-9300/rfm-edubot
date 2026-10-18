@@ -24,7 +24,7 @@ class SchedulerLease(
     val owner: String = defaultOwner(),
     private val clock: () -> Instant = SystemClock::now,
 ) {
-    private val collection = mongo.database.getCollection<Document>(COLLECTION)
+    private val collection = mongo.runtime.getCollection<Document>(COLLECTION)
 
     /** Takes or renews [name] for [ttl]; false while another owner holds it. */
     suspend fun tryAcquire(name: String, ttl: Duration): Boolean {

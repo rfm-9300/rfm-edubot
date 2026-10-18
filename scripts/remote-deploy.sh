@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Runs on the production VPS. Pulls the published image and recreates the app
-# container without deleting Mongo volumes or touching .env. After a healthy
-# deploy it removes older images of this repository, keeping the new one and
-# the rollback target.
+# Runs on the production VPS. Pulls the release's image (TAG, e.g. v1.4.0) and
+# recreates the app container without deleting Mongo volumes or touching .env.
+# Only the app image is pulled: Mongo's image changes only when someone updates
+# it on purpose (DEPLOYMENT_RUNBOOK.md). After a healthy deploy it removes older
+# images of this repository, keeping the new one and the rollback target.
 #
 # On a failed health check, automatically rolls back to the last tag that
-# passed health checks, so a bad merge doesn't leave prod down. The script
+# passed health checks, so a bad release doesn't leave prod down. The script
 # still exits non-zero in that case, so CI reports the deploy as failed.
 #
 # Optional: set DEPLOY_ALERT_WEBHOOK_URL to a Slack/Discord-compatible
@@ -15,7 +16,7 @@ set -euo pipefail
 
 APP_DIR="${APP_DIR:-$HOME/whatsapp-bot}"
 COMPOSE_FILE="${COMPOSE_FILE:-docker-compose.prod.yml}"
-TAG="${TAG:-latest}"
+TAG="${TAG:?Set TAG to the release to deploy, e.g. TAG=v1.4.0}"
 REGISTRY_IMAGE="${REGISTRY_IMAGE:-ghcr.io/rfm-9300/whatsapp-bot}"
 HEALTH_RETRIES="${HEALTH_RETRIES:-30}"
 HEALTH_SLEEP_SECONDS="${HEALTH_SLEEP_SECONDS:-2}"
@@ -89,25 +90,24 @@ prune_old_images() {
 }
 
 # Previous known-good tag, so we can roll back to it if this deploy fails.
-# Falls back to "latest" if this is the first deploy since this script's rollback logic shipped.
-previous_tag="latest"
+previous_tag=""
 if [[ -f "$LAST_GOOD_TAG_FILE" ]]; then
   previous_tag="$(cat "$LAST_GOOD_TAG_FILE")"
 fi
 
 export TAG
-echo "Deploying ${REGISTRY_IMAGE}:${TAG} (previous known-good: ${previous_tag})"
+echo "Deploying ${REGISTRY_IMAGE}:${TAG} (previous known-good: ${previous_tag:-none recorded})"
 
-docker compose -f "${COMPOSE_FILE}" pull
+docker compose -f "${COMPOSE_FILE}" pull app
 # Recreate the app from the new image. Do not `down` the stack: that would bounce
-# Mongo on every merge. Volumes and .env are left untouched.
+# Mongo on every release. Volumes and .env are left untouched.
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 
 echo "Waiting for /health and /ready..."
 if wait_for_health; then
   docker compose -f "${COMPOSE_FILE}" ps
   echo "$TAG" > "$LAST_GOOD_TAG_FILE"
-  prune_old_images "$TAG" "$previous_tag" || true
+  prune_old_images "$TAG" ${previous_tag:+"$previous_tag"} || true
   exit 0
 fi
 
@@ -115,9 +115,9 @@ echo "Health checks failed after ${HEALTH_RETRIES} attempts for tag ${TAG}" >&2
 docker compose -f "${COMPOSE_FILE}" ps >&2 || true
 docker compose -f "${COMPOSE_FILE}" logs --tail=100 app >&2 || true
 
-if [[ "$TAG" == "$previous_tag" ]]; then
-  echo "Already on the previous known-good tag (${previous_tag}); nothing to roll back to." >&2
-  notify "🔴 whatsapp-bot deploy of ${TAG} failed health checks. No rollback available (already on last-good tag). Manual intervention needed."
+if [[ -z "$previous_tag" || "$TAG" == "$previous_tag" ]]; then
+  echo "No other known-good tag (${previous_tag:-none recorded}); nothing to roll back to." >&2
+  notify "🔴 whatsapp-bot deploy of ${TAG} failed health checks. No rollback available (no other last-good tag). Manual intervention needed."
   exit 1
 fi
 
@@ -126,7 +126,7 @@ notify "🟠 whatsapp-bot deploy of ${TAG} failed health checks. Rolling back to
 
 TAG="$previous_tag"
 export TAG
-docker compose -f "${COMPOSE_FILE}" pull
+docker compose -f "${COMPOSE_FILE}" pull app
 docker compose -f "${COMPOSE_FILE}" up -d --remove-orphans
 
 if wait_for_health; then

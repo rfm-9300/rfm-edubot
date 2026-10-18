@@ -7,7 +7,7 @@ import org.testcontainers.containers.MongoDBContainer
 
 /**
  * MongoDB for repository tests: `TEST_MONGO_URI` when set (a local mongod), otherwise one MongoDB
- * container shared by every test class in the run. Each call gets its own fresh database.
+ * container shared by every test class in the run. Each call gets its own fresh databases.
  */
 object TestMongo {
     private val uri: String by lazy {
@@ -15,6 +15,9 @@ object TestMongo {
             ?: MongoDBContainer("mongo:7").also { it.start() }.replicaSetUrl
     }
 
-    fun module(name: String): MongoModule =
-        MongoModule(AppConfig.MongoConfig(uri = uri, database = "${name}_${ObjectId().toHexString().takeLast(8)}")).also { it.initialize() }
+    /** Fresh database names, for a test that writes before [MongoModule.initialize] runs. */
+    fun config(name: String): AppConfig.MongoConfig =
+        AppConfig.MongoConfig(uri = uri, database = "${name}_${ObjectId().toHexString().takeLast(8)}")
+
+    fun module(name: String): MongoModule = MongoModule(config(name)).also { it.initialize() }
 }

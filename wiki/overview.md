@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-18
 ---
 
 # Product overview
@@ -10,7 +10,10 @@ GitHub `rfm-9300/rfm-edubot`, GitNexus index name `rfm-edubot`. A Ktor 3 server 
 
 Webhook POST returns 200 immediately; work is async on a Kotlin Channel (`MessagePipeline`:
 dedup → user/convo lookup → rate limit → LLM → WhatsApp Graph API → Mongo). Dedup via
-`webhook_events` (unique `eventId`). Fat JAR `build/libs/app.jar`.
+`webhook_events` (unique `eventId`). Fat JAR `build/libs/app.jar`. Mongo holds three databases:
+the companies' data, the platform's records and disposable runtime state
+([mongo-databases.md](mongo-databases.md)). Production changes only when a release tag is pushed
+([ops-and-deploy.md](ops-and-deploy.md)).
 
 Package boundaries (repo AGENTS.md): `webhook/`, `messaging/`, `conversation/`, `ai/`,
 `whatsapp/`, `ratelimit/`, `persistence/`, `shared/`, `plugins/`.

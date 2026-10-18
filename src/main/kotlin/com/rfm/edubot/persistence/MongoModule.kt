@@ -9,23 +9,33 @@ import org.bson.Document
 import org.slf4j.LoggerFactory
 import java.util.concurrent.TimeUnit
 
+/**
+ * The MongoDB client and its three databases; every collection lives in exactly one of them:
+ * - [database]: the companies' data. Each document carries its company's `tenantId` (the per-company
+ *   settings collections use it as `_id`), which is what lets one company be restored on its own.
+ * - [platform]: the platform's own records ([PLATFORM_COLLECTIONS]).
+ * - [runtime]: state the app can lose without harm ([RUNTIME_COLLECTIONS]), never backed up.
+ */
 class MongoModule(config: AppConfig.MongoConfig) {
     val client: MongoClient = MongoClient.create(config.uri)
     val database = client.getDatabase(config.database)
+    val platform = client.getDatabase(config.platformDatabase)
+    val runtime = client.getDatabase(config.runtimeDatabase)
     private val log = LoggerFactory.getLogger("MongoModule")
 
     fun initialize() {
         log.info("Initializing MongoDB indexes")
         runBlocking {
+            DatabaseSplit(this@MongoModule).run()
+            initializePlatform()
+            initializeRuntime()
+
             val db = database
 
             listOf(
                 "users",
                 "conversations",
                 "messages",
-                "webhook_events",
-                "tenants",
-                "dashboard_users",
                 "tenant_persona",
                 "persona_sources",
                 "persona_versions",
@@ -37,32 +47,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "crm.invoices",
                 "crm.sequences",
                 "crm.standard_items",
-                "tenant_usage",
-                "admin_emails",
             ).forEach { name -> try { db.createCollection(name) } catch (_: Exception) {} }
-
-            val tenants = db.getCollection<Document>("tenants")
-            tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true).sparse(true))
-            tenants.createIndex(Document("slug", 1), IndexOptions().unique(true))
-            tenants.createIndex(Document("channels.platform", 1).append("channels.externalId", 1))
-            tenants.createIndex(
-                Document("parentTenantId", 1),
-                IndexOptions().partialFilterExpression(Document("parentTenantId", Document("\$type", "objectId"))),
-            )
-
-            val dashboardUsers = db.getCollection<Document>("dashboard_users")
-            dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))
-            dashboardUsers.createIndex(
-                Document("googleUid", 1),
-                IndexOptions().unique(true).partialFilterExpression(Document("googleUid", Document("\$type", "string"))),
-            )
-            dashboardUsers.createIndex(Document("tenantId", 1))
-            dashboardUsers.createIndex(
-                Document("employeeId", 1),
-                IndexOptions().unique(true).partialFilterExpression(Document("employeeId", Document("\$type", "objectId"))),
-            )
-
-            db.getCollection<Document>("admin_emails").createIndex(Document("email", 1), IndexOptions().unique(true))
 
             val tenantPersona = db.getCollection<Document>("tenant_persona")
             tenantPersona.createIndex(Document("tenantId", 1), IndexOptions().unique(true))
@@ -106,14 +91,6 @@ class MongoModule(config: AppConfig.MongoConfig) {
             )
             messages.createIndex(Document("tenantId", 1).append("channel", 1).append("waId", 1).append("createdAt", -1))
             messages.createIndex(Document("tenantId", 1).append("createdAt", -1))
-
-            val webhookEvents = db.getCollection<Document>("webhook_events")
-            webhookEvents.createIndex(Document("eventId", 1), IndexOptions().unique(true))
-            webhookEvents.createIndex(Document("tenantId", 1))
-            webhookEvents.createIndex(
-                Document("receivedAt", 1),
-                IndexOptions().expireAfter(7, TimeUnit.DAYS)
-            )
 
             val crmClients = db.getCollection<Document>("crm.clients")
             crmClients.dropIndexIfExists("phone_1")
@@ -239,7 +216,6 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val timeDevices = db.getCollection<Document>("timesheets.devices")
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("keyId", 1), IndexOptions().unique(true))
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("active", 1))
-            db.getCollection<Document>("timesheets.challenges").createIndex(Document("createdAt", 1), IndexOptions().expireAfter(5, TimeUnit.MINUTES))
 
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
@@ -273,9 +249,6 @@ class MongoModule(config: AppConfig.MongoConfig) {
             instagramMedia.createIndex(Document("tenantId", 1).append("mediaId", 1), IndexOptions().unique(true))
             instagramMedia.createIndex(Document("tenantId", 1).append("publishedAt", -1))
 
-            val tenantUsage = db.getCollection<Document>("tenant_usage")
-            tenantUsage.createIndex(Document("tenantId", 1).append("period", 1), IndexOptions().unique(true))
-
             val instagramComments = db.getCollection<Document>("instagram.comments")
             instagramComments.createIndex(Document("tenantId", 1).append("commentId", 1), IndexOptions().unique(true))
             instagramComments.createIndex(Document("tenantId", 1).append("mediaId", 1).append("createdAt", 1))
@@ -286,6 +259,52 @@ class MongoModule(config: AppConfig.MongoConfig) {
         log.info("MongoDB indexes initialized")
     }
 
+    private suspend fun initializePlatform() {
+        listOf("tenants", "dashboard_users", "admin_emails", "tenant_usage")
+            .forEach { name -> try { platform.createCollection(name) } catch (_: Exception) {} }
+
+        val tenants = platform.getCollection<Document>("tenants")
+        tenants.createIndex(Document("phoneNumberId", 1), IndexOptions().unique(true).sparse(true))
+        tenants.createIndex(Document("slug", 1), IndexOptions().unique(true))
+        tenants.createIndex(Document("channels.platform", 1).append("channels.externalId", 1))
+        tenants.createIndex(
+            Document("parentTenantId", 1),
+            IndexOptions().partialFilterExpression(Document("parentTenantId", Document("\$type", "objectId"))),
+        )
+
+        val dashboardUsers = platform.getCollection<Document>("dashboard_users")
+        dashboardUsers.createIndex(Document("email", 1), IndexOptions().unique(true))
+        dashboardUsers.createIndex(
+            Document("googleUid", 1),
+            IndexOptions().unique(true).partialFilterExpression(Document("googleUid", Document("\$type", "string"))),
+        )
+        dashboardUsers.createIndex(Document("tenantId", 1))
+        dashboardUsers.createIndex(
+            Document("employeeId", 1),
+            IndexOptions().unique(true).partialFilterExpression(Document("employeeId", Document("\$type", "objectId"))),
+        )
+
+        platform.getCollection<Document>("admin_emails").createIndex(Document("email", 1), IndexOptions().unique(true))
+
+        platform.getCollection<Document>("tenant_usage")
+            .createIndex(Document("tenantId", 1).append("period", 1), IndexOptions().unique(true))
+    }
+
+    private suspend fun initializeRuntime() {
+        try { runtime.createCollection("webhook_events") } catch (_: Exception) {}
+
+        val webhookEvents = runtime.getCollection<Document>("webhook_events")
+        webhookEvents.createIndex(Document("eventId", 1), IndexOptions().unique(true))
+        webhookEvents.createIndex(Document("tenantId", 1))
+        webhookEvents.createIndex(
+            Document("receivedAt", 1),
+            IndexOptions().expireAfter(7, TimeUnit.DAYS)
+        )
+
+        runtime.getCollection<Document>("timesheets.challenges")
+            .createIndex(Document("createdAt", 1), IndexOptions().expireAfter(5, TimeUnit.MINUTES))
+    }
+
     fun shutdown() {
         log.info("Closing MongoDB connection")
         client.close()
@@ -293,5 +312,13 @@ class MongoModule(config: AppConfig.MongoConfig) {
 
     private suspend fun MongoCollection<Document>.dropIndexIfExists(name: String) {
         try { dropIndex(name) } catch (_: Exception) {}
+    }
+
+    companion object {
+        /** In [platform]. scripts/mongo-databases.sh keeps the same list for backups and restores. */
+        val PLATFORM_COLLECTIONS = listOf("tenants", "dashboard_users", "admin_emails", "platform_settings", "tenant_usage")
+
+        /** In [runtime]. scripts/mongo-databases.sh keeps the same list. */
+        val RUNTIME_COLLECTIONS = listOf("webhook_events", "scheduler_leases", "timesheets.challenges")
     }
 }

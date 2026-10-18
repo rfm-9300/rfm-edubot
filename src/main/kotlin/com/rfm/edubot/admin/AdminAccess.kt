@@ -16,7 +16,7 @@ import java.util.Date
 data class AddedAdminEmail(val email: String, val addedBy: String?, val addedAt: Instant)
 
 class AdminEmailRepository(mongo: MongoModule) {
-    private val collection = mongo.database.getCollection<Document>("admin_emails")
+    private val collection = mongo.platform.getCollection<Document>("admin_emails")
 
     suspend fun list(): List<AddedAdminEmail> = collection.find().toList().map {
         AddedAdminEmail(

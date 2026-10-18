@@ -85,25 +85,34 @@ class BackupControlTest {
     }
 
     @Test
-    fun `a finished run reports its archive, and a failed one the end of its output`() {
+    fun `a finished run reports its archives, and a failed one the end of its output`() {
         control.resolve("last-request.json").writeText("""{"id":"r2","requestedBy":"ops@acme.test","requestedAt":"2026-09-30T09:00:00Z"}""")
         control.resolve("last.json").writeText(
-            """{"id":"r2","exitCode":0,"startedAt":"2026-09-30T09:00:30Z","finishedAt":"2026-09-30T09:00:41Z","archive":"mongo-20260930T090031Z.archive.gz"}""",
+            """{"id":"r2","exitCode":0,"startedAt":"2026-09-30T09:00:30Z","finishedAt":"2026-09-30T09:00:41Z",
+               "archives":["platform-20260930T090031Z.archive.gz","data-20260930T090031Z.archive.gz"]}""",
         )
         val done = backups().status().current!!
         assertEquals("succeeded", done.state)
-        assertEquals("mongo-20260930T090031Z.archive.gz", done.archive)
+        assertEquals(listOf("platform-20260930T090031Z.archive.gz", "data-20260930T090031Z.archive.gz"), done.archives)
         assertEquals("ops@acme.test", done.requestedBy)
         assertEquals("2026-09-30T09:00:41Z", done.finishedAt)
         assertNull(done.log)
 
-        control.resolve("last.json").writeText("""{"id":"r2","exitCode":1,"startedAt":"2026-09-30T09:00:30Z","finishedAt":"2026-09-30T09:00:33Z","archive":""}""")
+        control.resolve("last.json").writeText("""{"id":"r2","exitCode":1,"startedAt":"2026-09-30T09:00:30Z","finishedAt":"2026-09-30T09:00:33Z","archives":[]}""")
         control.resolve("last.log").writeText((1..60).joinToString("\n") { "line $it" })
         val failed = backups().status().current!!
         assertEquals("failed", failed.state)
-        assertNull(failed.archive)
+        assertEquals(emptyList(), failed.archives)
         assertEquals(40, failed.log!!.lines().size)
         assertTrue(failed.log!!.endsWith("line 60"))
+    }
+
+    @Test
+    fun `a run reported by a runner from before the database split shows its one archive`() {
+        control.resolve("last.json").writeText(
+            """{"id":"r3","exitCode":0,"startedAt":"2026-09-30T09:00:30Z","finishedAt":"2026-09-30T09:00:41Z","archive":"mongo-20260930T090031Z.archive.gz"}""",
+        )
+        assertEquals(listOf("mongo-20260930T090031Z.archive.gz"), backups().status().current!!.archives)
     }
 
     @Test
@@ -120,18 +129,24 @@ class BackupControlTest {
     }
 
     @Test
-    fun `archives are listed newest first with their size and off-box copy, other files ignored`() {
+    fun `archives are listed newest first with their kind, size and off-box copy, other files ignored`() {
         archives.resolve("mongo-20260929T031701Z.archive.gz").writeBytes(ByteArray(100))
-        archives.resolve("mongo-20260930T031701Z.archive.gz").writeBytes(ByteArray(250))
-        archives.resolve("mongo-20260930T031701Z.archive.gz.uploaded").writeText("")
-        archives.resolve("mongo-20260930T090000Z.archive.gz.tmp").writeText("partial")
+        archives.resolve("platform-20260930T031701Z.archive.gz").writeBytes(ByteArray(20))
+        archives.resolve("data-20260930T031701Z.archive.gz").writeBytes(ByteArray(250))
+        archives.resolve("data-20260930T031701Z.archive.gz.uploaded").writeText("")
+        archives.resolve("data-20260930T090000Z.archive.gz.tmp").writeText("partial")
         archives.resolve("notes.txt").writeText("x")
 
         val listed = backups().status().archives
-        assertEquals(listOf("mongo-20260930T031701Z.archive.gz", "mongo-20260929T031701Z.archive.gz"), listed.map { it.name })
+        assertEquals(
+            listOf("data-20260930T031701Z.archive.gz", "platform-20260930T031701Z.archive.gz", "mongo-20260929T031701Z.archive.gz"),
+            listed.map { it.name },
+        )
+        assertEquals(listOf("data", "platform", "full"), listed.map { it.kind })
         assertEquals(250L, listed[0].sizeBytes)
         assertTrue(listed[0].uploaded)
         assertFalse(listed[1].uploaded)
         assertEquals("2026-09-30T03:17:01Z", listed[0].createdAt)
+        assertEquals("2026-09-29T03:17:01Z", listed[2].createdAt)
     }
 }

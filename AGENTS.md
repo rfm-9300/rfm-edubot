@@ -71,9 +71,9 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-Merges to `main` deploy the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. See [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project and is not part of this pipeline.
+Pushing a release tag (`vMAJOR.MINOR.PATCH`, on a commit that is on `main`) deploys the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. Merging to `main` only runs CI and deploys nothing. See [DEPLOYMENT_RUNBOOK.md](DEPLOYMENT_RUNBOOK.md). Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project and is not part of this pipeline.
 
-When Rodrigo says any of the following, treat it as permission to ship this WhatsApp bot to production:
+When Rodrigo says any of the following, treat it as permission to ship this WhatsApp bot to production, which includes pushing the release tag:
 
 - "make deploy"
 - "make deployment"
@@ -82,7 +82,7 @@ When Rodrigo says any of the following, treat it as permission to ship this What
 - "deploy"
 - any close variant that clearly means deploying this WhatsApp bot to production
 
-Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (or re-run it). Use the laptop `./deploy.sh` + SSH fallback in the runbook only if CI cannot publish or SSH.
+Default path: confirm CI passed on `main`, cut the next release with `scripts/release.sh patch` (or `minor` for new features, `major` when operators or users must act), then follow the **Release** run until its Deploy job passes the health checks. To go back to an earlier release, run **Deploy WhatsApp Bot** by hand with that tag. Use the laptop `./deploy.sh` + SSH fallback in the runbook only if CI cannot publish or SSH.
 
 ## Production Host
 
@@ -90,12 +90,13 @@ Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (
 - Connect with: `ssh hillsong-vps`
 - Production app directory on the VPS: `~/whatsapp-bot`
 - Production compose file: `docker-compose.prod.yml`
-- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG}`, `TAG` a release tag (no `:latest`); the deployed one is in `~/whatsapp-bot/.last-good-tag`
 - Public domain: `thebotslab.pt`. Use it in docs, links and new setups (OAuth redirect URIs, webhooks); `thebotslab.eu` serves the same routes but is not the reference.
 
 ## Deployment Rules
 
-- Prefer GitHub Actions on `main` over a local Docker build.
+- Prefer the Release workflow (a pushed release tag) over a local Docker build.
+- Never move, delete or reuse a release tag; a fix ships as the next tag.
 - On the VPS, use `docker compose -f docker-compose.prod.yml` and `scripts/remote-deploy.sh`.
 - Prefer recreating the app with `up -d` after `pull`; do not `down` the whole stack (that bounces Mongo) unless recovery requires it.
 - After deploying, check container state, health endpoints, and logs before reporting success.
@@ -108,13 +109,14 @@ Default path: confirm the **Deploy WhatsApp Bot** workflow on `main` succeeded (
 
 - General shell commands are allowed when needed to complete the task.
 - Read-only `git` commands are allowed for inspection, such as `git status`, `git diff`, `git log`, `git show`, and `git rev-parse`.
-- Do not run `git` commands that change commits, branches, refs, the index, remotes, or the working tree unless Rodrigo explicitly asks.
+- Do not run `git` commands that change commits, branches, refs, the index, remotes, or the working tree unless Rodrigo explicitly asks. A deploy request (Deployment Intent) is that ask for pushing the release tag.
 
 ## Commands
 - `./gradlew build` — compile + test
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+- `scripts/release.sh patch|minor|major` — tag `origin/main` as the next version and push the tag, which releases it to production
 - `scripts/persona-e2e/` — browser walkthrough of the Persona page: start `python3 scripts/persona-e2e/fake-openrouter.py`, run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1` and a backoffice password, then in that folder `npm install && ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs` (exits non-zero on a failed check)
 - `scripts/email-e2e/` — browser walkthrough of the Email page: start `python3 scripts/email-e2e/fake-services.py` (model and Gmail), run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1 GMAIL_API_URL=http://127.0.0.1:8099/gmail/v1 GMAIL_INBOX_ENABLED=true GMAIL_SYNC_SECONDS=15`, the three `GOOGLE_OAUTH_*` set to anything and an `INTEGRATIONS_ENCRYPTION_KEY`, then in that folder `npm install && INTEGRATIONS_ENCRYPTION_KEY=… node walkthrough.mjs` (exits non-zero on a failed check)
 
@@ -153,7 +155,7 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - `ai/` — OpenRouter client with retry + fallback model
 - `whatsapp/` — outbound Graph API client
 - `ratelimit/` — in-memory token bucket (per-hour + per-day)
-- `persistence/` — MongoDB wiring + index creation
+- `persistence/` — MongoDB wiring (three databases), index creation, the database split
 - `shared/` — Clock, Ids, Result/AppError sealed classes
 - `plugins/` — Ktor: Monitoring, Serialization, StatusPages
 
@@ -165,6 +167,7 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - Config via HOCON (`application.conf`) with `${?ENV_VAR}` fallbacks
 - Fat JAR output: `build/libs/app.jar` (Dockerfile multi-stage, distroless-style)
 - MongoDB indexes created at startup in `MongoModule.initialize()`
+- Three Mongo databases: `wabot` (companies' data, every document scoped by `tenantId`), `wabot_platform`, `wabot_runtime`. A new collection goes in the one that matches ([wiki/mongo-databases.md](wiki/mongo-databases.md))
 
 ## UI Design System
 

@@ -47,20 +47,19 @@ class TenantSeeder(
             "users",
             "conversations",
             "messages",
-            "webhook_events",
             "crm.clients",
             "crm.quotes",
             "crm.invoices",
             "crm.sequences",
             "crm.standard_items",
-        )
-        for (name in collections) {
-            val result = mongo.database.getCollection<Document>(name).updateMany(
+        ).map { mongo.database.getCollection<Document>(it) } + mongo.runtime.getCollection<Document>("webhook_events")
+        for (collection in collections) {
+            val result = collection.updateMany(
                 Filters.exists("tenantId", false),
                 Updates.set("tenantId", tenant.id),
             )
             if (result.modifiedCount > 0) {
-                log.info("Backfilled tenantId for collection={} count={}", name, result.modifiedCount)
+                log.info("Backfilled tenantId for collection={} count={}", collection.namespace.collectionName, result.modifiedCount)
             }
         }
         backfillMissingChannel()
@@ -80,7 +79,7 @@ class TenantSeeder(
     }
 
     private suspend fun backfillTenantChannels(tenant: Tenant) {
-        val result = mongo.database.getCollection<Document>("tenants").updateOne(
+        val result = mongo.platform.getCollection<Document>("tenants").updateOne(
             Filters.and(Filters.eq("_id", tenant.id), Filters.exists("channels", false)),
             Updates.set("channels", tenant.channels.map { Document("platform", it.platform.name).append("externalId", it.externalId).append("accessToken", it.accessToken) }),
         )

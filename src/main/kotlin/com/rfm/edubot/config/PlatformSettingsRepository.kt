@@ -15,7 +15,7 @@ data class PlatformSettingsDocument(
 )
 
 class PlatformSettingsRepository(mongoModule: MongoModule) {
-    private val collection = mongoModule.database.getCollection<Document>("platform_settings")
+    private val collection = mongoModule.platform.getCollection<Document>("platform_settings")
 
     suspend fun load(): PlatformSettingsDocument {
         val doc = collection.find(Filters.eq("_id", DOC_ID)).firstOrNull() ?: return PlatformSettingsDocument(emptyMap(), null)
