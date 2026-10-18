@@ -665,12 +665,13 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl tbody tr.is-current td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 .tbl tbody tr.is-total td,
 .tbl tbody tr.is-total:hover td { background: var(--surface-2); font-weight: 800; }
-/* Phones: a .tbl--stack table turns each row into a card. A cell without data-label (the row's name, an
-   empty state), a long .id and a .tbl__wide cell each take a line. The cells with data-label (their column
-   heading) follow at their own width, label above value, wrapping like words, and the actions cell closes
-   the last line, at its right end when it fits. A .tbl__aside status sits at the right of the name's
-   .tbl__title, and the cell it repeats (.tbl__stack-hide) is left out. */
-@media (max-width: 700px) {
+/* Phones and tablets (the 920px shell, where the sidebar is a menu): a .tbl--stack table turns each row into
+   a card. A cell without data-label (the row's name, an empty state), a long .id and a .tbl__wide cell each
+   take a line. The cells with data-label (their column heading) follow at their own width, label above
+   value, wrapping like words, and the actions cell closes the last line, at its right end when it fits.
+   A .tbl__aside status sits at the right of the name's .tbl__title, and the cell it repeats
+   (.tbl__stack-hide) is left out. */
+@media (max-width: 920px) {
   .tbl--stack, .tbl--stack tbody { display: block; }
   .tbl--stack thead { display: none; }
   .tbl--stack tbody tr { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
@@ -2854,16 +2855,16 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
   html[data-layout="minimal"] .view > .panel .tbl tbody tr.is-day td { padding-right: 16px; padding-left: 16px; }
   html[data-layout="minimal"] .drawer__panel,
   html[data-layout="minimal"] .drawer__head { border-radius: 0; }
+  html[data-layout="minimal"] .tbl--stack tbody td,
+  html[data-layout="minimal"] .view > .panel .tbl--stack tbody td { padding: 0; }
+  html[data-layout="minimal"] .tbl--stack tbody tr:hover { background: var(--surface-2); }
+  html[data-layout="minimal"] .tbl--stack td[data-label]::before { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 }
 @media (max-width: 700px) {
   html[data-layout="minimal"] .view__stats { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   html[data-layout="minimal"] .stat:nth-child(odd)::before { display: none; }
   html[data-layout="minimal"] .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
   html[data-layout="minimal"] .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  html[data-layout="minimal"] .tbl--stack tbody td,
-  html[data-layout="minimal"] .view > .panel .tbl--stack tbody td { padding: 0; }
-  html[data-layout="minimal"] .tbl--stack tbody tr:hover { background: var(--surface-2); }
-  html[data-layout="minimal"] .tbl--stack td[data-label]::before { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 }
 /* Touch phones: small buttons, chips and toolbar selects grow to 36px and the drawer's close button to 40px,
    so a thumb can hit them; the drawer's back link keeps its look with a taller hit area. */
