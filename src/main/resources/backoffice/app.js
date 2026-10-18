@@ -333,7 +333,7 @@ async function renderAdmins() {
       ${data.googleReady ? '' : warnNoticeHtml(A.googleNotReady)}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.listTitle)} <span class="tag">${data.admins.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
           <th>${escapeHTML(A.thEmail)}</th><th>${escapeHTML(A.thSource)}</th><th>${escapeHTML(A.thAdded)}</th><th class="right">${escapeHTML(T.thActions)}</th>
         </tr></thead><tbody>${data.admins.map(a => adminRowHtml(a, data.me)).join('')}</tbody></table></div>
       </div>
@@ -443,7 +443,7 @@ async function renderBackups() {
       ${run ? backupRunHtml(run) : ''}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.listTitle)} <span class="tag">${data.archives.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
           <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
         </tr></thead><tbody>
         ${data.archives.length ? data.archives.map(backupArchiveRowHtml).join('')
@@ -744,7 +744,7 @@ function renderTenants() {
       <div class="panel__tools panel__tools--chips" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
         ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
       </div></div>
-      <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+      <div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
         <th>${escapeHTML(T.thName)}</th><th>${escapeHTML(T.thChannels)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thMsgs)}</th><th>${escapeHTML(state.filter === 'DELETED' ? T.thDeletedAt : T.thLastActivity)}</th><th class="right">${escapeHTML(T.thActions)}</th>
       </tr></thead><tbody>
       ${rows.length === 0 ? `<tr><td colspan="6">${tenantsEmptyHtml(q, counts)}</td></tr>` : rows.map(tenantRowHtml).join('')}
@@ -918,7 +918,7 @@ async function usersDrawer(slug, back = null) {
   wrap.className = 'form';
   wrap.innerHTML = `
     ${severalCompanies ? `<div class="hint">${escapeHTML(T.usersAllCompanies)}</div>` : ''}
-    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
       ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
         <td class="name"><div class="tbl__title"><span>${escapeHTML(u.email)}</span>${statusPill(u, 'tbl__aside')}</div></td><td ${dataLabel(T.thRole)}>${escapeHTML(roleLabel(u.role))}</td><td class="tbl__stack-hide" ${dataLabel(T.thStatus)}>${statusPill(u)}</td>
         <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">${escapeHTML(T.disable)}</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">${escapeHTML(T.activate)}</button>`}</td>
@@ -990,7 +990,7 @@ async function agentsDrawer(slug, back = null) {
         <div><dt>${escapeHTML(A.pendingApprovals)}</dt><dd>${num.format(data.pendingApprovals || 0)}</dd></div>
       </dl></div>
     </section>
-    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+    <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
       <th>${escapeHTML(A.thAgent)}</th><th>${escapeHTML(A.thStatus)}</th><th class="right">${escapeHTML(A.thRuns)}</th><th class="right">${escapeHTML(A.thFailed)}</th><th>${escapeHTML(A.thLastRun)}</th>
     </tr></thead><tbody>
       ${data.agents.length === 0 ? `<tr><td colspan="5"><div class="empty"><p class="empty__title">${escapeHTML(A.noAgents)}</p></div></td></tr>` : data.agents.map(a => agentAdminRowHtml(a, num)).join('')}
