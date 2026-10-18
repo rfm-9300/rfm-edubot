@@ -12,7 +12,7 @@ set -euo pipefail
 #   heartbeat          touched on every check, so the backoffice can tell the runner is alive
 #   request.json       left by the app; claimed by renaming it to running.json
 #   last-request.json  the request of the last finished run
-#   last.json          {id, exitCode, startedAt, finishedAt, archive} of the last finished run
+#   last.json          {id, exitCode, startedAt, finishedAt, archives} of the last finished run
 #   last.log           that run's output
 #
 # Config (env):
@@ -41,10 +41,10 @@ code=$?
 set -e
 cat "$CONTROL_DIR/last.log"
 
-archive="$(sed -n 's/^\[backup-mongo\] ARCHIVE //p' "$CONTROL_DIR/last.log" | tail -n 1)"
+archives="$(sed -n 's/^\[backup-mongo\] ARCHIVE //p' "$CONTROL_DIR/last.log" | jq -R . | jq -s .)"
 jq -n --arg id "$id" --argjson exitCode "$code" --arg startedAt "$started" \
-  --arg finishedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg archive "$archive" \
-  '{id: $id, exitCode: $exitCode, startedAt: $startedAt, finishedAt: $finishedAt, archive: $archive}' \
+  --arg finishedAt "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson archives "$archives" \
+  '{id: $id, exitCode: $exitCode, startedAt: $startedAt, finishedAt: $finishedAt, archives: $archives}' \
   > "$CONTROL_DIR/last.json.tmp"
 mv "$CONTROL_DIR/last.json.tmp" "$CONTROL_DIR/last.json"
 mv "$CONTROL_DIR/running.json" "$CONTROL_DIR/last-request.json"

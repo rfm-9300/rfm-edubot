@@ -124,7 +124,7 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
         run: |
           scripts=()
-          for name in backup-mongo.sh backup-runner.sh restore-mongo.sh healthcheck-alert.sh; do
+          for name in mongo-databases.sh backup-mongo.sh backup-runner.sh restore-mongo.sh restore-tenant.sh healthcheck-alert.sh; do
             if [ -f "scripts/$name" ]; then scripts+=("scripts/$name"); fi
           done
           scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \

@@ -23,11 +23,13 @@ import kotlin.time.Duration.Companion.minutes
  * `request.json` in [controlDir], and the host's `backup-runner.sh` (cron, every minute) claims it,
  * runs `backup-mongo.sh` and leaves the outcome next to it:
  * - `request.json`: written here; the runner renames it to `running.json` when it starts
- * - `last-request.json` and `last.json` (`id`, `exitCode`, `startedAt`, `finishedAt`, `archive`): the last finished run
+ * - `last-request.json` and `last.json` (`id`, `exitCode`, `startedAt`, `finishedAt`, `archives`): the last finished run
  * - `last.log`: that run's output
  * - `heartbeat`: touched on every check, so a runner that stopped shows up here
  *
  * Archives are listed from [archiveDir], mounted read-only; `<archive>.uploaded` marks the off-box copy.
+ * Each backup makes two, `platform-<stamp>` and `data-<stamp>`; `mongo-<stamp>` ones are from before
+ * the database split and hold everything.
  */
 class BackupControl(
     archiveDir: String,
@@ -84,29 +86,30 @@ class BackupControl(
             requestedAt = request?.requestedAt,
             startedAt = last.startedAt,
             finishedAt = last.finishedAt,
-            archive = last.archive.ifBlank { null },
+            archives = last.archives.ifEmpty { listOfNotNull(last.archive.ifBlank { null }) },
             log = if (failed) logTail() else null,
         )
     }
 
+    /** Newest first; the two archives of one backup sort by their kind (data, then platform). */
     private fun listArchives(): List<BackupArchiveDto> =
-        Files.list(archives!!).use { files -> files.filter { ARCHIVE.matches(it.name) }.toList() }
-            .sortedByDescending { it.name }
+        Files.list(archives!!).use { files -> files.toList() }
+            .mapNotNull { path -> ARCHIVE.matchEntire(path.name)?.let { path to it } }
+            .sortedWith(compareByDescending<Pair<Path, MatchResult>> { it.second.groupValues[2] }.thenBy { it.second.groupValues[1] })
             .take(MAX_LISTED)
-            .map { path ->
+            .map { (path, match) ->
                 BackupArchiveDto(
                     name = path.name,
-                    createdAt = createdAt(path),
+                    kind = KINDS.getValue(match.groupValues[1]),
+                    createdAt = createdAt(path, match.groupValues[2]),
                     sizeBytes = Files.size(path),
                     uploaded = path.resolveSibling("${path.name}.uploaded").exists(),
                 )
             }
 
-    private fun createdAt(path: Path): String {
-        val stamp = ARCHIVE.matchEntire(path.name)!!.groupValues[1]
-        return runCatching { LocalDateTime.parse(stamp, STAMP).toInstant(ZoneOffset.UTC).toString() }
+    private fun createdAt(path: Path, stamp: String): String =
+        runCatching { LocalDateTime.parse(stamp, STAMP).toInstant(ZoneOffset.UTC).toString() }
             .getOrElse { Files.getLastModifiedTime(path).toInstant().toString() }
-    }
 
     private fun logTail(): String? = runCatching {
         Files.readAllLines(file(LOG)).takeLast(LOG_LINES).joinToString("\n").ifBlank { null }
@@ -117,7 +120,7 @@ class BackupControl(
 
     private fun RequestFile.run(state: String, startedAt: String? = null) = BackupRunDto(
         state = state, requestedBy = requestedBy, requestedAt = requestedAt,
-        startedAt = startedAt, finishedAt = null, archive = null, log = null,
+        startedAt = startedAt, finishedAt = null, archives = emptyList(), log = null,
     )
 
     private fun file(name: String): Path = control!!.resolve(name)
@@ -128,8 +131,15 @@ class BackupControl(
     @Serializable
     private data class RequestFile(val id: String, val requestedBy: String? = null, val requestedAt: String)
 
+    /** [archive] is what runners from before the database split wrote: one archive per backup. */
     @Serializable
-    private data class LastFile(val exitCode: Int, val startedAt: String? = null, val finishedAt: String? = null, val archive: String = "")
+    private data class LastFile(
+        val exitCode: Int,
+        val startedAt: String? = null,
+        val finishedAt: String? = null,
+        val archives: List<String> = emptyList(),
+        val archive: String = "",
+    )
 
     companion object {
         private const val REQUEST = "request.json"
@@ -145,9 +155,10 @@ class BackupControl(
         /** A run this old never finished (the runner died mid-backup), so it no longer blocks a new request. */
         val STALE_RUN: Duration = 2.hours
 
-        private const val MAX_LISTED = 30
+        private const val MAX_LISTED = 60
         private const val LOG_LINES = 40
-        private val ARCHIVE = Regex("""mongo-(\d{8}T\d{6}Z)\.archive\.gz""")
+        private val ARCHIVE = Regex("""(platform|data|mongo)-(\d{8}T\d{6}Z)\.archive\.gz""")
+        private val KINDS = mapOf("platform" to "platform", "data" to "data", "mongo" to "full")
         private val STAMP: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss'Z'")
     }
 }
@@ -174,10 +185,18 @@ data class BackupRunDto(
     val requestedAt: String?,
     val startedAt: String?,
     val finishedAt: String?,
-    val archive: String?,
+    /** What a finished run wrote: its platform and data archives. */
+    val archives: List<String>,
     /** The end of the run's output, only when it failed. */
     val log: String?,
 )
 
 @Serializable
-data class BackupArchiveDto(val name: String, val createdAt: String, val sizeBytes: Long, val uploaded: Boolean)
+data class BackupArchiveDto(
+    val name: String,
+    /** platform, data, or full (an archive from before the database split, holding both). */
+    val kind: String,
+    val createdAt: String,
+    val sizeBytes: Long,
+    val uploaded: Boolean,
+)

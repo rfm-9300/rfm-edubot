@@ -1,5 +1,6 @@
-/* Backups (/backoffice → Backups): the server's archives, and a manual backup the host's runner picks up
-   within a minute. The page polls while one is waiting or running and says how it ended. */
+/* Backups (/backoffice → Backups): the server's archives (each backup is a platform and a data archive),
+   and a manual backup the host's runner picks up within a minute. The page polls while one is waiting
+   or running and says how it ended. */
 
 const BACKUP_POLL_MS = 4000;
 const BACKUP_STATE_PILLS = { requested: 'pill--warn', running: 'pill--info', succeeded: 'pill--ok', failed: 'pill--bad', stalled: 'pill--bad' };
@@ -39,10 +40,10 @@ async function renderBackups() {
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.listTitle)} <span class="tag">${data.archives.length}</span></h2></div>
         <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
-          <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
+          <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thKind)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
         </tr></thead><tbody>
         ${data.archives.length ? data.archives.map(backupArchiveRowHtml).join('')
-          : `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(B.emptyTitle)}</p><p class="empty__desc">${escapeHTML(B.emptyDesc)}</p></div></td></tr>`}
+          : `<tr><td colspan="5"><div class="empty"><p class="empty__title">${escapeHTML(B.emptyTitle)}</p><p class="empty__desc">${escapeHTML(B.emptyDesc)}</p></div></td></tr>`}
         </tbody></table></div>
       </div>
     </div>`;
@@ -72,7 +73,7 @@ function backupRunHtml(run) {
   const lines = {
     requested: () => B.requestedLine({ at: fmtDate(run.requestedAt), by }),
     running: () => B.runningLine({ at: fmtDate(run.startedAt), by }),
-    succeeded: () => B.succeededLine({ at: fmtDate(run.finishedAt), archive: run.archive || '—' }),
+    succeeded: () => B.succeededLine({ at: fmtDate(run.finishedAt), archives: (run.archives || []).join(', ') || '—' }),
     failed: () => B.failedLine({ at: fmtDate(run.finishedAt) }),
     stalled: () => B.stalledLine({ at: fmtDate(run.startedAt) }),
   };
@@ -89,6 +90,7 @@ function backupArchiveRowHtml(a) {
   const B = T.backups;
   return `<tr>
     <td>${escapeHTML(fmtDate(a.createdAt))}</td>
+    <td ${dataLabel(B.thKind)}>${escapeHTML(B.kinds[a.kind] || a.kind)}</td>
     <td class="id" ${dataLabel(B.thFile)}>${escapeHTML(a.name)}</td>
     <td class="num" ${dataLabel(B.thSize)}>${escapeHTML(formatBytes(a.sizeBytes))}</td>
     <td ${dataLabel(B.thOffsite)}>${a.uploaded ? `<span class="pill pill--ok">${escapeHTML(B.copied)}</span>` : `<span class="muted">${escapeHTML(B.notCopied)}</span>`}</td>

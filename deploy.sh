@@ -25,5 +25,5 @@ echo "Production normally deploys from the Release workflow when a release tag i
 echo "Manual VPS steps (emergency fallback, see DEPLOYMENT_RUNBOOK.md):"
 echo "  scp docker-compose.prod.yml scripts/remote-deploy.sh hillsong-vps:~/whatsapp-bot/"
 echo "  ssh hillsong-vps 'chmod +x ~/whatsapp-bot/remote-deploy.sh && TAG=${TAG} ~/whatsapp-bot/remote-deploy.sh'"
-echo "  then, once it is healthy, copy the host scripts (backup-mongo.sh, backup-runner.sh, restore-mongo.sh,"
-echo "  healthcheck-alert.sh) from scripts/ to ~/whatsapp-bot/"
+echo "  then, once it is healthy, copy the host scripts (mongo-databases.sh, backup-mongo.sh, backup-runner.sh,"
+echo "  restore-mongo.sh, restore-tenant.sh, healthcheck-alert.sh) from scripts/ to ~/whatsapp-bot/"
