@@ -674,7 +674,7 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 @media (max-width: 920px) {
   .tbl--stack, .tbl--stack tbody { display: block; }
   .tbl--stack thead { display: none; }
-  .tbl--stack tbody tr { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+  .tbl--stack tbody tr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
   .tbl--stack tbody tr:last-child { border-bottom: 0; }
   .tbl--stack tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, var(--mix)); }
   .tbl--stack tbody td { display: block; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; text-wrap: balance; }
