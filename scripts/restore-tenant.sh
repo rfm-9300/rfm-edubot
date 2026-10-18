@@ -99,6 +99,7 @@ mongo_exec -e SCRATCH="$scratch" -e DATA_DB="$DATA_DB" -e TENANT_ID="$tenant_id"
   } finally {
     scratch.dropDatabase();
   }
+  print("Dropped the scratch database " + process.env.SCRATCH + ".");
 ' </dev/null
 
 echo "Restored $slug from $(basename "$archive")."
