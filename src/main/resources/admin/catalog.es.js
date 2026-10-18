@@ -2165,6 +2165,8 @@ window.__I18N_CATALOGS['es'] = {
       sourceOverride: 'override Mongo',
       updatedAt: p => `Actualizado ${p.at}`,
       neverUpdated: 'Aún no hay overrides guardados',
+      unsaved: 'Cambios sin guardar', allSaved: 'Sin cambios por guardar', discard: 'Descartar cambios',
+      discardTitle: '¿Descartar los cambios en los ajustes?', discardBody: 'Los ajustes vuelven a quedar como se guardaron la última vez.',
       passwordHint: 'Introduce una contraseña en texto (se hashea al guardar) o pega un hash bcrypt.',
       empty: 'No hay ajustes disponibles',
       categories: {

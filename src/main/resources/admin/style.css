@@ -924,13 +924,20 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
   border-top: 1px solid var(--line);
 }
 .settings-row:first-child { border-top: 0; }
-.settings-row__key { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
+.settings-row__key { font-family: var(--mono); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .settings-row__meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .settings-row__controls { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .settings-row__actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* Narrow screens: the key shares its line with the pills, and a lone button (Reveal, Clear) sits beside the field. */
 @media (max-width: 860px) {
-  .settings-row { grid-template-columns: 1fr; }
+  .settings-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; }
+  .settings-row > :first-child { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .settings-row__meta { margin-top: 0; }
   .settings-row__actions { justify-content: flex-start; }
+  .settings-row__actions:has(.btn + .btn) { grid-column: 1 / -1; }
+  .settings-row__actions:not(:has(.btn)) { display: none; }
+  .settings-row:not(:has(.settings-row__actions .btn)) > .settings-row__controls { grid-column: 1 / -1; }
+  .settings-row__controls:has(.hint) + .settings-row__actions { align-self: start; }
 }
 
 /* Line items */

@@ -2171,6 +2171,8 @@ window.__I18N_CATALOGS['en'] = {
       sourceOverride: 'Mongo override',
       updatedAt: p => `Updated ${p.at}`,
       neverUpdated: 'No overrides saved yet',
+      unsaved: 'Unsaved changes', allSaved: 'No unsaved changes', discard: 'Discard changes',
+      discardTitle: 'Discard your changes to the settings?', discardBody: 'The settings go back to how they were last saved.',
       passwordHint: 'Enter a new plaintext password (hashed on save) or paste a bcrypt hash.',
       empty: 'No settings available',
       categories: {

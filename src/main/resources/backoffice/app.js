@@ -553,20 +553,47 @@ async function renderPlatformSettings() {
       </div>
       <div class="actions">
         <button class="btn btn--ghost" id="ps-reload" type="button">${escapeHTML(T.platformSettings.reload)}</button>
-        <button class="btn btn--primary" id="ps-save" type="button">${escapeHTML(T.platformSettings.save)}</button>
       </div>
     </div>
     <div class="settings-stack">
       <p class="hint">${escapeHTML(formatUpdatedAt(platformSettings.updatedAt))}</p>
-      ${categories.length === 0 ? `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(T.platformSettings.empty)}</p></div></div>` : categories.map(cat => `
+      ${categories.length === 0 ? `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(T.platformSettings.empty)}</p></div></div>` : `${categories.map(cat => `
         <div class="panel">
           <div class="panel__head"><h2 class="panel__title">${escapeHTML(categoryLabel(cat))}</h2></div>
           <div>
             ${groups[cat].map(settingRowHtml).join('')}
           </div>
         </div>`).join('')}
+      ${settingsSaveBarHtml()}`}
     </div>`;
   bindPlatformSettings();
+}
+
+// Empty drafts aren't saved (a secret's field starts empty), so they don't count as changes.
+const settingsDirty = () => platformSettings.clear.size > 0
+  || Object.values(platformSettings.drafts).some(v => v != null && String(v).trim() !== '');
+
+const settingsSaveStatusHtml = dirty => (dirty
+  ? `<span class="savebar__dot" aria-hidden="true"></span>${escapeHTML(T.platformSettings.unsaved)}`
+  : escapeHTML(T.platformSettings.allSaved));
+
+// Save follows the screen while there are changes, so it stays in reach at the end of a long page.
+function settingsSaveBarHtml() {
+  const dirty = settingsDirty();
+  const off = dirty ? '' : ' disabled';
+  return `<div class="savebar${dirty ? ' is-dirty' : ''}" id="ps-savebar">
+    <p class="savebar__status" id="ps-status" aria-live="polite">${settingsSaveStatusHtml(dirty)}</p>
+    <div class="actions"><button class="btn btn--ghost" type="button" id="ps-discard"${off}>${escapeHTML(T.platformSettings.discard)}</button><button class="btn btn--primary" type="button" id="ps-save"${off}>${escapeHTML(T.platformSettings.save)}</button></div>
+  </div>`;
+}
+
+function paintSettingsSaveBar() {
+  const bar = $('#ps-savebar');
+  const dirty = settingsDirty();
+  if (!bar || bar.classList.contains('is-dirty') === dirty) return;
+  bar.classList.toggle('is-dirty', dirty);
+  $('#ps-status', bar).innerHTML = settingsSaveStatusHtml(dirty);
+  $$('button', bar).forEach(b => { b.disabled = !dirty; });
 }
 
 function settingRowHtml(s) {
@@ -607,7 +634,15 @@ function bindPlatformSettings() {
       if (!key) return;
       platformSettings.drafts[key] = input.value;
       platformSettings.clear.delete(key);
+      paintSettingsSaveBar();
     });
+  });
+  $('#ps-discard')?.addEventListener('click', async () => {
+    const PS = T.platformSettings;
+    if (!await confirmDialog({ title: PS.discardTitle, body: PS.discardBody, okLabel: PS.discard })) return;
+    platformSettings.drafts = {};
+    platformSettings.clear = new Set();
+    renderPlatformSettings();
   });
   $$('[data-reveal]').forEach(btn => btn.addEventListener('click', async () => {
     const key = btn.dataset.reveal;
