@@ -7,8 +7,7 @@ updated: 2026-10-18
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84 and #85
-(stacked on #84's branch, so its base is that branch until #84 merges).
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84 and #85.
 Local sessions push straight to `main`. What a session should know:
 
 - **Merging deploys nothing (since PR #85).** Production changes only when a release tag is pushed
@@ -81,6 +80,14 @@ Local sessions push straight to `main`. What a session should know:
   rfm-9300/<branch>`, then the PR title); GitHub then marks the PR merged. In 2026-10 that push
   deployed like any merge, and the agent followed the Deploy WhatsApp Bot run; since PR #85 it
   deploys nothing until a release tag is pushed (above). The agent can't reach the VPS itself.
+- **#84 and #85 merged in one push** (2026-10-18, at Rodrigo's request, by the agent that wrote #85).
+  #85 removes `main`'s deploy-on-push workflow, and GitHub runs a push's workflows from the commit it
+  pushes, so both merge commits (#84's, then #85's on top) went to `main` together and only CI ran.
+  Pushing #84's merge alone would have run the old workflow and deployed #84 by itself. #85 had been
+  opened on #84's branch; it was retargeted to `main` before the push so GitHub would mark it merged.
+  Nothing deployed: the first release tag ships both. #84's GitGuardian check stayed red on its known
+  false positive (the `autocomplete` value `'new-password'`, described in #84), which has to be marked
+  in GitGuardian itself.
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's
