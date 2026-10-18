@@ -1,6 +1,9 @@
 services:
   app:
-    image: ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}
+    # TAG is the release to run (v1.4.0); remote-deploy.sh sets it. Images have no :latest, and the
+    # fallback names no image, so a command that would create the app without TAG fails to pull it
+    # instead of starting some other build. By hand: TAG=$(cat .last-good-tag) docker compose ...
+    image: ghcr.io/rfm-9300/whatsapp-bot:${TAG:-set-TAG-to-a-release}
     env_file:
       - path: .env
         format: raw

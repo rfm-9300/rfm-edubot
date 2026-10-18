@@ -1,100 +1,64 @@
 name: Deploy WhatsApp Bot
 
-# Server + bundled web UIs (/app, /backoffice, shared /admin assets, widget, legal).
-# Mobile is intentionally excluded (see mobile-ci.yml). The marketing site
+# Puts a published release on the VPS: the compose file and remote-deploy.sh from the release's
+# commit, the app recreated on ghcr.io/rfm-9300/whatsapp-bot:<tag>, and once /health and /ready
+# answer, that release's host scripts (backups, restores, the health alert). release.yml calls it for
+# every new tag. Run it by hand with an older tag to roll back. The marketing site
 # (websites-thebots on the VPS) is a separate deployment and is not touched.
 
 on:
-  pull_request:
-    paths-ignore:
-      - "mobile/**"
-      - ".github/workflows/mobile-ci.yml"
-      - "docs/**"
-      - "mocks/**"
-      - ".claude/**"
-      - ".gitnexus/**"
-      - "**/*.md"
-  push:
-    branches: [main]
-    paths-ignore:
-      - "mobile/**"
-      - ".github/workflows/mobile-ci.yml"
-      - "docs/**"
-      - "mocks/**"
-      - ".claude/**"
-      - ".gitnexus/**"
-      - "**/*.md"
+  workflow_call:
+    inputs:
+      tag:
+        description: Release tag to deploy
+        type: string
+        required: true
   workflow_dispatch:
-
-concurrency:
-  group: production-deploy-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    inputs:
+      tag:
+        description: Release tag to deploy, e.g. v1.4.0 (its image must already be published)
+        type: string
+        required: true
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ghcr.io/rfm-9300/whatsapp-bot
+  packages: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "20"
-      - uses: gradle/actions/setup-gradle@v4
-      - name: Unit tests
-        run: ./gradlew test --no-daemon
-
-  publish:
-    name: Build and push image
-    needs: test
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    outputs:
-      image_tag: ${{ steps.meta.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - id: meta
-        name: Resolve image tag
-        run: echo "tag=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          provenance: false
-          tags: |
-            ${{ env.IMAGE_NAME }}:${{ steps.meta.outputs.tag }}
-            ${{ env.IMAGE_NAME }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
   deploy:
     name: Deploy to VPS
-    needs: publish
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: production-deploy
+      cancel-in-progress: false
     environment:
       name: production
       url: https://thebotslab.pt
+    env:
+      IMAGE_NAME: ghcr.io/rfm-9300/whatsapp-bot
+      TAG: ${{ inputs.tag }}
     steps:
+      - name: Release tag
+        run: |
+          if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$TAG is not a release tag. Release tags are vMAJOR.MINOR.PATCH, e.g. v1.4.0."
+            exit 1
+          fi
       - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Release image is published
+        run: |
+          if ! docker manifest inspect "$IMAGE_NAME:$TAG" >/dev/null 2>&1; then
+            echo "::error::$IMAGE_NAME:$TAG is not published. Pushing the tag runs the Release workflow, which builds it."
+            exit 1
+          fi
       - name: Require deploy secrets
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
@@ -124,7 +88,7 @@ jobs:
             ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
           fi
           chmod 644 ~/.ssh/known_hosts
-      - name: Sync compose files
+      - name: Sync compose file and deploy script
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
@@ -132,17 +96,16 @@ jobs:
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" "mkdir -p ~/whatsapp-bot"
           scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            docker-compose.prod.yml scripts/remote-deploy.sh scripts/backup-mongo.sh scripts/backup-runner.sh scripts/restore-mongo.sh scripts/healthcheck-alert.sh \
+            docker-compose.prod.yml scripts/remote-deploy.sh \
             "$DEPLOY_USER@$DEPLOY_HOST:~/whatsapp-bot/"
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
-            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh ~/whatsapp-bot/backup-mongo.sh ~/whatsapp-bot/backup-runner.sh ~/whatsapp-bot/restore-mongo.sh ~/whatsapp-bot/healthcheck-alert.sh"
+            "$DEPLOY_USER@$DEPLOY_HOST" "chmod +x ~/whatsapp-bot/remote-deploy.sh"
       - name: Pull and restart app
         env:
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GHCR_USERNAME: ${{ github.actor }}
-          TAG: ${{ needs.publish.outputs.image_tag }}
           DEPLOY_ALERT_WEBHOOK_URL: ${{ secrets.DEPLOY_ALERT_WEBHOOK_URL }}
         run: |
           ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
@@ -152,3 +115,19 @@ jobs:
              export TAG=$(printf '%q' "$TAG"); \
              export DEPLOY_ALERT_WEBHOOK_URL=$(printf '%q' "$DEPLOY_ALERT_WEBHOOK_URL"); \
              ~/whatsapp-bot/remote-deploy.sh"
+      # Only after a healthy deploy: when health checks fail and remote-deploy.sh rolls back, the host
+      # keeps the scripts that match the release still running (a backup script must know where that
+      # release keeps its data).
+      - name: Install host scripts
+        env:
+          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
+          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
+        run: |
+          scripts=()
+          for name in backup-mongo.sh backup-runner.sh restore-mongo.sh healthcheck-alert.sh; do
+            if [ -f "scripts/$name" ]; then scripts+=("scripts/$name"); fi
+          done
+          scp -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "${scripts[@]}" "$DEPLOY_USER@$DEPLOY_HOST:~/whatsapp-bot/"
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes \
+            "$DEPLOY_USER@$DEPLOY_HOST" "cd ~/whatsapp-bot && chmod +x ${scripts[*]##*/}"
