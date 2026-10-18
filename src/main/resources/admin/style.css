@@ -602,6 +602,11 @@ html[data-theme="dark"] .iconbtn--avatar { color: var(--accent); }
 }
 html[data-theme="dark"] .panel__title .tag { color: var(--accent); }
 .panel__tools, .panel__views { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Filter chips that share the width two to a line on phones, instead of wrapping unevenly. */
+@media (max-width: 560px) {
+  .panel__tools--chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .panel__tools--chips .chip { justify-content: center; }
+}
 .panel__tools .sel, .panel__filters .sel {
   width: auto; min-width: 168px; max-width: 240px; height: 28px;
   font-size: 12px; font-weight: 800; padding: 0 28px 0 12px;
@@ -649,6 +654,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl__open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .tbl__open:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .tbl__pills { display: grid; justify-items: start; gap: 4px; }
+/* A name cell's .tbl__title holds the name and a .tbl__aside status, which only shows in a .tbl--stack card. */
+.tbl .tbl__aside { display: none; }
 /* A link inside a cell's text (a punch's place on the map), coloured like links in chat bubbles. */
 .tbl__link { color: var(--info-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .tbl__link:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
@@ -658,29 +665,33 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl tbody tr.is-current td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 .tbl tbody tr.is-total td,
 .tbl tbody tr.is-total:hover td { background: var(--surface-2); font-weight: 800; }
-/* Phones: a .tbl--stack table turns each row into a card. A cell with data-label (its column heading)
-   shows the label above its value and shares a grid of four columns, two under 560px; a cell without
-   one (the row's name, its actions, an empty state) and a long .id span the card. */
+/* Phones: a .tbl--stack table turns each row into a card. A cell without data-label (the row's name, an
+   empty state), a long .id and a .tbl__wide cell each take a line. The cells with data-label (their column
+   heading) follow at their own width, label above value, wrapping like words, and the actions cell closes
+   the last line, at its right end when it fits. A .tbl__aside status sits at the right of the name's
+   .tbl__title, and the cell it repeats (.tbl__stack-hide) is left out. */
 @media (max-width: 700px) {
   .tbl--stack, .tbl--stack tbody { display: block; }
   .tbl--stack thead { display: none; }
-  .tbl--stack tbody tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+  .tbl--stack tbody tr { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
   .tbl--stack tbody tr:last-child { border-bottom: 0; }
   .tbl--stack tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, var(--mix)); }
-  .tbl--stack tbody td { display: block; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; text-wrap: balance; }
+  .tbl--stack tbody td { display: block; flex: 0 1 auto; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; text-wrap: balance; }
   .tbl--stack tbody :is(td.num, td.right) { text-align: left; }
-  .tbl--stack tbody td:not([data-label]),
-  .tbl--stack tbody td.id { grid-column: 1 / -1; }
-  .tbl--stack tbody td:empty { display: none; }
+  .tbl--stack tbody :is(td:not([data-label]), td.id, td.tbl__wide) { flex-basis: 100%; }
+  .tbl--stack tbody td.right:not([data-label]) { flex-basis: auto; margin-left: auto; }
+  .tbl--stack tbody :is(td:empty, td.tbl__stack-hide) { display: none; }
   .tbl--stack td[data-label]::before {
     content: attr(data-label); display: block; margin-bottom: 3px;
     color: var(--ink-mute); font-family: var(--sans); font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
   }
+  /* A time under a date shares its line. */
+  .tbl--stack td[data-label] > .sub { display: inline; margin-left: 6px; }
   .tbl--stack .actions { justify-content: flex-start; }
   .tbl--stack .pill { white-space: normal; }
-}
-@media (max-width: 560px) {
-  .tbl--stack tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tbl--stack .tbl__pills { display: flex; flex-wrap: wrap; gap: 6px; }
+  .tbl--stack .tbl__title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .tbl--stack .tbl__aside { display: inline-flex; flex: none; white-space: nowrap; }
 }
 
 .empty { padding: 52px 16px; text-align: center; color: var(--ink-mute); }
@@ -2911,10 +2922,15 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
 .dash-facts > div:last-child { padding-bottom: 0; }
 .dash-facts dt { color: var(--ink-mute); font-size: 13px; }
-.dash-facts dd { margin: 0; color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.dash-facts dd { min-width: 0; margin: 0; color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .dash-facts--row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 16px; }
 .dash-facts--row > div { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 0 0; }
 .dash-facts--row dd { font-size: 14px; text-align: left; }
+/* Long values (a channel's name and id): on phones each label sits above its value. */
+@media (max-width: 560px) {
+  .dash-facts--stack > div { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .dash-facts--stack dd { text-align: left; }
+}
 
 /* work list: needs-you queue, feed, overdue rows */
 .worklist { margin: 0; padding: 0; list-style: none; }

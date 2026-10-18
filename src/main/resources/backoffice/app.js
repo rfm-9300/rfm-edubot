@@ -688,6 +688,7 @@ const tenantChannels = t => (t.channels?.length ? t.channels
 
 const STATUS_FILTERS = ['all', 'ACTIVE', 'SUSPENDED', 'DELETED'];
 const STATUS_PILLS = { ACTIVE: 'pill--ok', SUSPENDED: 'pill--warn', DELETED: 'pill--bad' };
+const tenantStatusPill = (t, cls = '') => `<span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}${cls ? ` ${cls}` : ''}">${escapeHTML(T.status[t.status] || t.status)}</span>`;
 // "All" leaves deleted tenants out: they only show under their own chip, ready to restore.
 const inStatusFilter = (t, filter) => (filter === 'all' ? t.status !== 'DELETED' : t.status === filter);
 const tenantSearchText = t => `${t.name} ${t.slug} ${t.phoneNumberId} ${(t.channels || []).map(c => `${c.platform} ${c.externalId}`).join(' ')}`.toLowerCase();
@@ -705,7 +706,7 @@ function renderTenants() {
   $('#view').innerHTML = `
     <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
     <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2>
-      <div class="panel__tools" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
+      <div class="panel__tools panel__tools--chips" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
         ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
       </div></div>
       <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
@@ -720,9 +721,9 @@ function tenantRowHtml(t) {
   const s = state.stats[t.slug] || {};
   const deleted = t.status === 'DELETED';
   return `<tr data-tenant="${escapeHTML(t.slug)}">
-    <td class="name"><button class="tbl__open" type="button">${escapeHTML(t.name)}</button><div class="sub mono">${escapeHTML(t.slug)}</div>${tenantCompanyLine(t)}</td>
-    <td ${dataLabel(T.thChannels)}>${channelBadges(t.channels)}</td>
-    <td ${dataLabel(T.thStatus)}><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></td>
+    <td class="name"><div class="tbl__title"><button class="tbl__open" type="button">${escapeHTML(t.name)}</button>${tenantStatusPill(t, 'tbl__aside')}</div><div class="sub mono">${escapeHTML(t.slug)}</div>${tenantCompanyLine(t)}</td>
+    <td class="tbl__wide" ${dataLabel(T.thChannels)}>${channelBadges(t.channels)}</td>
+    <td class="tbl__stack-hide" ${dataLabel(T.thStatus)}>${tenantStatusPill(t)}</td>
     <td class="num" ${dataLabel(T.thMsgs)}>${s.messages ?? '—'}</td>
     <td class="mono muted" ${dataLabel(deleted ? T.thDeletedAt : T.thLastActivity)}>${dateCell(deleted ? (t.deletedAt || t.updatedAt) : s.lastMessageAt)}</td>
     <td class="right"><div class="actions">${deleted ? deletedTenantActions(t) : `<button class="btn btn--sm" type="button" data-open-dashboard="${escapeHTML(t.slug)}">${escapeHTML(T.openDashboard)}</button>`}</div></td>
@@ -828,7 +829,7 @@ async function tenantDrawer(slug) {
       <div class="record-card__head">
         <span class="record-card__avatar" aria-hidden="true">${escapeHTML(initials)}</span>
         <div class="record-card__who">
-          <div class="record-card__lines"><span class="record-card__line mono">${escapeHTML(t.slug)}</span><span class="pill ${STATUS_PILLS[t.status] || 'pill--bad'}">${escapeHTML(T.status[t.status] || t.status)}</span></div>
+          <div class="record-card__lines"><span class="record-card__line mono">${escapeHTML(t.slug)}</span>${tenantStatusPill(t)}</div>
           <p class="record-card__since">${escapeHTML(since)}</p>
         </div>
         <div class="actions">${deleted ? deletedTenantActions(t) : `
@@ -856,7 +857,7 @@ async function tenantDrawer(slug) {
     <section class="panel">
       <header class="panel__head"><h3 class="panel__title">${escapeHTML(T.channelsLabel)} <span class="tag">${channels.length}</span></h3></header>
       <div class="panel__body">${channels.length
-        ? `<dl class="dash-facts">${channels.map(c => `<div><dt>${escapeHTML(platformLabel(c.platform))}</dt><dd>${escapeHTML(channelText(c))}${c.hasAccessToken ? '' : ` <span class="pill pill--warn">${escapeHTML(R.noToken)}</span>`}</dd></div>`).join('')}</dl>`
+        ? `<dl class="dash-facts dash-facts--stack">${channels.map(c => `<div><dt>${escapeHTML(platformLabel(c.platform))}</dt><dd>${escapeHTML(channelText(c))}${c.hasAccessToken ? '' : ` <span class="pill pill--warn">${escapeHTML(R.noToken)}</span>`}</dd></div>`).join('')}</dl>`
         : `<p class="dash-empty">${escapeHTML(T.noChannels)}</p>`}</div>
     </section>`;
   const back = { label: t.name, open: () => tenantDrawer(slug) };
@@ -877,13 +878,14 @@ async function usersDrawer(slug, back = null) {
   const users = await api(`/admin/api/tenants/${encodeURIComponent(slug)}/dashboard-users`);
   const tenant = state.tenants.find(t => t.slug === slug);
   const severalCompanies = tenant && (tenant.maxCompanies > 1 || companiesOf(tenant.id).length > 0);
+  const statusPill = (u, cls = '') => `<span class="pill ${u.status === 'ACTIVE' ? 'pill--ok' : ''}${cls ? ` ${cls}` : ''}">${escapeHTML(T.userStatus[u.status] || u.status)}</span>`;
   const wrap = document.createElement('div');
   wrap.className = 'form';
   wrap.innerHTML = `
     ${severalCompanies ? `<div class="hint">${escapeHTML(T.usersAllCompanies)}</div>` : ''}
     <div class="panel"><div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(T.thEmail)}</th><th>${escapeHTML(T.thRole)}</th><th>${escapeHTML(T.thStatus)}</th><th class="right">${escapeHTML(T.thActions)}</th></tr></thead><tbody>
       ${users.length === 0 ? `<tr><td colspan="4"><div class="empty"><p class="empty__title">${escapeHTML(T.noUsers)}</p></div></td></tr>` : users.map(u => `<tr>
-        <td class="name">${escapeHTML(u.email)}</td><td ${dataLabel(T.thRole)}>${escapeHTML(roleLabel(u.role))}</td><td ${dataLabel(T.thStatus)}><span class="pill ${u.status === 'ACTIVE' ? 'pill--ok' : ''}">${escapeHTML(T.userStatus[u.status] || u.status)}</span></td>
+        <td class="name"><div class="tbl__title"><span>${escapeHTML(u.email)}</span>${statusPill(u, 'tbl__aside')}</div></td><td ${dataLabel(T.thRole)}>${escapeHTML(roleLabel(u.role))}</td><td class="tbl__stack-hide" ${dataLabel(T.thStatus)}>${statusPill(u)}</td>
         <td class="right">${u.status === 'ACTIVE' ? `<button class="btn btn--sm btn--ghost" data-disable-user="${u.id}">${escapeHTML(T.disable)}</button>` : `<button class="btn btn--sm btn--accent" data-activate-user="${u.id}">${escapeHTML(T.activate)}</button>`}</td>
       </tr>`).join('')}
     </tbody></table></div></div>
@@ -916,9 +918,10 @@ const RUN_GROUPS = { succeeded: ['SUCCEEDED'], failed: ['FAILED', 'NEEDS_REVIEW'
 function agentAdminRowHtml(a, num) {
   const A = T.agents;
   const reason = a.status === 'PAUSED' && a.pausedReason ? A.pausedReasons[a.pausedReason] || '' : '';
+  const statusPill = (cls = '') => `<span class="pill ${AGENT_PILLS[a.status] || ''}${cls ? ` ${cls}` : ''}">${escapeHTML(I18N.t(`app.agents.status.${a.status}`))}</span>`;
   return `<tr>
-    <td class="name">${escapeHTML(a.name)}${reason ? `<div class="muted">${escapeHTML(reason)}</div>` : ''}</td>
-    <td ${dataLabel(A.thStatus)}><span class="pill ${AGENT_PILLS[a.status] || ''}">${escapeHTML(I18N.t(`app.agents.status.${a.status}`))}</span></td>
+    <td class="name"><div class="tbl__title"><span>${escapeHTML(a.name)}</span>${statusPill('tbl__aside')}</div>${reason ? `<div class="muted">${escapeHTML(reason)}</div>` : ''}</td>
+    <td class="tbl__stack-hide" ${dataLabel(A.thStatus)}>${statusPill()}</td>
     <td class="num" ${dataLabel(A.thRuns)}>${num.format(a.stats?.runs || 0)}</td>
     <td class="num" ${dataLabel(A.thFailed)}>${num.format(a.stats?.failed || 0)}</td>
     <td class="mono muted" ${dataLabel(A.thLastRun)}>${fmtDate(a.stats?.lastRunAt)}</td>
