@@ -71,16 +71,16 @@ When the session cwd is the vault itself, follow that vault's `AGENTS.md`.
 
 ## Deployment Intent
 
-Merges to `main` deploy the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. See `DEPLOYMENT_RUNBOOK.md`. Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project.
+Pushing a release tag (`vMAJOR.MINOR.PATCH`, on a commit that is on `main`) deploys the Ktor app (including `/app`, `/backoffice`, and shared `/admin` assets) via GitHub Actions. Merging to `main` only runs CI and deploys nothing. See `DEPLOYMENT_RUNBOOK.md`. Mobile is not deployed. The marketing site `websites-thebots` is a separate VPS project.
 
-When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`. Prefer confirming or re-running the **Deploy WhatsApp Bot** workflow. Use `./deploy.sh` + `ssh hillsong-vps` only as a fallback if CI cannot publish or SSH.
+When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the deployment", "deploy", or any close deployment variant, follow `DEPLOYMENT_RUNBOOK.md`; that request is the permission to push the release tag. Confirm CI passed on `main`, run `scripts/release.sh patch` (`minor` for new features, `major` when operators or users must act), and follow the **Release** run until its Deploy job passes the health checks. To go back to an earlier release, run **Deploy WhatsApp Bot** by hand with that tag. Use `./deploy.sh` + `ssh hillsong-vps` only as a fallback if CI cannot publish or SSH.
 
 ### Production Host
 - SSH alias: `hillsong-vps`
 - Connect with: `ssh hillsong-vps`
 - Production app directory: `~/whatsapp-bot`
 - Production compose file: `docker-compose.prod.yml`
-- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG:-latest}`
+- Production image: `ghcr.io/rfm-9300/whatsapp-bot:${TAG}`, `TAG` a release tag (no `:latest`); the deployed one is in `~/whatsapp-bot/.last-good-tag`
 - Public domain: `thebotslab.pt`. Use it in docs, links and new setups (OAuth redirect URIs, webhooks); `thebotslab.eu` serves the same routes but is not the reference.
 
 ### Deployment Guardrails
@@ -88,12 +88,14 @@ When Rodrigo says "make deploy", "make deployment", "deploy to VPS", "make the d
 - Do not change `.env` or production secrets unless Rodrigo explicitly asks.
 - Keep unrelated local worktree changes intact.
 - Do not bounce Mongo with `compose down` on a routine deploy.
+- Never move, delete or reuse a release tag; a fix ships as the next tag.
 
 ## Commands
 - `./gradlew build` — compile + test
 - `./gradlew test` — run tests (JUnit 5)
 - `./gradlew run` — start app (requires `.env` + MongoDB)
 - `./gradlew clean build` — full rebuild
+- `scripts/release.sh patch|minor|major` — tag `origin/main` as the next version and push the tag, which releases it to production
 - `scripts/persona-e2e/` — browser walkthrough of the Persona page: start `python3 scripts/persona-e2e/fake-openrouter.py`, run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1` and a backoffice password, then in that folder `npm install && ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs` (exits non-zero on a failed check)
 - `scripts/email-e2e/` — browser walkthrough of the Email page: start `python3 scripts/email-e2e/fake-services.py` (model and Gmail), run the app with `OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1 GMAIL_API_URL=http://127.0.0.1:8099/gmail/v1 GMAIL_INBOX_ENABLED=true GMAIL_SYNC_SECONDS=15`, the three `GOOGLE_OAUTH_*` set to anything and an `INTEGRATIONS_ENCRYPTION_KEY`, then in that folder `npm install && INTEGRATIONS_ENCRYPTION_KEY=… node walkthrough.mjs` (exits non-zero on a failed check)
 
@@ -125,7 +127,7 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - `ai/` — OpenRouter client with retry + fallback model
 - `whatsapp/` — outbound Graph API client
 - `ratelimit/` — in-memory token bucket (per-hour + per-day)
-- `persistence/` — MongoDB wiring + index creation
+- `persistence/` — MongoDB wiring (three databases), index creation, the database split
 - `shared/` — Clock, Ids, Result/AppError sealed classes
 - `plugins/` — Ktor: Monitoring, Serialization, StatusPages
 
@@ -137,6 +139,7 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - Config via HOCON (`application.conf`) with `${?ENV_VAR}` fallbacks
 - Fat JAR output: `build/libs/app.jar` (Dockerfile multi-stage, distroless-style)
 - MongoDB indexes created at startup in `MongoModule.initialize()`
+- Three Mongo databases: `wabot` (companies' data, every document scoped by `tenantId`), `wabot_platform`, `wabot_runtime`. A new collection goes in the one that matches (`wiki/mongo-databases.md`)
 
 ## UI Design System
 
