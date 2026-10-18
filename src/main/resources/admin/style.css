@@ -440,7 +440,7 @@ body.nav-open .nav-scrim {
   transition: border-color 120ms, box-shadow 120ms;
 }
 .topbar__search:focus-within { border-color: var(--focus-border); box-shadow: var(--focus-ring); }
-.topbar__search input { flex: 1; border: 0; background: transparent; outline: 0; color: var(--ink); min-width: 0; font-weight: 600; }
+.topbar__search input { flex: 1; align-self: stretch; border: 0; background: transparent; outline: 0; color: var(--ink); min-width: 0; font-weight: 600; }
 .topbar__search input::placeholder { color: var(--ink-faint); font-weight: 600; }
 .topbar__search kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mute); background: var(--bg); }
 /* Last column, so the actions stay at the right edge when the search is hidden (backoffice views without a list). */
@@ -2874,6 +2874,9 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
   .drawer__head .iconbtn,
   html[data-layout="minimal"] .drawer__head .iconbtn { width: 40px; height: 40px; }
   .drawer__back { padding: 8px 0; margin: -8px 0; }
+  /* A box's label is its target, so it takes the height the row gap had. */
+  .form__checks { row-gap: 4px; }
+  .form__check { min-height: 32px; }
 }
 
 /* ── Minimal Home: dashboard building blocks ─────────────────── */
