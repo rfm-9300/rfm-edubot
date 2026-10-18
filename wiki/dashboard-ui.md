@@ -53,7 +53,8 @@ Decisions that matter for future work:
 - Home is always the dense cockpit (KPI strip with sparklines, needs-you queue, agenda, cash flow,
   aging, pipeline, inbox activity, top clients, feed, tiles) from `GET /app/api/overview?extended=1`
   (`cashFlow`, `activity`, `agenda`, `recent`, `topClients`); blocks for hidden cards are skipped
-  server-side. The classic Home code in `app.js` is unreachable and can be deleted.
+  server-side. The classic Home code, unreachable since then, was deleted on 2026-10-17 (PR #84,
+  [dashboard-frontend.md](dashboard-frontend.md)).
 - Reusable pieces added for the other list pages: `statCards` items take an `icon` (yellow-soft
   well), and `crmPanel({ emptyArt })` takes a small inline line illustration (Clientes: a client, a
   spray bottle, sparkles).
@@ -150,7 +151,8 @@ and on all three directories (Clients, Suppliers, Employees).
 
 - A ghost **Columns** button in the directory's `.panel__tools` opens a drawer of `.form__checks`
   (Name ticked and disabled), plus a "Your fields" group on Clients. Boxes apply at once; the foot
-  restores the defaults. Front end only (`app.js`, no API).
+  restores the defaults. Front end only, no API (`app/directories.js`; each list's columns are beside
+  it, as `clientColumns()` in `clients.js`).
 - **Stored as overrides, not lists:** `localStorage` key `tableColumns:<tenantId>:<userId|operator>:<table>`
   holds only the columns someone turned away from their default. The defaults are the columns the lists
   always had, and an own field's default is its company-level "show as a column" (`showInList`), so a

@@ -1,10 +1,29 @@
 ---
-updated: 2026-10-12
+updated: 2026-10-18
 ---
 
 # Production ops and deploy lore
 
-What production looks like and the traps found running it. How to deploy is in [`DEPLOYMENT_RUNBOOK.md`](../DEPLOYMENT_RUNBOOK.md); this page holds the reasons and the gotchas.
+What production looks like and the traps found running it. How to deploy is in [`DEPLOYMENT_RUNBOOK.md`](../DEPLOYMENT_RUNBOOK.md); this page holds the reasons and the gotchas. Which Mongo database holds what: [mongo-databases.md](mongo-databases.md).
+
+## Releases by tag (PR #85)
+
+Until PR #85 every merge to `main` deployed, so production ran whatever had been merged last; Rodrigo
+wanted control of releases through git tags. Now merging runs CI only (`ci.yml`), and production
+changes only when a tag `vMAJOR.MINOR.PATCH` is pushed (`scripts/release.sh`). Decisions:
+
+- **The tag must point at a commit on `main`** (`release.yml` checks it), so only merged work ships,
+  and a malformed tag fails loudly instead of being ignored by a trigger filter.
+- **The release builds its own image,** `:<tag>` plus `:<sha>`, after the tests; there is no image per
+  merge to promote. Release notes come from GitHub's generated notes (merged PRs since the last tag).
+- **Rollback is a manual run of Deploy WhatsApp Bot with an older tag:** it reuses that release's image
+  and takes the compose file and host scripts from that tag. `deploy.yml` serves both, called by
+  `release.yml` (`workflow_call`) or by hand (`workflow_dispatch`).
+- **Host scripts install only after a healthy deploy,** so a release that fails its health checks and
+  rolls back leaves the scripts matching the release still running (it matters since the database
+  split changed what a backup dumps).
+- **Releases pull only the app image.** On 2026-10-14 a deploy also pulled a newer `mongo:7` and
+  recreated Mongo. Updating Mongo is now its own runbook step.
 
 ## Hosting
 
@@ -26,14 +45,19 @@ configured in `.env` ([agents-automations.md](agents-automations.md)), the three
 `app.google.oauth.*` keys and `app.integrations.encryptionKey` (seen 2026-10-11). Count
 `"level":"ERROR"` instead.
 
-## Ops gotcha: the VPS's `:latest` is not what is deployed
+## Ops gotcha: there is no `:latest` (fixed in PR #85)
 
-CI pushes `:<sha>` and `:latest` to GHCR, but the VPS deploys by SHA, so its local `:latest` only
-moves when someone deploys `latest` by hand. On 2026-09-28 it pointed at a month-old image. The
-prod compose file falls back to `:latest` when `TAG` is unset, so a hand-run `docker compose up -d`
-would silently downgrade the app. GHCR's `:latest` is not safe either: it is the newest `main` build
-even when that deploy failed health checks and rolled back. Hand-run Compose must pin
-`TAG=$(cat .last-good-tag)`, and the runbook does since that day. Each deploy leaves about 354 MB of
+Until PR #85 CI pushed `:<sha>` and `:latest` to GHCR while the VPS deployed by SHA, so its local
+`:latest` only moved when someone deployed `latest` by hand; on 2026-09-28 it pointed at a month-old
+image. The prod compose file fell back to `:latest` when `TAG` was unset, so a hand-run
+`docker compose up -d` would silently downgrade the app, and GHCR's `:latest` was the newest `main`
+build even when its deploy had failed and rolled back. Now releases push no `:latest`, and the
+compose file's fallback is the placeholder `set-TAG-to-a-release`: `ps`, `logs`, `exec` and `restart`
+work without `TAG`, while a command that would recreate the app fails to pull and leaves the running
+container alone (checked with Compose v5). Hand-run Compose still pins `TAG=$(cat .last-good-tag)`.
+GHCR keeps the old `:latest` (the last `main` build before PR #85); nothing reads it.
+
+Each deploy leaves about 354 MB of
 image; roughly 40 had filled the 25 GB disk to 83% before a manual cleanup on 2026-09-28 brought it
 to 35%. Since `29e2dc9` (same day), `remote-deploy.sh` removes older app images after every healthy
 deploy, keeping the new one and the rollback target. It is best-effort and never fails a deploy.
@@ -41,6 +65,13 @@ A commit that changes no app code builds the same image under a second SHA tag, 
 report "Removed 0" while an older tag stays: it is the same image and takes no extra space.
 
 ## Mongo backups
+
+**Two archives per backup (PR #85).** Since the database split each backup is a
+`platform-<stamp>.archive.gz` and a `data-<stamp>.archive.gz`, the runtime database isn't backed up,
+and one company can be restored from the data archive with `restore-tenant.sh`
+([mongo-databases.md](mongo-databases.md)). The older `mongo-<stamp>` archives below hold everything;
+both restore scripts still take them. Everything below about cron, locking, the runner and GCS holds
+for both.
 
 **Production Mongo backups (since 2026-09-28).** Until that day there were none: the runbook's one-time cron setup had never been done. A nightly cron job on the host now runs `backup-mongo.sh`, writing `~/whatsapp-bot/backups/mongo-*.archive.gz` with 14-day retention. The first archive restored cleanly into a throwaway container with every collection's count matching prod. Since the evening of 2026-09-28 each archive is also copied off-box to Google Cloud Storage (below); uptime alerting is still missing.
 

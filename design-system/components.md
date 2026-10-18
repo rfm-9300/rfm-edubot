@@ -327,7 +327,7 @@ A module may replace it with its own small line illustration: `crmPanel({ …, e
 </div>
 ```
 
-Keep it minimal and professional: outline strokes, at most a few accent shapes, no emoji or photos. Colors come only from `.art-line` / `.art-accent`, so dark mode works without extra rules. Only Clientes has one today (`CLIENTS_EMPTY_ART` in `app.js`: a client, a spray bottle, three sparkles).
+Keep it minimal and professional: outline strokes, at most a few accent shapes, no emoji or photos. Colors come only from `.art-line` / `.art-accent`, so dark mode works without extra rules. Only Clientes has one today (`CLIENTS_EMPTY_ART` in `app/clients.js`: a client, a spray bottle, three sparkles).
 
 ## Pills
 
@@ -407,7 +407,7 @@ A list long enough to scroll takes `.suggest--scroll`. Headings inside it are `.
 
 ## Line items
 
-Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, payment and Serviços editors (`lineItemsField()` in `app.js`), wrapped in `.lines-field` with the section `.lbl`. Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description cell (`.line__desc`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
+Use `.lines` / `.lines__head` / `.line` / `.lines__foot` for quote, invoice, payment and Serviços editors (`lineItemsField()` in `app/billing.js`), wrapped in `.lines-field` with the section `.lbl`. Numeric inputs get `.num`. Remove button: `.l-rm`. Do not replace this with a generic table. Under 560px each line stacks: the description cell (`.line__desc`) takes its own row and quantity, unit and price share the next one; the header follows the same grid.
 
 The description cell is also the catalog picker, so it is a `.line__desc` wrapper (input + `.line__caret` + a `.suggest` dropdown as `.line__opts`) rather than a bare input, and it carries the focus ring for the whole cell. The dropdown has to escape the box, so a `.lines` that holds one takes `.lines--combo`, which drops `overflow: hidden` and moves the rounded corners onto the head and foot. A `.lines` without a combo keeps clipping as before.
 

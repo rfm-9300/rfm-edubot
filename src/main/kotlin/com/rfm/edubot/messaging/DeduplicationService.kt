@@ -15,7 +15,7 @@ import org.slf4j.LoggerFactory
 import java.util.Date
 
 class DeduplicationService(mongoModule: MongoModule) {
-    private val collection = mongoModule.database.getCollection<Document>("webhook_events")
+    private val collection = mongoModule.runtime.getCollection<Document>("webhook_events")
     private val mutex = Mutex()
     private val log = LoggerFactory.getLogger("DeduplicationService")
 

@@ -114,7 +114,7 @@ graph TD
     end
 
     subgraph Persistence
-        Mongo[(MongoDB<br/>wabot db)]
+        Mongo[(MongoDB<br/>wabot · wabot_platform · wabot_runtime)]
     end
 
     WR --> WV
@@ -167,7 +167,7 @@ graph TD
 | `integrations/` | Connected accounts (`integration_connections`, `TokenCipher`), Google OAuth and token refresh, Gmail client and inbox sync, `EmailService`, email retention, integration and email routes |
 | `notifications/` | The dashboard bell: notifications per audience with read state, and their routes |
 | `timesheets/` | The time clock: shifts and punches with their rules (`ShiftRules`, `PunchPolicy`, `Geofence`), work sites, phone keys and signature checks (`DeviceKeys`), the employee's `/app/api/portal/time` and the team's `/app/api/timesheets` routes, CSV export, location retention |
-| `persistence/` | MongoDB wiring, index creation at startup |
+| `persistence/` | MongoDB wiring: the data, platform and runtime databases ([MongoDB Databases and Collections](#mongodb-databases-and-collections)), index creation at startup, and `DatabaseSplit`, which carried the platform and runtime collections out of the one database of before |
 | `config/` | `AppConfig` (env/HOCON), `RuntimeConfig` + Mongo `platform_settings` overrides |
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes; `jobs/` has `PeriodicJob` and `SchedulerLease` (a Mongo lease, so one instance runs each background job) |
 | `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages |
@@ -724,14 +724,35 @@ sequenceDiagram
     end
 ```
 
-## MongoDB Collections
+## MongoDB Databases and Collections
+
+One MongoDB server holds three databases, named from `app.mongo.database` (`MongoModule`). Each
+collection lives in exactly one; [wiki/mongo-databases.md](../wiki/mongo-databases.md) has the rules
+for new ones and how the single database of before was split.
+
+- **`wabot`, the companies' data:** every document carries its company's `tenantId` (the per-company
+  settings use it as `_id`). Backed up as `data-<timestamp>.archive.gz`; `restore-tenant.sh` restores
+  one company from it. It also keeps the originals of the moved collections until they are dropped by
+  hand; backups skip them.
+- **`wabot_platform`, the platform's records.** Backed up as `platform-<timestamp>.archive.gz`.
+- **`wabot_runtime`, disposable state.** Not backed up.
+
+```mermaid
+flowchart LR
+    App[Ktor app] --> Data[(wabot<br/>companies' data)]
+    App --> Platform[(wabot_platform<br/>tenants, sign-ins, settings)]
+    App --> Runtime[(wabot_runtime<br/>dedup, leases, nonces)]
+    Data -- data archive --> Backups[backup-mongo.sh]
+    Platform -- platform archive --> Backups
+```
+
+### Companies' data (`wabot`)
 
 | Collection | Purpose | Key Index |
 |---|---|---|
 | `users` | User profiles, status (ACTIVE/BLOCKED) | unique on `waId` |
 | `conversations` | One conversation per user: summary, token totals, `autoReplyEnabled` (+ who paused it), `lastInboundAt`, `unreadCount` | unique on `userId` |
 | `messages` | Full message history (user + assistant turns, text, templates and customer media by Meta media id); outbound rows carry `author`, `waMessageId`, delivery `status`/`statusAt` and Meta's error | `conversationId`, `createdAt`; unique partial `(tenantId, waMessageId)` |
-| `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows; `customFields` holds the values of the company's own fields by key ([Client fields](#client-fields)) | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
 | `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments | unique on `number` |
@@ -751,11 +772,9 @@ sequenceDiagram
 | `timesheets.shifts` | One per shift: employee, local `day`, start/end, punches (time, channel, location and site verdict, verification, flags), breaks, worked minutes, flags, review, edit history, `version` | unique partial `(tenantId, employeeId)` where `OPEN` (`one_open_shift`); `tenantId+day`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` |
 | `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
 | `timesheets.devices` | Employees' phone keys for the time clock: key id, public key, platform, name, active or revoked (by whom) | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
-| `timesheets.challenges` | One-use nonces a phone signs, valid 2 minutes | TTL 5 minutes on `createdAt` |
 | `timesheets.settings` | A company's time clock rules | `_id` = tenant id |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
-| `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
 | `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |
 | `agents` | Agent definitions (triggers, steps, policy), status, run stats, next schedule | `tenantId+status+updatedAt`; `tenantId+eventTypes`; `status+nextFireAt` |
 | `agent_runs` | One run per trigger firing: a copy of the definition, step results, status, `resumeAt` | unique `(tenantId, agentId, dedupeKey)`; `status+resumeAt`; `tenantId+clientId+createdAt`; TTL 180 days on `finishedAt` |
@@ -766,11 +785,29 @@ sequenceDiagram
 | `outbound_log` | Every message agents and email send outside the company, claimed before the provider call | unique `idempotencyKey`; `tenantId+recipient+at`; TTL 30 days |
 | `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
 | `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record; for the Email page also the team's read state, the model's reading (dropped with the text) and the actions taken from it | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId`; `tenantId+date` |
-| `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
 | `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
 | `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
 | `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
 | `chat_flows` | One per company: its [chat flows](#chat-flows) (keywords, steps, quick replies) and the channels where the AI stays off (`teamOnlyChannels`) | unique `tenantId` |
+
+### Platform (`wabot_platform`)
+
+| Collection | Purpose | Key Index |
+|---|---|---|
+| `tenants` | One per company: slug, name, status (soft delete), channel bindings, modules, locale, timezone, rate limits, token budget, document templates, client fields; extra companies carry `parentTenantId` ([tenants and companies](../wiki/tenants-and-companies.md)) | unique `slug`; unique sparse `phoneNumberId`; `channels.platform+channels.externalId`; partial `parentTenantId` |
+| `dashboard_users` | Sign-ins to `/app`: email, password hash, role, linked Google account, `employeeId` for an employee's own sign-in; `tenantId` is the tenant's first company | unique `email`; unique partial `googleUid`; unique partial `employeeId`; `tenantId` |
+| `admin_emails` | Backoffice Google sign-ins added on the Admins page, on top of `ADMIN_EMAILS` | unique `email` |
+| `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
+| `tenant_usage` | LLM tokens per company per UTC month, in total and per source; backs the monthly token budget | unique `(tenantId, period)` |
+| `migrations` | One-off migration markers: `database-split` holds when the split ran and the hashes of the originals left in `wabot` | `_id` |
+
+### Runtime (`wabot_runtime`)
+
+| Collection | Purpose | Key Index |
+|---|---|---|
+| `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
+| `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
+| `timesheets.challenges` | One-use nonces a phone signs, valid 2 minutes | TTL 5 minutes on `createdAt` |
 
 ## Dashboard AI Assistant
 
@@ -1220,9 +1257,10 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Per-conversation ordering** — the consumer hands each message to `ConversationLanes`, keyed by tenant + channel + participant. One participant's messages run one at a time in arrival order, and at most 16 messages (and LLM calls) run at once. Unrelated conversations that hash to the same lane wait on each other.
 - **Channel adapters at the edges** — webhook ingress normalizes WhatsApp and Instagram payloads into `InboundMessage`; the consumer selects an `OutboundClient` from the tenant's channel binding before calling the shared `MessagePipeline`.
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
-- **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, and i18n. Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
-- **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar. The backoffice declares the same skin in `backoffice/index.html` (since 2026-10-04, without the credit). Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. The older classic Home code in `app.js` is no longer reachable. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
-- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs the standard fields its company requires, NIF and address unless the company chose otherwise, plus its required own fields ([Client fields](#client-fields)); a `PATCH` that omits a detail keeps the stored one. Bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail in `app.js`. Converting an already-invoiced quote answers `409 already_invoiced`.
+- **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, i18n, and the helpers both dashboards use (`common.js`). Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
+- **Dashboard scripts** — neither dashboard has a build step: each `index.html` loads plain scripts with `defer`. A page's own scripts (`core.js` first, then one per page or view such as `quotes.js` or `tenants.js`, and `app.js`, the shell, last) and `/admin/common.js`, the helpers both pages share (`escapeHTML()`, `toast()`, `confirmDialog()`, `apiFetch()`, Google sign-in, Meta's SDK), make up one global scope and only declare things at their top level; `app.js`'s `init()` starts the page once all have loaded. `/app`'s self-contained modules (`agents.js`, `timesheets.js`, `assistant.js`, `email.js`, `menus.js`, `doc-template.js`) each expose one `window.*UI` object and get the shell's helpers through `init(deps)`. `DashboardScriptsTest` checks both pages: every script is loaded and no top-level name is declared twice. File map and rules: [wiki/dashboard-frontend.md](../wiki/dashboard-frontend.md).
+- **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar. The backoffice declares the same skin in `backoffice/index.html` (since 2026-10-04, without the credit). Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
+- **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs the standard fields its company requires, NIF and address unless the company chose otherwise, plus its required own fields ([Client fields](#client-fields)); a `PATCH` that omits a detail keeps the stored one. Bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail (`app/drawer.js`). Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
 - **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
@@ -1230,22 +1268,33 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
 - **Backoffice sign-in with Google** — operators sign in to `/backoffice` with Google through Firebase Auth (project `thebotslab`). `POST /admin/auth/google` verifies the Firebase ID token itself (Google's JWKS, issuer/audience = project, `sign_in_provider = google.com`, verified email in `ADMIN_EMAILS`) with the Auth0 JWT libraries Ktor already ships, then issues the same HS256 admin JWT as the password login, so every `admin-jwt` route is unchanged. Password login only exists while `ADMIN_PASSWORD_HASH` is set; `GET /admin/auth/config` tells the login screen which methods are on. Tenant users sign in with Google through the same Firebase project, matched to their own accounts ([Tenant sign-in](#tenant-sign-in)).
 - **Backoffice admins** — the Google allowlist is `ADMIN_EMAILS` plus emails added on the backoffice's Admins page (`admin_emails`, unique `email`). `AdminAccess` loads them at startup and after each change into `RuntimeConfig`, whose live `allowedEmails` is the union, so the Google sign-in needs no other change. Env emails can't be removed from the page and nobody can remove themselves, so the list can't lock everyone out. The `admin-jwt` validator re-checks a Google session's `email` claim against the live list on every request, so removing someone ends their session at once; password sessions carry no email and are unaffected.
-- **Manual backups from the backoffice** — the internet-facing app never runs host commands. `POST /admin/api/backups` only writes `request.json` into a mounted control folder; the host's `backup-runner.sh` (cron, every minute) claims it by renaming it, runs `backup-mongo.sh` (which now takes a `flock` so it never overlaps the nightly run) and writes `last.json`/`last.log` back. The app lists archives from the read-only backups mount, and `<archive>.uploaded` markers left after a successful `rclone copy` show which ones were copied off the server. A stale `heartbeat` (over three minutes) shows the runner as stopped. See `DEPLOYMENT_RUNBOOK.md` → Backups.
+- **Manual backups from the backoffice** — the internet-facing app never runs host commands. `POST /admin/api/backups` only writes `request.json` into a mounted control folder; the host's `backup-runner.sh` (cron, every minute) claims it by renaming it, runs `backup-mongo.sh` (which now takes a `flock` so it never overlaps the nightly run) and writes `last.json`/`last.log` back. Each backup is two archives, `platform-<timestamp>` and `data-<timestamp>`; the app lists them from the read-only backups mount with what each holds, and `<archive>.uploaded` markers left after a successful `rclone copy` show which ones were copied off the server. A stale `heartbeat` (over three minutes) shows the runner as stopped. Restores stay on the host: `restore-mongo.sh` for whole databases, `restore-tenant.sh` for one company. See `DEPLOYMENT_RUNBOOK.md` → Backups.
 - **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
 
 ## Infrastructure
 
 ```
-GitHub Actions (merge to main) → GHCR image
-                                      ↓
+git tag vX.Y.Z on main → GitHub Actions Release → GHCR image :vX.Y.Z → SSH deploy
+                                                                          ↓
 thebotslab.pt → websites-thebots Caddy (TLS) → whatsapp-bot app :8080
                                                     ↓
-                                               MongoDB :27017
+                                               MongoDB :27017 (wabot, wabot_platform, wabot_runtime)
 ```
 
 - **Dev**: `docker compose up` starts app + mongo:7 + mongo-express (:8081)
-- **Prod**: `docker-compose.prod.yml` — app + mongo on the VPS. Public TLS stays on the existing `websites-thebots` Caddy container (`web_proxy` network). `/admin`, `/app`, and `/backoffice` are static resources inside the app image, not separate services.
-- **CI/CD**: [`.github/workflows/deploy.yml`](../.github/workflows/deploy.yml) tests, publishes `ghcr.io/rfm-9300/whatsapp-bot`, and SSHs `scripts/remote-deploy.sh`. Mobile stays on [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) (no store deploy). See [DEPLOYMENT_RUNBOOK.md](../DEPLOYMENT_RUNBOOK.md).
+- **Prod**: `docker-compose.prod.yml` — app + mongo on the VPS. Public TLS stays on the existing `websites-thebots` Caddy container (`web_proxy` network). `/admin`, `/app`, and `/backoffice` are static resources inside the app image, not separate services. The app image is always a release tag (`TAG`); there is no `:latest`.
+- **CI/CD**: [`ci.yml`](../.github/workflows/ci.yml) tests pull requests and `main` and deploys nothing. Pushing a release tag runs [`release.yml`](../.github/workflows/release.yml): tests, publishes `ghcr.io/rfm-9300/whatsapp-bot:<tag>`, deploys it through [`deploy.yml`](../.github/workflows/deploy.yml) (SSH, `scripts/remote-deploy.sh`, health checks with automatic rollback, then the host scripts) and opens a GitHub release. `deploy.yml` run by hand with an older tag rolls back. `scripts/release.sh` cuts the tag. Mobile stays on [`.github/workflows/mobile-ci.yml`](../.github/workflows/mobile-ci.yml) (no store deploy). See [DEPLOYMENT_RUNBOOK.md](../DEPLOYMENT_RUNBOOK.md).
+
+```mermaid
+flowchart LR
+    PR[Pull request] --> CI[ci.yml: test]
+    Main[Merge to main] --> CI
+    Tag[Tag vX.Y.Z on main] --> Release[release.yml: check tag, test, image :vX.Y.Z]
+    Release --> Deploy[deploy.yml: remote-deploy.sh, health checks, host scripts]
+    Release --> Notes[GitHub release]
+    Manual[Run by hand with an older tag] --> Deploy
+    Deploy --> VPS[(VPS: app on the release image)]
+```
 - **Image**: multi-stage Dockerfile → fat JAR at `build/libs/app.jar`, distroless-style runtime
 
 ## Mobile Frontend

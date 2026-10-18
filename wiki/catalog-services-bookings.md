@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-17
 ---
 
 # Catalog, Serviços and bookings
@@ -25,7 +25,7 @@ the types already in use, like an employee's role. Decisions that matter later:
   item without one keeps its title in `description`, so the previous release, the mobile app (which
   still sends and shows only `description`) and anything else reading it still get a name. Readers
   treat a description equal to the title as none (`StandardItem.details()`, `catalogDetails()` in
-  `app.js`). Chosen over moving text out of `description`, which would break a rollback.
+  `app/catalog.js`). Chosen over moving text out of `description`, which would break a rollback.
 - **Document lines** get "title - description": the classic PDF's `splitItem` prints the part after
   " - " under the title.
 - **`CatalogItemBackfill`** runs at startup, before the booking migration: items without a title get
@@ -86,7 +86,7 @@ invoice instead of the edit form, loaded from a new `GET /app/api/crm/services/{
 client link, quantity × unit price, the booking it came from and the invoice that billed it, with
 actions by status: Invoice opens the open-work form with only this row ticked, then Edit, Cancel,
 Reopen and Delete. The booking detail gained Open service. Gotcha: `PATCH /crm/services/{id}` always
-overwrites `notes`, so any status change must resend the whole row (`servicePatch` in `app.js`).
+overwrites `notes`, so any status change must resend the whole row (`servicePatch` in `app/services.js`).
 
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 
@@ -134,8 +134,8 @@ clients and billing. The rework decided:
   (`DASHBOARD`/`ADMIN`/`ASSISTANT`) can override. Check-then-write is serialized per tenant by an
   in-process mutex, which again assumes a single app instance. The pipeline passes the chat's
   customer to the tools (`BookingCallContext`), so WhatsApp bookings default to the sender's number.
-  API errors are stable `{error}` codes, and the `app.js` `api()` helper now attaches `err.status`
-  and `err.code` (the message stays `HTTP <n>`).
+  API errors are stable `{error}` codes, and `/app`'s `api()` helper (now in `app/core.js`) attaches
+  `err.status` and `err.code` (the message stays `HTTP <n>`).
 - **The `/app` calendar works in tenant-local day keys**, not the browser zone. The old grid bucketed
   bookings by browser-local hours, and a Home deep link to a booking outside the loaded week did
   nothing.

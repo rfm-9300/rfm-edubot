@@ -7,8 +7,16 @@ updated: 2026-10-18
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76 and #86.
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84, #85 and #86.
 Local sessions push straight to `main`. What a session should know:
+
+- **Merging deploys nothing (since PR #85).** Production changes only when a release tag is pushed
+  ([ops-and-deploy.md](ops-and-deploy.md)), so the merge notes below that follow a deploy after each
+  merge describe the old pipeline. An agent asked to deploy, after the merge, runs
+  `scripts/release.sh patch` (or `minor`/`major`), which tags `origin/main` and pushes the tag, and
+  follows the Release run; its Deploy job checks `/health` and `/ready` and rolls back on failure.
+  Merging several PRs no longer has to wait for each deploy, but each still needs `main` merged in
+  and tested.
 
 - **The environment is configured in Cursor, not in the repo.** `main` has no
   `.cursor/environment.json`; the AGENTS.md section "Cursor Cloud specific instructions" (PR #42,
@@ -69,9 +77,17 @@ Local sessions push straight to `main`. What a session should know:
   unchanged since the branch was cut (otherwise it merges `main` into the branch and tests again)
   and the PR's Test and GitGuardian green on the head commit, it marks the PR ready and pushes a
   `--no-ff` merge commit to `main`, named like GitHub's (`Merge pull request #76 from
-  rfm-9300/<branch>`, then the PR title); GitHub then marks the PR merged. That push deploys like
-  any merge: the agent follows the Deploy WhatsApp Bot run, whose Deploy job checks `/health` and
-  `/ready` and rolls back on failure, but it can't reach the VPS itself.
+  rfm-9300/<branch>`, then the PR title); GitHub then marks the PR merged. In 2026-10 that push
+  deployed like any merge, and the agent followed the Deploy WhatsApp Bot run; since PR #85 it
+  deploys nothing until a release tag is pushed (above). The agent can't reach the VPS itself.
+- **#84 and #85 merged in one push** (2026-10-18, at Rodrigo's request, by the agent that wrote #85).
+  #85 removes `main`'s deploy-on-push workflow, and GitHub runs a push's workflows from the commit it
+  pushes, so both merge commits (#84's, then #85's on top) went to `main` together and only CI ran.
+  Pushing #84's merge alone would have run the old workflow and deployed #84 by itself. #85 had been
+  opened on #84's branch; it was retargeted to `main` before the push so GitHub would mark it merged.
+  Nothing deployed: the first release tag ships both. #84's GitGuardian check stayed red on its known
+  false positive (the `autocomplete` value `'new-password'`, described in #84), which has to be marked
+  in GitGuardian itself.
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's
@@ -79,16 +95,26 @@ Local sessions push straight to `main`. What a session should know:
   boot script, no `.env`. With sudo, `apt-get install docker.io`, `dockerd` in the background, the
   65536 nofile ulimit in `/etc/docker/daemon.json` and `api.version=1.44` in
   `~/.docker-java.properties` gave it Mongo 7 and Testcontainers; `TEST_MONGO_URI` pointed at that
-  Mongo container is faster than a container per run. The backoffice password needs a BCrypt
-  `ADMIN_PASSWORD_HASH` in the hand-written `.env`. #76's VM (2026-10-14) was the same, and the same
-  steps worked (`docker run mongo:7` instead of Compose, which `docker.io` lacks; the hash from
-  `httpd:2.4-alpine htpasswd`). Point puppeteer at `/opt/google/chrome/chrome`: the
-  `/usr/local/bin/google-chrome` there is a wrapper script that pins its own profile. #86's VM
-  (2026-10-18) was the same again; a hand-written `.env` also needs non-empty `WA_PHONE_NUMBER_ID`
-  and `WA_ACCESS_TOKEN` placeholders, or `./gradlew run` exits on "Missing required config". The
-  backoffice's Backups page shows archives when `BACKUP_ARCHIVE_DIR` and `BACKUP_CONTROL_DIR` point
-  at two local folders (`mongo-<yyyyMMddTHHmmssZ>.archive.gz` files, and a `last.json` with a
-  non-zero `exitCode` plus `last.log` for a failed run).
+  Mongo container is faster than a container per run, but only `TestMongo` reads it: 19 test classes
+  start their own `MongoDBContainer`, so the agent's user needs the Docker socket either way
+  (`sudo chmod 666 /var/run/docker.sock` when it isn't in the `docker` group). The backoffice password
+  needs a BCrypt `ADMIN_PASSWORD_HASH` in the hand-written `.env`. #76's VM (2026-10-14) was the same,
+  and the same steps worked (`docker run mongo:7` instead of Compose, which `docker.io` lacks; the hash
+  from `httpd:2.4-alpine htpasswd`). So was #84's (2026-10-17): plain `./gradlew test`, as CI runs it,
+  passed all 830 tests once the socket was readable, and its mock data only showed once migrated
+  ([gotchas.md](gotchas.md)). Point puppeteer at `/opt/google/chrome/chrome`: the
+  `/usr/local/bin/google-chrome` there is a wrapper script that pins its own profile. #85's VM
+  (2026-10-18) had no Docker either; `get.docker.com`'s Docker CE comes with the Compose plugin
+  (unlike `docker.io`), so the production compose file itself could run there: a prod-like stack in a
+  folder named `whatsapp-bot` (same project and container names) with an override publishing Mongo's
+  port, the fat JARs of two releases run against it with `java -jar`, and the host scripts run with
+  `APP_DIR` pointing at that folder. `actionlint` (its download script) and `shellcheck` (apt) lint the
+  workflows and scripts. #86's VM (2026-10-18) took the `docker.io` route again; a hand-written
+  `.env` also needs non-empty `WA_PHONE_NUMBER_ID` and `WA_ACCESS_TOKEN` placeholders, or
+  `./gradlew run` exits on "Missing required config". The backoffice's Backups page shows archives
+  when `BACKUP_ARCHIVE_DIR` and `BACKUP_CONTROL_DIR` point at two local folders
+  (`mongo-<yyyyMMddTHHmmssZ>.archive.gz` files, and a `last.json` with a non-zero `exitCode` plus
+  `last.log` for a failed run).
 - The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
   driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed
   unmerged on 2026-10-06, and the 2026-10-09 batch on 2026-10-11. Only Testcontainers went in, by hand

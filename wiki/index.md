@@ -8,6 +8,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [overview.md](overview.md) — what the product is, the message pipeline, modules and channels, rules that apply everywhere
 - [architecture-review.md](architecture-review.md) — the 2026-09-28 review: access policy, webhook replay, conversation lanes, tool-to-module tables, hot spots
 - [tenants-and-companies.md](tenants-and-companies.md) — a tenant holding several companies: data scope, users, token switching, soft delete and restore
+- [mongo-databases.md](mongo-databases.md) — the three Mongo databases and which collection goes where, the split from one database, backups by database, restoring one company
 
 ## Features
 
@@ -22,6 +23,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [agents-automations.md](agents-automations.md) — the opt-in Agents module, domain events, background jobs, Gmail and Google verification
 - [auth-and-access.md](auth-and-access.md) — Google sign-in for the backoffice and `/app`, admin emails, where the access rules live
 - [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker
+- [dashboard-frontend.md](dashboard-frontend.md) — how `/app`'s and the backoffice's JavaScript is split: one script per page in one global scope, `admin/common.js`, the self-contained modules, where new code goes
 
 ## Mobile
 
@@ -30,6 +32,6 @@ wiki works, and what must never go in it: [README.md](README.md).
 
 ## Running it
 
-- [ops-and-deploy.md](ops-and-deploy.md) — production hosting, deploy by SHA, backups, platform settings over `.env`, VPS script traps
+- [ops-and-deploy.md](ops-and-deploy.md) — production hosting, releases by git tag, backups, platform settings over `.env`, VPS script traps
 - [gotchas.md](gotchas.md) — cross-cutting traps: kotlinx defaults, JUnit, Testcontainers, i18n proxies, `hidden`, local UI checks, GitNexus
 - [cloud-agents.md](cloud-agents.md) — Cursor cloud agents: environment, PR history, how their PRs get merged

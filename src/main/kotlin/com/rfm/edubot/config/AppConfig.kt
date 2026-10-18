@@ -100,9 +100,15 @@ data class AppConfig(
         val baseUrl: String = DEFAULT_OPENROUTER_BASE_URL,
     )
 
+    /**
+     * Three databases on one server: [database] holds the companies' data, [platformDatabase] the
+     * platform's own records and [runtimeDatabase] disposable runtime state (see MongoModule).
+     */
     data class MongoConfig(
         val uri: String,
         val database: String = "wabot",
+        val platformDatabase: String = "${database}_platform",
+        val runtimeDatabase: String = "${database}_runtime",
     )
 
     data class RateLimitConfig(

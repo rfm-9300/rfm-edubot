@@ -261,7 +261,7 @@ class TimeDeviceRepository(mongo: MongoModule, private val tenantId: ObjectId) {
 
 /** One-time nonces a phone signs, so a captured signature can't be sent again. */
 class TimeChallengeRepository(mongo: MongoModule) {
-    private val collection = mongo.database.getCollection<Document>(COLLECTION)
+    private val collection = mongo.runtime.getCollection<Document>(COLLECTION)
 
     suspend fun issue(tenantId: ObjectId, employeeId: ObjectId, now: Instant): Pair<String, Instant> {
         val nonce = DeviceKeys.nonce()

@@ -50,7 +50,7 @@ class DeduplicationServiceTest {
     private fun freshService(): DeduplicationService {
         // Each test gets its own collection state cleared, since the collection name
         // ("webhook_events") is fixed by DeduplicationService itself.
-        runBlocking { mongoModule.database.getCollection<Document>("webhook_events").drop() }
+        runBlocking { mongoModule.runtime.getCollection<Document>("webhook_events").drop() }
         return DeduplicationService(mongoModule)
     }
 
@@ -110,7 +110,7 @@ class DeduplicationServiceTest {
         assertFalse(service.isDuplicate("evt-1", "{}"))
         service.markProcessed("evt-1")
 
-        val doc = mongoModule.database.getCollection<Document>("webhook_events")
+        val doc = mongoModule.runtime.getCollection<Document>("webhook_events")
             .find(com.mongodb.client.model.Filters.eq("eventId", "evt-1")).firstOrNull()
         assertEquals("processed", doc?.getString("status"))
         // Still a duplicate afterwards - processed events must not be retried.
@@ -190,7 +190,7 @@ class DeduplicationServiceTest {
         assertFalse(service.isDuplicate("evt-1", "{}"))
         service.markFailed("evt-1")
 
-        val doc = mongoModule.database.getCollection<Document>("webhook_events")
+        val doc = mongoModule.runtime.getCollection<Document>("webhook_events")
             .find(com.mongodb.client.model.Filters.eq("eventId", "evt-1")).firstOrNull()
         assertEquals("failed", doc?.getString("status"))
     }

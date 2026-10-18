@@ -1,0 +1,48 @@
+name: CI
+
+# Tests the server and its bundled web UIs (/app, /backoffice, shared /admin assets, widget, legal)
+# on pull requests and on main. Merging to main deploys nothing: production changes only when a
+# release tag is pushed (release.yml). Mobile has its own workflow (mobile-ci.yml).
+
+on:
+  pull_request:
+    paths-ignore:
+      - "mobile/**"
+      - ".github/workflows/mobile-ci.yml"
+      - "docs/**"
+      - "mocks/**"
+      - ".claude/**"
+      - ".gitnexus/**"
+      - "**/*.md"
+  push:
+    branches: [main]
+    paths-ignore:
+      - "mobile/**"
+      - ".github/workflows/mobile-ci.yml"
+      - "docs/**"
+      - "mocks/**"
+      - ".claude/**"
+      - ".gitnexus/**"
+      - "**/*.md"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "20"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew test --no-daemon

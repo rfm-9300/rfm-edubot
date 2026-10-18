@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-17
 ---
 
 # Clients, suppliers and employees
@@ -23,7 +23,7 @@ that matter later:
   NIF prints on quotes and invoices on the client-number line ("CLT-005 · NIF …"), so the PDF client
   block never grows taller. `CrmTools` builds its own client JSON and must never return notes, email
   or NIF, because what it returns can reach a customer's chat.
-- **Drawer return rule** in `app.js`: a drawer opened from the record gets `drawerReturn`. Its eyebrow
+- **Drawer return rule** (in `app/drawer.js` since PR #84): a drawer opened from the record gets `drawerReturn`. Its eyebrow
   becomes a back link, and a programmatic `closeDrawer()` after an action reopens the record (same
   tab, fresh data). ×, scrim and Escape call `closeDrawer({ dismissed: true })` and leave it. A
   generation counter stops the return when the caller opens another drawer right away. New drawer

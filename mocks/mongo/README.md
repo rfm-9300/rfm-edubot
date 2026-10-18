@@ -14,6 +14,8 @@ The script targets database `wabot` by default. Override with `MONGO_DATABASE` i
 MONGO_DATABASE=wabot_dev docker exec -i whatsapp-bot-mongo-1 mongosh --quiet --file /dev/stdin < mocks/mongo/create-mocks.js
 ```
 
+Like the app, it reads the tenant and writes the employee's sign-in in `<database>_platform`, and writes the webhook events in `<database>_runtime`; everything else goes to the database itself.
+
 The script deletes and recreates only its known seed records. It does not drop the database, delete Mongo volumes, or remove unrelated local data.
 
 Seeded collections:
@@ -21,7 +23,7 @@ Seeded collections:
 - `users`
 - `conversations`
 - `messages`
-- `webhook_events`
+- `webhook_events` (in `<database>_runtime`)
 - `crm.clients`
 - `crm.quotes`
 - `crm.invoices`
@@ -40,11 +42,17 @@ Seeded collections:
 - `notifications`
 - `integration_connections`
 - `email_messages`
-- `dashboard_users` (only the mock employee's own sign-in)
+- `dashboard_users` (only the mock employee's own sign-in, in `<database>_platform`)
 - `crm.service_submissions`
 - `crm.client_services` (only the service approved from a submission)
 
 Bookings, agents, email and the employee's sign-in are seeded only when the database already has a tenant; they go to the first one. Start the app once before seeding a fresh database.
+
+Clients, quotes, invoices and the chats (`users`, `conversations`, `messages`, `webhook_events`) are written without a `tenantId`, so the dashboard shows none of them until they get one. Restart the app (its startup gives them the first tenant), or run the migration:
+
+```bash
+docker exec -i whatsapp-bot-mongo-1 mongosh --quiet wabot --file /dev/stdin < mocks/mongo/migrate-add-tenant-id.js
+```
 
 Suppliers and invoices:
 

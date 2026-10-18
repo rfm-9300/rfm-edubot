@@ -1,5 +1,8 @@
 const dbName = process.env.MONGO_DATABASE || "wabot";
 const target = db.getSiblingDB(dbName);
+// The app keeps tenants and sign-ins in "<database>_platform" and webhook events in "<database>_runtime".
+const platform = db.getSiblingDB(`${dbName}_platform`);
+const runtime = db.getSiblingDB(`${dbName}_runtime`);
 const now = new Date("2026-05-20T12:00:00.000Z");
 
 const oid = (value) => ObjectId(value);
@@ -485,7 +488,7 @@ const webhookEvents = [
   },
 ];
 
-const seedTenant = target.tenants.findOne({}) || null;
+const seedTenant = platform.tenants.findOne({}) || null;
 const seedTenantId = seedTenant ? seedTenant._id : null;
 if (seedTenantId) {
   suppliers.forEach((item) => { item.tenantId = seedTenantId; });
@@ -571,7 +574,7 @@ function buildAgentSeed() {
   };
   const ptDate = (isoDay) => isoDay.split("-").reverse().join("/");
 
-  const seedUser = target.getCollection("dashboard_users").findOne({ tenantId: seedTenantId });
+  const seedUser = platform.getCollection("dashboard_users").findOne({ tenantId: seedTenantId });
   const actorId = seedUser ? hex(seedUser._id) : "operator";
   const actorName = seedUser ? seedUser.email : "operator";
   const documentTemplate = seedTenant.documentTemplate || {};
@@ -1420,7 +1423,7 @@ function buildEmployeeWorkSeed() {
   const runAt = new Date();
   const hoursAgo = (hours) => new Date(runAt.getTime() - hours * 3600 * 1000);
   const dayOf = (value) => value.toISOString().slice(0, 10);
-  const reviewer = target.getCollection("dashboard_users").findOne({ tenantId: seedTenantId, role: { $ne: "TENANT_EMPLOYEE" } });
+  const reviewer = platform.getCollection("dashboard_users").findOne({ tenantId: seedTenantId, role: { $ne: "TENANT_EMPLOYEE" } });
   const reviewedBy = reviewer ? reviewer.email : "operator";
   const sumCents = (items) => items.reduce((sum, item) => sum + item.totalCents, 0);
   const submission = ({ id, clientId, name, items, notes = null, doneHoursAgo, sentHoursAgo, status = "PENDING", decided = {} }) => ({
@@ -1540,7 +1543,7 @@ function removeSeedConflicts() {
   target.users.deleteMany({ $or: [{ _id: { $in: users.map((item) => item._id) } }, { waId: { $in: users.map((item) => item.waId) } }, { "metadata.mockSeed": "create-mocks" }] });
   target.conversations.deleteMany({ $or: [{ _id: { $in: conversations.map((item) => item._id) } }, { waId: { $in: conversations.map((item) => item.waId) } }] });
   target.messages.deleteMany({ $or: [{ _id: { $in: messages.map((item) => item._id) } }, { waMessageId: { $in: messages.map((item) => item.waMessageId).filter(Boolean) } }] });
-  target.getCollection("webhook_events").deleteMany({ eventId: { $in: webhookEvents.map((item) => item.eventId) } });
+  runtime.getCollection("webhook_events").deleteMany({ eventId: { $in: webhookEvents.map((item) => item.eventId) } });
   target.getCollection("crm.clients").deleteMany({ $or: [{ _id: { $in: clients.map((item) => item._id) } }, { number: { $in: clients.map((item) => item.number) } }, { phone: { $in: clients.map((item) => item.phone) } }] });
   target.getCollection("crm.quotes").deleteMany({ $or: [{ _id: { $in: quotes.map((item) => item._id) } }, { number: { $in: quotes.map((item) => item.number) } }] });
   target.getCollection("crm.invoices").deleteMany({ $or: [{ _id: { $in: invoices.map((item) => item._id) } }, { number: { $in: invoices.map((item) => item.number) } }] });
@@ -1564,22 +1567,22 @@ function removeSeedConflicts() {
   });
   target.getCollection("email_messages").deleteMany({ $or: [{ _id: { $in: Object.values(ids.emails) } }, { connectionId: ids.gmail }] });
   // What the app saved for the mock employee goes too, so the counts start from the seed again.
-  target.getCollection("dashboard_users").deleteMany({ $or: [{ _id: ids.employeeLogins.ana }, { employeeId: ids.employees.ana }, { email: EMPLOYEE_EMAIL }] });
+  platform.getCollection("dashboard_users").deleteMany({ $or: [{ _id: ids.employeeLogins.ana }, { employeeId: ids.employees.ana }, { email: EMPLOYEE_EMAIL }] });
   target.getCollection("crm.service_submissions").deleteMany({ $or: [{ _id: { $in: Object.values(ids.serviceSubmissions) } }, { employeeId: ids.employees.ana }] });
   target.getCollection("crm.client_services").deleteMany({ $or: [{ _id: { $in: Object.values(ids.clientServices) } }, { employeeId: ids.employees.ana }] });
   target.notifications.deleteMany({ $or: [{ _id: ids.submittedNotification }, { kind: "service_submitted", "subject.id": ids.employees.ana.toHexString() }] });
 }
 
-function insertMany(collectionName, docs) {
+function insertMany(collectionName, docs, database = target) {
   if (docs.length === 0) return;
-  target.getCollection(collectionName).insertMany(docs, { ordered: true });
+  database.getCollection(collectionName).insertMany(docs, { ordered: true });
 }
 
 removeSeedConflicts();
 insertMany("users", users);
 insertMany("conversations", conversations);
 insertMany("messages", messages);
-insertMany("webhook_events", webhookEvents);
+insertMany("webhook_events", webhookEvents, runtime);
 insertMany("crm.clients", clients);
 insertMany("crm.quotes", quotes);
 insertMany("crm.invoices", invoices);
@@ -1606,7 +1609,7 @@ insertMany("agent_tasks", agentSeed.tasks);
 insertMany("notifications", agentSeed.notifications);
 insertMany("integration_connections", agentSeed.connections);
 insertMany("email_messages", agentSeed.emails);
-insertMany("dashboard_users", workSeed.login ? [workSeed.login] : []);
+insertMany("dashboard_users", workSeed.login ? [workSeed.login] : [], platform);
 insertMany("crm.service_submissions", workSeed.submissions);
 insertMany("crm.client_services", workSeed.services);
 insertMany("notifications", workSeed.notifications);
@@ -1616,7 +1619,7 @@ const summary = {
   users: target.users.countDocuments({ _id: { $in: users.map((item) => item._id) } }),
   conversations: target.conversations.countDocuments({ _id: { $in: conversations.map((item) => item._id) } }),
   messages: target.messages.countDocuments({ _id: { $in: messages.map((item) => item._id) } }),
-  webhook_events: target.getCollection("webhook_events").countDocuments({ eventId: { $in: webhookEvents.map((item) => item.eventId) } }),
+  webhook_events: runtime.getCollection("webhook_events").countDocuments({ eventId: { $in: webhookEvents.map((item) => item.eventId) } }),
   crm_clients: target.getCollection("crm.clients").countDocuments({ _id: { $in: clients.map((item) => item._id) } }),
   crm_quotes: target.getCollection("crm.quotes").countDocuments({ _id: { $in: quotes.map((item) => item._id) } }),
   crm_invoices: target.getCollection("crm.invoices").countDocuments({ _id: { $in: invoices.map((item) => item._id) } }),
@@ -1635,7 +1638,7 @@ const summary = {
   notifications: target.notifications.countDocuments({ _id: { $in: Object.values(ids.notifications) } }),
   integration_connections: target.getCollection("integration_connections").countDocuments({ _id: ids.gmail }),
   email_messages: target.getCollection("email_messages").countDocuments({ _id: { $in: Object.values(ids.emails) } }),
-  employee_logins: target.getCollection("dashboard_users").countDocuments({ _id: ids.employeeLogins.ana }),
+  employee_logins: platform.getCollection("dashboard_users").countDocuments({ _id: ids.employeeLogins.ana }),
   service_submissions: target.getCollection("crm.service_submissions").countDocuments({ _id: { $in: Object.values(ids.serviceSubmissions) } }),
   crm_client_services: target.getCollection("crm.client_services").countDocuments({ _id: { $in: Object.values(ids.clientServices) } }),
 };

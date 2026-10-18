@@ -1,10 +1,12 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-18
 ---
 
 # Tenants and companies
 
 How a customer's account (tenant) holds one or more companies, and what that means for data, users, tokens and the backoffice lifecycle. Which modules a tenant gets, and why channels are optional, is in [overview.md](overview.md).
+
+Since PR #85 the `tenants` documents and `dashboard_users` live in the platform database, and each company's business data in the data database, scoped by its own `tenantId`. One company is restored on its own with `restore-tenant.sh` (its slug); a tenant with several companies restores each that needs it ([mongo-databases.md](mongo-databases.md)).
 
 ## Companies inside a tenant (shipped 2026-09-29, commit `46dd2c8`)
 

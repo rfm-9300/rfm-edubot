@@ -20,7 +20,7 @@ Source of truth for every **dashboard web UI** in this repo. Agents and LLMs mus
 |---|---|---|---|
 | Tenant Dashboard | `/app` | `src/main/resources/app/` | **shared** `/admin/style.css` |
 | Backoffice | `/backoffice` | `src/main/resources/backoffice/` | **shared** `/admin/style.css` |
-| Shared assets | `/admin/{asset}` | `src/main/resources/admin/style.css`, catalogs, `theme.js` | — |
+| Shared assets | `/admin/{asset}` | `src/main/resources/admin/style.css`, catalogs, `theme.js`, `i18n.js`, `common.js` | — |
 | Retired CRM | `/admin` | redirects to `/backoffice/` | — |
 | Website widget | embed | `src/main/resources/widget/` | **separate** `widget.css` (`tbl-` prefix) |
 | Legal pages | `/legal/…` | `src/main/resources/legal/` | **standalone** inline CSS |
@@ -35,7 +35,8 @@ The same tokens and class vocabulary are used by **Extractor** (`/Users/rodrigom
 1. One stylesheet: `src/main/resources/admin/style.css`, served at `/admin/style.css`.
 2. One theme switcher: `src/main/resources/admin/theme.js` (`html[data-theme]`, `localStorage.uiTheme`). If the user has never chosen, follow `prefers-color-scheme`. Labels come from `common.themeToLight` / `common.themeToDark`.
 3. One i18n runtime: `admin/i18n.js` + `admin/catalog.{en,pt,es}.js`.
-4. Shared class vocabulary: `.sidebar`, `.nav`, `.topbar`, `.btn`, `.panel`, `.tbl`, `.pill`, `.drawer`, `.form`, `.inp`, `.toast`, `.auth`, …
+4. One copy of the helpers both use: `admin/common.js` (`escapeHTML()`, `toast()`, `confirmDialog()`, the API call, Google sign-in, Meta's SDK, Instagram's consent popup).
+5. Shared class vocabulary: `.sidebar`, `.nav`, `.topbar`, `.btn`, `.panel`, `.tbl`, `.pill`, `.drawer`, `.form`, `.inp`, `.toast`, `.auth`, …
 
 New dashboard CSS goes into that one stylesheet. New copy goes into all three catalogs.
 

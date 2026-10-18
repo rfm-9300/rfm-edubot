@@ -1,0 +1,119 @@
+name: Release
+
+# The only way production changes. Pushing a tag vMAJOR.MINOR.PATCH that points at a commit on main
+# (scripts/release.sh does it) tests that commit, publishes its image as
+# ghcr.io/rfm-9300/whatsapp-bot:<tag>, deploys it with deploy.yml and opens a GitHub release with the
+# changes since the previous tag. To go back to an older release, run "Deploy WhatsApp Bot" by hand
+# with that release's tag.
+
+on:
+  push:
+    tags: ["v*"]
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ghcr.io/rfm-9300/whatsapp-bot
+
+jobs:
+  verify:
+    name: Check the tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: tag
+        name: Release tag on a commit from main
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$tag is not a release tag. Release tags are vMAJOR.MINOR.PATCH, e.g. v1.4.0."
+            exit 1
+          fi
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "::error::$tag points at $GITHUB_SHA, which is not on main. Only merged commits are released."
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  test:
+    name: Test
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "20"
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Unit tests
+        run: ./gradlew test --no-daemon
+
+  publish:
+    name: Build and push image
+    needs: [verify, test]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ env.IMAGE_NAME }}:${{ needs.verify.outputs.tag }}
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+          labels: |
+            org.opencontainers.image.version=${{ needs.verify.outputs.tag }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy:
+    name: Deploy
+    needs: [verify, publish]
+    uses: ./.github/workflows/deploy.yml
+    with:
+      tag: ${{ needs.verify.outputs.tag }}
+    secrets: inherit
+
+  github-release:
+    name: GitHub release
+    needs: [verify, deploy]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Release notes from the merged pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.verify.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A GitHub release for $TAG already exists."
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "$TAG" --generate-notes
+          fi
