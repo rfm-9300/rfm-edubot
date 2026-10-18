@@ -119,6 +119,15 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   are redrawn whenever their data changes, so click them through the DOM and wait for the new state
   (the chip's `is-on`), not just a row count the previous list may already have.
 
+## GitGuardian flags an autocomplete value as a password
+
+GitGuardian's "Generic Password" detector reads `accountPasswordField('acc-new', …, 'new-password', …)`
+in `app/account.js` (the account drawer's new-password field, whose `autocomplete` is `new-password`)
+as a hardcoded secret. Any PR whose diff carries that line fails the GitGuardian check: #84, which
+moved it out of `app.js`, and #86, which merged `main` in after it. Nothing is leaked and the check
+isn't required; the incident has to be marked a false positive in the GitGuardian dashboard, which
+agents can't reach.
+
 ## Agent-rules gotcha: the GitNexus block is pinned (since 2026-09-29)
 
 `gitnexus analyze` rewrites the `<!-- gitnexus:start -->` … `<!-- gitnexus:end -->` block in
