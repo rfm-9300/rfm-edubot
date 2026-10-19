@@ -7,6 +7,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 
 - [overview.md](overview.md) — what the product is, the message pipeline, modules and channels, rules that apply everywhere
 - [architecture-review.md](architecture-review.md) — the 2026-09-28 review: access policy, webhook replay, conversation lanes, tool-to-module tables, hot spots
+- [single-instance.md](single-instance.md) — what lives in one process's memory (queue, lanes, rate limiter, locks, caches) and what would move to shared state to run two instances
 - [tenants-and-companies.md](tenants-and-companies.md) — a tenant holding several companies: data scope, users, token switching, soft delete and restore
 - [mongo-databases.md](mongo-databases.md) — the three Mongo databases and which collection goes where, the split from one database, backups by database, restoring one company
 

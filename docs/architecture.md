@@ -1271,6 +1271,32 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Manual backups from the backoffice** — the internet-facing app never runs host commands. `POST /admin/api/backups` only writes `request.json` into a mounted control folder; the host's `backup-runner.sh` (cron, every minute) claims it by renaming it, runs `backup-mongo.sh` (which now takes a `flock` so it never overlaps the nightly run) and writes `last.json`/`last.log` back. Each backup is two archives, `platform-<timestamp>` and `data-<timestamp>`; the app lists them from the read-only backups mount with what each holds, and `<archive>.uploaded` markers left after a successful `rclone copy` show which ones were copied off the server. A stale `heartbeat` (over three minutes) shows the runner as stopped. Restores stay on the host: `restore-mongo.sh` for whole databases, `restore-tenant.sh` for one company. See `DEPLOYMENT_RUNBOOK.md` → Backups.
 - **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
 
+## Single-instance state
+
+The app runs as one instance, and a release recreates that one container. The state below lives in
+the process's memory; it is correct for one instance and would have to move to shared state (Mongo,
+or a broker) before two instances could run, a deploy that overlaps old and new included. Nothing
+here is built yet; the reasoning is in [wiki/single-instance.md](../wiki/single-instance.md).
+
+| Component | Held in memory | With two instances | Would move to |
+|---|---|---|---|
+| `MessageQueue` + `ConversationLanes` (`messaging/`) | Inbound messages waiting, 16 lanes keyed by tenant, channel and participant | One conversation's messages are ordered only within a process; each instance re-queues every `received` event from the last 30 minutes at startup, including ones the other is answering | A Mongo work queue claimed per conversation (like `DomainEventLog.claimNext`), or routing each conversation to one instance |
+| `RateLimiter` (`ratelimit/`, one per pipeline in `TenantPipelineFactory`) | Per-customer hour and day counters, reset when the pipeline is evicted | Each instance counts separately, doubling every customer's quota | Counters in `wabot_runtime` with a TTL |
+| `BookingScheduler` locks | A `Mutex` per company around "find overlaps, then insert" | Two instances can book the same slot | A lock document or a conditional write in Mongo |
+| `CompanyService` locks (`DashboardCompanyRoutes.kt`) | A `Mutex` per tenant around "count companies, then create" | Two creates can pass the company limit | A conditional update on the tenant's company count |
+| `OAuthState` | The OAuth states already consumed | A state is single-use per instance only | A collection with a unique state and a TTL |
+| `TenantRegistry` | Channel binding → tenant, for webhooks | A channel connected, moved or removed through one instance is unknown to the other until restart | Reload on a change signal (change stream, or a polled version document) |
+| `TenantPipelineFactory` cache | One `MessagePipeline` per tenant with its persona, modules and limits | The other instance keeps answering with the old persona and settings | Evict on the same change signal |
+| `RuntimeConfig` + `AdminAccess` | Platform-setting overrides and the backoffice admin list | A setting or admin change applies only on the instance that made it | Reload on a change signal |
+| `AgentDispatcher` + `DomainEventInterest` | Each company's active agents and the event types they listen for | The other instance doesn't record or dispatch events for agents activated elsewhere | Reload on a change signal |
+| `WebChannelRegistry` | Website-widget WebSocket sessions | Only the instance holding a visitor's socket can send the reply | Sticky sessions plus handing replies to the owning instance |
+| `DomainEventSignal` | Wakes the local dispatcher after a write | Other instances pick events up on their next poll | Nothing needed (latency only) |
+| Caches and local locks: WhatsApp templates (`InboxService`, `WhatsAppTemplateSending`), `EmailInsightsService`, `GoogleTokenProvider`, `PersonaCompiler`, `AgentRunExecutor` semaphores, `DeduplicationService` mutex | Short-lived copies, de-duplicated work, per-company caps | Duplicated work (an extra model call or token refresh) or a cap per instance, never a wrong result | Can stay per instance |
+
+Already shared through Mongo: background jobs take a lease (`SchedulerLease`: agents' scheduler,
+Gmail sync, retention jobs), webhook dedup is a unique `eventId`, domain events and agent runs are
+claimed atomically, and phone uniqueness is a unique index.
+
 ## Infrastructure
 
 ```
