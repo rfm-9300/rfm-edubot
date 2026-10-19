@@ -6,6 +6,7 @@ import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.dashboard.openToEverySession
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.encodeURLParameter
 import io.ktor.server.application.call
@@ -52,19 +53,21 @@ fun Route.instagramOAuthRoutes(
     }
 
     authenticate("dashboard") {
-        // Tenant-scoped: the slug comes from the JWT, so a client can only ever link their own tenant.
-        get("/app/api/instagram/connect") {
-            val config = configProvider()
-            if (!config.oauthEnabled) {
-                call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "Instagram OAuth not configured"))
-                return@get
+        openToEverySession("connecting an Instagram account to the session's own company") {
+            // Tenant-scoped: the slug comes from the JWT, so a client can only ever link their own tenant.
+            get("/app/api/instagram/connect") {
+                val config = configProvider()
+                if (!config.oauthEnabled) {
+                    call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "Instagram OAuth not configured"))
+                    return@get
+                }
+                val tenantId = call.principal<JWTPrincipal>()?.payload?.getClaim("tenantId")?.asString()
+                    ?: return@get call.respond(HttpStatusCode.Unauthorized)
+                val tenant = tenantRepository.findById(ObjectId(tenantId))
+                    ?: return@get call.respond(HttpStatusCode.NotFound)
+                val state = oauthState.mint(tenant.slug, origin = OAuthState.ORIGIN_DASHBOARD)
+                call.respond(mapOf("authorizeUrl" to authorizeUrl(config, state)))
             }
-            val tenantId = call.principal<JWTPrincipal>()?.payload?.getClaim("tenantId")?.asString()
-                ?: return@get call.respond(HttpStatusCode.Unauthorized)
-            val tenant = tenantRepository.findById(ObjectId(tenantId))
-                ?: return@get call.respond(HttpStatusCode.NotFound)
-            val state = oauthState.mint(tenant.slug, origin = OAuthState.ORIGIN_DASHBOARD)
-            call.respond(mapOf("authorizeUrl" to authorizeUrl(config, state)))
         }
     }
 

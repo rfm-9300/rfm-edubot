@@ -131,71 +131,73 @@ fun Route.dashboardAccountRoutes(
 
     authenticate("dashboard") {
         route("/app/api/account") {
-            get {
-                val user = call.accountUser() ?: return@get
-                call.respond(user.accountDto(googleConfig() != null))
-            }
-
-            post("/google/link") {
-                val user = call.accountUser() ?: return@post
-                val google = googleConfig() ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "google_sign_in_disabled"))
-                val request = call.receive<LinkGoogleRequest>()
-                if (user.googleUid != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_linked"))
-                if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
-                val identity = when (val result = withContext(Dispatchers.IO) { googleVerifier.identify(request.idToken, google, RECENT_SIGN_IN_SECONDS) }) {
-                    is FirebaseIdTokenVerifier.Result.Allowed -> result
-                    is FirebaseIdTokenVerifier.Result.Rejected -> return@post call.respondRejected(result)
+            openToEverySession("the signed-in user's own sign-in: password and Google") {
+                get {
+                    val user = call.accountUser() ?: return@get
+                    call.respond(user.accountDto(googleConfig() != null))
                 }
-                when (dashboardUsers.linkGoogle(user.id, identity.uid, identity.email)) {
-                    DashboardUserRepository.LinkResult.LINKED -> {
-                        accountLog.info("Dashboard user {} linked Google account {}", user.email, identity.email)
-                        call.respondAccount(dashboardUsers, user, googleAvailable = true)
+
+                post("/google/link") {
+                    val user = call.accountUser() ?: return@post
+                    val google = googleConfig() ?: return@post call.respond(HttpStatusCode.NotFound, mapOf("error" to "google_sign_in_disabled"))
+                    val request = call.receive<LinkGoogleRequest>()
+                    if (user.googleUid != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_linked"))
+                    if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
+                    val identity = when (val result = withContext(Dispatchers.IO) { googleVerifier.identify(request.idToken, google, RECENT_SIGN_IN_SECONDS) }) {
+                        is FirebaseIdTokenVerifier.Result.Allowed -> result
+                        is FirebaseIdTokenVerifier.Result.Rejected -> return@post call.respondRejected(result)
                     }
-                    DashboardUserRepository.LinkResult.TAKEN -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "google_in_use"))
-                    DashboardUserRepository.LinkResult.NOT_FOUND -> call.respond(HttpStatusCode.NotFound)
+                    when (dashboardUsers.linkGoogle(user.id, identity.uid, identity.email)) {
+                        DashboardUserRepository.LinkResult.LINKED -> {
+                            accountLog.info("Dashboard user {} linked Google account {}", user.email, identity.email)
+                            call.respondAccount(dashboardUsers, user, googleAvailable = true)
+                        }
+                        DashboardUserRepository.LinkResult.TAKEN -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "google_in_use"))
+                        DashboardUserRepository.LinkResult.NOT_FOUND -> call.respond(HttpStatusCode.NotFound)
+                    }
                 }
-            }
 
-            post("/google/unlink") {
-                val user = call.accountUser() ?: return@post
-                val request = call.receive<CurrentPasswordRequest>()
-                if (user.googleUid != null) {
-                    // Without a password, unlinking would leave no way to sign in.
-                    if (user.passwordHash == null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "password_required"))
-                    if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
-                    dashboardUsers.unlinkGoogle(user.id)
-                    accountLog.info("Dashboard user {} unlinked their Google account", user.email)
+                post("/google/unlink") {
+                    val user = call.accountUser() ?: return@post
+                    val request = call.receive<CurrentPasswordRequest>()
+                    if (user.googleUid != null) {
+                        // Without a password, unlinking would leave no way to sign in.
+                        if (user.passwordHash == null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "password_required"))
+                        if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
+                        dashboardUsers.unlinkGoogle(user.id)
+                        accountLog.info("Dashboard user {} unlinked their Google account", user.email)
+                    }
+                    call.respondAccount(dashboardUsers, user, googleConfig() != null)
                 }
-                call.respondAccount(dashboardUsers, user, googleConfig() != null)
-            }
 
-            post("/password") {
-                val user = call.accountUser() ?: return@post
-                val request = call.receive<SetPasswordRequest>()
-                newPasswordProblem(request.newPassword)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-                if (user.passwordHash != null) {
-                    if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
-                } else if (!call.confirmLinkedGoogle(user, request.idToken, googleConfig(), googleVerifier)) {
-                    return@post
+                post("/password") {
+                    val user = call.accountUser() ?: return@post
+                    val request = call.receive<SetPasswordRequest>()
+                    newPasswordProblem(request.newPassword)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                    if (user.passwordHash != null) {
+                        if (!user.passwordMatches(request.currentPassword)) return@post call.respondWrongPassword()
+                    } else if (!call.confirmLinkedGoogle(user, request.idToken, googleConfig(), googleVerifier)) {
+                        return@post
+                    }
+                    val hash = withContext(Dispatchers.Default) { BCrypt.withDefaults().hashToString(12, request.newPassword.toCharArray()) }
+                    dashboardUsers.setPasswordHash(user.id, hash)
+                    accountLog.info("Dashboard user {} {} their password", user.email, if (user.passwordHash == null) "set" else "changed")
+                    call.respondAccount(dashboardUsers, user, googleConfig() != null)
                 }
-                val hash = withContext(Dispatchers.Default) { BCrypt.withDefaults().hashToString(12, request.newPassword.toCharArray()) }
-                dashboardUsers.setPasswordHash(user.id, hash)
-                accountLog.info("Dashboard user {} {} their password", user.email, if (user.passwordHash == null) "set" else "changed")
-                call.respondAccount(dashboardUsers, user, googleConfig() != null)
-            }
 
-            // Confirmed with a fresh sign-in to the linked Google account, which proves that account
-            // still works before it becomes the only way in.
-            post("/password/disable") {
-                val user = call.accountUser() ?: return@post
-                val request = call.receive<GoogleConfirmRequest>()
-                if (user.passwordHash != null) {
-                    if (user.googleUid == null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "google_required"))
-                    if (!call.confirmLinkedGoogle(user, request.idToken, googleConfig(), googleVerifier)) return@post
-                    dashboardUsers.setPasswordHash(user.id, null)
-                    accountLog.info("Dashboard user {} switched to Google-only sign-in", user.email)
+                // Confirmed with a fresh sign-in to the linked Google account, which proves that account
+                // still works before it becomes the only way in.
+                post("/password/disable") {
+                    val user = call.accountUser() ?: return@post
+                    val request = call.receive<GoogleConfirmRequest>()
+                    if (user.passwordHash != null) {
+                        if (user.googleUid == null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "google_required"))
+                        if (!call.confirmLinkedGoogle(user, request.idToken, googleConfig(), googleVerifier)) return@post
+                        dashboardUsers.setPasswordHash(user.id, null)
+                        accountLog.info("Dashboard user {} switched to Google-only sign-in", user.email)
+                    }
+                    call.respondAccount(dashboardUsers, user, googleConfig() != null)
                 }
-                call.respondAccount(dashboardUsers, user, googleConfig() != null)
             }
         }
     }

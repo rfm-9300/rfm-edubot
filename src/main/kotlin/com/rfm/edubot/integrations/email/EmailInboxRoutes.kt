@@ -2,8 +2,9 @@ package com.rfm.edubot.integrations.email
 
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardModules
-import com.rfm.edubot.dashboard.dashboardContext
-import com.rfm.edubot.dashboard.requireModule
+import com.rfm.edubot.dashboard.ModuleDenial
+import com.rfm.edubot.dashboard.moduleContext
+import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -29,56 +30,58 @@ import kotlinx.serialization.Serializable
 internal fun Route.emailInboxRoutes(inbox: EmailInbox) {
     authenticate("dashboard") {
         route("/app/api/email/inbox") {
-            get {
-                val ctx = call.emailContext() ?: return@get
-                call.respond(inbox.status(ctx))
-            }
+            requireModules(DashboardModules.EMAIL, denial = ModuleDenial.MODULE_DISABLED) {
+                get {
+                    val ctx = call.moduleContext()
+                    call.respond(inbox.status(ctx))
+                }
 
-            get("/threads") {
-                val ctx = call.emailContext() ?: return@get
-                val params = call.request.queryParameters
-                val account = params["account"]?.takeIf { it.isNotBlank() }?.let { it.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_account")) }
-                call.respond(inbox.threads(ctx, EmailThreadFilter.of(params["filter"]), account, params["q"]))
-            }
+                get("/threads") {
+                    val ctx = call.moduleContext()
+                    val params = call.request.queryParameters
+                    val account = params["account"]?.takeIf { it.isNotBlank() }?.let { it.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_account")) }
+                    call.respond(inbox.threads(ctx, EmailThreadFilter.of(params["filter"]), account, params["q"]))
+                }
 
-            get("/threads/{id}") {
-                val ctx = call.emailContext() ?: return@get
-                val message = call.emailParam(inbox, ctx) ?: return@get
-                call.respond(inbox.thread(ctx, message))
-            }
+                get("/threads/{id}") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@get
+                    call.respond(inbox.thread(ctx, message))
+                }
 
-            post("/threads/{id}/read") {
-                val ctx = call.emailContext() ?: return@post
-                val message = call.emailParam(inbox, ctx) ?: return@post
-                call.respond(UnreadDto(inbox.markRead(ctx.tenant, message)))
-            }
+                post("/threads/{id}/read") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@post
+                    call.respond(UnreadDto(inbox.markRead(ctx.tenant, message)))
+                }
 
-            post("/threads/{id}/unread") {
-                val ctx = call.emailContext() ?: return@post
-                val message = call.emailParam(inbox, ctx) ?: return@post
-                call.respond(UnreadDto(inbox.markUnread(ctx.tenant, message)))
-            }
+                post("/threads/{id}/unread") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@post
+                    call.respond(UnreadDto(inbox.markUnread(ctx.tenant, message)))
+                }
 
-            post("/threads/{id}/insights") {
-                val ctx = call.emailContext() ?: return@post
-                val message = call.emailParam(inbox, ctx) ?: return@post
-                call.respondResult(inbox.analyze(ctx, message, refresh = call.request.queryParameters["refresh"] in TRUTHY))
-            }
+                post("/threads/{id}/insights") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@post
+                    call.respondResult(inbox.analyze(ctx, message, refresh = call.request.queryParameters["refresh"] in TRUTHY))
+                }
 
-            post("/threads/{id}/reply") {
-                val ctx = call.emailContext() ?: return@post
-                val message = call.emailParam(inbox, ctx) ?: return@post
-                val request = runCatching { call.receive<EmailReplyRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                call.respondResult(inbox.reply(ctx, message, request))
-            }
+                post("/threads/{id}/reply") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@post
+                    val request = runCatching { call.receive<EmailReplyRequest>() }.getOrNull()
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                    call.respondResult(inbox.reply(ctx, message, request))
+                }
 
-            post("/threads/{id}/actions") {
-                val ctx = call.emailContext() ?: return@post
-                val message = call.emailParam(inbox, ctx) ?: return@post
-                val request = runCatching { call.receive<EmailActionRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                call.respondResult(inbox.record(ctx, message, request))
+                post("/threads/{id}/actions") {
+                    val ctx = call.moduleContext()
+                    val message = call.emailParam(inbox, ctx) ?: return@post
+                    val request = runCatching { call.receive<EmailActionRequest>() }.getOrNull()
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                    call.respondResult(inbox.record(ctx, message, request))
+                }
             }
         }
     }
@@ -92,18 +95,6 @@ private val TRUTHY = setOf("1", "true", "yes")
 private suspend fun ApplicationCall.respondResult(result: EmailInbox.Result) = when (result) {
     is EmailInbox.Result.Thread -> respond(result.thread)
     is EmailInbox.Result.Refused -> respond(HttpStatusCode.fromValue(result.status), mapOf("error" to result.key))
-}
-
-private suspend fun ApplicationCall.emailContext(): DashboardContext? {
-    val ctx = dashboardContext() ?: run {
-        respond(HttpStatusCode.Unauthorized)
-        return null
-    }
-    if (!ctx.requireModule(DashboardModules.EMAIL)) {
-        respond(HttpStatusCode.Forbidden, mapOf("error" to "module_disabled"))
-        return null
-    }
-    return ctx
 }
 
 private suspend fun ApplicationCall.emailParam(inbox: EmailInbox, ctx: DashboardContext): EmailMessage? {

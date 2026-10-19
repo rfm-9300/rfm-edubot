@@ -7,6 +7,7 @@ import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.ChannelBinding
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.Tenant
+import com.rfm.edubot.dashboard.openToEverySession
 import io.ktor.client.plugins.HttpRequestTimeoutException
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -50,23 +51,25 @@ fun Route.whatsAppSignupRoutes(
     }
 
     authenticate("dashboard") {
-        // Tenant-scoped: slug comes from the JWT so a client can only connect their own tenant.
-        get("/app/api/whatsapp/embedded-signup/config") {
-            call.respond(embeddedSignupConfig(configProvider()))
-        }
+        openToEverySession("connecting a WhatsApp number to the session's own company") {
+            // Tenant-scoped: slug comes from the JWT so a client can only connect their own tenant.
+            get("/app/api/whatsapp/embedded-signup/config") {
+                call.respond(embeddedSignupConfig(configProvider()))
+            }
 
-        post("/app/api/whatsapp/connect") {
-            val tenantId = call.principal<JWTPrincipal>()?.payload?.getClaim("tenantId")?.asString()
-                ?: return@post call.respond(HttpStatusCode.Unauthorized)
-            val tenant = tenantRepository.findById(ObjectId(tenantId))
-                ?: return@post call.respond(HttpStatusCode.NotFound)
-            connectWhatsAppForTenant(
-                call = call,
-                slug = tenant.slug,
-                config = configProvider(),
-                signupClient = signupClient,
-                bindingService = bindingService,
-            )
+            post("/app/api/whatsapp/connect") {
+                val tenantId = call.principal<JWTPrincipal>()?.payload?.getClaim("tenantId")?.asString()
+                    ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                val tenant = tenantRepository.findById(ObjectId(tenantId))
+                    ?: return@post call.respond(HttpStatusCode.NotFound)
+                connectWhatsAppForTenant(
+                    call = call,
+                    slug = tenant.slug,
+                    config = configProvider(),
+                    signupClient = signupClient,
+                    bindingService = bindingService,
+                )
+            }
         }
     }
 }
