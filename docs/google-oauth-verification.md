@@ -14,34 +14,74 @@ application client, authorization code, `access_type=offline`), one grant per co
 | `https://www.googleapis.com/auth/gmail.readonly` | **restricted** | only with "Use my inbox in automations" (or "Read this inbox" on the Email page) | Read new inbox messages to link them to clients, show them to the company's team on the Email page with the dashboard actions they call for, and start the company's email automations. |
 | `https://www.googleapis.com/auth/gmail.modify` | **restricted** | same, together with `gmail.readonly` | Planned: mark the inbox messages an automation handled. Not used yet (see below). |
 
-Sending needs brand verification plus sensitive-scope verification. Inbox reading needs
-restricted-scope verification and a yearly **CASA** security assessment; it stays off (the scopes
-are never requested) until that is done. `gmail.readonly` + `gmail.modify` are asked for with
-incremental consent, so companies that only send never see them.
+Sending needs brand verification plus sensitive-scope verification (Google quotes 3–5 business
+days, with no security assessment). Inbox reading needs restricted-scope verification and a yearly
+**CASA** security assessment; it stays off (the scopes are never requested) until that is done.
+`gmail.readonly` + `gmail.modify` are asked for with incremental consent, so companies that only
+send never see them. Branding comes first: Google opens a scope review only once the branding is
+verified and published.
+
+## What Google checks first
+
+Brand verification reads the consent screen and the pages it links:
+
+- **Home page**: `https://thebotslab.pt/crm/`, a product page in the marketing site's repo
+  (`websites-thebots`, `src/pages/crm.astro`). Google wants a public page on the privacy policy's
+  domain that describes the app (a login page alone doesn't count), carries the app name, and links
+  the same privacy policy URL as the consent screen. The studio landing page at
+  `https://thebotslab.pt/` describes the studio rather than the app and links no policy, so it can't
+  be the home page.
+- **App name**: `TheBotsLab`, written exactly so on the consent screen, the home page and `/privacy`.
+  Renaming the app after approval means verifying again.
+- **Domains**: every authorized domain must be verified in Search Console by an account that is also
+  an Owner or Editor of the project. Authorized domains include the domains of every web client's
+  redirect URIs and JavaScript origins, so the Firebase sign-in client's `thebotslab.firebaseapp.com`
+  counts too. If the branding check flags it, move Firebase's auth domain onto `thebotslab.pt` by
+  proxying `/__/auth/` ([Firebase's redirect best practices](https://firebase.google.com/docs/auth/web/redirect-best-practices)).
+- **Support email**: the dropdown offers only the signed-in account and the Google Groups it
+  manages. To show `hello@thebotslab.pt`, make that account an Owner or Editor of the project and do
+  the console steps signed in as it.
 
 ## Google Cloud project
 
 1. Use the Firebase project **thebotslab** (one brand on the consent screen for sign-in and Gmail).
+   Google sign-in for `/app` and the backoffice uses the same consent screen, so every change below
+   shows there too.
 2. **APIs & Services > Library**: enable the **Gmail API**.
-3. **OAuth consent screen** (Google Auth Platform > Branding):
+3. **Audience**: user type External, publishing status **In production**. Never switch to Testing:
+   publishing status is per project, and Testing would lock every Google account that isn't on the
+   test-user list out of Google sign-in.
+4. **Branding** (Google Auth Platform > Branding):
    - App name `TheBotsLab`, support email `hello@thebotslab.pt`, logo (120x120, the brand mark).
-   - Home page `https://thebotslab.pt`, privacy policy `https://thebotslab.pt/privacy`.
+   - Home page `https://thebotslab.pt/crm/`, privacy policy `https://thebotslab.pt/privacy`. Terms of
+     service are optional; we have none.
    - Authorized domain: `thebotslab.pt`.
    - Developer contact: `hello@thebotslab.pt`.
-4. **Data access**: add `openid`, `email` and `gmail.send` (later `gmail.readonly` and `gmail.modify`).
-5. **Clients > Create client > Web application**, named `Gmail integration` (separate from the
-   Firebase sign-in client). Authorized redirect URI: `https://thebotslab.pt/integrations/google/callback`.
-6. Put the client in the app: backoffice **Platform settings > Google** (`GOOGLE_OAUTH_CLIENT_ID`,
+   - Press **Verify Branding**: an automated check that usually takes minutes. If it lists issues, fix
+     them and run it again, or request additional review (2–3 business days). Then press **Publish
+     branding** within 7 days, or the check has to run again. Branding can't be edited while a check
+     runs, and changing the name, logo or URLs later makes a draft that needs verifying again.
+5. **Data access**: add `gmail.send` next to the sign-in scopes already listed. Add `gmail.readonly`
+   (and `gmail.modify`, if it stays) only when the restricted-scope submission is ready: declaring a
+   restricted scope pulls the submission into the restricted review and CASA.
+6. **Clients > Create client > Web application**, named `Gmail integration` (separate from the
+   Firebase sign-in client). Authorized redirect URI: `https://thebotslab.pt/integrations/google/callback`;
+   no JavaScript origins. Keep localhost and tunnel URLs out of this project and use another project
+   for local work: a redirect URI added after approval means verifying again, and Google suggests
+   removing clients that aren't production-ready from the project it verifies.
+7. Put the client in the app: backoffice **Platform settings > Google** (`GOOGLE_OAUTH_CLIENT_ID`,
    `GOOGLE_OAUTH_CLIENT_SECRET`, `GOOGLE_OAUTH_REDIRECT`) or the same names as environment variables,
    plus `INTEGRATIONS_ENCRYPTION_KEY` (env only: `openssl rand -base64 32`). Without the key the
    Gmail row stays hidden and connecting answers 503.
 
-## Testing mode (before verification)
+## Before approval
 
-- At most 100 test users, listed under **Audience > Test users**. Only those Google accounts can
-  consent.
-- Refresh tokens expire after 7 days: connected accounts drop to "Needs reconnecting" every week.
-- Don't onboard real companies until verification passes and the app is **In production**.
+- Connecting Gmail shows Google's "Google hasn't verified this app" screen first; testers continue
+  through **Advanced**. The demo video may show it.
+- Google lets at most 100 new users past that screen in total, so connect only test accounts, and
+  don't onboard real companies until the `gmail.send` review has passed.
+- Testing mode (a test-user list, refresh tokens that expire after 7 days) isn't an option here; see
+  Audience above.
 
 ## Exact use of each scope (for the verification form)
 
@@ -51,7 +91,9 @@ the messages of automations it sets up (for example, a reminder before an invoic
 own address. We send only emails that a signed-in user of that company sends from the dashboard
 (the "Send by email" button on a quote or invoice, the "Send a test email" button in Settings) or
 that an automation the company created and turned on sends. Each sent email is shown on the
-client's record. We never read the mailbox with this scope.
+client's record. We never read the mailbox with this scope. No narrower scope can send: the other
+Gmail scopes that can (`gmail.compose`, `gmail.modify`, `https://mail.google.com/`) are restricted
+and give more access.
 
 **`gmail.readonly` / `gmail.modify`** (Phase 4): when a company admin turns on "Use my inbox in
 automations", we read the messages that arrive in its inbox from then on (not its own sent mail,
@@ -84,20 +126,25 @@ automation handled) or drop it from `GoogleScopes.inbox`: reviewers refuse scope
 
 ## Recording the demo video
 
-1. Use a test Google account that is on the test-user list, and a company with a synthetic client
-   whose email you control. English UI (**Settings > Language**), English browser.
+1. Use a test Google account, a company whose admin user has that account's email (the first
+   Google sign-in links them), and a synthetic client whose email you control. English UI
+   (**Settings > Language**), English browser.
 2. Show the browser address bar throughout: the consent screen URL must show the OAuth client ID.
-3. In **Settings > Channels**, press **Connect Gmail**. On Google's screen, show the app name, the
-   requested permissions ("Send email on your behalf") and press **Continue**.
-4. Back in Settings, show the connected account, open **Manage**, set a sender name and signature,
+3. Start at `https://thebotslab.pt/app/` and sign in with **Continue with Google**: Google asks to
+   see the sign-in flow when the app uses Google sign-in.
+4. In **Settings > Channels**, press **Connect Gmail**. Continue past Google's unverified-app screen,
+   then show the app name, the requested permissions ("Send email on your behalf") and press
+   **Continue**.
+5. Back in Settings, show the connected account, open **Manage**, set a sender name and signature,
    press **Send a test email**, and show it arriving in the test inbox.
-5. Open a quote, press **Send by email**, show the draft (recipient, subject, text, PDF attached),
+6. Open a quote, press **Send by email**, show the draft (recipient, subject, text, PDF attached),
    send it, then show the email in the recipient's inbox and on the client's **Emails** tab.
-6. Open **Agents**, show an automation with an **Email** step (for example the invoice reminder) and
+7. Open **Agents**, show an automation with an **Email** step (for example the invoice reminder) and
    the email it sent.
-7. Back in Settings, **Disconnect** the account and confirm; show that the row is gone and the
+8. Back in Settings, **Disconnect** the account and confirm; show that the row is gone and the
    client's Emails tab no longer lists the mail.
-8. Don't show passwords, tokens, the client secret or real customer data.
+9. Don't show passwords, tokens, the client secret or real customer data. Upload the video to
+   YouTube as Unlisted.
 
 For the restricted-scope video (Phase 4), also: open **Manage** on the account, turn on **Use my
 inbox in automations**, show Google's second consent screen (reading email), send a test email from
@@ -106,11 +153,27 @@ automation (for example the lead reply, answered in the same thread). With the E
 **Email**, open that email, show the summary and suggested actions, add a quote from one (saving the
 form yourself), and send a reply from the page.
 
+## Submitting
+
+1. Publish the branding first (Google Cloud project, step 4): the Verification Center takes a data
+   access request only after that.
+2. **Verification Center** > data access: paste the text from "Exact use of each scope" for each
+   sensitive or restricted scope, say why a narrower scope wouldn't do, give the video's YouTube
+   link, and add up to three links (home page, `/privacy`, `/data-deletion`).
+3. Google quotes 3–5 business days for sensitive scopes and several weeks for restricted ones. Its
+   questions arrive by email at the support and developer contact addresses, and the review pauses
+   until we answer.
+
 ## Restricted scopes and CASA (Phase 4)
 
-- Verification of `gmail.readonly` / `gmail.modify` needs a **CASA Tier 2** assessment by an
-  authorized lab (App Defense Alliance), renewed every 12 months. Google emails the steps after the
-  restricted-scope submission.
+- Verification of `gmail.readonly` / `gmail.modify` needs a **CASA** security assessment by a lab
+  the App Defense Alliance authorized, renewed every 12 months. The free self-scan route is
+  deprecated: the lab verifies the evidence (assurance level AL1, or AL2 for high-risk apps) and
+  charges for it; Google doesn't. Google emails the steps after the restricted-scope submission.
+- Under **What features will you use?**, pick the CRM use: Google's Workspace user data policy lists
+  "applications for customer relationship management" among the approved uses of Gmail scopes.
+- Before submitting, add the Email page and the inbox automations to the home page
+  (`src/pages/crm.astro` in `websites-thebots`); it describes only sending today.
 - Keep for the assessor: this document, `docs/architecture.md`, the token cipher and key rotation
   (comma-separated keys in `INTEGRATIONS_ENCRYPTION_KEY`, newest first), the retention job, and the
   deployment's TLS and access controls.
@@ -118,10 +181,12 @@ form yourself), and send a reply from the page.
 
 ## Before going live
 
-- [ ] Gmail API enabled, consent screen branded, domains verified in Search Console.
-- [ ] Web client created with the production redirect URI; values set in Platform settings.
+- [ ] Home page `https://thebotslab.pt/crm/` deployed: describes the app and links `https://thebotslab.pt/privacy`.
+- [ ] Gmail API enabled; `thebotslab.pt` verified in Search Console by an Owner or Editor of the project.
+- [ ] Branding verified and published (app name `TheBotsLab`, home page, privacy policy, support email).
+- [ ] Web client created with the production redirect URI only; values set in Platform settings.
 - [ ] `INTEGRATIONS_ENCRYPTION_KEY` set in the production environment and backed up.
 - [ ] `/privacy` and `/data-deletion` reachable over HTTPS on `thebotslab.pt`.
-- [ ] Brand + `gmail.send` verification submitted with the video; app switched to **In production**.
-- [ ] (Phase 4) `gmail.modify` given its use or dropped from `GoogleScopes.inbox`.
+- [ ] `gmail.send` data access submitted with the video, and approved.
+- [ ] (Phase 4) `gmail.modify` given its use or dropped from `GoogleScopes.inbox`; home page describes inbox reading.
 - [ ] (Phase 4) Restricted scopes submitted; CASA passed; then inbox reading enabled (`GMAIL_INBOX_ENABLED=true`).

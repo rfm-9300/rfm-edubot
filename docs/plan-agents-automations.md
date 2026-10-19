@@ -342,7 +342,8 @@ and company per day, email sends per day, token budget); dry run ("Test on a rec
 - Scopes: `openid`, `email`, `gmail.send` (sensitive: brand verification + demo video). Inbox reading
   adds `gmail.readonly` + `gmail.modify` (restricted: verification + annual CASA assessment).
 - Testing mode: at most 100 listed test users and refresh tokens expire after 7 days — don't onboard
-  real tenants before verification.
+  real tenants before verification. (Superseded: the consent screen also serves Google sign-in, so
+  the project stays In production; see `docs/google-oauth-verification.md`.)
 - Limited Use: disclose Gmail data use on `/privacy`, never train models on it, delete it on request
   or disconnect.
 
