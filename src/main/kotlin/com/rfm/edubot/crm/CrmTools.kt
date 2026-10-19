@@ -19,12 +19,21 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 
+/**
+ * The bot's CRM tools, which the dashboard assistant and agents also use. Their writes go through the same
+ * services as the dashboard's routes; [clientServices] is what an invoice's Serviços rows are read from.
+ */
 class CrmTools(
     private val clients: ClientRepository,
     private val quotes: QuoteRepository,
     private val invoices: InvoiceRepository,
     private val standardItems: StandardItemRepository,
+    clientServices: ClientServiceRepository,
 ) {
+    private val directory = ClientDirectory(clients)
+    private val quoteService = QuoteService(quotes, invoices, clients)
+    private val invoiceService = InvoiceService(invoices, clientServices, clients)
+
     val definitions: List<ToolDefinition> = listOf(
         tool("search_clients", "Search clients by name or phone", obj("query" to "string"), listOf("query")),
         tool("list_service_templates", "List reusable construction service templates and default clauses", obj("query" to "string")),
@@ -199,14 +208,12 @@ class CrmTools(
 
     private suspend fun createClient(args: JsonObject): JsonObject {
         // search_clients doesn't see archived clients; one coming back is restored rather than duplicated.
-        val archived = clients.findByPhone(args.string("phone"))?.takeIf { it.archivedAt != null }
-        val client = archived?.let { clients.setArchived(it.id, archived = false) }
-            ?: clients.create(args.string("name"), args.string("phone"), args.optionalString("address"))
+        val client = directory.createOrRestore(args.string("name"), args.string("phone"), args.optionalString("address"))
         return buildJsonObject { put("client", clientJson(client.id.toHexString(), client.number, client.name, client.phone, client.address)) }
     }
 
     private suspend fun createQuote(args: JsonObject): JsonObject {
-        val quote = quotes.create(
+        val quote = quoteService.create(
             clientId = resolveClientId(args.string("client_id")),
             items = args.items(),
             notes = args.optionalString("notes"),
@@ -231,7 +238,7 @@ class CrmTools(
                 unitPriceEur = obj.getValue("price_eur").jsonPrimitive.double,
             )
         }
-        val quote = quotes.update(
+        val quote = quoteService.revise(
             id = id,
             items = items,
             notes = args.optionalString("notes"),
@@ -269,7 +276,7 @@ class CrmTools(
     }
 
     private suspend fun createInvoice(args: JsonObject): JsonObject {
-        val invoice = invoices.create(
+        val invoice = invoiceService.create(
             clientId = resolveClientId(args.string("client_id")),
             quoteId = args.optionalString("quote_id")?.let { ObjectId(it) },
             items = args.items(),
@@ -319,7 +326,7 @@ class CrmTools(
     }
 
     private suspend fun markInvoicePaid(args: JsonObject): JsonObject {
-        val invoice = invoices.markPaid(ObjectId(args.string("invoice_id")))
+        val invoice = invoiceService.markPaid(ObjectId(args.string("invoice_id")))
             ?: return buildJsonObject { put("error", "Invoice not found") }
         return buildJsonObject {
             put("id", invoice.id.toHexString())

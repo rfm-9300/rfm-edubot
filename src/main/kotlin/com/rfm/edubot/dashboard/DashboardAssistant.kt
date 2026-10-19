@@ -25,6 +25,7 @@ import com.rfm.edubot.bookings.BookingTools
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
@@ -511,6 +512,7 @@ internal class DashboardAssistantService(
             QuoteRepository(mongo, tenant.id),
             InvoiceRepository(mongo, tenant.id),
             StandardItemRepository(mongo, tenant.id),
+            ClientServiceRepository(mongo, tenant.id),
         )
         val tools = CompositeToolPack(own, CrmToolPack(crm), BookingToolPack(bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools()), extra)
         val policy = CompositeToolPack(own, extra)

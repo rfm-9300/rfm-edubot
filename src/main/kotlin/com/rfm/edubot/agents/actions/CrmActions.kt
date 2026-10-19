@@ -21,6 +21,7 @@ import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.ClientServiceStatus
 import com.rfm.edubot.crm.model.InvoiceStatus
@@ -144,7 +145,7 @@ object SetQuoteStatusAction : AgentAction {
     override suspend fun execute(input: JsonObject, ctx: RunContext): ActionResult {
         val status = input.string("status")?.let { runCatching { QuoteStatus.valueOf(it.uppercase()) }.getOrNull() } ?: return ActionResult.Failed("invalid_status")
         val id = ctx.subjectId() ?: return ActionResult.Skipped("no_record")
-        QuoteRepository(ctx.services.mongo, ctx.tenant.id).update(id, null, null, null, status) ?: return ActionResult.Failed("quote_not_found")
+        QuoteService.of(ctx.services.mongo, ctx.tenant.id).setStatus(id, status) ?: return ActionResult.Failed("quote_not_found")
         return ActionResult.Done(buildJsonObject { put("status", status.name) })
     }
 }

@@ -20,7 +20,14 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
 
-internal fun Route.dashboardAssistantRoutes(
+/** `/assistant`: the dashboard AI assistant's threads, its proposed changes and its settings. */
+internal object AssistantRoutes : DashboardFeature(DashboardModules.AI_ASSISTANT) {
+    override fun Route.routes(deps: DashboardDeps) {
+        dashboardAssistantRoutes(deps.mongo, deps.aiClient, deps.assistantExtension, deps.inbox)
+    }
+}
+
+private fun Route.dashboardAssistantRoutes(
     mongo: MongoModule,
     aiClient: AiClient,
     extension: AssistantExtension? = null,
@@ -36,22 +43,22 @@ internal fun Route.dashboardAssistantRoutes(
 
     route("/assistant") {
         get("/threads") {
-            val ctx = call.assistantContext() ?: return@get
+            val ctx = call.assistantContext()
             call.respond(service.repository.listThreads(ctx.tenant.id, ctx.ownerKey, call.request.queryParameters["q"]).map { it.dto() })
         }
         post("/threads") {
-            val ctx = call.assistantContext() ?: return@post
+            val ctx = call.assistantContext()
             val request = runCatching { call.receive<CreateAssistantThreadRequest>() }.getOrDefault(CreateAssistantThreadRequest())
             call.respond(HttpStatusCode.Created, service.repository.createThread(ctx.tenant.id, ctx.ownerKey, request.title).dto())
         }
         get("/threads/{id}") {
-            val ctx = call.assistantContext() ?: return@get
+            val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@get call.respond(HttpStatusCode.BadRequest)
             val before = call.request.queryParameters["before"]?.let { it.toObjectId() ?: return@get call.respond(HttpStatusCode.BadRequest) }
             call.respond(service.threadDetail(ctx, threadId, before) ?: return@get call.respond(HttpStatusCode.NotFound))
         }
         patch("/threads/{id}") {
-            val ctx = call.assistantContext() ?: return@patch
+            val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             val title = runCatching { call.receive<RenameAssistantThreadRequest>() }.getOrNull()?.title?.trim().orEmpty()
             if (title.isEmpty() || title.length > DashboardAssistantRepository.MAX_TITLE) {
@@ -61,13 +68,13 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(thread.dto())
         }
         delete("/threads/{id}") {
-            val ctx = call.assistantContext() ?: return@delete
+            val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@delete call.respond(HttpStatusCode.BadRequest)
             if (!service.repository.deleteThread(ctx.tenant.id, ctx.ownerKey, threadId)) return@delete call.respond(HttpStatusCode.NotFound)
             call.respond(HttpStatusCode.NoContent)
         }
         post("/threads/{id}/messages") {
-            val ctx = call.assistantContext() ?: return@post
+            val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val thread = service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) ?: return@post call.respond(HttpStatusCode.NotFound)
             val content = runCatching { call.receive<AssistantMessageRequest>() }.getOrNull()?.content?.trim().orEmpty()
@@ -78,7 +85,7 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{id}/retry") {
-            val ctx = call.assistantContext() ?: return@post
+            val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) == null) return@post call.respond(HttpStatusCode.NotFound)
             if (!service.retry(ctx.context, ctx.ownerKey, threadId, ctx.modules)) {
@@ -87,7 +94,7 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/confirm") {
-            val ctx = call.assistantContext() ?: return@post
+            val ctx = call.assistantContext()
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             when (service.confirm(ctx.context, ctx.ownerKey, threadId, ctx.modules, actionId)) {
@@ -98,7 +105,7 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/cancel") {
-            val ctx = call.assistantContext() ?: return@post
+            val ctx = call.assistantContext()
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
             if (!service.repository.cancelAction(ctx.tenant.id, ctx.ownerKey, threadId, actionId)) {
@@ -107,11 +114,11 @@ internal fun Route.dashboardAssistantRoutes(
             call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         get("/settings") {
-            val ctx = call.assistantContext() ?: return@get
+            val ctx = call.assistantContext()
             call.respond(service.settings.find(ctx.tenant.id).dto(ctx))
         }
         put("/settings") {
-            val ctx = call.assistantContext() ?: return@put
+            val ctx = call.assistantContext()
             if (!ctx.context.isAdmin()) return@put call.respond(HttpStatusCode.Forbidden, AssistantErrorDto("not_allowed"))
             val request = runCatching { call.receive<AssistantSettingsRequest>() }.getOrNull()
                 ?: return@put call.respond(HttpStatusCode.BadRequest, AssistantErrorDto("invalid_request"))
@@ -135,14 +142,7 @@ private data class AssistantRouteContext(val context: DashboardContext) {
     val ownerKey get() = context.assistantOwnerKey()
 }
 
-private suspend fun ApplicationCall.assistantContext(): AssistantRouteContext? {
-    val ctx = dashboardContext() ?: return null
-    if (!ctx.requireModule(DashboardModules.AI_ASSISTANT)) {
-        respond(HttpStatusCode.Forbidden)
-        return null
-    }
-    return AssistantRouteContext(ctx)
-}
+private fun ApplicationCall.assistantContext(): AssistantRouteContext = AssistantRouteContext(moduleContext())
 
 private suspend fun DashboardAssistantService.threadDetail(ctx: AssistantRouteContext, threadId: ObjectId, before: ObjectId? = null): AssistantThreadDetailDto? {
     val thread = repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) ?: return null

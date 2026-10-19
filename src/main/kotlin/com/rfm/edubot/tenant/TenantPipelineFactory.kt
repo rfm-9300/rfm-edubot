@@ -10,6 +10,7 @@ import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
@@ -96,7 +97,7 @@ class TenantPipelineFactory(
             rateLimiter = RateLimiter(tenant.rateLimitPerHour, tenant.rateLimitPerDay),
             aiClient = aiClient,
             deduplicationService = deduplicationService,
-            crmTools = CrmTools(clients, quotes, invoices, items),
+            crmTools = CrmTools(clients, quotes, invoices, items, ClientServiceRepository(mongo, tenant.id)),
             bookingTools = bookingTools,
             clientRepository = clients,
             quoteRepository = quotes,

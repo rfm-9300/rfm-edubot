@@ -1,9 +1,6 @@
 package com.rfm.edubot.dashboard
 
-import com.mongodb.ErrorCategory
-import com.mongodb.MongoServerException
 import com.mongodb.client.model.Filters
-import com.rfm.edubot.admin.CreateClientRequest
 import com.rfm.edubot.agents.ai.UntrustedContent
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.ai.ToolDefinition
@@ -18,15 +15,17 @@ import com.rfm.edubot.conversation.model.Message
 import com.rfm.edubot.conversation.model.MessageAuthor
 import com.rfm.edubot.conversation.model.MessageContent
 import com.rfm.edubot.conversation.model.UserRole
+import com.rfm.edubot.crm.ClientDirectory
+import com.rfm.edubot.crm.ClientDraft
 import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.ClientServiceRepository
-import com.rfm.edubot.crm.CustomFields
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.ClientServiceStatus
@@ -83,6 +82,7 @@ internal class AssistantTools(
     private val quotes by lazy { QuoteRepository(mongo, tenant.id) }
     private val invoices by lazy { InvoiceRepository(mongo, tenant.id) }
     private val payments by lazy { PaymentRepository(mongo, tenant.id) }
+    private val directory by lazy { ClientDirectory(clients, ClientFields.of(tenant)) }
 
     override val definitions: List<ToolDefinition> = DEFINITIONS.filter { offered(it.name) }
     override fun knows(name: String): Boolean = name in MODULE_OF
@@ -323,13 +323,11 @@ internal class AssistantTools(
     }
 
     /** A new client's details, checked like the dashboard's form checks them. */
-    private class NewClient(val request: CreateClientRequest, val custom: Map<String, JsonPrimitive?>)
-
-    private suspend fun newClient(args: JsonObject): NewClient {
+    private suspend fun newClient(args: JsonObject): ClientDraft {
         val name = args.text("name") ?: throw missing("name")
         val phone = args.text("phone") ?: throw missing("phone")
         val fields = ClientFields.of(tenant)
-        val request = CreateClientRequest(
+        val draft = ClientDraft(
             name = name,
             phone = phone,
             address = args.text("address"),
@@ -341,25 +339,17 @@ internal class AssistantTools(
             contactPerson = args.text("contact_person"),
             customFields = customValues(args, fields),
         )
-        request.requiredError(fields = fields)?.let { throw Problem(it, "The company requires ${FIELD_NAMES[it] ?: "this field"} for new clients: ask the person for it.") }
-        request.detailsError()?.let { throw Problem(it, "${FIELD_NAMES[it]?.replaceFirstChar(Char::uppercase) ?: "A field"} isn't valid: check it with the person.") }
-        val custom = customChanges(fields, request, emptyMap())
+        directory.check(draft)?.let { throw it.problem(fields, update = false) }
         clients.findByPhone(phone)?.let { throw phoneTaken(it) }
-        return NewClient(request, custom)
+        return draft
     }
 
     private suspend fun createClient(args: JsonObject): JsonObject {
-        val draft = newClient(args)
-        val request = draft.request
-        val client = try {
-            clients.create(
-                request.name, request.phone, request.address, request.email, request.taxId, request.notes,
-                request.postalCode, request.city, request.contactPerson,
-                customFields = draft.custom.mapNotNull { (key, value) -> value?.let { key to it } }.toMap(),
-            )
-        } catch (e: MongoServerException) {
-            if (ErrorCategory.fromErrorCode(e.code) != ErrorCategory.DUPLICATE_KEY) throw e
-            throw clients.findByPhone(request.phone)?.let(::phoneTaken) ?: Problem("phone_taken", "Another record already has this phone.")
+        val client = when (val outcome = directory.create(newClient(args))) {
+            is ClientDirectory.Outcome.Saved -> outcome.client
+            is ClientDirectory.Outcome.PhoneTaken -> throw outcome.owner?.let(::phoneTaken) ?: Problem("phone_taken", "Another record already has this phone.")
+            is ClientDirectory.Outcome.Invalid -> throw outcome.problem(ClientFields.of(tenant), update = false)
+            ClientDirectory.Outcome.NotFound -> throw Problem("client_not_found", "That client no longer exists.")
         }
         return buildJsonObject {
             put("created", true)
@@ -370,14 +360,14 @@ internal class AssistantTools(
     }
 
     /** A change to an existing client, checked like the dashboard's form checks it. */
-    private class ClientUpdate(val client: Client, val request: CreateClientRequest, val custom: Map<String, JsonPrimitive?>)
+    private class ClientUpdate(val client: Client, val draft: ClientDraft)
 
     private suspend fun clientUpdate(args: JsonObject): ClientUpdate {
         val client = resolveClient(args.text("client_id") ?: throw missing("client_id"))
         if (clientChanges(client, args).isEmpty()) throw Problem("nothing_to_change", "Say which details to change.")
         val fields = ClientFields.of(tenant)
         val phone = args.text("phone") ?: client.phone
-        val request = CreateClientRequest(
+        val draft = ClientDraft(
             name = args.text("name") ?: client.name,
             phone = phone,
             address = if (args.has("address")) args.text("address") else client.address,
@@ -389,31 +379,33 @@ internal class AssistantTools(
             contactPerson = args.raw("contact_person"),
             customFields = customValues(args, fields),
         )
-        request.requiredError(client, fields)?.let { throw Problem(it, "The company requires ${FIELD_NAMES[it] ?: "this field"}: it can't be emptied.") }
-        request.detailsError()?.let { throw Problem(it, "${FIELD_NAMES[it]?.replaceFirstChar(Char::uppercase) ?: "A field"} isn't valid: check it with the person.") }
-        val custom = customChanges(fields, request, client.customFields)
+        directory.check(draft, existing = client)?.let { throw it.problem(fields, update = true) }
         if (args.has("phone")) clients.findByPhone(phone)?.takeIf { it.id != client.id }?.let { throw phoneTaken(it) }
-        return ClientUpdate(client, request, custom)
+        return ClientUpdate(client, draft)
     }
 
-    private fun customChanges(fields: DirectoryFields, request: CreateClientRequest, stored: Map<String, JsonPrimitive>): Map<String, JsonPrimitive?> =
-        when (val checked = CustomFields.values(fields.custom, request.customFields, stored)) {
-            is CustomFields.Values.Valid -> checked.changes
-            is CustomFields.Values.Invalid -> throw Problem(checked.error, "The field \"${fields.custom.firstOrNull { it.key == checked.field }?.label ?: checked.field}\" is missing or isn't valid: check it with the person.")
+    /** What the model reads for a refused client: what is required, what isn't valid, or which of the company's own fields. */
+    private fun ClientDirectory.Outcome.Invalid.problem(fields: DirectoryFields, update: Boolean): Problem {
+        val key = field
+        return when {
+            key != null -> Problem(error, "The field \"${fields.custom.firstOrNull { it.key == key }?.label ?: key}\" is missing or isn't valid: check it with the person.")
+            error in ClientFields.REQUIRABLE.values -> Problem(
+                error,
+                if (update) "The company requires ${FIELD_NAMES[error] ?: "this field"}: it can't be emptied."
+                else "The company requires ${FIELD_NAMES[error] ?: "this field"} for new clients: ask the person for it.",
+            )
+            else -> Problem(error, "${FIELD_NAMES[error]?.replaceFirstChar(Char::uppercase) ?: "A field"} isn't valid: check it with the person.")
         }
+    }
 
     private suspend fun updateClient(args: JsonObject): JsonObject {
         val change = clientUpdate(args)
-        val request = change.request
-        val updated = try {
-            clients.update(
-                change.client.id, request.name, request.phone, request.address, request.email, request.taxId, request.notes,
-                request.postalCode, request.city, request.contactPerson, customFieldChanges = change.custom,
-            )
-        } catch (e: MongoServerException) {
-            if (ErrorCategory.fromErrorCode(e.code) != ErrorCategory.DUPLICATE_KEY) throw e
-            throw Problem("phone_taken", "Another record already has this phone.")
-        } ?: throw Problem("client_not_found", "That client no longer exists.")
+        val updated = when (val outcome = directory.update(change.client.id, change.draft)) {
+            is ClientDirectory.Outcome.Saved -> outcome.client
+            is ClientDirectory.Outcome.PhoneTaken -> throw Problem("phone_taken", "Another record already has this phone.")
+            is ClientDirectory.Outcome.Invalid -> throw outcome.problem(ClientFields.of(tenant), update = true)
+            ClientDirectory.Outcome.NotFound -> throw Problem("client_not_found", "That client no longer exists.")
+        }
         return buildJsonObject {
             put("updated", true)
             put("type", "client")
@@ -528,7 +520,7 @@ internal class AssistantTools(
 
     private suspend fun convertQuote(args: JsonObject): JsonObject {
         val (quote, dueDate) = quoteToInvoice(args)
-        return when (val outcome = QuoteInvoicing.invoice(quotes, invoices, clients, quote.id, dueDate)) {
+        return when (val outcome = QuoteService(quotes, invoices, clients).invoice(quote.id, dueDate)) {
             is QuoteInvoicing.Outcome.Invoiced -> buildJsonObject {
                 put("created", true)
                 put("type", "invoice")
