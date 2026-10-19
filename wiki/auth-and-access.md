@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-19
 ---
 
 # Sign-in and access
@@ -9,6 +9,7 @@ Who can sign in where, and what a session may open: Google sign-in for the backo
 ## Who can open what
 
 - Dashboard access is decided once per request, in the `jwt("dashboard")` validator, by `DashboardAccessPolicy`; the design and its reasons are in [architecture-review.md](architecture-review.md).
+- What a signed-in company may open is decided by module gates around the routes (`requireModules`), and a test fails for an `/app/api` route without one: [dashboard-api.md](dashboard-api.md).
 - An employee's own sign-in (`TENANT_EMPLOYEE`) reaches only `/app/api/me`, `/app/api/account/*` and `/app/api/portal/*`: [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md).
 - Switching company re-issues the token with the same expiry: [tenants-and-companies.md](tenants-and-companies.md).
 

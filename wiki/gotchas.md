@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Cross-cutting gotchas
@@ -22,6 +22,21 @@ Traps that bite anywhere in this codebase or its tooling. Feature-specific gotch
   fail with `IllegalAccessException` (a 500): kotlinx's reflective serializer lookup can't reach the
   plugin-generated `serializer()` on a private companion. Tests that construct the class directly miss
   it; `Json.decodeFromString(serializer(typeOf<T>()), …)` catches it.
+
+## Ktor 3: the engine's 415, route-scoped plugins, relaxed mocks
+
+- **The engine answers an unreadable body itself.** `CannotTransformContentToTypeException` (an empty
+  body, or a content type no converter reads) is caught by an interceptor Ktor's engine installs at
+  the `Plugins` phase, which answers a bare 415 before StatusPages runs, so an `exception<…>` handler
+  for it never fires. `configureStatusPages` intercepts the same phase to turn it into the error
+  contract ([dashboard-api.md](dashboard-api.md#the-error-contract)).
+- **A route-scoped plugin runs once, at its innermost installation.** Installing it again inside a
+  route that has it replaces the outer check for those routes instead of adding a second one, which is
+  why a nested module gate carries the modules of the gate around it
+  ([dashboard-api.md](dashboard-api.md#the-module-gate)). `Route.intercept`, the old way, is deprecated.
+- **A relaxed mockk `TenantPipelineFactory` hands every company a WhatsApp client**, so an HTTP test
+  of a path that should answer `no_channel` sees it "sent". The `DashboardApi` harness uses the real
+  factory over a MockEngine.
 
 ## Test gotcha: JUnit 5 silently skips Kotlin tests that return a value
 

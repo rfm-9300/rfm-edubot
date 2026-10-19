@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-19
 ---
 
 # Architecture review (2026-09-28)
@@ -29,6 +29,18 @@ deployed to production through the normal CI run. Design decisions in that chang
 - The Mongo shutdown moved to a Ktor `ApplicationStopped` subscriber (Ktor's embedded server
   installs its own JVM shutdown hook).
 
+**Status of the server-side hot spots (PR #87, 2026-10-19):** a structural refactor with no change
+to endpoints, data or UI, apart from the error answers below. `DashboardRoutes.kt` is split into one
+file per area behind a `DashboardFeature` registry; module gates are one route-scoped plugin
+(`requireModules`), and `DashboardRouteAuditTest` fails for an `/app/api` route without one; CRM
+writes go through `ClientDirectory`, `QuoteService` and `InvoiceService` from the routes, the
+backoffice, `CrmTools` and the assistant; list endpoints batch their name lookups; `AssistantTools`
+and `OverviewService` are split by area and by Home card; every route group has `testApplication`
+tests for gating, isolation between companies and error codes. The error contract is fixed:
+unreadable ids, dates, statuses and bodies answer 4xx `{error, detail}` instead of 500. How
+it is built: [dashboard-api.md](dashboard-api.md). The single-instance assumption (the in-memory
+queue, lanes and rate limiter among others) is documented, not changed: [single-instance.md](single-instance.md).
+
 Original findings (verified in code; the first four are the ones fixed above):
 
 - **Dashboard auth ignores lifecycle status.** `POST /app/auth/login` checks
@@ -51,7 +63,9 @@ Original findings (verified in code; the first four are the ones fixed above):
 - **The error contract is lost end to end.** `StatusPages` maps every `Throwable` to 500 (bad
   ObjectIds, enum `valueOf`, `LocalDate.parse`, malformed JSON), and `api()` in both `app.js` and
   `backoffice/app.js` throws `HTTP <status>` without reading the `{error}` body, so users only see
-  generic toasts.
+  generic toasts. Both halves are fixed now: the dashboards read `{error, detail}` through
+  `apiError()` (since the inbox and Persona work, in `admin/common.js` since PR #84), and the server
+  answers 4xx with a code since PR #87 (above).
 - **Change hot spots.** `app/app.js` (3.8k lines, one global `state` with ~50 fields, full
   `innerHTML` re-render plus listener re-binding) was touched in 37 of the last 60 commits;
   `style.css` and each catalog in 34; `DashboardRoutes.kt` (78 endpoints) in 24. Every handler

@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Product overview
@@ -16,7 +16,11 @@ the companies' data, the platform's records and disposable runtime state
 ([ops-and-deploy.md](ops-and-deploy.md)).
 
 Package boundaries (repo AGENTS.md): `webhook/`, `messaging/`, `conversation/`, `ai/`,
-`whatsapp/`, `ratelimit/`, `persistence/`, `shared/`, `plugins/`.
+`whatsapp/`, `ratelimit/`, `persistence/`, `shared/`, `plugins/`, plus `http/` (the error
+contract), `crm/` (services and repositories, with `crm/api/` for HTTP types) and `dashboard/`
+(one route file per area). Layering is route → service → repository, checked by
+`ArchitectureBoundariesTest`: [dashboard-api.md](dashboard-api.md). The server runs as one
+instance; what that assumes: [single-instance.md](single-instance.md).
 
 Stack noted in-repo: Kotlin 2.0.21, JVM 20, Ktor 3.0.1, MongoDB coroutine driver 5.2.1.
 
@@ -32,7 +36,9 @@ The product is a multi-module CRM, not a WhatsApp-first bot. Two consequences ba
   into `optional` — every module except the landing page can be switched off per tenant.
   `enabledModules = null` still means "full catalog" for legacy tenants.
 
-Module gating is enforced per route (403), not just in the nav.
+Module gating is enforced per route (403), not just in the nav: every `/app/api` route sits behind
+`requireModules` or is open on purpose, and a test fails for one that is neither
+([dashboard-api.md](dashboard-api.md)).
 
 ## Rules that apply everywhere
 

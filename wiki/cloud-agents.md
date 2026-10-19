@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Cursor cloud agents on this repo
@@ -7,7 +7,7 @@ updated: 2026-10-18
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84, #85 and #86.
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84, #85, #86 and #87.
 Local sessions push straight to `main`. What a session should know:
 
 - **Merging deploys nothing (since PR #85).** Production changes only when a release tag is pushed
@@ -114,7 +114,13 @@ Local sessions push straight to `main`. What a session should know:
   `./gradlew run` exits on "Missing required config". The backoffice's Backups page shows archives
   when `BACKUP_ARCHIVE_DIR` and `BACKUP_CONTROL_DIR` point at two local folders
   (`mongo-<yyyyMMddTHHmmssZ>.archive.gz` files, and a `last.json` with a non-zero `exitCode` plus
-  `last.log` for a failed run).
+  `last.log` for a failed run). #87's VM (2026-10-19) had no Docker service at all (`service docker`
+  unknown): `docker.io` with `sudo dockerd` left running in a tmux session, plus the steps above, ran
+  the full suite (893 tests). To prove a refactor changed no answers, that agent recorded every
+  `/app/api` and backoffice endpoint's status and body for several sessions and module mixes, from a
+  `testApplication` mounting the real routes over a throwaway Mongo, before and after, and diffed the
+  two; a `git worktree` of the old commit gave the "before". It kept that probe out of git, since the
+  HTTP tests ([dashboard-api.md](dashboard-api.md)) hold the behavior from then on.
 - The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
   driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed
   unmerged on 2026-10-06, and the 2026-10-09 batch on 2026-10-11. Only Testcontainers went in, by hand
