@@ -23,15 +23,19 @@
       : '<svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M12.6 10.4A5.4 5.4 0 0 1 6.2 3.4 5.8 5.8 0 1 0 12.6 10.4z" fill="currentColor"/></svg>';
   }
 
+  // #btn-theme in the top bar, plus any [data-theme-toggle] (the backoffice's phone menu has one).
+  function themeButtons() {
+    return [document.getElementById('btn-theme'), ...document.querySelectorAll('[data-theme-toggle]')].filter(Boolean);
+  }
+
   function apply(theme) {
     root.dataset.theme = theme;
-    const btn = document.getElementById('btn-theme');
-    if (btn) {
+    const label = themeLabel(theme);
+    themeButtons().forEach(btn => {
       btn.innerHTML = themeIcon(theme);
-      const label = themeLabel(theme);
       btn.title = label;
       btn.setAttribute('aria-label', label);
-    }
+    });
   }
 
   function initialTheme() {
@@ -111,7 +115,7 @@
       if (e.key === 'Escape' && document.body.classList.contains('nav-open')) close();
     });
     sidebar.addEventListener('click', (e) => {
-      if (e.target.closest('.nav__item')) close();
+      if (e.target.closest('.nav__item, [data-nav-close]')) close();
     });
     window.addEventListener('resize', () => {
       if (!isMobileNav()) close();
@@ -121,9 +125,9 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     apply(current());
-    document.getElementById('btn-theme')?.addEventListener('click', () => {
+    themeButtons().forEach(btn => btn.addEventListener('click', () => {
       setTheme(current() === 'dark' ? 'light' : 'dark');
-    });
+    }));
     initMobileNav();
   });
 

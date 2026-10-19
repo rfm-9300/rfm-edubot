@@ -59,7 +59,9 @@ async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
   $('#btn-new').addEventListener('click', () => tenantForm());
+  // Phones log out from the menu (#nav-logout); the top bar's button is for wider screens.
   $('#btn-logout').addEventListener('click', () => signOut());
+  $('#nav-logout').addEventListener('click', () => signOut());
   $('#search').addEventListener('input', e => { state.search = e.target.value; if (currentView === 'tenants') renderTenants(); });
   $$('.nav__item[data-view]').forEach(a => a.addEventListener('click', e => {
     e.preventDefault();

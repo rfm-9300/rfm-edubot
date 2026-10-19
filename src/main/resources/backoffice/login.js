@@ -1,10 +1,11 @@
 /* Signing in to the backoffice: with Google (an email on the admins list) or, while ADMIN_PASSWORD_HASH is
    set, the platform password. Google's sign-in itself is in /admin/common.js, shared with /app. */
 
-// Signed out, the top bar keeps only the theme switch: the menu, search, New and Log out all need a session.
+// Signed out, the top bar keeps only the theme switch: the menu, crumb, search, New and Log out all need a session.
 // Signed in, setView shows search and New on the views that use them.
 function showSessionControls(on) {
   $('#btn-nav').hidden = !on;
+  $('.topbar .crumb').hidden = !on;
   $('#btn-logout').hidden = !on;
   if (!on) {
     $('.topbar__search').hidden = true;

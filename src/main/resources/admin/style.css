@@ -336,6 +336,9 @@ html[data-theme="dark"] .nav__item[data-tab="overview"] { --tab: #ffd60a; }
 .kpi__value { font-family: var(--mono); font-size: 13px; font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums; }
 .meta { margin-top: 8px; font-size: 11px; color: var(--ink-faint); font-weight: 700; letter-spacing: 0.02em; display: flex; gap: 8px; align-items: center; }
 .meta__sep { opacity: 0.6; }
+/* The theme switch and Log out inside the menu, for phones, where a .topbar--one-row leaves them out. */
+.sidebar__session { display: none; gap: 8px; margin-top: 8px; }
+.sidebar__session .btn { flex: 1; justify-content: center; }
 /* Technology-provider credit under the tenant's own brand; keep it quieter than the brand. */
 .sidebar__credit { display: flex; align-items: center; gap: 6px; margin-top: 10px; color: var(--ink-mute); font-size: 11.5px; font-weight: 600; }
 .sidebar__credit::before {
@@ -437,12 +440,13 @@ body.nav-open .nav-scrim {
   transition: border-color 120ms, box-shadow 120ms;
 }
 .topbar__search:focus-within { border-color: var(--focus-border); box-shadow: var(--focus-ring); }
-.topbar__search input { flex: 1; border: 0; background: transparent; outline: 0; color: var(--ink); min-width: 0; font-weight: 600; }
+.topbar__search input { flex: 1; align-self: stretch; border: 0; background: transparent; outline: 0; color: var(--ink); min-width: 0; font-weight: 600; }
 .topbar__search input::placeholder { color: var(--ink-faint); font-weight: 600; }
 .topbar__search kbd { font-family: var(--mono); font-size: 10.5px; padding: 2px 7px; border: 1px solid var(--line); border-radius: 7px; color: var(--ink-mute); background: var(--bg); }
 /* Last column, so the actions stay at the right edge when the search is hidden (backoffice views without a list). */
 .topbar__actions { display: flex; align-items: center; gap: 8px; grid-column: -2; }
 .topbar__search[hidden],
+.topbar .crumb[hidden],
 .topbar #btn-nav[hidden],
 .topbar #btn-new[hidden],
 .topbar #btn-logout[hidden],
@@ -598,6 +602,11 @@ html[data-theme="dark"] .iconbtn--avatar { color: var(--accent); }
 }
 html[data-theme="dark"] .panel__title .tag { color: var(--accent); }
 .panel__tools, .panel__views { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+/* Filter chips that share the width two to a line on phones, instead of wrapping unevenly. */
+@media (max-width: 560px) {
+  .panel__tools--chips { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .panel__tools--chips .chip { justify-content: center; }
+}
 .panel__tools .sel, .panel__filters .sel {
   width: auto; min-width: 168px; max-width: 240px; height: 28px;
   font-size: 12px; font-weight: 800; padding: 0 28px 0 12px;
@@ -645,6 +654,8 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl__open { padding: 0; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .tbl__open:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
 .tbl__pills { display: grid; justify-items: start; gap: 4px; }
+/* A name cell's .tbl__title holds the name and a .tbl__aside status, which only shows in a .tbl--stack card. */
+.tbl .tbl__aside { display: none; }
 /* A link inside a cell's text (a punch's place on the map), coloured like links in chat bubbles. */
 .tbl__link { color: var(--info-ink); font-weight: 600; text-decoration: underline; text-underline-offset: 2px; }
 .tbl__link:focus-visible { outline: none; border-radius: 4px; box-shadow: var(--focus-ring); }
@@ -654,10 +665,15 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl tbody tr.is-current td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 .tbl tbody tr.is-total td,
 .tbl tbody tr.is-total:hover td { background: var(--surface-2); font-weight: 800; }
-/* Phones: a .tbl--stack table turns each row into a card. A cell with data-label (its column heading)
-   shows the label above its value and shares a grid of four columns, two under 560px; a cell without
-   one (the row's name, its actions, an empty state) and a long .id span the card. */
-@media (max-width: 700px) {
+/* Phones and tablets (under 920px, where the sidebar is a menu): a .tbl--stack table turns each row into a
+   card. A cell with data-label (its column heading) shows the label above its value and shares a grid of
+   four columns, two under 560px; a cell without one (the row's name, its actions, an empty state), a long
+   .id and a .tbl__wide cell span the card. A .tbl__aside status sits at the right of the name's .tbl__title,
+   and the cell it repeats (.tbl__stack-hide) is left out. In a .tbl--flow card (the backoffice's short
+   lists) the labelled values follow at their own width instead, wrapping like words, a time under a date
+   shares its line, pills sit side by side, and the actions close the last line, at its right end when
+   they fit. */
+@media (max-width: 920px) {
   .tbl--stack, .tbl--stack tbody { display: block; }
   .tbl--stack thead { display: none; }
   .tbl--stack tbody tr { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px 16px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
@@ -665,15 +681,22 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
   .tbl--stack tbody tr:hover { background: color-mix(in srgb, var(--accent) 4%, var(--mix)); }
   .tbl--stack tbody td { display: block; min-width: 0; padding: 0; border: 0; overflow-wrap: anywhere; text-wrap: balance; }
   .tbl--stack tbody :is(td.num, td.right) { text-align: left; }
-  .tbl--stack tbody td:not([data-label]),
-  .tbl--stack tbody td.id { grid-column: 1 / -1; }
-  .tbl--stack tbody td:empty { display: none; }
+  .tbl--stack tbody :is(td:not([data-label]), td.id, td.tbl__wide) { grid-column: 1 / -1; }
+  .tbl--stack tbody :is(td:empty, td.tbl__stack-hide) { display: none; }
   .tbl--stack td[data-label]::before {
     content: attr(data-label); display: block; margin-bottom: 3px;
     color: var(--ink-mute); font-family: var(--sans); font-size: 10.5px; font-weight: 800; letter-spacing: 0.07em; text-transform: uppercase;
   }
   .tbl--stack .actions { justify-content: flex-start; }
   .tbl--stack .pill { white-space: normal; }
+  .tbl--stack .tbl__title { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+  .tbl--stack .tbl__aside { display: inline-flex; flex: none; white-space: nowrap; }
+  .tbl--flow tbody tr { display: flex; flex-wrap: wrap; align-items: flex-start; }
+  .tbl--flow tbody td { flex: 0 1 auto; }
+  .tbl--flow tbody :is(td:not([data-label]), td.id, td.tbl__wide) { flex-basis: 100%; }
+  .tbl--flow tbody td.right:not([data-label]) { flex-basis: auto; margin-left: auto; }
+  .tbl--flow td[data-label] > .sub { display: inline; margin-left: 6px; }
+  .tbl--flow .tbl__pills { display: flex; flex-wrap: wrap; gap: 6px; }
 }
 @media (max-width: 560px) {
   .tbl--stack tbody tr { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -909,13 +932,20 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
   border-top: 1px solid var(--line);
 }
 .settings-row:first-child { border-top: 0; }
-.settings-row__key { font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 600; }
+.settings-row__key { font-family: var(--mono); font-size: 12px; font-weight: 600; overflow-wrap: anywhere; }
 .settings-row__meta { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
 .settings-row__controls { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .settings-row__actions { display: flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+/* Narrow screens: the key shares its line with the pills, and a lone button (Reveal, Clear) sits beside the field. */
 @media (max-width: 860px) {
-  .settings-row { grid-template-columns: 1fr; }
+  .settings-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px 10px; align-items: center; }
+  .settings-row > :first-child { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; }
+  .settings-row__meta { margin-top: 0; }
   .settings-row__actions { justify-content: flex-start; }
+  .settings-row__actions:has(.btn + .btn) { grid-column: 1 / -1; }
+  .settings-row__actions:not(:has(.btn)) { display: none; }
+  .settings-row:not(:has(.settings-row__actions .btn)) > .settings-row__controls { grid-column: 1 / -1; }
+  .settings-row__controls:has(.hint) + .settings-row__actions { align-self: start; }
 }
 
 /* Line items */
@@ -1183,6 +1213,9 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
     max-width: none;
     order: 3;
   }
+  /* A .topbar--one-row (the backoffice) keeps its search on the first row instead of giving it a row of its own. */
+  .topbar--one-row { grid-template-columns: auto minmax(0, 1fr) auto; }
+  .topbar--one-row .topbar__search { grid-column: auto; order: 0; }
   .topbar__search kbd { display: none; }
   .topbar__actions { gap: 6px; }
   .crumb__root, .crumb__sep { display: none; }
@@ -1209,6 +1242,13 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
   .topbar__actions #btn-new:has(.btn__label) { width: 36px; padding: 0; justify-content: center; }
   .topbar__actions #btn-new:has(.btn__label) .btn__plus { margin: 0; }
   .topbar__actions #btn-new .btn__label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  /* A .topbar--one-row is menu, search and New: the search takes the crumb's place (the page title below says
+     the same), and the theme switch and Log out move into the menu's .sidebar__session. Signed out there is
+     no menu, so the theme switch stays. */
+  .topbar--one-row:has(.topbar__search:not([hidden])) .crumb,
+  .topbar--one-row #btn-logout,
+  .topbar--one-row:has(#btn-nav:not([hidden])) #btn-theme { display: none; }
+  .sidebar__session { display: flex; }
 }
 
 /* ── Persona test chat ─────────────────────────────────────── */
@@ -2400,6 +2440,11 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
 .notice__list { margin: 2px 0 0; padding-left: 18px; }
 .notice__actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .record > .notice, .builder > .notice, .form > .notice, .settings-stack > .notice { margin-bottom: 0; }
+/* Phones: the buttons go under the text instead of squeezing it into a narrow column. */
+@media (max-width: 560px) {
+  .notice:has(> .notice__actions) { flex-wrap: wrap; }
+  .notice:has(> .notice__actions) > .notice__text { flex-basis: 100%; }
+}
 
 .agent-icon { display: inline-grid; flex: none; place-items: center; width: 32px; height: 32px; border-radius: var(--r-sm); background: var(--accent-soft); color: var(--accent-deep); }
 .agent-icon svg { width: 18px; height: 18px; }
@@ -2817,16 +2862,28 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
   html[data-layout="minimal"] .view > .panel .tbl tbody tr.is-day td { padding-right: 16px; padding-left: 16px; }
   html[data-layout="minimal"] .drawer__panel,
   html[data-layout="minimal"] .drawer__head { border-radius: 0; }
+  html[data-layout="minimal"] .tbl--stack tbody td,
+  html[data-layout="minimal"] .view > .panel .tbl--stack tbody td { padding: 0; }
+  html[data-layout="minimal"] .tbl--stack tbody tr:hover { background: var(--surface-2); }
+  html[data-layout="minimal"] .tbl--stack td[data-label]::before { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 }
 @media (max-width: 700px) {
   html[data-layout="minimal"] .view__stats { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   html[data-layout="minimal"] .stat:nth-child(odd)::before { display: none; }
   html[data-layout="minimal"] .stat:nth-child(n + 3) { border-top: 1px solid var(--line); }
   html[data-layout="minimal"] .stat:last-child:nth-child(odd) { grid-column: 1 / -1; }
-  html[data-layout="minimal"] .tbl--stack tbody td,
-  html[data-layout="minimal"] .view > .panel .tbl--stack tbody td { padding: 0; }
-  html[data-layout="minimal"] .tbl--stack tbody tr:hover { background: var(--surface-2); }
-  html[data-layout="minimal"] .tbl--stack td[data-label]::before { font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+}
+/* Touch phones: small buttons, chips and toolbar selects grow to 36px and the drawer's close button to 40px,
+   so a thumb can hit them; the drawer's back link keeps its look with a taller hit area. */
+@media (max-width: 560px) and (pointer: coarse) {
+  .btn--sm, .chip, .panel__tools .sel, .panel__filters .sel,
+  html[data-layout="minimal"] :is(.btn--sm, .chip, .panel__tools .sel, .panel__filters .sel) { height: 36px; }
+  .drawer__head .iconbtn,
+  html[data-layout="minimal"] .drawer__head .iconbtn { width: 40px; height: 40px; }
+  .drawer__back { padding: 8px 0; margin: -8px 0; }
+  /* A box's label is its target, so it takes the height the row gap had. */
+  .form__checks { row-gap: 4px; }
+  .form__check { min-height: 32px; }
 }
 
 /* ── Minimal Home: dashboard building blocks ─────────────────── */
@@ -2897,10 +2954,15 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash-facts > div { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 8px 0; border-top: 1px solid var(--line-soft); }
 .dash-facts > div:last-child { padding-bottom: 0; }
 .dash-facts dt { color: var(--ink-mute); font-size: 13px; }
-.dash-facts dd { margin: 0; color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.dash-facts dd { min-width: 0; margin: 0; color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .dash-facts--row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 16px; }
 .dash-facts--row > div { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 0 0; }
 .dash-facts--row dd { font-size: 14px; text-align: left; }
+/* Long values (a channel's name and id): on phones each label sits above its value. */
+@media (max-width: 560px) {
+  .dash-facts--stack > div { flex-direction: column; align-items: flex-start; gap: 2px; }
+  .dash-facts--stack dd { text-align: left; }
+}
 
 /* work list: needs-you queue, feed, overdue rows */
 .worklist { margin: 0; padding: 0; list-style: none; }

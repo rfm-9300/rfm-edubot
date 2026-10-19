@@ -27,6 +27,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
 - `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
 - In the minimal skin (`html[data-layout="minimal"]`, `/app` and `/backoffice`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
+- On touch phones (under 560px with `pointer: coarse`) `.btn--sm`, `.chip` and the toolbar `.sel` are 36px tall and the drawer's close `.iconbtn` 40px, so a thumb hits them; the layout around them doesn't change.
 - Disabled: `disabled` attribute (opacity 0.5). Do not invent a `--disabled` class.
 
 ## Brand
@@ -87,11 +88,13 @@ In the minimal skin the active item is a `--accent-soft` fill with a 3px `--acce
 </header>
 ```
 
-Order: crumb · search · actions. Theme button is always in actions. Below 920px search takes its own row under the crumb and actions.
+Order: crumb · search · actions. Theme button is always in actions (a `.topbar--one-row` moves it into the menu on phones, below). Below 920px search takes its own row under the crumb and actions.
 
 Neither `/app` nor `/backoffice` has a layout switch: the skin is fixed in markup (`<html data-layout="minimal">`). There, `.topbar__search` draws its magnifier with `::before` (no extra markup), sits on `--bg` with a hairline border and a 10px radius, and focuses with the shared ring. The `/` hint is `aria-hidden`; the input gets its accessible name from `data-i18n-aria-label` (`app.searchPlaceholder`, `backoffice.searchPlaceholder`).
 
-The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it. Signed out, it also hides the menu button (`#btn-nav`), Log out and New: only the theme switch stays.
+The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` on its other views. `.topbar__actions` sits in the last grid column, so the actions stay at the right edge without it. Signed out, it also hides the menu button (`#btn-nav`), the crumb, Log out and New: only the theme switch stays.
+
+The backoffice's bar is `.topbar.topbar--one-row`: under 920px its search stays on the first row (menu and crumb · search · actions) instead of taking a row of its own, and under 620px it is the menu, the search and New. There the search takes the crumb's place while it shows (the page title below says the same), and the theme switch and Log out move to the end of the menu, in a `.sidebar__session` ([Sidebar KPIs](#sidebar-kpis)); signed out there is no menu, so the theme switch stays in the bar. `/app` keeps the two rows: its bar also holds the bell and the account button.
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
@@ -216,6 +219,7 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 
 `.chip.is-on` = selected filter (solid accent). `.tag` inside `.panel__title` is a count pill.
 A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter Serviços by client, Pagamentos by supplier). It uses chip height (28px) and `width: auto`; do not drop a full-width form select into the toolbar.
+`.panel__tools--chips` (the backoffice's tenant status filter) lays its chips out two to a line across the panel under 560px, centred, instead of letting the last one wrap alone.
 
 ### Panel with a view switch (List / By week / By month)
 
@@ -274,15 +278,20 @@ A table can have more columns than its panel fits, as the `/app` directory lists
 
 A row that opens a record (the backoffice tenants) puts its name in `button.tbl__open`, which looks like the text and takes the focus ring, and listens for clicks on the whole row, skipping its other buttons; such rows get the pointer cursor. Keyboards reach the record through the name. Several pills in one cell stack in `.tbl__pills`, one per line, so the column is only as wide as the widest pill. A link inside a cell's text (a punch's place on the map) is `a.tbl__link`: `--info-ink`, underlined, with the focus ring.
 
-A table that has to read on a phone takes `.tbl--stack` (every backoffice table does) instead of scrolling sideways. Under 700px the head is hidden and each row becomes a card. A cell with `data-label` (its column heading, from the same catalog key as the `th`) shows that label above its value, and those cells share a grid of four columns, two under 560px. A cell without `data-label` spans the card: the row's name comes first, its actions last (left-aligned), and an empty state sits in the `colspan` cell. A long `.id` (a file name) spans too, an empty cell (no action on this row) disappears, and numbers align left.
+A table that has to read on a phone takes `.tbl--stack` (every backoffice table does, and `/app`'s Timesheets and Persona sources and history) instead of scrolling sideways. Under 920px, where the sidebar is a menu, the head is hidden and each row becomes a card. A cell with `data-label` (its column heading, from the same catalog key as the `th`) shows that label above its value, and those cells share a grid of four columns, two under 560px. A cell without `data-label` spans the card: the row's name comes first, its actions last (left-aligned), and an empty state sits in the `colspan` cell. A long `.id` (a file name) and a `.tbl__wide` cell (the tenants' channels) span too, keeping their label; an empty cell (no action on this row) disappears, and numbers align left.
+
+A status that matters at a glance sits beside the name: the name cell's first line is a `.tbl__title` holding the name and the same pill with `.tbl__aside`, which only shows in the card (at its top right), and the status column's cell takes `.tbl__stack-hide`, so the card leaves it out. The backoffice's tenants, dashboard users and agents do this.
+
+`.tbl--flow` (with `.tbl--stack`; the backoffice's short lists) lets a card's labelled values follow at their own width instead of the grid, wrapping like words, puts a time `.sub` on its date's line and pills side by side, and closes the last line with the actions, at its right end when they fit. A tenant then takes about 230px at 375px instead of 320px. Keep the grid for tables whose cards are compared value by value (shifts, hours), where it lines the values up.
 
 ```html
-<table class="tbl tbl--stack">
-  <thead><tr><th>Name</th><th>Status</th><th class="right">Msgs</th><th class="right">Actions</th></tr></thead>
+<table class="tbl tbl--stack tbl--flow">
+  <thead><tr><th>Name</th><th>Channels</th><th>Status</th><th class="right">Msgs</th><th class="right">Actions</th></tr></thead>
   <tbody>
     <tr>
-      <td class="name"><button class="tbl__open" type="button">Padaria Central</button><div class="sub mono">padaria-central</div></td>
-      <td data-label="Status"><span class="pill pill--ok">Active</span></td>
+      <td class="name"><div class="tbl__title"><button class="tbl__open" type="button">Padaria Central</button><span class="pill pill--ok tbl__aside">Active</span></div><div class="sub mono">padaria-central</div></td>
+      <td class="tbl__wide" data-label="Channels"><div class="tbl__pills"><span class="pill pill--info">WhatsApp</span></div></td>
+      <td class="tbl__stack-hide" data-label="Status"><span class="pill pill--ok">Active</span></td>
       <td class="num" data-label="Msgs">12</td>
       <td class="right"><div class="actions"><button class="btn btn--sm" type="button">Open dashboard</button></div></td>
     </tr>
@@ -359,7 +368,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - Labels: `.lbl` (sentence case in the minimal skin; uppercase only in the classic layer). Required: `.req`. Optional: `.opt`.
 - Hints: `.hint`; `.hint--warn` for a warning, `.hint--bad` for an error (add `role="alert"` when it appears after an action).
 - A single yes/no option inside a form: `<label class="form__check"><input type="checkbox" /> Label</label>` (accent-colored box, same size as `.tbl td.check`). Don't build a toggle switch.
-- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns and one column on a phone. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. Don't use pills as checkboxes.
+- Several options in one field (the backoffice's tenant modules): `.form__check` labels inside `div.form__checks` (`role="group"`, `aria-labelledby` the field label), a grid of 140px+ columns that fills the width (three in a drawer, two on a phone). Longer labels (a supplier's usual services with their price, in the payment form) take `.form__checks--wide`, with 220px+ columns and one column on a phone. A disabled box, for an option that is always on, turns its label `--ink-mute` with a not-allowed cursor. On touch phones a label is 32px tall and the grid's row gap 4px, so the whole line takes the tap. Don't use pills as checkboxes.
 - A field label with its own tools on the same line (All / None, Add channel): `.form__row-head` > `.lbl` + `.actions`.
 - Several short values typed into one field (a Persona menu's keywords): `div.tokens` holding one `.token` per value (`.token__text`, a button that takes the value back to edit, and `.token__rm` ×) and a bare `input.tokens__input` last, which carries the field's `id` for the label. It looks like `.inp`, grows in rows, and rings on `:focus-within`. `.token--warn` marks a value with a problem (its `title` says which); `.tokens.is-readonly` has no input and no ×. Enter adds, a pasted list adds a value per line; don't split on commas, since a value may contain one.
 - A field a refused save points at gets `aria-invalid` (red border on `.inp`, `.txt` and `.tokens`, a red inset in a `.line`; the focus ring still wins) and a `.hint--bad` under it saying what is wrong, until it's right.
@@ -367,7 +376,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 
 ### Save bar
 
-A long form whose changes are saved together (the Persona Menus tab) ends with a `.savebar`:
+A long form whose changes are saved together (the Persona Menus tab, the backoffice's Platform settings) ends with a `.savebar`:
 
 ```html
 <div class="savebar is-dirty">
@@ -458,7 +467,7 @@ The footer is sticky and is the last thing in the body, directly or inside the d
 
 Show/hide with the `hidden` attribute, not a CSS class. On open: focus the first control, trap Tab inside the panel, Escape closes, and restore focus to the opener.
 
-Under 920px the panel takes the full width with square corners; under 560px its head, body and footer use 16px side padding.
+Under 920px the panel takes the full width with square corners; under 560px its head, body and footer use 16px side padding. On touch phones the close button is 40px and the `.drawer__back` link keeps its look with a 32px hit area.
 
 `openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from another drawer (a record, an invoice…) through `openFrom(back, open)` stacks its opener on a trail and replaces the eyebrow with `.drawer__back` (the opener's name; the ← glyph is CSS). Back pops one step, and a drawer that closes itself after an action (save, mark paid, convert) reopens its opener with fresh data. Closing by hand (×, scrim, Escape) clears the trail and leaves.
 
@@ -798,7 +807,7 @@ Building blocks of the minimal-layout Home ([patterns.md](patterns.md#home-minim
 | `.hbars` > `.hbars__row` (`__label` `__track` `__fill` `__value`) | Pipeline stages |
 | `.rank` > `button.rank__item` (`__pos` `__name` `__value` `__bar` `__fill` `__fill--billed` `__meta`) | Top clients, billed vs paid |
 | `.dash-split` · `.dash-figures` · `.dash-figure` (`--lg` `--end`, `__value--bad\|warn`, `__label`) | Headline numbers inside a card |
-| `dl.dash-facts` (`--row`) · `.dash-sub` · `.dash-empty` (`--center`) · `.dash-axis` | Key/value rows, sub-heading, quiet empty line, sparkline axis |
+| `dl.dash-facts` (`--row`, `--stack`) · `.dash-sub` · `.dash-empty` (`--center`) · `.dash-axis` | Key/value rows (a long value wraps; `--stack`, for long values like a tenant's channels, puts each label above its value under 560px), sub-heading, quiet empty line, sparkline axis |
 | `.dash-tiles` > `button.dash-tile` (`__label` `__value` `__meta`) | Small module tiles for modules without a card |
 
 Do not reuse these as classic Home components, and do not add emoji to them — the minimal layout is emoji-free.
@@ -907,10 +916,13 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
       <div class="settings-row__meta"><span class="pill pill--ok">live</span></div>
     </div>
     <div class="settings-row__controls"><input class="inp" /></div>
-    <div class="settings-row__actions"><button class="btn btn--sm btn--accent">Save</button></div>
+    <div class="settings-row__actions"><button class="btn btn--sm btn--ghost">Reveal</button></div>
   </div>
+  <div class="savebar">…</div>
 </div>
 ```
+
+Three columns (key and pills · field · buttons) on wide screens. Under 860px the key shares its line with its pills, and a lone button (Reveal, Clear override) sits beside the field; two buttons take their own line, and an empty `.settings-row__actions` takes none. The backoffice's Platform settings save every changed row at once from a `.savebar` at the end of the stack (Save, and Discard through `.confirm`); the hero keeps only Reload.
 
 ## Email (Google)
 
@@ -962,7 +974,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 
 | Block | Role |
 |---|---|
-| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume, the backoffice's setup warnings (Google sign-in not configured, backup runner stopped) at the top of a `.settings-stack`. Not a toast, not a modal |
+| `.notice` (`--warn` `--info`) > `__text` (`strong` + `span`, or `ul.notice__list`) + `__actions` | Inline banner in a view, record or drawer: agents paused, problems to fix before activating, the "let it act on its own" suggestion, the builder's intro on a drafted agent, the backoffice agents drawer's pause state with Pause or Resume, the backoffice's setup warnings (Google sign-in not configured, backup runner stopped) at the top of a `.settings-stack`. Under 560px its buttons go under the text. Not a toast, not a modal |
 | `.agent-icon` (`--lg`) | 32px (44px) line icon on the accent tint; the SVG comes from the agent's `icon` key |
 | `.agent-cell` (`__text` `__name` `__sub`) | Agents table first column: icon, name, and a `.recipe` under it |
 | `.recipe` > `.recipe__part` (`--when`) + `.recipe__arrow` | "When → step → step" chips; the trigger part is tinted; long parts truncate |
@@ -1025,3 +1037,14 @@ The punch card on an employee's **My hours** ([patterns.md](patterns.md#my-hours
 ```
 
 `.sidebar__credit` is `/app`'s technology-provider line: a small bolt (CSS mask) plus muted text, last in the foot. It must stay quieter than the tenant's brand at the top — no logo, no accent color, no link. "Powered by" goes through i18n; "The Bots Lab" is the product name and is not translated.
+
+The backoffice's foot ends with a `.sidebar__session`, shown only under 620px, where its `.topbar--one-row` leaves the theme switch and Log out out of the bar:
+
+```html
+<div class="sidebar__session">
+  <button class="iconbtn iconbtn--theme" type="button" data-theme-toggle></button>
+  <button class="btn btn--ghost" id="nav-logout" type="button" data-nav-close data-i18n="backoffice.logout">Log out</button>
+</div>
+```
+
+`theme.js` paints every `[data-theme-toggle]` like `#btn-theme` (icon, `title` and `aria-label`) and toggles the theme on its click, keeping the menu open; a click on a `[data-nav-close]` closes the menu, like a nav item.

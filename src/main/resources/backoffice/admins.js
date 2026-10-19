@@ -17,7 +17,7 @@ async function renderAdmins() {
       ${data.googleReady ? '' : warnNoticeHtml(A.googleNotReady)}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(A.listTitle)} <span class="tag">${data.admins.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
           <th>${escapeHTML(A.thEmail)}</th><th>${escapeHTML(A.thSource)}</th><th>${escapeHTML(A.thAdded)}</th><th class="right">${escapeHTML(T.thActions)}</th>
         </tr></thead><tbody>${data.admins.map(a => adminRowHtml(a, data.me)).join('')}</tbody></table></div>
       </div>

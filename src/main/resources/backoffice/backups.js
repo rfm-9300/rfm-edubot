@@ -39,7 +39,7 @@ async function renderBackups() {
       ${run ? backupRunHtml(run) : ''}
       <div class="panel">
         <div class="panel__head"><h2 class="panel__title">${escapeHTML(B.listTitle)} <span class="tag">${data.archives.length}</span></h2></div>
-        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr>
+        <div class="tbl-wrap"><table class="tbl tbl--stack tbl--flow"><thead><tr>
           <th>${escapeHTML(B.thDate)}</th><th>${escapeHTML(B.thKind)}</th><th>${escapeHTML(B.thFile)}</th><th class="right">${escapeHTML(B.thSize)}</th><th>${escapeHTML(B.thOffsite)}</th>
         </tr></thead><tbody>
         ${data.archives.length ? data.archives.map(backupArchiveRowHtml).join('')

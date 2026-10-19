@@ -139,11 +139,11 @@ Pausing a client's automations is any member's brake for a client who asked not 
 
 ## Tenants (backoffice directory + record)
 
-The backoffice's Tenants view is the directory recipe with All / Active / Suspended / Deleted chips. A row shows the name (a `.tbl__open` button) over its slug and company line, the channels as stacked pills (`.tbl__pills`), status, messages, and the last activity as date over time. Its only action is Open dashboard (Restore under Deleted). A click anywhere else on the row, or Enter on the name, opens the tenant **record** in the drawer ([components.md](components.md#record)):
+The backoffice's Tenants view is the directory recipe with All / Active / Suspended / Deleted chips. A row shows the name (a `.tbl__open` button) over its slug and company line, the channels as stacked pills (`.tbl__pills`), status, messages, and the last activity as date over time. Its only action is Open dashboard (Restore under Deleted). Under 920px it is a `.tbl--flow` card: the name with its status pill at the right, the channels across the card, then messages, last activity and Open dashboard on one line; under 560px the chips share the width two to a line. A click anywhere else on the row, or Enter on the name, opens the tenant **record** in the drawer ([components.md](components.md#record)):
 
 1. Profile card: initials, slug and status pill, then one line with the company relation, language, model and modules in use. Edit, Suspend (Activate when suspended) and Delete sit in the head; a deleted tenant has Restore (or "comes back with …") and a "Deleted on …" warning line instead. Then Open dashboard, Users (first companies only), Agents (with Agents on) and Reload pipeline, all plain buttons, so yellow only marks Activate and Restore.
 2. Four `.record-kpi`s: messages, last activity (date, time under it), rate per hour, rate per day.
-3. A Channels panel: `dl.dash-facts` with each platform's account and id, and a "No access token" pill where one is missing.
+3. A Channels panel: `dl.dash-facts.dash-facts--stack` with each platform's account and id (the label above them on a phone), and a "No access token" pill where one is missing.
 
 Edit, Users and Agents open with `← tenant` and come back to the record after saving. Suspend, Activate and Restore show the record fresh after their confirm; Delete closes the drawer. A new tenant opens its record once created. Closing returns focus to the row's name. Escape closes a confirm on its own and leaves the drawer behind it.
 
@@ -330,17 +330,19 @@ Defaults when the tenant leaves a text empty: invoices print "Pagamento até à 
 At `max-width: 920px`:
 
 - Sidebar becomes a slide-over; `#btn-nav` + `#nav-scrim` toggle it
-- Topbar search stays visible on a second row (`grid-column: 1 / -1`); hide only `kbd`
+- Topbar search stays visible on a second row (`grid-column: 1 / -1`); hide only `kbd`. The backoffice's `.topbar--one-row` keeps it on the first row instead
 - View padding shrinks; hero stacks
 - Drawer goes full width, square corners
+- A `.tbl--stack` table shows one card per row, each value under its `data-label`, instead of scrolling sideways (a tablet squeezed the tenant table to one word per line). Give every list table on a page people open from a phone `.tbl--stack` and label its cells
 
 Do not hide primary CTAs or the search field at this breakpoint.
 
 Phones:
 
-- At `700px` a `.tbl--stack` table shows one card per row, each value under its `data-label`, instead of scrolling sideways. Give every list table on a page people open from a phone `.tbl--stack` and label its cells.
-- At `560px` forms drop to one column, the drawer's padding to 16px, line items and channel rows stack, and a long toast uses the screen's width.
-- On touch screens fields are 16px, so iOS doesn't zoom in on focus, and the backoffice opens a drawer with focus on × rather than in a field, so the keyboard stays closed.
+- At `620px` the backoffice's top bar is the menu, the search and New; the theme switch and Log out are at the end of the menu (`.sidebar__session`). Keep a phone's sticky bar to one row: it stays on screen the whole time.
+- At `560px` forms drop to one column, the drawer's padding to 16px, line items and channel rows stack, a notice's buttons go under its text, and a long toast uses the screen's width.
+- On touch screens fields are 16px, so iOS doesn't zoom in on focus, and the backoffice opens a drawer with focus on × rather than in a field, so the keyboard stays closed. On touch phones small buttons and chips are 36px.
+- A long page of fields saved together puts Save in a `.savebar` that follows the screen while there are changes (Persona Menus, Platform settings), not only at the top.
 
 ## Widget (not the dashboard)
 

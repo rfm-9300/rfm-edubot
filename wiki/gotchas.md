@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-18
 ---
 
 # Cross-cutting gotchas
@@ -99,6 +99,13 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   `mocks/mongo/migrate-add-tenant-id.js`. Turn on the opt-in modules (Agents, Email, the time clock)
   for that tenant in the backoffice to see their pages.
 
+- **Phone checks need touch emulation:** the touch rules (`pointer: coarse`: 16px fields, 36px small
+  buttons and chips) only match with puppeteer's `setViewport({ hasTouch: true, isMobile: true })`; a
+  plain 375px window shows the desktop sizes. To sign in by script, set `adminToken` or
+  `dashboardToken` in `localStorage` on another page of the origin (`/health`), then open the
+  dashboard: a `goto` from `/backoffice/` to `/backoffice/#tenants` only changes the hash, so the
+  page never reloads and stays on the sign-in card.
+
 - **Local UI-check gotchas:** a process started with `(cmd &)` inside an agent's tool shell dies when
   that shell exits, so run `./gradlew run` as a background job of the tool. `/app`'s own scripts are
   classic scripts sharing one global scope ([dashboard-frontend.md](dashboard-frontend.md)), so their
@@ -111,6 +118,15 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   typing goes nowhere: wait for it to settle, or focus fields through the DOM. List chips and rows
   are redrawn whenever their data changes, so click them through the DOM and wait for the new state
   (the chip's `is-on`), not just a row count the previous list may already have.
+
+## GitGuardian flags an autocomplete value as a password
+
+GitGuardian's "Generic Password" detector reads `accountPasswordField('acc-new', …, 'new-password', …)`
+in `app/account.js` (the account drawer's new-password field, whose `autocomplete` is `new-password`)
+as a hardcoded secret. Any PR whose diff carries that line fails the GitGuardian check: #84, which
+moved it out of `app.js`, and #86, which merged `main` in after it. Nothing is leaked and the check
+isn't required; the incident has to be marked a false positive in the GitGuardian dashboard, which
+agents can't reach.
 
 ## Agent-rules gotcha: the GitNexus block is pinned (since 2026-09-29)
 

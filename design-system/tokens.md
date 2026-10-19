@@ -184,10 +184,10 @@ Classic resolves the tokens to `--accent` / `0 0 0 4px var(--accent-soft)`. The 
 |---|---|
 | `--sidebar` | `256px` |
 | Body grid | `grid-template-columns: var(--sidebar) 1fr` |
-| Main breakpoint | `max-width: 920px` → single column, horizontal nav |
-| Secondary | `860px` settings rows, `760px` assistant, `620px` chat/asset picker |
-| Phone tables | `700px` `.tbl--stack` rows become cards (four columns of values, two under `560px`) |
-| Phones | `560px` one-column forms, 16px drawer padding, stacked line items and channel rows, full-width toast |
+| Main breakpoint | `max-width: 920px` → single column, the sidebar becomes a menu behind `#btn-nav`; `.tbl--stack` rows become cards (four columns of values, two under `560px`) |
+| Secondary | `860px` settings rows, `760px` assistant, `620px` chat/asset picker and the phone top bar (New keeps its plus; a `.topbar--one-row` is menu · search · New) |
+| Phones | `560px` one-column forms, 16px drawer padding, stacked line items and channel rows, full-width toast, notice buttons under the text, two-to-a-line `.panel__tools--chips` |
+| Touch phones | `560px` and `pointer: coarse`: 36px `.btn--sm`, `.chip` and toolbar `.sel`, 40px drawer close, 32px `.form__check` (any touch screen: 16px fields, so iOS doesn't zoom) |
 
 ## Background texture
 
