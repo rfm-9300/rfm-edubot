@@ -69,7 +69,7 @@ graph TD
     subgraph HTTP["HTTP Layer (Ktor/Netty :8080)"]
         WR[WebhookRoutes<br/>WhatsApp + Instagram]
         DR[Dashboard API /app/api<br/>feature registry + module gate]
-        AR[AdminRoutes<br/>backoffice]
+        AR[AdminRoutes<br/>backoffice · board · vault]
         WV[WebhookVerifier]
         Health["/health  /ready  /app  /backoffice"]
         AGR[Agent, integration<br/>and email routes]
@@ -161,7 +161,7 @@ graph TD
 | `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
 | `dashboard/` | The tenant dashboard's API (`/app/api`): sessions and tokens (`DashboardAccess`), the module gate (`ModuleGate.kt`) and the feature registry (`DashboardFeature.kt`); one route file per area in `crm/`, `inbox/` and `settings/`, plus Home, persona and the assistant; the assistant's tool groups in `assistant/` and Home's card queries in `overview/` ([Dashboard API](#dashboard-api)) |
 | `http/` | The error contract: `ErrorBody`, `ApiException`, the `ApiErrors` codes, and `idParam` / `idValue` / `dateValue` / `enumValue` for values a handler can't use. Depends on no feature |
-| `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing |
+| `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing; the team's work board in `admin/board/` and its password vault in `admin/vault/` ([Backoffice board and password vault](#backoffice-board-and-password-vault)) |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
 | `channel/` | `OutboundClient` interface (text, documents, Instagram quick replies) and per-channel capability flags used by the pipeline |
 | `flows/` | Chat flows: menus with quick replies that answer before the AI, their keyword matching and limits, and the `chat_flows` reader |
@@ -856,6 +856,11 @@ flowchart LR
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
 | `tenant_usage` | LLM tokens per company per UTC month, in total and per source; backs the monthly token budget | unique `(tenantId, period)` |
 | `migrations` | One-off migration markers: `database-split` holds when the split ran and the hashes of the originals left in `wabot` | `_id` |
+| `board.boards` | The backoffice's boards: name, fixed key, ordered columns (`done` flag), the last card number taken | unique `key` |
+| `board.cards` | Cards: board, number, column, `position` inside it, title, description, assignee email, due date, priority, labels, checklist, optional `tenantId`, archived, comment count, who created and changed it | unique `(boardId, number)`; `boardId+columnId+position`; partial `tenantId` |
+| `board.comments` | Comments on cards, with their author's email | `cardId+createdAt`; `boardId` |
+| `vault.meta` | The password vault (singleton `_id: "team"`): PBKDF2 parameters, the vault key sealed by the master password, the SHA-256 of the browser's vault token | `_id` |
+| `vault.entries` | Logins sealed in the browser (AES-GCM IV and ciphertext), with who saved them and when | `_id` |
 
 ### Runtime (`wabot_runtime`)
 
@@ -864,6 +869,37 @@ flowchart LR
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
 | `timesheets.challenges` | One-use nonces a phone signs, valid 2 minutes | TTL 5 minutes on `createdAt` |
+
+## Backoffice board and password vault
+
+Two tools for the platform team in the backoffice, behind the same `admin-jwt` sign-in; who did what
+is the Google session's email.
+
+- **Board** (`admin/board/`, `/admin/api/board`, `backoffice/board.js` and `board-card.js`): boards
+  with a fixed key that numbers their cards (`OPS-12`), columns, cards with checklists, comments and an
+  optional tenant, which the tenant's backoffice record lists. A card moves between neighbours'
+  positions, so a drag writes one card. Details: [wiki/backoffice-board.md](../wiki/backoffice-board.md).
+- **Passwords** (`admin/vault/`, `/admin/api/vault`, `backoffice/vault.js`): one vault the team opens
+  with a shared master password. The browser seals everything; the server stores sealed bytes and only
+  serves or changes entries for a caller that holds the token derived from the vault key. Details:
+  [wiki/password-vault.md](../wiki/password-vault.md).
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (vault.js)
+    participant S as Server (/admin/api/vault)
+    participant M as wabot_platform
+    B->>S: GET /admin/api/vault
+    S->>M: vault.meta
+    S-->>B: KDF parameters + sealed vault key
+    Note over B: PBKDF2(master password) opens the vault key<br/>HKDF(vault key) gives the entries' key and the token
+    B->>S: GET /entries (X-Vault-Auth: token)
+    S->>S: SHA-256(token) equals the stored hash?
+    S-->>B: sealed entries
+    Note over B: AES-GCM opens each entry
+    B->>S: PUT /entries/{id} sealed entry + expectedUpdatedAt (X-Vault-Auth)
+    S->>M: update if unchanged since, else 409 stale_entry
+```
 
 ## Dashboard AI Assistant
 

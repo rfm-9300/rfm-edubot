@@ -13,7 +13,8 @@ import java.util.concurrent.TimeUnit
  * The MongoDB client and its three databases; every collection lives in exactly one of them:
  * - [database]: the companies' data. Each document carries its company's `tenantId` (the per-company
  *   settings collections use it as `_id`), which is what lets one company be restored on its own.
- * - [platform]: the platform's own records ([PLATFORM_COLLECTIONS]).
+ * - [platform]: the platform's own records: the ones the split moved ([PLATFORM_COLLECTIONS]) and the backoffice's
+ *   boards and password vault.
  * - [runtime]: state the app can lose without harm ([RUNTIME_COLLECTIONS]), never backed up.
  */
 class MongoModule(config: AppConfig.MongoConfig) {
@@ -289,6 +290,17 @@ class MongoModule(config: AppConfig.MongoConfig) {
 
         platform.getCollection<Document>("tenant_usage")
             .createIndex(Document("tenantId", 1).append("period", 1), IndexOptions().unique(true))
+
+        platform.getCollection<Document>("board.boards").createIndex(Document("key", 1), IndexOptions().unique(true))
+        val boardCards = platform.getCollection<Document>("board.cards")
+        boardCards.createIndex(Document("boardId", 1).append("number", 1), IndexOptions().unique(true))
+        boardCards.createIndex(Document("boardId", 1).append("columnId", 1).append("position", 1))
+        boardCards.createIndex(
+            Document("tenantId", 1),
+            IndexOptions().partialFilterExpression(Document("tenantId", Document("\$type", "objectId"))),
+        )
+        platform.getCollection<Document>("board.comments").createIndex(Document("cardId", 1).append("createdAt", 1))
+        platform.getCollection<Document>("board.comments").createIndex(Document("boardId", 1))
     }
 
     private suspend fun initializeRuntime() {
@@ -316,7 +328,11 @@ class MongoModule(config: AppConfig.MongoConfig) {
     }
 
     companion object {
-        /** In [platform]. scripts/mongo-databases.sh keeps the same list for backups and restores. */
+        /**
+         * The collections the split moved into [platform]; scripts/mongo-databases.sh keeps the same list for backups
+         * and restores. Collections born in [platform] (the boards, the vault) stay off it: the backup dumps that
+         * database whole, and they have no original in the data database to copy or skip.
+         */
         val PLATFORM_COLLECTIONS = listOf("tenants", "dashboard_users", "admin_emails", "platform_settings", "tenant_usage")
 
         /** In [runtime]. scripts/mongo-databases.sh keeps the same list. */

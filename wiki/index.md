@@ -23,6 +23,8 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [ai-persona-and-bot.md](ai-persona-and-bot.md) — the customer-facing bot: persona studio, prompts, tools, human handoff, chat flows (menus before the AI)
 - [ai-assistant.md](ai-assistant.md) — the dashboard AI Assistant: its prompt, checked cards, settings, history
 - [agents-automations.md](agents-automations.md) — the opt-in Agents module, domain events, background jobs, Gmail and Google verification
+- [backoffice-board.md](backoffice-board.md) — the backoffice's work board: boards and keys, columns, cards, ordering and dragging, the tenant link
+- [password-vault.md](password-vault.md) — the backoffice's password manager: encrypted in the browser, the master password, what the server checks, resetting a lost vault
 - [auth-and-access.md](auth-and-access.md) — Google sign-in for the backoffice and `/app`, admin emails, where the access rules live
 - [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker and column order, the company logo
 - [dashboard-frontend.md](dashboard-frontend.md) — how `/app`'s and the backoffice's JavaScript is split: one script per page in one global scope, `admin/common.js`, the self-contained modules, where new code goes

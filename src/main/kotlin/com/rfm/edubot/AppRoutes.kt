@@ -7,8 +7,12 @@ import com.rfm.edubot.admin.adminRoutes
 import com.rfm.edubot.admin.authRoutes
 import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.backupRoutes
+import com.rfm.edubot.admin.board.BoardService
+import com.rfm.edubot.admin.board.boardRoutes
 import com.rfm.edubot.admin.platformSettingsRoutes
 import com.rfm.edubot.admin.tenantAdminRoutes
+import com.rfm.edubot.admin.vault.VaultService
+import com.rfm.edubot.admin.vault.vaultRoutes
 import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.agentAdminRoutes
 import com.rfm.edubot.agents.agentRoutes
@@ -125,6 +129,8 @@ internal fun Routing.installRoutes(s: AppServices) {
     platformSettingsRoutes(s.platformSettings)
     adminAccessRoutes(s.adminAccess, s.runtimeConfig)
     backupRoutes(s.backups)
+    boardRoutes(BoardService.of(s.mongo, s.tenants))
+    vaultRoutes(VaultService.of(s.mongo))
     backofficeRoutes()
     dashboardStaticRoutes()
     dashboardRoutes(

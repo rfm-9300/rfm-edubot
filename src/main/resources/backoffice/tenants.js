@@ -204,7 +204,8 @@ async function tenantDrawer(slug) {
       <div class="panel__body">${channels.length
         ? `<dl class="dash-facts dash-facts--stack">${channels.map(c => `<div><dt>${escapeHTML(platformLabel(c.platform))}</dt><dd>${escapeHTML(channelText(c))}${c.hasAccessToken ? '' : ` <span class="pill pill--warn">${escapeHTML(R.noToken)}</span>`}</dd></div>`).join('')}</dl>`
         : `<p class="dash-empty">${escapeHTML(T.noChannels)}</p>`}</div>
-    </section>`;
+    </section>
+    <section class="panel" data-tenant-cards hidden></section>`;
   const back = { label: t.name, open: () => tenantDrawer(slug) };
   const on = (act, fn) => $(`[data-act="${act}"]`, wrap)?.addEventListener('click', fn);
   on('edit', () => tenantForm(t, back));
@@ -217,6 +218,8 @@ async function tenantDrawer(slug) {
   on('delete', async () => { if (await deleteTenant(slug)) closeDrawer(); });
   $('[data-restore]', wrap)?.addEventListener('click', async () => { if (await restoreTenant(slug)) tenantDrawer(slug); });
   openDrawer({ title: t.name, body: wrap, autofocus: false });
+  // The board's cards for this tenant arrive after the record opens, so it doesn't wait on them.
+  mountTenantCards(t, wrap, back);
 }
 
 async function usersDrawer(slug, back = null) {

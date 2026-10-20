@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-20
 ---
 
 # Mongo databases
@@ -17,7 +17,7 @@ database gets its own pair:
 | Database | `MongoModule` | Holds | Backed up |
 |---|---|---|---|
 | `wabot` | `database` | every company's business data | `data-<stamp>.archive.gz` |
-| `wabot_platform` | `platform` | `tenants`, `dashboard_users`, `admin_emails`, `platform_settings`, `tenant_usage`, and `migrations` (the split's marker) | `platform-<stamp>.archive.gz` |
+| `wabot_platform` | `platform` | `tenants`, `dashboard_users`, `admin_emails`, `platform_settings`, `tenant_usage`, `migrations` (the split's marker), and the backoffice's `board.*` ([backoffice-board.md](backoffice-board.md)) and `vault.*` ([password-vault.md](password-vault.md)) | `platform-<stamp>.archive.gz` |
 | `wabot_runtime` | `runtime` | `webhook_events`, `scheduler_leases`, `timesheets.challenges` | never |
 
 Rules for new collections:
@@ -33,6 +33,10 @@ Rules for new collections:
 - Moving a collection between databases means changing `MongoModule.PLATFORM_COLLECTIONS` /
   `RUNTIME_COLLECTIONS` and `scripts/mongo-databases.sh` together (`MongoModuleLayoutTest` fails
   otherwise), plus a migration like `DatabaseSplit`.
+- **A new platform collection stays off `PLATFORM_COLLECTIONS`.** That list names what the split moved:
+  `DatabaseSplit` copies those names from the data database and the restore scripts map or skip them.
+  A collection born in the platform database (the board's and the vault's, 2026-10-20) has no original
+  there, and the platform archive dumps the whole database, so it is backed up without being listed.
 - `$lookup` doesn't cross databases. The only ones (quotes and invoices to their clients) stay inside
   the data database.
 
