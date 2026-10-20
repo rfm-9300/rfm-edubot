@@ -35,6 +35,7 @@ import com.rfm.edubot.ai.tools.WriteDecision
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
@@ -193,7 +194,7 @@ object AiTaskAction : AgentAction {
         val actions = ActionToolPack(reads, writes, ctx)
         val mongo = ctx.services.mongo
         val tenantId = ctx.tenant.id
-        val crm = CrmToolPack(CrmTools(ClientRepository(mongo, tenantId), QuoteRepository(mongo, tenantId), InvoiceRepository(mongo, tenantId), StandardItemRepository(mongo, tenantId)))
+        val crm = CrmToolPack(CrmTools(ClientRepository(mongo, tenantId), QuoteRepository(mongo, tenantId), InvoiceRepository(mongo, tenantId), StandardItemRepository(mongo, tenantId), ClientServiceRepository(mongo, tenantId)))
         val bookings = if (readData && DashboardModules.BOOKINGS in availability.modules) BookingToolPack(bookingDeps(mongo, ctx.tenant, BookingSource.ASSISTANT).tools()) else null
         val definitions = actions.definitions +
             if (readData) crm.readOnlyDefinitionsFor(availability.modules) + bookings?.readOnlyDefinitionsFor(availability.modules).orEmpty() else emptyList()

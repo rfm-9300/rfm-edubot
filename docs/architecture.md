@@ -68,10 +68,12 @@ sequenceDiagram
 graph TD
     subgraph HTTP["HTTP Layer (Ktor/Netty :8080)"]
         WR[WebhookRoutes<br/>WhatsApp + Instagram]
-        AR[AdminRoutes]
+        DR[Dashboard API /app/api<br/>feature registry + module gate]
+        AR[AdminRoutes<br/>backoffice · board · vault]
         WV[WebhookVerifier]
         Health["/health  /ready  /app  /backoffice"]
         AGR[Agent, integration<br/>and email routes]
+        SP[StatusPages<br/>error contract]
     end
 
     subgraph Messaging
@@ -84,6 +86,7 @@ graph TD
         UR[UserRepository]
         CR[ConversationRepository]
         MR[MessageRepository]
+        CS[CRM services<br/>ClientDirectory · QuoteService<br/>InvoiceService]
         CRM[CRM repositories<br/>clients quotes invoices<br/>suppliers employees payments]
         RL[RateLimiter<br/>token bucket]
         CF[ChatFlowRepository<br/>menus before the AI]
@@ -121,15 +124,16 @@ graph TD
     WR --> DS
     WR --> MQ
     MQ --> MP
-    MP --> UR & CR & MR & CRM & RL & DS & CF
+    MP --> UR & CR & MR & CRM & CS & RL & DS & CF
     MP --> AI
     MP --> OC
     MP --> PDF
-    AR --> CRM
-    AR --> DA
-    AR --> TC
+    DR --> CS & CRM & DA & TC
+    AR --> CS & CRM
+    CS --> CRM
+    DR & AR & AGR -. refusals .-> SP
     TC --> NT
-    DA --> AI & CRM & Mongo
+    DA --> AI & CS & CRM & Mongo
     DA --> OC
     DA --> AEX
     CRM --> EV
@@ -153,9 +157,11 @@ graph TD
 | `webhook/` | HTTP edge: HMAC signature verification, GET challenge + POST routing |
 | `messaging/` | `MessageQueue` (Channel), `MessagePipeline` orchestrator, `DeduplicationService` |
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
-| `crm/` | Client, quote, invoice, supplier, payment models/repositories, CRM tool executor, PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio) |
+| `crm/` | Client, quote, invoice, supplier, payment models/repositories; the write services every caller shares (`ClientDirectory`, `QuoteService`, `InvoiceService`, with `ClientDraft` validation); CRM tool executor; PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio). `crm/api/` holds the HTTP request and response types and the helpers the dashboard and backoffice routes share |
 | `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
-| `admin/` | Internal admin REST endpoints and static admin panel routing |
+| `dashboard/` | The tenant dashboard's API (`/app/api`): sessions and tokens (`DashboardAccess`), the module gate (`ModuleGate.kt`) and the feature registry (`DashboardFeature.kt`); one route file per area in `crm/`, `inbox/` and `settings/`, plus Home, persona and the assistant; the assistant's tool groups in `assistant/` and Home's card queries in `overview/` ([Dashboard API](#dashboard-api)) |
+| `http/` | The error contract: `ErrorBody`, `ApiException`, the `ApiErrors` codes, and `idParam` / `idValue` / `dateValue` / `enumValue` for values a handler can't use. Depends on no feature |
+| `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing; the team's work board in `admin/board/` and its password vault in `admin/vault/` ([Backoffice board and password vault](#backoffice-board-and-password-vault)) |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
 | `channel/` | `OutboundClient` interface (text, documents, Instagram quick replies) and per-channel capability flags used by the pipeline |
 | `flows/` | Chat flows: menus with quick replies that answer before the AI, their keyword matching and limits, and the `chat_flows` reader |
@@ -170,7 +176,56 @@ graph TD
 | `persistence/` | MongoDB wiring: the data, platform and runtime databases ([MongoDB Databases and Collections](#mongodb-databases-and-collections)), index creation at startup, and `DatabaseSplit`, which carried the platform and runtime collections out of the one database of before |
 | `config/` | `AppConfig` (env/HOCON), `RuntimeConfig` + Mongo `platform_settings` overrides |
 | `shared/` | `Clock`, `Ids`, `Result`/`AppError` sealed classes; `jobs/` has `PeriodicJob` and `SchedulerLease` (a Mongo lease, so one instance runs each background job) |
-| `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages |
+| `plugins/` | Ktor plugins: Monitoring, Serialization, StatusPages (answers the `http/` error contract) |
+
+Layering is route → service → repository. Route files read the request and map results to HTTP;
+services take and return domain types and outcomes, never HTTP; repositories own the Mongo queries,
+or a service does for a report such as Home. `ArchitectureBoundariesTest` checks the rules that can
+be read off the sources: nothing in `crm/` outside `crm/api/` imports Ktor's server, `http/` imports
+no feature, dashboard route files don't call `getCollection`, and every dashboard feature is
+registered. Gradle modules per domain are a proposal, not done: [plan-gradle-modules.md](plan-gradle-modules.md).
+
+## Dashboard API
+
+`Routing.installRoutes(AppServices)` (`AppRoutes.kt`) mounts every route; `Application.kt` builds the
+`AppServices` and HTTP tests build one with doubles. Under `/app/api`, each area is a
+`DashboardFeature` (its modules plus its routes) listed in `DashboardFeatures.all`, so a new area is a
+new file and one line in that list.
+
+```mermaid
+flowchart LR
+    Req[Request] --> Auth["authenticate(dashboard)<br/>DashboardAccessPolicy"]
+    Auth -->|no session| U401[401]
+    Auth --> Gate["requireModules(...)<br/>route-scoped plugin"]
+    Gate -->|module off| F403["403: bare or module_disabled"]
+    Gate --> Route["Area route file<br/>call.moduleContext()"]
+    Route --> Svc["Service<br/>ClientDirectory · QuoteService · InvoiceService"]
+    Svc --> Repo["Repositories<br/>tenant-scoped"]
+    Repo --> DB[(MongoDB)]
+    Route -. unreadable request .-> SP["StatusPages<br/>error code and detail"]
+```
+
+- **Module gate.** `requireModules(modules, denial) { … }` (`dashboard/ModuleGate.kt`) answers 401
+  without a session and 403 when the company lacks a listed module, before the handler runs, and
+  stores the `DashboardContext` that `call.moduleContext()` reads. A nested gate (invoicing a quote:
+  quotes, then invoices) adds the modules of the gate around it, because Ktor runs only the innermost
+  installation of a route-scoped plugin. `openToEverySession(reason)` marks the routes every session
+  needs (`/me`, account, notifications, switching company, connecting a channel).
+  `DashboardRouteAuditTest` reads the mounted route tree and fails for an `/app/api` endpoint that is
+  neither gated, open with a reason, nor an employee's own page.
+- **CRM services.** The dashboard, the backoffice, `CrmTools` and the assistant write clients, quotes
+  and invoices through `ClientDirectory`, `QuoteService` and `InvoiceService`, and each maps the
+  outcome to its own answers. List endpoints load the clients, suppliers and employees they name with
+  one `findByIds` per kind instead of one lookup per row.
+- **Error contract.** Every refusal is `{"error": code, "detail": field}`. Malformed or empty JSON
+  answers 400 `invalid_body`, a missing or unconvertible query parameter 400 `invalid_request`, an id,
+  date or status a handler can't read 400 `invalid_id` / `invalid_date` / `invalid_status` with the
+  field as `detail`, a body format nothing reads 415 `unsupported_media_type`, a body over a limit 413,
+  and anything else 500 `{"error":"Internal server error"}`. Domain refusals keep their own codes
+  (`phone_taken`, `already_invoiced`, …). Ktor's engine answers an unreadable body with a bare 415
+  before StatusPages runs, so `configureStatusPages` converts that exception first.
+
+Details, reasons and the test harness: [wiki/dashboard-api.md](../wiki/dashboard-api.md).
 
 ## Tenant Module Access
 
@@ -197,8 +252,9 @@ enabling the full catalog. Legacy Mongo `agentType` fields are ignored by the te
 not require a data migration.
 
 `GET /app/api/me` returns the effective module list for navigation, but navigation is not the
-security boundary. Every dashboard module route and tenant-scoped admin CRM route checks the same
-effective module list and returns `403 Forbidden` when its module is disabled.
+security boundary. Every dashboard module route sits behind a module gate that checks the same
+effective module list and returns `403 Forbidden` when a module it needs is disabled
+([Dashboard API](#dashboard-api)); tenant-scoped admin CRM routes check it too.
 
 Before any module check, the `dashboard` JWT validator (`dashboard/DashboardAccess.kt`) loads the
 token's tenant and user and returns `401` unless the tenant is `ACTIVE` and the user exists, belongs
@@ -800,6 +856,11 @@ flowchart LR
 | `platform_settings` | Global runtime config overrides (singleton `_id: "global"`) | `_id` |
 | `tenant_usage` | LLM tokens per company per UTC month, in total and per source; backs the monthly token budget | unique `(tenantId, period)` |
 | `migrations` | One-off migration markers: `database-split` holds when the split ran and the hashes of the originals left in `wabot` | `_id` |
+| `board.boards` | The backoffice's boards: name, fixed key, ordered columns (`done` flag), the last card number taken | unique `key` |
+| `board.cards` | Cards: board, number, column, `position` inside it, title, description, assignee email, due date, priority, labels, checklist, optional `tenantId`, archived, comment count, who created and changed it | unique `(boardId, number)`; `boardId+columnId+position`; partial `tenantId` |
+| `board.comments` | Comments on cards, with their author's email | `cardId+createdAt`; `boardId` |
+| `vault.meta` | The password vault (singleton `_id: "team"`): PBKDF2 parameters, the vault key sealed by the master password, the SHA-256 of the browser's vault token | `_id` |
+| `vault.entries` | Logins sealed in the browser (AES-GCM IV and ciphertext), with who saved them and when | `_id` |
 
 ### Runtime (`wabot_runtime`)
 
@@ -808,6 +869,37 @@ flowchart LR
 | `webhook_events` | Deduplication log — eventId + status, plus the queued `InboundMessage` for text messages | unique on `eventId`; TTL 7 days on `receivedAt` |
 | `scheduler_leases` | Named leases, so one instance runs each periodic job | `_id` = job name |
 | `timesheets.challenges` | One-use nonces a phone signs, valid 2 minutes | TTL 5 minutes on `createdAt` |
+
+## Backoffice board and password vault
+
+Two tools for the platform team in the backoffice, behind the same `admin-jwt` sign-in; who did what
+is the Google session's email.
+
+- **Board** (`admin/board/`, `/admin/api/board`, `backoffice/board.js` and `board-card.js`): boards
+  with a fixed key that numbers their cards (`OPS-12`), columns, cards with checklists, comments and an
+  optional tenant, which the tenant's backoffice record lists. A card moves between neighbours'
+  positions, so a drag writes one card. Details: [wiki/backoffice-board.md](../wiki/backoffice-board.md).
+- **Passwords** (`admin/vault/`, `/admin/api/vault`, `backoffice/vault.js`): one vault the team opens
+  with a shared master password. The browser seals everything; the server stores sealed bytes and only
+  serves or changes entries for a caller that holds the token derived from the vault key. Details:
+  [wiki/password-vault.md](../wiki/password-vault.md).
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (vault.js)
+    participant S as Server (/admin/api/vault)
+    participant M as wabot_platform
+    B->>S: GET /admin/api/vault
+    S->>M: vault.meta
+    S-->>B: KDF parameters + sealed vault key
+    Note over B: PBKDF2(master password) opens the vault key<br/>HKDF(vault key) gives the entries' key and the token
+    B->>S: GET /entries (X-Vault-Auth: token)
+    S->>S: SHA-256(token) equals the stored hash?
+    S-->>B: sealed entries
+    Note over B: AES-GCM opens each entry
+    B->>S: PUT /entries/{id} sealed entry + expectedUpdatedAt (X-Vault-Auth)
+    S->>M: update if unchanged since, else 409 stale_entry
+```
 
 ## Dashboard AI Assistant
 
@@ -1263,13 +1355,39 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs the standard fields its company requires, NIF and address unless the company chose otherwise, plus its required own fields ([Client fields](#client-fields)); a `PATCH` that omits a detail keeps the stored one. Bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail (`app/drawer.js`). Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
 - **LLM fallback** — `AiClient` tries `primaryModel` first; on error it retries with `fallbackModel`.
-- **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit repository calls and returns structured JSON results.
+- **Tool execution boundary** — the LLM can request CRM operations, but `CrmTools` maps tool names to explicit calls (writes through the same CRM services the dashboard uses, reads through repositories) and returns structured JSON results.
 - **PDF storage** — generated quote/invoice PDFs are written under `app.pdf.storagePath` (production: `/data/pdfs` on the `pdf_data` volume), then uploaded to WhatsApp as documents and linked from the tenant dashboard and operator APIs. `GET …/pdf` regenerates a missing file from the stored invoice/quote so downloads survive container recreation.
 - **Config via HOCON** — `application.conf` reads `${?ENV_VAR}` overrides; required keys are validated at startup with a clear error.
 - **Backoffice sign-in with Google** — operators sign in to `/backoffice` with Google through Firebase Auth (project `thebotslab`). `POST /admin/auth/google` verifies the Firebase ID token itself (Google's JWKS, issuer/audience = project, `sign_in_provider = google.com`, verified email in `ADMIN_EMAILS`) with the Auth0 JWT libraries Ktor already ships, then issues the same HS256 admin JWT as the password login, so every `admin-jwt` route is unchanged. Password login only exists while `ADMIN_PASSWORD_HASH` is set; `GET /admin/auth/config` tells the login screen which methods are on. Tenant users sign in with Google through the same Firebase project, matched to their own accounts ([Tenant sign-in](#tenant-sign-in)).
 - **Backoffice admins** — the Google allowlist is `ADMIN_EMAILS` plus emails added on the backoffice's Admins page (`admin_emails`, unique `email`). `AdminAccess` loads them at startup and after each change into `RuntimeConfig`, whose live `allowedEmails` is the union, so the Google sign-in needs no other change. Env emails can't be removed from the page and nobody can remove themselves, so the list can't lock everyone out. The `admin-jwt` validator re-checks a Google session's `email` claim against the live list on every request, so removing someone ends their session at once; password sessions carry no email and are unaffected.
 - **Manual backups from the backoffice** — the internet-facing app never runs host commands. `POST /admin/api/backups` only writes `request.json` into a mounted control folder; the host's `backup-runner.sh` (cron, every minute) claims it by renaming it, runs `backup-mongo.sh` (which now takes a `flock` so it never overlaps the nightly run) and writes `last.json`/`last.log` back. Each backup is two archives, `platform-<timestamp>` and `data-<timestamp>`; the app lists them from the read-only backups mount with what each holds, and `<archive>.uploaded` markers left after a successful `rclone copy` show which ones were copied off the server. A stale `heartbeat` (over three minutes) shows the runner as stopped. Restores stay on the host: `restore-mongo.sh` for whole databases, `restore-tenant.sh` for one company. See `DEPLOYMENT_RUNBOOK.md` → Backups.
 - **Hot platform settings** — bootstrap-critical keys (Mongo URI, listen port) stay env-only. Operational and secret settings can be overridden in Mongo `platform_settings` and applied through `RuntimeConfig` without rebuild; operators manage them in `/backoffice` (secrets masked, reveal on demand).
+
+## Single-instance state
+
+The app runs as one instance, and a release recreates that one container. The state below lives in
+the process's memory; it is correct for one instance and would have to move to shared state (Mongo,
+or a broker) before two instances could run, a deploy that overlaps old and new included. Nothing
+here is built yet; the reasoning is in [wiki/single-instance.md](../wiki/single-instance.md).
+
+| Component | Held in memory | With two instances | Would move to |
+|---|---|---|---|
+| `MessageQueue` + `ConversationLanes` (`messaging/`) | Inbound messages waiting, 16 lanes keyed by tenant, channel and participant | One conversation's messages are ordered only within a process; each instance re-queues every `received` event from the last 30 minutes at startup, including ones the other is answering | A Mongo work queue claimed per conversation (like `DomainEventLog.claimNext`), or routing each conversation to one instance |
+| `RateLimiter` (`ratelimit/`, one per pipeline in `TenantPipelineFactory`) | Per-customer hour and day counters, reset when the pipeline is evicted | Each instance counts separately, doubling every customer's quota | Counters in `wabot_runtime` with a TTL |
+| `BookingScheduler` locks | A `Mutex` per company around "find overlaps, then insert" | Two instances can book the same slot | A lock document or a conditional write in Mongo |
+| `CompanyService` locks (`DashboardCompanyRoutes.kt`) | A `Mutex` per tenant around "count companies, then create" | Two creates can pass the company limit | A conditional update on the tenant's company count |
+| `OAuthState` | The OAuth states already consumed | A state is single-use per instance only | A collection with a unique state and a TTL |
+| `TenantRegistry` | Channel binding → tenant, for webhooks | A channel connected, moved or removed through one instance is unknown to the other until restart | Reload on a change signal (change stream, or a polled version document) |
+| `TenantPipelineFactory` cache | One `MessagePipeline` per tenant with its persona, modules and limits | The other instance keeps answering with the old persona and settings | Evict on the same change signal |
+| `RuntimeConfig` + `AdminAccess` | Platform-setting overrides and the backoffice admin list | A setting or admin change applies only on the instance that made it | Reload on a change signal |
+| `AgentDispatcher` + `DomainEventInterest` | Each company's active agents and the event types they listen for | The other instance doesn't record or dispatch events for agents activated elsewhere | Reload on a change signal |
+| `WebChannelRegistry` | Website-widget WebSocket sessions | Only the instance holding a visitor's socket can send the reply | Sticky sessions plus handing replies to the owning instance |
+| `DomainEventSignal` | Wakes the local dispatcher after a write | Other instances pick events up on their next poll | Nothing needed (latency only) |
+| Caches and local locks: WhatsApp templates (`InboxService`, `WhatsAppTemplateSending`), `EmailInsightsService`, `GoogleTokenProvider`, `PersonaCompiler`, `AgentRunExecutor` semaphores, `DeduplicationService` mutex | Short-lived copies, de-duplicated work, per-company caps | Duplicated work (an extra model call or token refresh) or a cap per instance, never a wrong result | Can stay per instance |
+
+Already shared through Mongo: background jobs take a lease (`SchedulerLease`: agents' scheduler,
+Gmail sync, retention jobs), webhook dedup is a unique `eventId`, domain events and agent runs are
+claimed atomically, and phone uniqueness is a unique index.
 
 ## Infrastructure
 

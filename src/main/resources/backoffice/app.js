@@ -1,6 +1,6 @@
 /* The backoffice's shell, loaded last: loadAll() fetches the tenants and their stats for the sidebar,
-   setView() switches between Tenants, Admins, Backups and Platform settings, and init() wires the top bar
-   and starts it all. */
+   setView() switches between Tenants, Admins, Board, Passwords, Backups and Platform settings, and init()
+   wires the top bar and starts it all. */
 
 async function loadAll() {
   const [tenants, whatsAppSignup] = await Promise.all([
@@ -35,22 +35,25 @@ async function loadDeletedStats() {
   return true;
 }
 
-const VIEWS = ['tenants', 'admins', 'backups', 'settings'];
+const VIEWS = ['tenants', 'admins', 'board', 'vault', 'backups', 'settings'];
 
 function setView(view) {
   if (!token) return;
   currentView = VIEWS.includes(view) ? view : 'tenants';
   stopBackupPolling();
+  stopBoardRefresh();
   if (location.hash !== `#${currentView}`) location.hash = currentView;
   $$('.nav__item').forEach(a => a.classList.toggle('is-active', a.dataset.view === currentView));
   const leaf = $('.crumb__leaf');
-  if (leaf) leaf.textContent = { settings: T.platformSettings.nav, admins: T.admins.nav, backups: T.backups.nav }[currentView] || T.heroTitle;
+  if (leaf) leaf.textContent = { settings: T.platformSettings.nav, admins: T.admins.nav, board: T.board.nav, vault: T.vault.nav, backups: T.backups.nav }[currentView] || T.heroTitle;
   const search = $('.topbar__search');
   if (search) search.hidden = currentView !== 'tenants';
   const btnNew = $('#btn-new');
   if (btnNew) btnNew.hidden = currentView !== 'tenants';
   if (currentView === 'settings') renderPlatformSettings();
   else if (currentView === 'admins') renderAdmins();
+  else if (currentView === 'board') renderBoard();
+  else if (currentView === 'vault') renderVault();
   else if (currentView === 'backups') renderBackups();
   else renderTenants();
 }

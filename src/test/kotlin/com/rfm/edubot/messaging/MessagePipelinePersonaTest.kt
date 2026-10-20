@@ -84,7 +84,7 @@ class MessagePipelinePersonaTest {
         coEvery { dedup.markFailed(any()) } returns Unit
         coEvery { responder.sendText(any(), capture(sent)) } returns Unit
         every { responder.capabilities } returns ChannelCapabilities()
-        every { crmTools.definitionsFor(any()) } returns CrmTools(mockk(), mockk(), mockk(), mockk()).definitionsFor(DashboardModules.catalog.toSet())
+        every { crmTools.definitionsFor(any()) } returns CrmTools(mockk(), mockk(), mockk(), mockk(), mockk()).definitionsFor(DashboardModules.catalog.toSet())
     }
 
     private fun pipeline(model: FakeModel, persona: TenantPersona?, modules: Set<String> = setOf(DashboardModules.CONVERSATIONS)) = MessagePipeline(

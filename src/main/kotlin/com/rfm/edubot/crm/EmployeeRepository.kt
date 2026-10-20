@@ -21,6 +21,12 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
     suspend fun findById(id: ObjectId): Employee? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toEmployee()
 
+    /** The employees among [ids], archived ones included, read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Employee> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toEmployee() }.associateBy { it.id }
+    }
+
     suspend fun search(query: String, archived: Boolean = false): List<Employee> {
         val trimmed = query.trim()
         val text = if (trimmed.isBlank()) {

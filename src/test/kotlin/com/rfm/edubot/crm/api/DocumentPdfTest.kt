@@ -1,4 +1,4 @@
-package com.rfm.edubot.admin
+package com.rfm.edubot.crm.api
 
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice

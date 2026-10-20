@@ -2678,6 +2678,134 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 }
 
 /* ============================================================
+   BACKOFFICE · BOARD + PASSWORDS
+   The platform team's boards (columns of cards that drag) and its password vault.
+   ============================================================ */
+
+/* A compact search field in a panel's tools or filters, as tall as the chips and toolbar selects beside it. */
+.panel__search { width: 220px; height: 28px; padding: 0 12px; font-size: 12.5px; }
+@media (max-width: 560px) { .panel__search { flex: 1 1 100%; width: 100%; } }
+@media (pointer: coarse) { .panel__search { font-size: 16px; } }
+
+/* Secondary actions at the end of a view, under its last panel. */
+.view__foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+
+/* A field with its own buttons on its line (copy, show, generate); on phones the buttons go under it. */
+.inp-row { display: flex; align-items: center; gap: 6px; }
+.inp-row > .inp { flex: 1 1 auto; min-width: 0; }
+.inp-row > .btn { flex: none; }
+@media (max-width: 560px) {
+  .inp-row { flex-wrap: wrap; }
+  .inp-row > .inp { flex-basis: 100%; }
+}
+
+/* The end of a drawer's body: who created and changed the record, then its secondary actions (archive, delete). */
+.drawer__meta { margin: 18px 0 0; }
+.drawer__actions { margin-top: 12px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+
+/* The sign-in card as a view's lock screen (the backoffice's Passwords): under the top bar, not a full screen. */
+.auth--view { min-height: 0; padding: 24px 0 40px; }
+.auth__mark svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.auth .notice { margin-bottom: 16px; }
+.vault__lost { margin: 14px 0 0; }
+
+.board__body { padding: 14px; }
+.board__filtered { margin: 0 2px 10px; }
+/* Columns side by side, scrolling inside the panel when they don't fit; stacked on phones, so nothing scrolls sideways. */
+.board__cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(264px, 1fr); align-items: start; gap: 12px; padding-bottom: 4px; overflow-x: auto; }
+.board.is-dragging,
+.board.is-dragging .board-card { cursor: grabbing; }
+.board-col { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--surface-2); transition: background 120ms, border-color 120ms; }
+.board-col.is-drop { border-color: var(--hairline-strong); background: var(--accent-soft); }
+.board-col__head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 6px; }
+.board-col__title { flex: 1; min-width: 0; margin: 0; overflow: hidden; color: var(--ink); font-family: var(--display); font-size: 14px; font-weight: 700; text-overflow: ellipsis; white-space: nowrap; }
+/* Marks a column whose cards count as done. */
+.board-col__done { display: inline-grid; flex: none; place-items: center; color: var(--ok-ink); }
+.board-col__done svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.board-col__cards { display: flex; flex-direction: column; gap: 8px; min-height: 8px; padding: 4px 8px; }
+.board-col__foot { padding: 4px 8px 8px; }
+.board-col__add { width: 100%; justify-content: flex-start; }
+.board-col__new { display: grid; gap: 8px; }
+
+/* A card on the board. A mouse drags it at once; a finger holds it first, so a swipe still scrolls. */
+.board-card {
+  display: grid; gap: 6px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); box-shadow: var(--shadow-sm);
+  color: var(--ink); cursor: grab; touch-action: manipulation; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none;
+  transition: border-color 120ms, box-shadow 120ms;
+}
+.board-card:hover { border-color: var(--hairline-strong); }
+.board-card:focus-visible { outline: none; border-color: var(--focus-border); box-shadow: var(--focus-ring); }
+/* While it drags, the card follows the pointer above the page; its left, top and width are set as it moves. */
+.board-card.is-dragging { position: fixed; z-index: 70; margin: 0; pointer-events: none; box-shadow: var(--shadow-lg); transform: rotate(1.5deg); }
+/* Where the dragged card will land. */
+.board-card--slot { padding: 0; border: 1.5px dashed var(--hairline-strong); background: transparent; box-shadow: none; }
+.board-card__top { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-height: 20px; }
+.board-card__key { color: var(--ink-mute); font-family: var(--mono); font-size: 11.5px; font-weight: 500; }
+.board-card__title { margin: 0; font-size: 13.5px; font-weight: 700; line-height: 1.35; overflow-wrap: anywhere; }
+.board-card__labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.board-card__label { max-width: 100%; height: 20px; padding: 0 7px; overflow: hidden; border: 1px solid var(--line-soft); border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 700; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.board-card__meta { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; color: var(--ink-mute); font-size: 12px; font-weight: 600; }
+.board-card__fact { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.board-card__fact svg { flex: none; width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.board-card__fact.is-late { color: var(--bad-ink); }
+.board-card__fact.is-done { color: var(--ok-ink); }
+.board-card__tenant { max-width: 100%; }
+.board-card__tenant span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.board-card__avatar { display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; margin-left: auto; border-radius: 50%; background: var(--accent-soft); color: var(--accent-deep); font-size: 10.5px; font-weight: 800; letter-spacing: 0.02em; }
+
+/* Counts beside a column's or a drawer section's title, like a panel title's. */
+.board-col__head .tag,
+.board-detail__title .tag { min-width: 22px; padding: 1px 8px; border-radius: 999px; background: var(--bg-deep); color: var(--ink-2); font-family: var(--sans); font-size: 12px; font-weight: 700; text-align: center; }
+
+/* A card in the drawer: its checklist and comments under the form. */
+.board-detail__section { margin-top: 22px; padding-top: 16px; border-top: 1px solid var(--line-soft); }
+.board-detail__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.board-detail__title { display: flex; align-items: center; gap: 8px; margin: 0; color: var(--ink); font-family: var(--display); font-size: 15px; font-weight: 700; }
+.board-detail__meter { margin: 0 0 10px; }
+.board-detail__meter .meter__fill { background: var(--ok); }
+.checklist { margin: 0 0 10px; padding: 0; list-style: none; }
+.checklist__item { display: flex; align-items: flex-start; gap: 8px; padding: 4px 0; }
+.checklist__item .form__check { flex: 1; min-width: 0; align-items: flex-start; }
+.checklist__item .form__check input { margin-top: 2px; }
+.checklist__text { overflow-wrap: anywhere; }
+.checklist__text.is-done { color: var(--ink-mute); text-decoration: line-through; }
+.checklist__rm { display: grid; flex: none; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 8px; background: none; color: var(--ink-faint); font-size: 16px; cursor: pointer; }
+.checklist__rm:hover { background: var(--bad-soft); color: var(--bad-ink); }
+.checklist__rm:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.checklist__add { display: flex; gap: 8px; }
+.checklist__add .inp { flex: 1; min-width: 0; }
+.comments { display: grid; gap: 14px; margin: 0 0 14px; padding: 0; list-style: none; }
+.comment__head { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.comment__head .board-card__avatar { margin-left: 0; }
+.comment__author { color: var(--ink); font-size: 13px; font-weight: 700; overflow-wrap: anywhere; }
+.comment__when { color: var(--ink-mute); font-size: 12px; }
+.comment__rm { margin-left: auto; }
+.comment__body { margin: 6px 0 0 32px; color: var(--ink-2); font-size: 13.5px; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comment-form { display: grid; gap: 8px; }
+.comment-form .actions { justify-content: flex-end; }
+@media (pointer: coarse) {
+  .checklist__rm { width: 36px; height: 36px; }
+}
+
+/* A board's columns in its settings: name, done, move up and down, remove. */
+.lines--columns .lines__head,
+.lines--columns .line { grid-template-columns: minmax(0, 1fr) 64px 72px 32px; }
+.lines--columns .lines__head > span { padding-right: 0; text-align: left; }
+.line__check { display: grid; place-items: center; border-right: 1px solid var(--line-soft); cursor: pointer; }
+.line .line__check input { width: 16px; height: 16px; padding: 0; border: 0; accent-color: var(--accent); cursor: pointer; }
+.line__moves { display: flex; align-items: stretch; border-right: 1px solid var(--line-soft); }
+.line .l-move { display: grid; flex: 1; place-items: center; border: 0; background: transparent; color: var(--ink-faint); font-size: 14px; cursor: pointer; }
+.line .l-move:hover { background: var(--surface-2); color: var(--ink); }
+.line .l-move:focus-visible,
+.line .l-rm:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus-border); }
+
+@media (max-width: 700px) {
+  .board__body { padding: 10px; }
+  .board__cols { grid-auto-flow: row; grid-auto-columns: auto; overflow-x: visible; }
+}
+
+/* ============================================================
    LAYOUT · minimal — html[data-layout="minimal"], the skin of /app and /backoffice
    Clean Ops look: light-gray canvas, white cards, near-black text,
    yellow only for actions, selections and small highlights.
@@ -2853,6 +2981,8 @@ html[data-layout="minimal"] .nav__item[data-tab="agents"] { --nav-icon: url("dat
 html[data-layout="minimal"] .nav__item[href="#tenants"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M4.5 21V5a2 2 0 0 1 2-2h7a2 2 0 0 1 2 2v16'/><path d='M15.5 9h2a2 2 0 0 1 2 2v10'/><path d='M3 21h18'/><path d='M8.5 7.5h3M8.5 11.5h3M8.5 15.5h3'/></svg>"); }
 html[data-layout="minimal"] .nav__item[href="#admins"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M12 3 4.5 6v5.5c0 4.5 3.1 8.1 7.5 9.5 4.4-1.4 7.5-5 7.5-9.5V6z'/><path d='m9 12 2.2 2.2L15.5 10'/></svg>"); }
 html[data-layout="minimal"] .nav__item[href="#backups"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><ellipse cx='12' cy='5.5' rx='7.5' ry='2.5'/><path d='M4.5 5.5v13c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5v-13'/><path d='M4.5 12c0 1.4 3.4 2.5 7.5 2.5s7.5-1.1 7.5-2.5'/></svg>"); }
+html[data-layout="minimal"] .nav__item[href="#board"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='4' width='5' height='15' rx='1.5'/><rect x='9.5' y='4' width='5' height='9' rx='1.5'/><rect x='16' y='4' width='5' height='12' rx='1.5'/></svg>"); }
+html[data-layout="minimal"] .nav__item[href="#vault"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><rect x='4.5' y='10.5' width='15' height='10' rx='2'/><path d='M8 10.5V7.5a4 4 0 0 1 8 0v3'/><path d='M12 14.5v2'/></svg>"); }
 html[data-layout="minimal"] .nav__item[data-tab="settings"],
 html[data-layout="minimal"] .nav__item[href="#settings"] { --nav-icon: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'><path d='M10.46 5.07L10.6 2.6A9.5 9.5 0 0 1 13.4 2.6L13.54 5.07A7.1 7.1 0 0 1 15.81 6.01L17.65 4.36A9.5 9.5 0 0 1 19.64 6.35L17.99 8.19A7.1 7.1 0 0 1 18.93 10.46L21.4 10.6A9.5 9.5 0 0 1 21.4 13.4L18.93 13.54A7.1 7.1 0 0 1 17.99 15.81L19.64 17.65A9.5 9.5 0 0 1 17.65 19.64L15.81 17.99A7.1 7.1 0 0 1 13.54 18.93L13.4 21.4A9.5 9.5 0 0 1 10.6 21.4L10.46 18.93A7.1 7.1 0 0 1 8.19 17.99L6.35 19.64A9.5 9.5 0 0 1 4.36 17.65L6.01 15.81A7.1 7.1 0 0 1 5.07 13.54L2.6 13.4A9.5 9.5 0 0 1 2.6 10.6L5.07 10.46A7.1 7.1 0 0 1 6.01 8.19L4.36 6.35A9.5 9.5 0 0 1 6.35 4.36L8.19 6.01A7.1 7.1 0 0 1 10.46 5.07Z'/><circle cx='12' cy='12' r='3'/></svg>"); }
 
@@ -3235,4 +3365,10 @@ html[data-layout="minimal"] .worklist__group { font-size: 11.5px; font-weight: 6
   .dash-kpi__value { font-size: 20px; }
   .dash-figures { gap: 8px; }
   .dash-figure__value { font-size: 19px; }
+}
+
+/* The skin's fields are 38px; a panel's search keeps the 28px of the chips and selects beside it (36px on touch phones). */
+html[data-layout="minimal"] .panel__search { height: 28px; }
+@media (max-width: 560px) and (pointer: coarse) {
+  html[data-layout="minimal"] .panel__search { height: 36px; }
 }

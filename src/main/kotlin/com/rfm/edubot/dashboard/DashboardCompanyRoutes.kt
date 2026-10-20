@@ -89,44 +89,46 @@ fun Route.dashboardCompanyRoutes(tenantRepository: TenantRepository, runtimeConf
 
     authenticate("dashboard") {
         route("/app/api/companies") {
-            get {
-                val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SETTINGS) }
-                    ?: return@get call.respond(HttpStatusCode.Forbidden)
-                val all = tenantRepository.findCompanies(ctx.tenant.primaryTenantId)
-                call.respond(
-                    CompaniesDto(
-                        current = ctx.tenant.id.toHexString(),
-                        limit = all.companyLimit(ctx.tenant),
-                        canManage = ctx.canManageCompanies(),
-                        companies = all.map { it.companyDto() },
-                    ),
-                )
-            }
+            requireModules(DashboardModules.SETTINGS) {
+                get {
+                    val ctx = call.moduleContext()
+                    val all = tenantRepository.findCompanies(ctx.tenant.primaryTenantId)
+                    call.respond(
+                        CompaniesDto(
+                            current = ctx.tenant.id.toHexString(),
+                            limit = all.companyLimit(ctx.tenant),
+                            canManage = ctx.canManageCompanies(),
+                            companies = all.map { it.companyDto() },
+                        ),
+                    )
+                }
 
-            post {
-                val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SETTINGS) }
-                    ?: return@post call.respond(HttpStatusCode.Forbidden)
-                if (!ctx.canManageCompanies()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                val request = call.receive<CreateCompanyRequest>()
-                when (val result = companies.create(ctx.tenant, request.name, SystemClock.now())) {
-                    is CompanyService.Created.Ok -> call.respond(HttpStatusCode.Created, result.company.companyDto())
-                    CompanyService.Created.InvalidName -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name_required"))
-                    CompanyService.Created.LimitReached -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "company_limit"))
+                post {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageCompanies()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    val request = call.receive<CreateCompanyRequest>()
+                    when (val result = companies.create(ctx.tenant, request.name, SystemClock.now())) {
+                        is CompanyService.Created.Ok -> call.respond(HttpStatusCode.Created, result.company.companyDto())
+                        CompanyService.Created.InvalidName -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name_required"))
+                        CompanyService.Created.LimitReached -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "company_limit"))
+                    }
                 }
             }
 
             // The new token keeps this session's expiry, so switching can't extend a session.
-            post("/{id}/switch") {
-                val ctx = call.dashboardContext() ?: return@post
-                val session = call.principal<JWTPrincipal>() ?: return@post call.respond(HttpStatusCode.Unauthorized)
-                val expiresAt = session.expiresAt ?: return@post call.respond(HttpStatusCode.Unauthorized)
-                val target = call.parameters["id"]?.toObjectIdOrNull()?.let { tenantRepository.findById(it) }
-                    ?.takeIf { it.primaryTenantId == ctx.tenant.primaryTenantId && it.status != TenantStatus.DELETED }
-                    ?: return@post call.respond(HttpStatusCode.NotFound)
-                if (!DashboardAccessPolicy.allows(target, ctx.user, ctx.principalType)) {
-                    return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "company_inactive"))
+            openToEverySession("switching to another of the tenant's companies, which that company's own access then decides") {
+                post("/{id}/switch") {
+                    val ctx = call.dashboardContext() ?: return@post
+                    val session = call.principal<JWTPrincipal>() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                    val expiresAt = session.expiresAt ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                    val target = call.parameters["id"]?.toObjectIdOrNull()?.let { tenantRepository.findById(it) }
+                        ?.takeIf { it.primaryTenantId == ctx.tenant.primaryTenantId && it.status != TenantStatus.DELETED }
+                        ?: return@post call.respond(HttpStatusCode.NotFound)
+                    if (!DashboardAccessPolicy.allows(target, ctx.user, ctx.principalType)) {
+                        return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "company_inactive"))
+                    }
+                    call.respond(SwitchCompanyResponse(token = switchedDashboardToken(runtimeConfig.get().admin, session.payload, target, expiresAt)))
                 }
-                call.respond(SwitchCompanyResponse(token = switchedDashboardToken(runtimeConfig.get().admin, session.payload, target, expiresAt)))
             }
         }
     }

@@ -1,4 +1,4 @@
-package com.rfm.edubot.admin
+package com.rfm.edubot.crm.api
 
 import kotlinx.datetime.LocalDate
 import kotlinx.serialization.json.Json

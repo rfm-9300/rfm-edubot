@@ -1,7 +1,7 @@
 package com.rfm.edubot.crm
 
-import com.rfm.edubot.admin.CreateSupplierRequest
-import com.rfm.edubot.admin.SupplierServiceRequest
+import com.rfm.edubot.crm.api.CreateSupplierRequest
+import com.rfm.edubot.crm.api.SupplierServiceRequest
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.crm.model.SupplierService
 import com.rfm.edubot.persistence.MongoModule

@@ -41,6 +41,12 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
 
     suspend fun findById(id: ObjectId): Client? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toClient()
 
+    /** The clients among [ids], archived ones included, read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Client> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toClient() }.associateBy { it.id }
+    }
+
     /** [customKeys] are the tenant's own fields whose values the query also matches. */
     suspend fun search(query: String, limit: Int = 20, archived: Boolean = false, customKeys: Collection<String> = emptyList()): List<Client> {
         val trimmed = query.trim()

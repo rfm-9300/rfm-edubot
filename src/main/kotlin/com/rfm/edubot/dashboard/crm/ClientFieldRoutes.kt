@@ -1,14 +1,15 @@
-package com.rfm.edubot.dashboard
+package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.CustomFields
+import com.rfm.edubot.dashboard.isAdmin
+import com.rfm.edubot.dashboard.moduleContext
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.CustomField
 import com.rfm.edubot.tenant.model.DirectoryFields
 import com.rfm.edubot.tenant.model.FieldDirectory
 import io.ktor.http.HttpStatusCode
-import io.ktor.server.application.call
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -22,11 +23,11 @@ import kotlinx.serialization.Serializable
  */
 internal fun Route.clientFieldRoutes(tenantRepository: TenantRepository) {
     get("/clients/fields") {
-        val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@get call.respond(HttpStatusCode.Forbidden)
+        val ctx = call.moduleContext()
         call.respond(ClientFields.of(ctx.tenant).dto(canEdit = ctx.isAdmin()))
     }
     put("/clients/fields") {
-        val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.CLIENTS) } ?: return@put call.respond(HttpStatusCode.Forbidden)
+        val ctx = call.moduleContext()
         if (!ctx.isAdmin()) return@put call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
         val request = call.receive<DirectoryFieldsRequest>()
         val change = CustomFields.change(

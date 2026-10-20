@@ -96,6 +96,8 @@ Signup (`loadFacebookSdk()`, `waitForWhatsAppSignupMessage()`, `facebookLoginFor
 | `login.js` | The sign-in screen (Google or the platform password) |
 | `tenants.js` | The tenants list and filters, a tenant's record with its users and agents, suspend / activate / delete / restore |
 | `tenant-form.js` | The new and edit form: modules, channels, connecting Instagram and WhatsApp, the OAuth popup |
+| `board.js`, `board-card.js` | Board: the view, its filters, quick add and the cards' drag; the card, new card, board settings and archived drawers, and the tenant record's cards ([backoffice-board.md](backoffice-board.md)) |
+| `vault.js` | Passwords: the browser's crypto, create, unlock and lock, the logins and their drawer ([password-vault.md](password-vault.md)) |
 | `admins.js`, `backups.js`, `platform-settings.js` | The other three views |
 | `app.js` | The shell: `loadAll()`, the sidebar's counts, `setView()`, `init()` |
 

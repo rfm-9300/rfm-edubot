@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-19
 ---
 
 # Cursor cloud agents on this repo
@@ -7,7 +7,7 @@ updated: 2026-10-18
 How Cursor cloud agents work on this repo, what their environment has, and how their PRs get merged.
 
 Part of the work lands as PRs from Cursor cloud agents (branches `cursor/<topic>-<4 hex>`, opened
-under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84, #85 and #86.
+under `rfm-9300`): #2 to #13 (August to 2026-09-22), #41, #43, #44, #48, #51, #52, #53, #54, #55, #72, #76, #84, #85, #86 and #87.
 Local sessions push straight to `main`. What a session should know:
 
 - **Merging deploys nothing (since PR #85).** Production changes only when a release tag is pushed
@@ -88,6 +88,17 @@ Local sessions push straight to `main`. What a session should know:
   Nothing deployed: the first release tag ships both. #84's GitGuardian check stayed red on its known
   false positive (the `autocomplete` value `'new-password'`, described in #84), which has to be marked
   in GitGuardian itself.
+- **#87 merged on 2026-10-20** at Rodrigo's request, a day after it was opened. Meanwhile `main` had
+  gained `f334754` (front end only, merged cleanly) and `68729e8` (a quote becoming a Serviços row, the
+  company logo), whose backend changes went into the files #87 had split up, so `DashboardRoutes.kt`,
+  `AssistantTools.kt` and `AdminRoutes.kt` conflicted. In a worktree the session merged `main` into
+  the branch, took #87's side of those three files, and re-applied what `68729e8` changed in them to
+  the per-area files that now hold that code, by [dashboard-api.md](dashboard-api.md)'s rules: the
+  quote route behind a nested `requireModules(SERVICES)`, `QuoteService.service`, the
+  `http/RequestValues` helpers, `/me/logo` under `openToEverySession`. `68729e8`'s own tests, which
+  the merge brought in, checked the port, and the full suite passed (894 tests). Then the usual flow:
+  push, mark ready, Test and GitGuardian, merge. For a structural PR, porting the feature commits'
+  diffs beats resolving the conflict hunks, which only show the old file.
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's
@@ -114,7 +125,13 @@ Local sessions push straight to `main`. What a session should know:
   `./gradlew run` exits on "Missing required config". The backoffice's Backups page shows archives
   when `BACKUP_ARCHIVE_DIR` and `BACKUP_CONTROL_DIR` point at two local folders
   (`mongo-<yyyyMMddTHHmmssZ>.archive.gz` files, and a `last.json` with a non-zero `exitCode` plus
-  `last.log` for a failed run).
+  `last.log` for a failed run). #87's VM (2026-10-19) had no Docker service at all (`service docker`
+  unknown): `docker.io` with `sudo dockerd` left running in a tmux session, plus the steps above, ran
+  the full suite (893 tests). To prove a refactor changed no answers, that agent recorded every
+  `/app/api` and backoffice endpoint's status and body for several sessions and module mixes, from a
+  `testApplication` mounting the real routes over a throwaway Mongo, before and after, and diffed the
+  two; a `git worktree` of the old commit gave the "before". It kept that probe out of git, since the
+  HTTP tests ([dashboard-api.md](dashboard-api.md)) hold the behavior from then on.
 - The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
   driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed
   unmerged on 2026-10-06, and the 2026-10-09 batch on 2026-10-11. Only Testcontainers went in, by hand

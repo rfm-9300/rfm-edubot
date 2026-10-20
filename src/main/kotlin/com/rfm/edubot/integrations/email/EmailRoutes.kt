@@ -4,12 +4,17 @@ import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.ModuleDenial
 import com.rfm.edubot.dashboard.dashboardContext
+import com.rfm.edubot.dashboard.moduleContext
+import com.rfm.edubot.dashboard.openToEverySession
 import com.rfm.edubot.dashboard.requireModule
+import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
@@ -39,76 +44,82 @@ fun Route.emailRoutes(email: EmailService, mongo: MongoModule, pdf: PdfGenerator
 
     authenticate("dashboard") {
         route("/app/api/email") {
-            get {
-                val ctx = call.dashboardContext() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-                val account = email.sender(ctx.tenant)
-                call.respond(EmailStatusDto(configured = email.configured, canSend = email.isAvailable(ctx.tenant), from = account?.accountEmail))
-            }
-
-            get("/draft") {
-                val ctx = call.dashboardContext() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-                val params = call.request.queryParameters
-                val doc = call.emailedDocument(ctx, mongo, pdf, params["type"], params["id"]) ?: return@get
-                val account = email.sender(ctx.tenant)
-                val locale = ctx.tenant.locale
-                val company = ctx.tenant.documentTemplate.withCompanyFallback(ctx.tenant.name).companyName
-                val name = doc.client.name.trim().substringBefore(' ')
-                call.respond(
-                    EmailDraftDto(
-                        to = doc.client.email?.trim()?.takeIf { it.isNotEmpty() },
-                        subject = EmailCopy.t(locale, "${doc.type}.subject", "number" to doc.number, "company" to company),
-                        text = EmailCopy.documentBody(locale, doc.type, name, doc.number, company, signed = !account?.settings?.signature.isNullOrBlank()),
-                        from = account?.accountEmail,
-                        attachment = doc.filename,
-                        canSend = email.isAvailable(ctx.tenant),
-                        marksSent = doc.pendingQuote,
-                    ),
-                )
-            }
-
-            post("/send") {
-                val ctx = call.dashboardContext() ?: return@post call.respond(HttpStatusCode.Unauthorized)
-                val request = runCatching { call.receive<SendDocumentEmailRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val doc = call.emailedDocument(ctx, mongo, pdf, request.type, request.id) ?: return@post
-                val subject = request.subject.trim()
-                val text = request.text.trim()
-                val problem = when {
-                    request.to.isBlank() -> "no_email"
-                    subject.isEmpty() -> "empty_subject"
-                    text.isEmpty() -> "empty_message"
-                    subject.length > MAX_SUBJECT || text.length > MAX_TEXT || (request.cc?.length ?: 0) > MAX_CC -> "too_long"
-                    else -> null
+            openToEverySession("whether the company can send email: every page with a Send by email button asks") {
+                get {
+                    val ctx = call.dashboardContext() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+                    val account = email.sender(ctx.tenant)
+                    call.respond(EmailStatusDto(configured = email.configured, canSend = email.isAvailable(ctx.tenant), from = account?.accountEmail))
                 }
-                if (problem != null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to problem))
+            }
 
-                val outgoing = OutgoingEmail(
-                    to = listOf(request.to.trim()),
-                    subject = subject,
-                    text = text,
-                    cc = request.cc.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() },
-                    attachments = if (request.attachPdf) listOf(EmailAttachment(doc.filename, "application/pdf", doc.pdf())) else emptyList(),
-                    clientId = doc.client.id,
-                    record = SubjectRef.of(doc.type, doc.id),
-                )
-                // One drawer sends once, however often its button is pressed.
-                val key = request.requestId?.takeIf { REQUEST_ID.matches(it) }?.let { "ui:${ctx.tenant.id.toHexString()}:$it" }
-                when (val sent = email.send(ctx.tenant, outgoing, key)) {
-                    is EmailSendResult.Sent -> {
-                        val marked = doc.pendingQuote && !sent.alreadySent &&
-                            QuoteRepository(mongo, ctx.tenant.id).update(doc.id, null, null, null, QuoteStatus.SENT) != null
-                        call.respond(SentEmailDto(to = outgoing.to.single(), messageId = sent.messageId, alreadySent = sent.alreadySent, markedSent = marked))
+            // Which module the document needs depends on its type: emailedDocument checks it.
+            openToEverySession("sending a quote or an invoice by email, which needs the quotes or the invoices module") {
+                get("/draft") {
+                    val ctx = call.dashboardContext() ?: return@get call.respond(HttpStatusCode.Unauthorized)
+                    val params = call.request.queryParameters
+                    val doc = call.emailedDocument(ctx, mongo, pdf, params["type"], params["id"]) ?: return@get
+                    val account = email.sender(ctx.tenant)
+                    val locale = ctx.tenant.locale
+                    val company = ctx.tenant.documentTemplate.withCompanyFallback(ctx.tenant.name).companyName
+                    val name = doc.client.name.trim().substringBefore(' ')
+                    call.respond(
+                        EmailDraftDto(
+                            to = doc.client.email?.trim()?.takeIf { it.isNotEmpty() },
+                            subject = EmailCopy.t(locale, "${doc.type}.subject", "number" to doc.number, "company" to company),
+                            text = EmailCopy.documentBody(locale, doc.type, name, doc.number, company, signed = !account?.settings?.signature.isNullOrBlank()),
+                            from = account?.accountEmail,
+                            attachment = doc.filename,
+                            canSend = email.isAvailable(ctx.tenant),
+                            marksSent = doc.pendingQuote,
+                        ),
+                    )
+                }
+
+                post("/send") {
+                    val ctx = call.dashboardContext() ?: return@post call.respond(HttpStatusCode.Unauthorized)
+                    val request = runCatching { call.receive<SendDocumentEmailRequest>() }.getOrNull()
+                        ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                    val doc = call.emailedDocument(ctx, mongo, pdf, request.type, request.id) ?: return@post
+                    val subject = request.subject.trim()
+                    val text = request.text.trim()
+                    val problem = when {
+                        request.to.isBlank() -> "no_email"
+                        subject.isEmpty() -> "empty_subject"
+                        text.isEmpty() -> "empty_message"
+                        subject.length > MAX_SUBJECT || text.length > MAX_TEXT || (request.cc?.length ?: 0) > MAX_CC -> "too_long"
+                        else -> null
                     }
-                    is EmailSendResult.Failed -> call.respond(sent.httpStatus(), mapOf("error" to sent.key))
+                    if (problem != null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to problem))
+
+                    val outgoing = OutgoingEmail(
+                        to = listOf(request.to.trim()),
+                        subject = subject,
+                        text = text,
+                        cc = request.cc.orEmpty().split(',', ';').map { it.trim() }.filter { it.isNotEmpty() },
+                        attachments = if (request.attachPdf) listOf(EmailAttachment(doc.filename, "application/pdf", doc.pdf())) else emptyList(),
+                        clientId = doc.client.id,
+                        record = SubjectRef.of(doc.type, doc.id),
+                    )
+                    // One drawer sends once, however often its button is pressed.
+                    val key = request.requestId?.takeIf { REQUEST_ID.matches(it) }?.let { "ui:${ctx.tenant.id.toHexString()}:$it" }
+                    when (val sent = email.send(ctx.tenant, outgoing, key)) {
+                        is EmailSendResult.Sent -> {
+                            val marked = doc.pendingQuote && !sent.alreadySent &&
+                                QuoteService.of(mongo, ctx.tenant.id).setStatus(doc.id, QuoteStatus.SENT) != null
+                            call.respond(SentEmailDto(to = outgoing.to.single(), messageId = sent.messageId, alreadySent = sent.alreadySent, markedSent = marked))
+                        }
+                        is EmailSendResult.Failed -> call.respond(sent.httpStatus(), mapOf("error" to sent.key))
+                    }
                 }
             }
 
-            get("/messages") {
-                val ctx = call.dashboardContext() ?: return@get call.respond(HttpStatusCode.Unauthorized)
-                if (!ctx.requireModule(DashboardModules.CLIENTS)) return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "module_disabled"))
-                val clientId = call.request.queryParameters["clientId"]?.toObjectIdOrNull()
-                    ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_id"))
-                call.respond(messages.forClient(ctx.tenant.id, clientId).map { it.dto() })
+            requireModules(DashboardModules.CLIENTS, denial = ModuleDenial.MODULE_DISABLED) {
+                get("/messages") {
+                    val ctx = call.moduleContext()
+                    val clientId = call.request.queryParameters["clientId"]?.toObjectIdOrNull()
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_id"))
+                    call.respond(messages.forClient(ctx.tenant.id, clientId).map { it.dto() })
+                }
             }
         }
     }

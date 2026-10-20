@@ -18,6 +18,7 @@ class CrmToolsTest {
         QuoteRepository(mongo, tenantId),
         InvoiceRepository(mongo, tenantId),
         StandardItemRepository(mongo, tenantId),
+        ClientServiceRepository(mongo, tenantId),
     )
 
     @Test

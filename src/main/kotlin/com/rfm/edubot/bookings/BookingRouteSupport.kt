@@ -5,7 +5,10 @@ import com.rfm.edubot.bookings.model.BookingStatus
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.MIN_BOOKING_MINUTES
+import com.rfm.edubot.dashboard.DashboardDeps
+import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.moduleContext
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantLocales
@@ -69,6 +72,14 @@ internal object BookingCatalogDefaults {
     }
 }
 
+/** `/bookings` in the dashboard: the calendar's services, opening hours, free slots and bookings. */
+internal object BookingRoutes : DashboardFeature(DashboardModules.BOOKINGS) {
+    override fun Route.routes(deps: DashboardDeps) {
+        installBookingRoutes { bookingDeps(deps.mongo, moduleContext().tenant, BookingSource.DASHBOARD) }
+    }
+}
+
+/** The bookings API, for the dashboard and the backoffice; [resolve] answers the call itself when it returns null. */
 fun Route.installBookingRoutes(resolve: suspend ApplicationCall.() -> BookingDeps?) {
     route("/bookings") {
         get("/services") {

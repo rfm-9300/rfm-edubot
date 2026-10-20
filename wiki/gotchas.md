@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-20
 ---
 
 # Cross-cutting gotchas
@@ -23,6 +23,21 @@ Traps that bite anywhere in this codebase or its tooling. Feature-specific gotch
   plugin-generated `serializer()` on a private companion. Tests that construct the class directly miss
   it; `Json.decodeFromString(serializer(typeOf<T>()), …)` catches it.
 
+## Ktor 3: the engine's 415, route-scoped plugins, relaxed mocks
+
+- **The engine answers an unreadable body itself.** `CannotTransformContentToTypeException` (an empty
+  body, or a content type no converter reads) is caught by an interceptor Ktor's engine installs at
+  the `Plugins` phase, which answers a bare 415 before StatusPages runs, so an `exception<…>` handler
+  for it never fires. `configureStatusPages` intercepts the same phase to turn it into the error
+  contract ([dashboard-api.md](dashboard-api.md#the-error-contract)).
+- **A route-scoped plugin runs once, at its innermost installation.** Installing it again inside a
+  route that has it replaces the outer check for those routes instead of adding a second one, which is
+  why a nested module gate carries the modules of the gate around it
+  ([dashboard-api.md](dashboard-api.md#the-module-gate)). `Route.intercept`, the old way, is deprecated.
+- **A relaxed mockk `TenantPipelineFactory` hands every company a WhatsApp client**, so an HTTP test
+  of a path that should answer `no_channel` sees it "sent". The `DashboardApi` harness uses the real
+  factory over a MockEngine.
+
 ## Test gotcha: JUnit 5 silently skips Kotlin tests that return a value
 
 A test written as ``fun `x`() = runBlocking { ... }`` returns whatever its last expression returns.
@@ -31,6 +46,14 @@ If that is not `Unit` (for example `assertFailsWith<E> { ... }`, which returns t
 failure, no skip, it just does not run. Two `InstagramClientTest` cases had never run for this reason
 (found 2026-09-28; they pass once fixed). Use `runBlocking<Unit> { ... }` or end on an assertion, and
 check by comparing `@Test` counts with the `tests=` counts in `build/test-results/test/*.xml`.
+
+## Test gotcha: a backoffice token's email must be on the allowlist
+
+The `admin-jwt` validator re-checks a Google session's `email` claim against the live admin list on
+every request ([auth-and-access.md](auth-and-access.md)). A test that signs its own admin JWT with an
+`email` claim, as the board and vault tests do to record who did what, gets a 401 with an empty body
+unless that email is in the test config's `googleSignIn.allowedEmails`; parsing that body then fails
+with "unexpected end of the input". A token without `email` (a password sign-in) passes as before.
 
 ## Testcontainers and Docker Engine 29
 
@@ -104,7 +127,9 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   plain 375px window shows the desktop sizes. To sign in by script, set `adminToken` or
   `dashboardToken` in `localStorage` on another page of the origin (`/health`), then open the
   dashboard: a `goto` from `/backoffice/` to `/backoffice/#tenants` only changes the hash, so the
-  page never reloads and stays on the sign-in card.
+  page never reloads and stays on the sign-in card. For dark mode set `localStorage.uiTheme` to
+  `dark` before the page loads: `ui:theme` is the event `admin/theme.js` fires, not its key, and
+  setting it leaves the page light.
 
 - **Local UI-check gotchas:** a process started with `(cmd &)` inside an agent's tool shell dies when
   that shell exits, so run `./gradlew run` as a background job of the tool. `/app`'s own scripts are

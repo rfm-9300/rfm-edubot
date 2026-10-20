@@ -223,6 +223,10 @@ Home’s enabled-module cards, one per operational module. Two columns, one colu
 A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter Serviços by client, Pagamentos by supplier). It uses chip height (28px) and `width: auto`; do not drop a full-width form select into the toolbar.
 `.panel__tools--chips` (the backoffice's tenant status filter) lays its chips out two to a line across the panel under 560px, centred, instead of letting the last one wrap alone.
 
+`input.inp.panel__search` (`type="search"`) is a compact search field for a panel's tools or filters: 220px wide and as tall as the chips and toolbar selects beside it (28px, 36px on touch phones, 16px text on touch screens), the full width under 560px. The backoffice's Board and Passwords use it; the tenants list keeps the top bar's search. Redraw only what it filters, or put the focus and caret back, so typing isn't interrupted.
+
+`.view__foot` holds secondary actions at the end of a view, right-aligned under its last panel (Passwords' "Change the master password").
+
 ### Panel with a view switch (List / By week / By month)
 
 When a panel has a control that swaps its whole layout (columns, hero, even the stat row) rather than just narrowing the rows, keep it out of `.panel__tools` — a `.chip` reads as "one of several filters," which undersells a control that changes the table's shape. Use `crmPanel`'s `views` slot instead of `tools`; it renders in the head as its own `.panel__views` group (same buttons the bookings toolbar uses: `.btn.btn--sm`, active = `.btn--primary`), and any ordinary filters passed via `tools` automatically drop to a `.panel__filters` strip underneath, on a `--surface-2` band with its own bottom border:
@@ -377,6 +381,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 - Several short values typed into one field (a Persona menu's keywords): `div.tokens` holding one `.token` per value (`.token__text`, a button that takes the value back to edit, and `.token__rm` ×) and a bare `input.tokens__input` last, which carries the field's `id` for the label. It looks like `.inp`, grows in rows, and rings on `:focus-within`. `.token--warn` marks a value with a problem (its `title` says which); `.tokens.is-readonly` has no input and no ×. Enter adds, a pasted list adds a value per line; don't split on commas, since a value may contain one.
 - A field a refused save points at gets `aria-invalid` (red border on `.inp`, `.txt` and `.tokens`, a red inset in a `.line`; the focus ring still wins) and a `.hint--bad` under it saying what is wrong, until it's right.
 - `button.linkbtn`: a button that reads as a link inside a sentence or hint ("Show", "From 1 · Prices", "Hide map"): `--ink-2` text with a hairline underline, the focus ring. Not for actions that change data.
+- A field with its own buttons on its line (a saved password's Show, Generate and Copy): `div.inp-row` > `.inp` + `.btn--sm`s. The field takes the room left; under 560px the buttons wrap under it.
 
 ### Save bar
 
@@ -423,6 +428,7 @@ More variants keep the channels' bare inputs with `aria-label`s, without a catal
 - `.lines--breaks`: a shift's breaks in the Timesheets correction form, as from and to (`input type="time"`) and `.l-rm`, left-aligned headings, same columns on phones.
 - `.lines--replies`: a Persona menu message's buttons, as title (a bare `input` with the 20-character `maxlength`), "Leads to" (a flush `.sel` of the menu's messages plus "New message…"), `.l-go` (→, goes to that message; disabled until one is chosen) and `.l-rm`; four columns on phones too. Its foot holds "Add button" and the count; an empty list says the menu ends there.
 - `.lines--installments`: an invoice's installments, as a read-only number in `span.line__index`, amount (`.num`), due date (`input type="date"`) and `.l-rm`; the date heading is left-aligned. Same four columns on phones. Its foot holds the add button and the total, or what is still to split.
+- `.lines--columns`: a backoffice board's columns in its settings, as name (a bare `input`), done (a checkbox centred in `label.line__check`), move up and down (two `.l-move` ↑ ↓ in `span.line__moves`) and `.l-rm`. Same four columns on phones. Its foot holds "Add column".
 
 ```html
 <div class="line">
@@ -475,7 +481,9 @@ Under 920px the panel takes the full width with square corners; under 560px its 
 
 `openDrawer(title, body, wide, { eyebrow })` sets the eyebrow text (default "Dashboard"). A drawer opened from another drawer (a record, an invoice…) through `openFrom(back, open)` stacks its opener on a trail and replaces the eyebrow with `.drawer__back` (the opener's name; the ← glyph is CSS). Back pops one step, and a drawer that closes itself after an action (save, mark paid, convert) reopens its opener with fresh data. Closing by hand (×, scrim, Escape) clears the trail and leaves.
 
-The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer. On a touch screen (`pointer: coarse`) it focuses × instead of the first field, so the keyboard doesn't open over the drawer. A long name in `.drawer__back` wraps left-aligned, the ← on its first line.
+The backoffice keeps one level: `openDrawer({ …, back: { label, open } })` puts the same `.drawer__back` in the eyebrow, and a save reopens `back` instead of closing (`onSave` may also return false to stay, or the next drawer to open). Without `onSave` there is no footer. Without `back` the eyebrow reads `eyebrow` (the board's name and the card's key, "Passwords"), or "Tenant". On a touch screen (`pointer: coarse`) it focuses × instead of the first field, so the keyboard doesn't open over the drawer. A long name in `.drawer__back` wraps left-aligned, the ← on its first line.
+
+A drawer that edits a record ends its body with `p.hint.drawer__meta` (who created and last changed it, and when) and `div.actions.drawer__actions`, the secondary actions under a hairline (Archive, a `.btn--danger` Delete), before the sticky footer. Destructive ones still confirm through `.confirm`.
 
 ```html
 <div class="drawer__eyebrow"><button class="drawer__back" type="button" aria-label="Back to Ana Ribeiro">Ana Ribeiro</button></div>
@@ -585,6 +593,8 @@ One toast node per page. JS pattern: set innerHTML, `hidden = false`, auto-hide 
 ```
 
 Render login **inside** `#view` so the sidebar/topbar chrome can remain or clear as each app already does. Submit button is full-width (`.auth .btn`).
+
+A view's own lock screen, under the shell's top bar, is the same card in `.auth.auth--view`, which drops the full-screen height for a little top padding: the backoffice's Passwords creates and unlocks the vault with it. Its `.auth__mark` may hold a line icon (an `svg` drawn in `currentColor`) instead of letters, and a `.notice--warn` under `.auth__desc` carries what the person must know before going on (nobody can recover the master password).
 
 When Google sign-in is configured (`/admin/auth/config`, `/app/auth/config`), a `.btn--primary` "Continue with Google" button comes first, then an `.auth__desc` line ("or sign in with your email and password"), then the form with a `.btn--ghost` submit. A refusal that needs explaining (no linked user, a different Google account) shows under the Google button as `.hint.hint--warn` with `role="alert"`; cancelled or failed popups use the toast.
 
@@ -1020,6 +1030,39 @@ The punch card on an employee's **My hours** ([patterns.md](patterns.md#my-hours
 - `.clock__actions` holds the buttons that fit the state, the main one `.btn--primary`. On phones they share the row.
 - A `.notice` inside the card sits flush (the "use the app" notice when the company requires the phone's biometrics, with the buttons `disabled`).
 - A forgotten clock-out is a `.notice--warn` above the card whose `form.notice__actions.clock__fix` holds a `.lbl`, a 120px time `.inp` and Save; on phones the notice stacks.
+
+## Backoffice board
+
+The backoffice's Board ([patterns.md](patterns.md#board-backoffice)): one `.panel.board` holding the board's chips, its filters and its columns.
+
+```html
+<div class="panel board">
+  <div class="panel__head"><div class="chip-tabs" role="tablist">…one .chip per board…</div><div class="panel__tools">…</div></div>
+  <div class="panel__filters"><input class="inp panel__search" type="search" /> <select class="sel">…</select></div>
+  <div class="board__body">
+    <div class="board__cols">
+      <section class="board-col">
+        <header class="board-col__head"><h2 class="board-col__title">In progress</h2><span class="tag">2</span></header>
+        <div class="board-col__cards">
+          <article class="board-card" tabindex="0">
+            <div class="board-card__top"><span class="board-card__key">OPS-12</span><span class="pill pill--bad">Urgent</span></div>
+            <p class="board-card__title">Renew the domain</p>
+            <div class="board-card__labels"><span class="board-card__label">billing</span></div>
+            <div class="board-card__meta"><span class="board-card__fact is-late"><svg>…</svg>19 Oct</span><span class="board-card__avatar">AN</span></div>
+          </article>
+        </div>
+        <div class="board-col__foot"><button class="btn btn--sm btn--ghost board-col__add" type="button">+ Add a card</button></div>
+      </section>
+    </div>
+  </div>
+</div>
+```
+
+- **Columns** (`.board-col`, a `--surface-2` well) sit side by side in `.board__cols` and scroll inside the panel when they don't fit; under 700px they stack, so nothing scrolls sideways. A column whose cards count as done shows `.board-col__done` (a check in `--ok-ink`, its meaning in `title`) before its count. Counts beside a column's title are `.tag`s styled like a panel title's.
+- **A card** is `article.board-card` (`tabindex="0"`): its key in mono, a priority pill (Low `--info`, High `--warn`, Urgent `--bad`; Medium none), its title, labels as neutral `.board-card__label`s (not pills, whose tones mean status), and `.board-card__meta` facts with 14px line icons in `currentColor`: due date (`.is-late` in `--bad-ink` once past and not in a done column), checklist progress (`.is-done` in `--ok-ink` when complete), comments, the tenant, and the assignee's initials (`.board-card__avatar`, `--accent-soft` with `--accent-deep` text) pushed to the right. No emoji.
+- **Dragging:** the card takes `.is-dragging` (fixed above the page, `--shadow-lg`, tilted 1.5°, `pointer-events: none`, its left, top and width set inline as it moves), `.board-card--slot` (a dashed `--hairline-strong` outline of its height) marks where it will land, the target column takes `.is-drop` (`--accent-soft`), and `.board.is-dragging` shows the grabbing cursor. A mouse drags at once; a finger or pen holds the card first, so a swipe still scrolls; Escape cancels. Alt with an arrow key moves a focused card.
+- **Quick add:** "+ Add a card" turns the foot into `form.board-col__new` (an `.inp` and Add / Cancel); Enter adds and keeps the field for the next card, Escape closes it.
+- **The card's drawer** puts the checklist and the comments under the form, each a `.board-detail__section` with a `.board-detail__title` (and its `.tag` count). The checklist is a `.meter` (filled `--ok`) over `ul.checklist` of `.form__check` items with a `.checklist__rm` ×, then `form.checklist__add`; a done item's text is struck through in `--ink-mute`. Comments are `ul.comments` of `.comment` (`.comment__head` with the author's initials, name and time, and Delete for the author's own; `.comment__body` keeps line breaks), then `form.comment-form`.
 
 ## Utilities
 

@@ -144,8 +144,24 @@ The backoffice's Tenants view is the directory recipe with All / Active / Suspen
 1. Profile card: initials, slug and status pill, then one line with the company relation, language, model and modules in use. Edit, Suspend (Activate when suspended) and Delete sit in the head; a deleted tenant has Restore (or "comes back with …") and a "Deleted on …" warning line instead. Then Open dashboard, Users (first companies only), Agents (with Agents on) and Reload pipeline, all plain buttons, so yellow only marks Activate and Restore.
 2. Four `.record-kpi`s: messages, last activity (date, time under it), rate per hour, rate per day.
 3. A Channels panel: `dl.dash-facts.dash-facts--stack` with each platform's account and id (the label above them on a phone), and a "No access token" pill where one is missing.
+4. A "Cards on the board" panel, filled once the record is open: the tenant's cards that aren't archived as a `.worklist` (key and title over board and column, due date and assignee at the side; the dot `ok` when done, `bad` when late, `info` otherwise), each opening the card with `← tenant`, and a ghost "+ New card" in its head ([Board](#board-backoffice)).
 
 Edit, Users and Agents open with `← tenant` and come back to the record after saving. Suspend, Activate and Restore show the record fresh after their confirm; Delete closes the drawer. A new tenant opens its record once created. Closing returns focus to the row's name. Escape closes a confirm on its own and leaves the drawer behind it.
+
+## Board (backoffice)
+
+The platform team's boards ([components.md](components.md#backoffice-board)). The hero has the title, a line on how to move cards, and **New board** (primary). Under it, one `.panel.board`: its head holds a `.chip` per board (its card count inside) and the ghost Archived cards and Board settings; its `.panel__filters` hold the `.panel__search`, a person `.sel` (Everyone, Assigned to me, Unassigned, then each admin) and a tenant `.sel`. With a filter on, a `.hint` above the columns says how many cards show, with Clear filters. No board yet: an `.empty` in the panel.
+
+- A card opens in the drawer: the form (title, column, assigned to, priority, due date, tenant, labels as `.tokens`, description) saves with the footer's Save card and sends only what changed; the checklist and the comments under it save as they change, without touching the form. Then the `.drawer__meta` line and Archive / Delete card in `.drawer__actions`. Its eyebrow is the board's name and the card's key.
+- New board asks for a name, a key that follows the name until someone types one, and an optional description; the columns start as To do, In progress and Done. Board settings edit the name, the description and the columns (`.lines--columns`), and delete the board, after a confirm naming how many cards go with it.
+- Archived cards is a drawer with a `.tbl--stack` of the board's archived cards, each with Restore; a title opens the card with `← Archived cards`.
+
+## Passwords (backoffice)
+
+The team's password vault ([wiki/password-vault.md](../wiki/password-vault.md)). Until the vault is unlocked the view is an `.auth.auth--view` card with a lock mark: **create** (master password twice, the warning that nobody can recover it, a hint asking for a sentence) or **unlock** (the master password; a wrong one answers a `.hint--bad` under the field, `role="alert"`). Unlocked, the hero has Lock (ghost) and **New password** (primary), then one panel of saved logins: a `.panel__search` in its head and a `.tbl--stack.tbl--flow` with the name (a `.tbl__open`, the site's host as a link under it), the username in mono, when it changed, and Copy username / Copy password. "Change the master password" sits in a `.view__foot`.
+
+- A login opens in the drawer: name, username and password each in an `.inp-row` with Copy (the password also with Show / Hide and Generate), website and notes, then `.drawer__meta` and Delete in `.drawer__actions`. Copying confirms with a toast.
+- The vault locks itself after 10 minutes without activity, on Lock and on Log out, closing a password drawer that is open; the view goes back to the unlock card.
 
 ## Invoices
 

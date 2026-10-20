@@ -21,6 +21,12 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
     suspend fun findById(id: ObjectId): Supplier? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toSupplier()
 
+    /** The suppliers among [ids], archived ones included, read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Supplier> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toSupplier() }.associateBy { it.id }
+    }
+
     suspend fun search(query: String, archived: Boolean = false): List<Supplier> {
         val trimmed = query.trim()
         val text = if (trimmed.isBlank()) {

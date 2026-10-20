@@ -1,6 +1,6 @@
 package com.rfm.edubot.bookings
 
-import com.rfm.edubot.admin.StandardItemRequest
+import com.rfm.edubot.crm.api.StandardItemRequest
 import com.rfm.edubot.ai.ToolCall
 import com.rfm.edubot.bookings.model.AvailabilityRule
 import com.rfm.edubot.bookings.model.BookingSource

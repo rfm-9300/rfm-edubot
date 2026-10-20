@@ -130,12 +130,17 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - `persistence/` — MongoDB wiring (three databases), index creation, the database split
 - `shared/` — Clock, Ids, Result/AppError sealed classes
 - `plugins/` — Ktor: Monitoring, Serialization, StatusPages
+- `http/` — the error contract (`ErrorBody`, `ApiException`, `idParam`/`dateValue`/`enumValue`); depends on no feature
+- `crm/` — CRM services (`ClientDirectory`, `QuoteService`, `InvoiceService`) and repositories; `crm/api/` holds their HTTP request/response types
+- `dashboard/` — the `/app/api` feature registry (`DashboardFeature`), module gate (`requireModules`) and one route file per area
+
+Layering is route → service → repository: routes parse and answer HTTP, services take domain types, repositories own the queries. `ArchitectureBoundariesTest` checks it and `DashboardRouteAuditTest` fails for an ungated `/app/api` route (`wiki/dashboard-api.md`).
 
 ### Key patterns
 - Webhook POST returns 200 OK immediately; processing is async via Channel consumer
 - Deduplication via `webhook_events` collection (unique index on `eventId`)
 - Pipeline marks events `processed` or `failed` after handling
-- `Application.kt` has `main()` and `Application.module()` — both delegate to `bootstrapModule()`
+- `Application.kt` has `main()` and `Application.module()` — both delegate to `bootstrapModule()`, which mounts every route through `installRoutes` (`AppRoutes.kt`)
 - Config via HOCON (`application.conf`) with `${?ENV_VAR}` fallbacks
 - Fat JAR output: `build/libs/app.jar` (Dockerfile multi-stage, distroless-style)
 - MongoDB indexes created at startup in `MongoModule.initialize()`

@@ -16,6 +16,7 @@ const T = I18N.section('backoffice');
 function signOut() {
   localStorage.removeItem('adminToken');
   token = '';
+  lockVault();
   renderLogin();
 }
 
@@ -51,17 +52,18 @@ function closeDrawer() {
 
 // `back` ({ label, open }) is the tenant record this drawer was opened from: the eyebrow links back to it,
 // and a save reopens it with fresh data instead of closing. `onSave` may return false to stay open, or a
-// function that opens the next drawer. Without `onSave` there is no footer.
-function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true, back = null }) {
+// function that opens the next drawer. Without `onSave` there is no footer. Without `back` the eyebrow
+// reads `eyebrow`, or "Tenant".
+function openDrawer({ title, body, onSave, saveLabel = T.save, autofocus = true, back = null, eyebrow = null }) {
   const root = $('#drawer');
   if (root.hidden) drawerOpener = document.activeElement;
   $('#drawer-title').textContent = title;
-  const eyebrow = $('#drawer-eyebrow');
+  const eyebrowEl = $('#drawer-eyebrow');
   if (back) {
-    eyebrow.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(T.record.backTo({ name: back.label }))}">${escapeHTML(back.label)}</button>`;
-    $('.drawer__back', eyebrow).addEventListener('click', () => back.open());
+    eyebrowEl.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(T.record.backTo({ name: back.label }))}">${escapeHTML(back.label)}</button>`;
+    $('.drawer__back', eyebrowEl).addEventListener('click', () => back.open());
   } else {
-    eyebrow.textContent = T.drawerEyebrow;
+    eyebrowEl.textContent = eyebrow || T.drawerEyebrow;
   }
   const host = $('#drawer-body');
   host.innerHTML = '';

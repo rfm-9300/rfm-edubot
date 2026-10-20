@@ -5,21 +5,10 @@ import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.admin.AdminAccess
 import com.rfm.edubot.admin.AdminEmailRepository
 import com.rfm.edubot.admin.BackupControl
-import com.rfm.edubot.admin.adminAccessRoutes
-import com.rfm.edubot.admin.adminRoutes
-import com.rfm.edubot.admin.authRoutes
-import com.rfm.edubot.admin.backupRoutes
-import com.rfm.edubot.admin.backofficeRoutes
 import com.rfm.edubot.admin.configureAdminAuth
-import com.rfm.edubot.admin.platformSettingsRoutes
-import com.rfm.edubot.admin.tenantAdminRoutes
 import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.actions.AgentActions
-import com.rfm.edubot.agents.agentAdminRoutes
-import com.rfm.edubot.agents.agentRoutes
-import com.rfm.edubot.agents.ai.AgentAssistant
 import com.rfm.edubot.notifications.NotificationRepository
-import com.rfm.edubot.notifications.notificationRoutes
 import com.rfm.edubot.agents.registry.AgentRegistry
 import com.rfm.edubot.agents.registry.TriggerTypes
 import com.rfm.edubot.agents.runtime.AgentRuntime
@@ -30,48 +19,29 @@ import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
-import com.rfm.edubot.building.buildingRoutes
-import com.rfm.edubot.building.projectShareRoutes
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
 import com.rfm.edubot.config.RuntimeConfig
-import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.crm.CatalogItemBackfill
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.EmployeeLookup
-import com.rfm.edubot.dashboard.dashboardAccountRoutes
-import com.rfm.edubot.dashboard.dashboardCompanyRoutes
-import com.rfm.edubot.dashboard.dashboardImpersonationRoute
-import com.rfm.edubot.dashboard.dashboardRoutes
-import com.rfm.edubot.dashboard.dashboardStaticRoutes
-import com.rfm.edubot.dashboard.employeeWorkRoutes
 import com.rfm.edubot.timesheets.TimesheetLocationRetention
-import com.rfm.edubot.timesheets.timeClockRoutes
-import com.rfm.edubot.timesheets.timesheetRoutes
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.TokenCipher
 import com.rfm.edubot.integrations.email.EmailMessageRepository
-import com.rfm.edubot.integrations.email.EmailInbox
-import com.rfm.edubot.integrations.email.EmailInsightsService
 import com.rfm.edubot.integrations.email.EmailRetention
-import com.rfm.edubot.integrations.email.emailInboxRoutes
 import com.rfm.edubot.integrations.email.EmailService
-import com.rfm.edubot.integrations.email.emailRoutes
 import com.rfm.edubot.integrations.google.GmailSyncWorker
 import com.rfm.edubot.integrations.google.GoogleIntegration
-import com.rfm.edubot.integrations.integrationRoutes
 import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
-import com.rfm.edubot.legal.legalRoutes
 import com.rfm.edubot.oauth.InstagramOAuthClient
 import com.rfm.edubot.oauth.OAuthState
-import com.rfm.edubot.oauth.instagramMetaCallbacks
-import com.rfm.edubot.oauth.instagramOAuthRoutes
 import com.rfm.edubot.instagram.InstagramSocialService
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaCompiler
@@ -82,24 +52,18 @@ import com.rfm.edubot.plugins.configureSerialization
 import com.rfm.edubot.plugins.configureStatusPages
 import com.rfm.edubot.plugins.configureWebSockets
 import com.rfm.edubot.web.WebChannelRegistry
-import com.rfm.edubot.web.webChatRoutes
-import com.rfm.edubot.web.widgetRoutes
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.TenantSeeder
 import com.rfm.edubot.shared.jobs.SchedulerLease
-import com.rfm.edubot.webhook.webhookRoutes
 import com.rfm.edubot.whatsapp.signup.WhatsAppSignupClient
-import com.rfm.edubot.whatsapp.signup.whatsAppSignupRoutes
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
 import io.ktor.client.plugins.HttpTimeout
-import io.ktor.http.*
 import io.ktor.server.application.*
 import io.ktor.server.engine.*
 import io.ktor.server.netty.*
-import io.ktor.server.response.*
 import io.ktor.server.routing.*
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -329,115 +293,34 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     configureAdminAuth(runtimeConfig, tenantRepository, dashboardUserRepository, employeeLookup)
 
     routing {
-        get("/health") {
-            call.respond(
-                mapOf(
-                    "status" to "ok",
-                    "timestamp" to Clock.System.now().toString()
-                )
-            )
-        }
-
-        get("/ready") {
-            try {
-                mongoModule.client.getDatabase("admin").runCommand(org.bson.Document("ping", 1))
-                call.respond(mapOf("status" to "ready"))
-            } catch (e: Exception) {
-                call.respond(HttpStatusCode.ServiceUnavailable, mapOf("status" to "not ready", "error" to e.message))
-            }
-        }
-
-        webhookRoutes(
-            configProvider = { runtimeConfig.get().whatsapp },
-            instagramAppSecretProvider = { runtimeConfig.get().instagram.appSecret },
-            messageQueue = messageQueue,
-            deduplicationService = deduplicationService,
-            tenantRegistry = tenantRegistry,
-            instagramSocial = instagramSocial,
-            deliveryStatuses = DeliveryStatusRecorder(mongoModule),
-        )
-        authRoutes(runtimeConfig)
-        platformSettingsRoutes(platformSettingsService)
-        adminAccessRoutes(adminAccess, runtimeConfig)
-        backupRoutes(backupControl)
-        backofficeRoutes()
-        dashboardStaticRoutes()
-        dashboardRoutes(
-            mongo = mongoModule,
-            tenantRepository = tenantRepository,
-            dashboardUsers = dashboardUserRepository,
-            pipelineFactory = pipelineFactory,
-            personaCompiler = personaCompiler,
-            aiClient = aiClient,
-            runtimeConfig = runtimeConfig,
-            channelBindingService = channelBindingService,
-            instagramSocial = instagramSocial,
-            assistantExtension = AgentAssistant(agentsModule, agentRuntime),
-        )
-        dashboardImpersonationRoute(
-            tenantRepository = tenantRepository,
-            dashboardUsers = dashboardUserRepository,
-            runtimeConfig = runtimeConfig,
-        )
-        dashboardAccountRoutes(
-            tenantRepository = tenantRepository,
-            dashboardUsers = dashboardUserRepository,
-            runtimeConfig = runtimeConfig,
-            employees = employeeLookup,
-        )
-        employeeWorkRoutes(mongoModule, dashboardUserRepository, agentServices.notifications)
-        timeClockRoutes(mongoModule, agentServices.notifications)
-        timesheetRoutes(mongoModule)
-        buildingRoutes(mongoModule, storagePath = { runtimeConfig.get().pdfStoragePath })
-        projectShareRoutes(mongoModule, tenantRepository, storagePath = { runtimeConfig.get().pdfStoragePath })
-        dashboardCompanyRoutes(
-            tenantRepository = tenantRepository,
-            runtimeConfig = runtimeConfig,
-        )
-        agentRoutes(agentsModule, agentRuntime, tenantRepository)
-        agentAdminRoutes(agentsModule, agentRuntime, tenantRepository)
-        notificationRoutes(agentServices.notifications)
-        adminRoutes()
-        tenantAdminRoutes(
-            mongo = mongoModule,
-            tenantRepository = tenantRepository,
-            tenantRegistry = tenantRegistry,
-            pipelineFactory = pipelineFactory,
-            runtimeConfig = runtimeConfig,
-        )
-        instagramOAuthRoutes(
-            configProvider = { runtimeConfig.get().instagram },
-            oauthState = oauthState,
-            oauthClient = instagramOAuthClient,
-            bindingService = channelBindingService,
-            tenantRepository = tenantRepository,
-        )
-        integrationRoutes(
-            google = google,
-            email = emailService,
-            oauthState = oauthState,
-            tenants = tenantRepository,
-            users = dashboardUserRepository,
-        )
-        emailRoutes(emailService, mongoModule)
-        emailInboxRoutes(EmailInbox(mongoModule, emailService, google, EmailInsightsService(aiClient, mongoModule)))
-        whatsAppSignupRoutes(
-            configProvider = { runtimeConfig.get().whatsapp },
-            signupClient = whatsAppSignupClient,
-            bindingService = channelBindingService,
-            tenantRepository = tenantRepository,
-        )
-        instagramMetaCallbacks(
-            configProvider = { runtimeConfig.get().instagram },
-            tenantRegistry = tenantRegistry,
-            bindingService = channelBindingService,
-        )
-        legalRoutes()
-        widgetRoutes()
-        webChatRoutes(
-            messageQueue = messageQueue,
-            tenantRegistry = tenantRegistry,
-            webChannelRegistry = webChannelRegistry,
+        installRoutes(
+            AppServices(
+                mongo = mongoModule,
+                runtimeConfig = runtimeConfig,
+                tenants = tenantRepository,
+                tenantRegistry = tenantRegistry,
+                dashboardUsers = dashboardUserRepository,
+                employeeLookup = employeeLookup,
+                pipelineFactory = pipelineFactory,
+                channelBindings = channelBindingService,
+                personaCompiler = personaCompiler,
+                aiClient = aiClient,
+                messageQueue = messageQueue,
+                deduplication = deduplicationService,
+                instagramSocial = instagramSocial,
+                platformSettings = platformSettingsService,
+                adminAccess = adminAccess,
+                backups = backupControl,
+                notifications = agentServices.notifications,
+                agents = agentsModule,
+                agentRuntime = agentRuntime,
+                google = google,
+                email = emailService,
+                oauthState = oauthState,
+                instagramOAuth = instagramOAuthClient,
+                whatsAppSignup = whatsAppSignupClient,
+                webChannels = webChannelRegistry,
+            ),
         )
     }
 }
