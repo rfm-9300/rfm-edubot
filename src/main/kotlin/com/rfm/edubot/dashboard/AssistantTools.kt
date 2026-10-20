@@ -523,6 +523,7 @@ internal class AssistantTools(
     private suspend fun quoteToInvoice(args: JsonObject): Pair<Quote, LocalDate> {
         val quote = resolveQuote(args.text("quote_id") ?: throw missing("quote_id"))
         val dueDate = args.date("due_date") ?: throw Problem("due_date_required", "Ask when the invoice is due (YYYY-MM-DD).")
+        if (quote.projectId != null) throw Problem(QuoteInvoicing.ALREADY_MEASURED, MEASURED_QUOTE)
         invoicedQuotes(listOf(quote.id))[quote.id]?.let { throw Problem(QuoteInvoicing.ALREADY_INVOICED, "${quote.number} is already on invoice $it.") }
         clientServices.findByQuoteId(quote.id).firstOrNull { it.status != ClientServiceStatus.CANCELLED }?.let {
             throw Problem(QuoteInvoicing.ALREADY_SERVICED, "${quote.number} already became the service \"${it.name}\"; invoice that service instead.")
@@ -548,6 +549,7 @@ internal class AssistantTools(
                 when (outcome.reason) {
                     QuoteInvoicing.ALREADY_INVOICED -> "This quote already has an invoice that isn't cancelled."
                     QuoteInvoicing.ALREADY_SERVICED -> "This quote already became a service; invoice that service instead."
+                    QuoteInvoicing.ALREADY_MEASURED -> MEASURED_QUOTE
                     else -> "That quote or its client no longer exists."
                 },
             )
@@ -943,6 +945,7 @@ internal class AssistantTools(
 
         private const val DEFAULT_LIMIT = 20
         private const val MAX_LIMIT = 50
+        private const val MEASURED_QUOTE = "This quote is a project's contract and is billed by that project's measurements; invoice the next measurement instead."
         private val OPEN_PAYMENTS = setOf(PaymentStatus.PENDING, PaymentStatus.OVERDUE)
         private val OUTSIDER_AREAS = setOf(DashboardModules.CONVERSATIONS, DashboardModules.CONTACTS, DashboardModules.INSTAGRAM)
 

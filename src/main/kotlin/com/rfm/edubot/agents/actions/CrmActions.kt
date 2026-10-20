@@ -179,6 +179,8 @@ object InvoiceFromQuoteAction : AgentAction {
         val quotes = QuoteRepository(ctx.services.mongo, ctx.tenant.id)
         val invoices = InvoiceRepository(ctx.services.mongo, ctx.tenant.id)
         val quote = quotes.findById(id) ?: return ActionResult.Failed("quote_not_found")
+        // A project's measurements bill its quote as the work gets done.
+        if (quote.projectId != null) return ActionResult.Skipped("quote_measured")
         invoices.list(quote.clientId).firstOrNull { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED }?.let {
             return ActionResult.Done(buildJsonObject { put("invoiceId", it.id.toHexString()); put("number", it.number) }, note = "already_invoiced")
         }

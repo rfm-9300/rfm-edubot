@@ -30,6 +30,8 @@ import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
+import com.rfm.edubot.building.buildingRoutes
+import com.rfm.edubot.building.projectShareRoutes
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
@@ -386,6 +388,8 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         employeeWorkRoutes(mongoModule, dashboardUserRepository, agentServices.notifications)
         timeClockRoutes(mongoModule, agentServices.notifications)
         timesheetRoutes(mongoModule)
+        buildingRoutes(mongoModule, storagePath = { runtimeConfig.get().pdfStoragePath })
+        projectShareRoutes(mongoModule, tenantRepository, storagePath = { runtimeConfig.get().pdfStoragePath })
         dashboardCompanyRoutes(
             tenantRepository = tenantRepository,
             runtimeConfig = runtimeConfig,

@@ -13,6 +13,7 @@ import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.AgentTaskRepository
 import com.rfm.edubot.bookings.BookingRepository
 import com.rfm.edubot.bookings.model.BookingStatus
+import com.rfm.edubot.building.BuildingOverview
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.model.MessageContent
@@ -103,6 +104,7 @@ class OverviewService(private val mongo: MongoModule) {
             }
         }
         val agents = async { if (DashboardModules.AGENTS in modules) agents(tenant.id, window) else null }
+        val building = async { if (DashboardModules.PROJECTS in modules) BuildingOverview.build(mongo, tenant, modules, window.now) else null }
         val reconnects = async {
             if (DashboardModules.SETTINGS in modules) IntegrationConnectionRepository(mongo).needingReconnect(tenant.id) else emptyList()
         }
@@ -150,7 +152,11 @@ class OverviewService(private val mongo: MongoModule) {
 
         val waiting = waitingList.await()
         val reconnectList = reconnects.await()
-        val attention = attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList, employeesDto)
+        val buildingBlock = building.await()
+        val attention = attentionItems(
+            tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList, employeesDto,
+            buildingBlock?.attention.orEmpty(),
+        )
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -169,6 +175,7 @@ class OverviewService(private val mongo: MongoModule) {
             agentAttention = agentsBlock?.let { (it.dto.pendingApprovals + it.dto.tasksDue).toInt() + it.failed.size } ?: 0,
             reconnects = reconnectList.size,
             pendingSubmissions = (employeesDto?.pendingSubmissions ?: 0).toInt(),
+            buildingAttention = buildingBlock?.attention?.size ?: 0,
         )
         OverviewHomeLayout.apply(
             OverviewDto(
@@ -200,6 +207,7 @@ class OverviewService(private val mongo: MongoModule) {
                 payments = paymentsDto,
                 assistant = assistantDto,
                 agents = agentsBlock?.dto,
+                projects = buildingBlock?.dto,
                 setup = setup,
                 cashFlow = cashFlow.await(),
                 activity = activity.await(),
@@ -712,8 +720,9 @@ class OverviewService(private val mongo: MongoModule) {
         waiting: List<WaitingConversation>,
         reconnects: List<IntegrationConnection>,
         employees: OverviewEmployeesDto?,
+        building: List<OverviewAttentionItemDto>,
     ): List<OverviewAttentionItemDto> {
-        val items = mutableListOf<OverviewAttentionItemDto>()
+        val items = building.toMutableList()
         if ((employees?.pendingSubmissions ?: 0) > 0) {
             // The ones waiting longest first.
             val pending = coll(ServiceSubmissionRepository.COLLECTION).find(
@@ -920,11 +929,15 @@ class OverviewService(private val mongo: MongoModule) {
             OverviewMath.KIND_AGENT_APPROVAL,
             OverviewMath.KIND_SERVICE_SUBMISSION,
             OverviewMath.KIND_PENDING_BOOKING,
+            OverviewMath.KIND_SITE_ISSUE_OVERDUE,
+            OverviewMath.KIND_PROJECT_DELAYED,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
             OverviewMath.KIND_AGENT_TASK_DUE,
             OverviewMath.KIND_AGENT_FAILED,
             OverviewMath.KIND_DUE_SOON_INVOICE,
             OverviewMath.KIND_DUE_SOON_PAYMENT,
+            OverviewMath.KIND_MEASUREMENT_TO_INVOICE,
+            OverviewMath.KIND_CHANGE_ORDER_PENDING,
             OverviewMath.KIND_QUOTE_EXPIRING,
             OverviewMath.KIND_ASSISTANT_ACTION,
         )

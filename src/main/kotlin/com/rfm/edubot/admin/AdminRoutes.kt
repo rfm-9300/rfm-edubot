@@ -328,6 +328,11 @@ internal data class InvoiceDto(
     val outstandingEur: Double,
     val taxOfficeCode: String? = null,
     val installments: List<InvoiceInstallmentDto> = emptyList(),
+    /** The project and measurement the invoice bills, when a measurement made it ("OB-001 · Moradia Silva", n.º 3). */
+    val projectId: String? = null,
+    val projectLabel: String? = null,
+    val measurementId: String? = null,
+    val measurementNumber: Int? = null,
 )
 
 @Serializable
@@ -588,7 +593,7 @@ internal fun com.rfm.edubot.crm.model.ClientService.dto(client: Client?) = Clien
     quoteId = quoteId?.toHexString(),
 )
 
-internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = InvoiceDto(
+internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLabel: String? = null, measurementNumber: Int? = null) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -606,6 +611,10 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     outstandingEur = outstandingCents / 100.0,
     taxOfficeCode = taxOfficeCode,
     installments = installments.map { InvoiceInstallmentDto(it.amountCents / 100.0, it.dueDate.toString(), it.paidAt?.toString()) },
+    projectId = projectId?.toHexString(),
+    projectLabel = projectLabel,
+    measurementId = measurementId?.toHexString(),
+    measurementNumber = measurementNumber,
 )
 
 internal fun Employee.dto() = EmployeeDto(

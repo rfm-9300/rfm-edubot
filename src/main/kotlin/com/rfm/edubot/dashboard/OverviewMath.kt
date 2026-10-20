@@ -29,6 +29,10 @@ object OverviewMath {
     const val KIND_AGENT_FAILED = "agent_failed"
     const val KIND_INTEGRATION_RECONNECT = "integration_reconnect"
     const val KIND_SERVICE_SUBMISSION = "service_submission"
+    const val KIND_PROJECT_DELAYED = "project_delayed"
+    const val KIND_SITE_ISSUE_OVERDUE = "site_issue_overdue"
+    const val KIND_CHANGE_ORDER_PENDING = "change_order_pending"
+    const val KIND_MEASUREMENT_TO_INVOICE = "measurement_to_invoice"
 
     const val HIGHLIGHT_COLLECTED = "collected_month"
     const val HIGHLIGHT_OUTSTANDING = "outstanding"
@@ -118,9 +122,11 @@ object OverviewMath {
         agentAttention: Int = 0,
         reconnects: Int = 0,
         pendingSubmissions: Int = 0,
+        buildingAttention: Int = 0,
     ): String {
         if (overdueCount > 0) return HEALTH_URGENT
-        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant + agentAttention + reconnects + pendingSubmissions
+        val watch = waiting + pendingBookings + unreplied + dueSoonCount + expiringQuotes + pendingAssistant + agentAttention + reconnects + pendingSubmissions +
+            buildingAttention
         return if (watch > 0) HEALTH_WATCH else HEALTH_OK
     }
 

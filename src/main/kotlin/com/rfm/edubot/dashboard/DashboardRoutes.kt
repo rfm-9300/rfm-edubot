@@ -24,6 +24,8 @@ import com.rfm.edubot.admin.updateStandardItem
 import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.installBookingRoutes
 import com.rfm.edubot.bookings.model.BookingSource
+import com.rfm.edubot.building.MeasurementRepository
+import com.rfm.edubot.building.ProjectRepository
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.conversation.ConversationRepository
@@ -593,6 +595,8 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
         clientServices = ClientServiceRepository(mongo, ctx.tenant.id),
         pdfGenerator = PdfGenerator(),
         documentTemplate = ctx.tenant.documentTemplate.withCompanyFallback(ctx.tenant.name),
+        projects = ProjectRepository(mongo, ctx.tenant.id),
+        measurements = MeasurementRepository(mongo, ctx.tenant.id),
     )
 
     route("/crm") {
@@ -793,13 +797,16 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val index = call.parameters["index"]?.toIntOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
             call.respondInvoiceChange(deps, deps.invoices.receiveInstallment(id, index))
         }
-        // Cancelling and deleting both free the Serviços rows the invoice billed, to be invoiced again.
+        // Cancelling and deleting both free the Serviços rows or the measurement the invoice billed, to be invoiced again.
         post("/invoices/{id}/cancel") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.INVOICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
             val deps = tenantDeps(ctx)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val change = deps.invoices.cancel(id)
-            if (change is InvoiceChange.Done) deps.clientServices.reopenInvoiced(id)
+            if (change is InvoiceChange.Done) {
+                deps.clientServices.reopenInvoiced(id)
+                deps.measurements.releaseInvoice(id)
+            }
             call.respondInvoiceChange(deps, change)
         }
         delete("/invoices/{id}") {
@@ -808,6 +815,7 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest)
             deps.invoices.delete(id) ?: return@delete call.respond(HttpStatusCode.NotFound)
             deps.clientServices.reopenInvoiced(id)
+            deps.measurements.releaseInvoice(id)
             call.respond(mapOf("deleted" to true))
         }
         get("/invoices/{id}/pdf") {
@@ -1142,8 +1150,12 @@ private suspend fun <T> ApplicationCall.uniquePhone(write: suspend () -> T): Wri
         null
     }
 
-private suspend fun CrmDeps.invoiceDto(invoice: Invoice) =
-    invoice.dto(clients.findById(invoice.clientId), invoice.quoteId?.let { quotes.findById(it)?.number })
+private suspend fun CrmDeps.invoiceDto(invoice: Invoice) = invoice.dto(
+    clients.findById(invoice.clientId),
+    invoice.quoteId?.let { quotes.findById(it)?.number },
+    projectLabel = invoice.projectId?.let { projects.findById(it) }?.let { "${it.number} · ${it.name}" },
+    measurementNumber = invoice.measurementId?.let { measurements.findById(it)?.number },
+)
 
 /** The invoice after a change, or why it was refused: 409 when its state doesn't allow it, 400 for a bad request. */
 private suspend fun ApplicationCall.respondInvoiceChange(deps: CrmDeps, change: InvoiceChange) = when (change) {
@@ -1174,6 +1186,8 @@ private data class CrmDeps(
     val clientServices: ClientServiceRepository,
     val pdfGenerator: PdfGenerator,
     val documentTemplate: DocumentTemplate,
+    val projects: ProjectRepository,
+    val measurements: MeasurementRepository,
 )
 
 private const val MAX_LOGO_BYTES = 2 * 1024 * 1024
@@ -1414,7 +1428,7 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
 
 /** A quote that is gone, whose client is gone, or that is already billed ([QuoteInvoicing.billedBy]). */
 private suspend fun ApplicationCall.respondQuoteRefused(reason: String) = when (reason) {
-    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
+    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED, QuoteInvoicing.ALREADY_MEASURED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
     QuoteInvoicing.CLIENT_NOT_FOUND -> respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
     else -> respond(HttpStatusCode.NotFound)
 }

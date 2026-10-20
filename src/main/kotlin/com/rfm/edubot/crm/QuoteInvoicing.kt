@@ -11,13 +11,15 @@ import org.bson.types.ObjectId
 
 /**
  * A quote becoming its invoice, from the Quotes page or the dashboard assistant: same lines, and the quote turns accepted.
- * A quote is billed once, by its invoice or by the Serviços row made from it ([QuoteServicing]), until that one is cancelled.
+ * A quote is billed once: by its invoice or by the Serviços row made from it ([QuoteServicing]) until that one is
+ * cancelled, or by the measurements of the project it is the contract of ([Quote.projectId]).
  */
 object QuoteInvoicing {
     const val QUOTE_NOT_FOUND = "quote_not_found"
     const val CLIENT_NOT_FOUND = "client_not_found"
     const val ALREADY_INVOICED = "already_invoiced"
     const val ALREADY_SERVICED = "already_serviced"
+    const val ALREADY_MEASURED = "already_measured"
 
     sealed interface Outcome {
         data class Invoiced(val invoice: Invoice, val client: Client) : Outcome
@@ -40,8 +42,12 @@ object QuoteInvoicing {
         return Outcome.Invoiced(invoice, client)
     }
 
-    /** [ALREADY_INVOICED] or [ALREADY_SERVICED] while [quote] has an invoice or a Serviços row that isn't cancelled. */
+    /**
+     * [ALREADY_MEASURED] while a project's measurements bill [quote], else [ALREADY_INVOICED] or [ALREADY_SERVICED]
+     * while it has an invoice or a Serviços row that isn't cancelled.
+     */
     suspend fun billedBy(quote: Quote, invoices: InvoiceRepository, services: ClientServiceRepository): String? = when {
+        quote.projectId != null -> ALREADY_MEASURED
         invoices.list(quote.clientId).any { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED } -> ALREADY_INVOICED
         services.findByQuoteId(quote.id).any { it.status != ClientServiceStatus.CANCELLED } -> ALREADY_SERVICED
         else -> null
