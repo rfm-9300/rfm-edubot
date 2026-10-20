@@ -57,7 +57,7 @@ function renderClients(root) {
   const rows = source
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
-    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}">${columnCells(columns, ids, c)}</tr>`)
+    .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}">${columnCells(columns, c, ids)}</tr>`)
     .join('');
   const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
@@ -66,9 +66,9 @@ function renderClients(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('clients') + columnsButton('clients')
+    tools: directoryViewChips('clients') + columnsButton('clients') + columnOrderButton('clients')
       + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : ''),
-    head: columnsHead(columns),
+    head: columnsHead(columns, 'clients'),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
@@ -77,6 +77,7 @@ function renderClients(root) {
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
   $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('clients', clientColumns(), labels.clients));
+  wireColumnOrder(root, 'clients', clientColumns());
   wireDirectoryView(root);
 }
 

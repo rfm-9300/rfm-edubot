@@ -47,32 +47,38 @@ async function openInvoiceForm(opts = {}) {
   openDrawer(STR.invoiceFormTitle, form, true);
 }
 
+function invoiceColumns() {
+  const t = CRM.invoices;
+  const actions = inv => {
+    const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
+    // An invoice paid in installments receives its next part from the row instead.
+    const nextPart = canMarkPaid ? invoiceParts(inv).findIndex(p => !p.paidAt) : -1;
+    const pay = nextPart >= 0
+      ? `<button class="btn btn--sm btn--accent" type="button" data-receive-invoice="${escapeHTML(inv.id)}" data-part="${nextPart}">${escapeHTML(STR.installmentReceiveShort)}</button>`
+      : canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-paid="${escapeHTML(inv.id)}">${escapeHTML(STR.markPaid)}</button>` : '';
+    return `<td class="right"><div class="actions">${pay}${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}</div></td>`;
+  };
+  return [
+    { id: 'number', label: t.thNumber, cell: inv => `<td class="id">${escapeHTML(inv.number)}</td>` },
+    { id: 'client', label: t.thClient, cell: inv => `<td class="name">${escapeHTML(inv.clientName || '')}</td>` },
+    { id: 'status', label: t.thStatus, cell: inv => `<td>${invoicePill(inv.status)}</td>` },
+    { id: 'dueDate', label: t.thDueDate, cell: inv => `<td class="mono muted">${fmtDay(inv.dueDate)}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: inv => `<td class="num">${invoiceTotalCell(inv)}</td>` },
+    { id: 'actions', label: t.thPdfActions, head: 'right', pin: 'end', cell: actions },
+  ];
+}
+
 function renderInvoices(root) {
   const t = CRM.invoices;
   const q = state.search.toLowerCase();
   const matches = inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)} ${inv.taxOfficeCode || ''}`.toLowerCase().includes(q);
+  const columns = orderedColumns('invoices', invoiceColumns());
+  const rowClass = inv => (inv.status === 'PAID' ? 'is-paid' : inv.status === 'OVERDUE' ? 'is-overdue' : inv.status === 'CANCELLED' ? 'is-draft' : '');
   const rows = state.invoices
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
     .filter(matches)
-    .map(inv => {
-      const canMarkPaid = inv.status === 'PENDING' || inv.status === 'OVERDUE';
-      // An invoice paid in installments receives its next part from the row instead.
-      const nextPart = canMarkPaid ? invoiceParts(inv).findIndex(p => !p.paidAt) : -1;
-      const rowClass = inv.status === 'PAID' ? 'is-paid' : inv.status === 'OVERDUE' ? 'is-overdue' : inv.status === 'CANCELLED' ? 'is-draft' : '';
-      return `<tr class="conversation-row ${rowClass}" data-invoice="${escapeHTML(inv.id)}">
-        <td class="id">${escapeHTML(inv.number)}</td>
-        <td class="name">${escapeHTML(inv.clientName || '')}</td>
-        <td>${invoicePill(inv.status)}</td>
-        <td class="mono muted">${fmtDay(inv.dueDate)}</td>
-        <td class="num">${invoiceTotalCell(inv)}</td>
-        <td class="right"><div class="actions">
-          ${nextPart >= 0
-            ? `<button class="btn btn--sm btn--accent" type="button" data-receive-invoice="${escapeHTML(inv.id)}" data-part="${nextPart}">${escapeHTML(STR.installmentReceiveShort)}</button>`
-            : canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-paid="${escapeHTML(inv.id)}">${escapeHTML(STR.markPaid)}</button>` : ''}
-          ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
-        </div></td>
-      </tr>`;
-    }).join('');
+    .map(inv => `<tr class="conversation-row ${rowClass(inv)}" data-invoice="${escapeHTML(inv.id)}">${columnCells(columns, inv)}</tr>`)
+    .join('');
   const { paid, pending, overdue } = invoiceRollup(state.invoices);
   const period = state.filterInvoicePeriod || '';
   const listed = state.invoices
@@ -94,9 +100,10 @@ function renderInvoices(root) {
     : '';
   const views = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
   const tools = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
-    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('');
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('')
+    + (period ? '' : columnOrderButton('invoices'));
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
-  const listHead = `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdfActions)}</th></tr>`;
+  const listHead = columnsHead(columns, 'invoices');
   const invoiceNav = periodNav(nowKey, period, 'data-inv-period-nav', t);
   const invoiceStats = period
     ? [
@@ -121,6 +128,7 @@ function renderInvoices(root) {
     emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
   });
   wirePdfButtons(root);
+  wireColumnOrder(root, 'invoices', invoiceColumns());
   $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; state.filterInvoicePeriodKey = ''; render(); }));
   $$('[data-inv-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
     const dir = btn.dataset.invPeriodNav;

@@ -153,6 +153,19 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
   openDrawer(t.formTitle, form, true);
 }
 
+function paymentColumns() {
+  const t = CRM.payments;
+  const canMarkPaid = p => p.status === 'PENDING' || p.status === 'OVERDUE';
+  return [
+    { id: 'number', label: t.thNumber, cell: p => `<td class="id">${escapeHTML(p.number)}</td>` },
+    { id: 'payee', label: t.thPayee, cell: p => `<td class="name">${escapeHTML(payeeName(p))}${p.clientName ? ` <span class="muted">· ${escapeHTML(p.clientName)}</span>` : ''}</td>` },
+    { id: 'status', label: t.thStatus, cell: p => `<td>${paymentPill(p.status)}</td>` },
+    { id: 'dueDate', label: t.thDueDate, cell: p => `<td class="mono muted">${fmtDay(p.dueDate)}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: p => `<td class="num">${fmtEUR(p.totalEur)}</td>` },
+    { id: 'actions', label: '', pin: 'end', cell: p => `<td class="right"><div class="actions">${canMarkPaid(p) ? `<button class="btn btn--sm btn--accent" type="button" data-mark-payment="${escapeHTML(p.id)}">${escapeHTML(t.markPaid)}</button>` : ''}</div></td>` },
+  ];
+}
+
 function renderPayments(root) {
   const t = CRM.payments;
   const q = state.search.toLowerCase();
@@ -167,23 +180,13 @@ function renderPayments(root) {
   if (state.filterPaymentSupplier && !names.has(state.filterPaymentSupplier)) state.filterPaymentSupplier = '';
   const supplierId = state.filterPaymentSupplier || '';
   const scoped = supplierId ? all.filter(p => payeeId(p) === supplierId) : all;
+  const columns = orderedColumns('payments', paymentColumns());
+  const rowClass = p => (p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '');
   const rows = scoped
     .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
     .filter(p => !q || `${p.number} ${payeeName(p)} ${p.clientName || ''} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
-    .map(p => {
-      const canMarkPaid = p.status === 'PENDING' || p.status === 'OVERDUE';
-      const rowClass = p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '';
-      return `<tr class="conversation-row ${rowClass}" data-payment="${escapeHTML(p.id)}">
-        <td class="id">${escapeHTML(p.number)}</td>
-        <td class="name">${escapeHTML(payeeName(p))}${p.clientName ? ` <span class="muted">· ${escapeHTML(p.clientName)}</span>` : ''}</td>
-        <td>${paymentPill(p.status)}</td>
-        <td class="mono muted">${fmtDay(p.dueDate)}</td>
-        <td class="num">${fmtEUR(p.totalEur)}</td>
-        <td class="right"><div class="actions">
-          ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" data-mark-payment="${escapeHTML(p.id)}">${escapeHTML(t.markPaid)}</button>` : ''}
-        </div></td>
-      </tr>`;
-    }).join('');
+    .map(p => `<tr class="conversation-row ${rowClass(p)}" data-payment="${escapeHTML(p.id)}">${columnCells(columns, p)}</tr>`)
+    .join('');
   const paid = scoped.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
   const pending = scoped.filter(p => p.status === 'PENDING').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
   const overdue = scoped.filter(p => p.status === 'OVERDUE').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
@@ -193,7 +196,8 @@ function renderPayments(root) {
     : '';
   const tools = supplierFilter
     + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
-    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(paymentStatusLabel(s))}</button>`).join('');
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(paymentStatusLabel(s))}</button>`).join('')
+    + columnOrderButton('payments');
   const filtered = Boolean(supplierId || state.filterPaymentStatus || q);
   root.innerHTML = hero(labels.payments, CRM.tabs.pagamentos.desc, statCards([
     { label: t.paid, value: fmtEUR(paid) },
@@ -203,11 +207,12 @@ function renderPayments(root) {
     title: t.ledger,
     tag: scoped.filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus).length,
     tools,
-    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thPayee)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thDueDate)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th></th></tr>`,
+    head: columnsHead(columns, 'payments'),
     rows,
     empty: filtered ? t.emptyFiltered : t.emptyTitle,
     emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
   });
+  wireColumnOrder(root, 'payments', paymentColumns());
   $$('[data-filter-pay]', root).forEach(btn => btn.addEventListener('click', () => { state.filterPaymentStatus = btn.dataset.filterPay; render(); }));
   $('[data-filter-pay-supplier]', root)?.addEventListener('change', e => { state.filterPaymentSupplier = e.target.value; render(); });
   $$('[data-mark-payment]', root).forEach(btn => btn.addEventListener('click', e => {

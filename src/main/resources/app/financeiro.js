@@ -1,6 +1,16 @@
 /* Financeiro (/app → Financeiro): money in from invoices and out through payments, as a list or by week or
    month. Not a module of its own: the nav shows it whenever Invoices or Payments is on. */
 
+function ledgerColumns() {
+  const t = CRM.financeiro;
+  return [
+    { id: 'when', label: t.thWhen, cell: m => `<td class="mono muted">${escapeHTML(fmtDay(m.date))} <span class="pill ${m.kind === 'in' ? 'pill--ok' : 'pill--bad'}">${escapeHTML(m.kind === 'in' ? t.received : t.spent)}</span></td>` },
+    { id: 'who', label: t.thWho, cell: m => `<td class="name">${escapeHTML(m.who)}${m.whoFor ? ` <span class="muted">· ${escapeHTML(m.whoFor)}</span>` : ''}</td>` },
+    { id: 'ref', label: t.thRef, cell: m => `<td class="mono muted">${escapeHTML(m.ref)}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: m => `<td class="num">${m.kind === 'out' ? '−' : ''}${fmtEUR(m.amount)}</td>` },
+  ];
+}
+
 function renderFinanceiro(root) {
   const t = CRM.financeiro;
   const period = state.filterFinanceiroPeriod || '';
@@ -53,7 +63,8 @@ function renderFinanceiro(root) {
     : '';
   const tools = clientFilter + (period ? '' : `<button class="chip ${!typeFilter ? 'is-on' : ''}" data-filter-fin="">${escapeHTML(t.filterAll)}</button>`
     + `<button class="chip ${typeFilter === 'in' ? 'is-on' : ''}" data-filter-fin="in">${escapeHTML(t.received)}</button>`
-    + `<button class="chip ${typeFilter === 'out' ? 'is-on' : ''}" data-filter-fin="out">${escapeHTML(t.spent)}</button>`);
+    + `<button class="chip ${typeFilter === 'out' ? 'is-on' : ''}" data-filter-fin="out">${escapeHTML(t.spent)}</button>`
+    + columnOrderButton('financeiro'));
 
   const financeNav = periodNav(nowKey, period, 'data-fin-period-nav', t);
   const financeStats = period
@@ -69,7 +80,8 @@ function renderFinanceiro(root) {
     ];
 
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.received)}</th><th class="right">${escapeHTML(t.spent)}</th><th class="right">${escapeHTML(t.net)}</th></tr>`;
-  const listHead = `<tr><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thWho)}</th><th>${escapeHTML(t.thRef)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
+  const columns = orderedColumns('financeiro', ledgerColumns());
+  const listHead = columnsHead(columns, 'financeiro');
   const summaryRows = period && periodKeys.length
     ? `<tr class="is-total"><td class="name">${escapeHTML(t.thTotal)}</td><td class="num">${fmtEUR(receivedAll)}</td><td class="num">${fmtEUR(spentAll)}</td><td class="num">${fmtEUR(receivedAll - spentAll)}</td></tr>`
       + periodKeys.map(key => {
@@ -77,12 +89,7 @@ function renderFinanceiro(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${fmtEUR(roll.received)}</td><td class="num">${fmtEUR(roll.spent)}</td><td class="num">${fmtEUR(roll.net)}</td></tr>`;
       }).join('')
     : '';
-  const ledgerRows = ledger.map(m => `<tr class="conversation-row" data-fin-open="${escapeHTML(m.open)}">
-    <td class="mono muted">${escapeHTML(fmtDay(m.date))} <span class="pill ${m.kind === 'in' ? 'pill--ok' : 'pill--bad'}">${escapeHTML(m.kind === 'in' ? t.received : t.spent)}</span></td>
-    <td class="name">${escapeHTML(m.who)}${m.whoFor ? ` <span class="muted">· ${escapeHTML(m.whoFor)}</span>` : ''}</td>
-    <td class="mono muted">${escapeHTML(m.ref)}</td>
-    <td class="num">${m.kind === 'out' ? '−' : ''}${fmtEUR(m.amount)}</td>
-  </tr>`).join('');
+  const ledgerRows = ledger.map(m => `<tr class="conversation-row" data-fin-open="${escapeHTML(m.open)}">${columnCells(columns, m)}</tr>`).join('');
 
   root.innerHTML = hero(labels.financeiro, CRM.tabs.financeiro.desc, statCards(financeStats), financeNav) + crmPanel({
     title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.ledger,
@@ -94,6 +101,7 @@ function renderFinanceiro(root) {
     empty: clientId ? t.emptyClient : period ? t.summaryEmpty : t.emptyTitle,
     emptyDesc: clientId ? t.emptyClientDesc : period ? t.summaryEmptyDesc : t.emptyDesc,
   });
+  wireColumnOrder(root, 'financeiro', ledgerColumns());
   $('[data-filter-fin-client]', root)?.addEventListener('change', e => { state.filterFinanceiroClient = e.target.value; render(); });
   $$('[data-fin-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterFinanceiroPeriod = btn.dataset.finPeriod; state.filterFinanceiroPeriodKey = ''; render(); }));
   $$('[data-fin-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {

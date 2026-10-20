@@ -1,6 +1,19 @@
 /* Serviços (/app → Services): work done for clients, by week or month, waiting to be invoiced. The list,
    the service form and detail, cancelling and deleting one, and invoicing the ones selected. */
 
+function serviceColumns() {
+  const t = CRM.services;
+  return [
+    { id: 'pick', label: '', pin: 'start', cell: s => `<td class="check">${s.status === 'OPEN' ? `<input type="checkbox" data-pick-service="${escapeHTML(s.id)}" data-client="${escapeHTML(s.clientId)}" />` : ''}</td>` },
+    { id: 'when', label: t.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>` },
+    { id: 'client', label: t.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName || '')}</td>` },
+    { id: 'service', label: t.thService, cell: s => `<td>${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>` },
+    { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
+    { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
+  ];
+}
+
 function renderServices(root) {
   const t = CRM.services;
   const q = state.search.toLowerCase();
@@ -11,21 +24,12 @@ function renderServices(root) {
   if (state.filterServiceClient && !clientNames.has(state.filterServiceClient)) state.filterServiceClient = '';
   const clientId = state.filterServiceClient || '';
   const scoped = clientId ? all.filter(s => s.clientId === clientId) : all;
+  const columns = orderedColumns('services', serviceColumns());
   const rows = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
     .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q))
-    .map(s => {
-      const canPick = s.status === 'OPEN';
-      return `<tr class="conversation-row ${s.status === 'INVOICED' ? 'is-paid' : ''}" data-service="${escapeHTML(s.id)}">
-        <td class="check">${canPick ? `<input type="checkbox" data-pick-service="${escapeHTML(s.id)}" data-client="${escapeHTML(s.clientId)}" />` : ''}</td>
-        <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
-        <td class="name">${escapeHTML(s.clientName || '')}</td>
-        <td>${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
-        <td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>
-        <td class="num">${fmtEUR(s.totalEur)}</td>
-        <td>${servicePill(s.status)}</td>
-      </tr>`;
-    }).join('');
+    .map(s => `<tr class="conversation-row ${s.status === 'INVOICED' ? 'is-paid' : ''}" data-service="${escapeHTML(s.id)}">${columnCells(columns, s)}</tr>`)
+    .join('');
   const open = scoped.filter(s => s.status === 'OPEN');
   const openCents = open.reduce((sum, s) => sum + Number(s.totalEur || 0), 0);
   const invoiced = scoped.filter(s => s.status === 'INVOICED');
@@ -55,10 +59,11 @@ function renderServices(root) {
   const tools = clientFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
+    + (period ? '' : columnOrderButton('services'))
     + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
   const filtered = Boolean(clientId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
-  const listHead = `<tr><th></th><th>${escapeHTML(t.thWhen)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thService)}</th><th>${escapeHTML(t.thQty)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th>${escapeHTML(t.thStatus)}</th></tr>`;
+  const listHead = columnsHead(columns, 'services');
   const serviceNav = periodNav(nowKey, period, 'data-svc-period-nav', t);
   const serviceStats = period
     ? [
@@ -95,6 +100,7 @@ function renderServices(root) {
     openServiceDetail(state.clientServices.find(s => s.id === r.dataset.service) || r.dataset.service);
   }));
   $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
+  wireColumnOrder(root, 'services', serviceColumns());
 }
 
 // Bookable services are catalog services, so both lists merge into one (the booking list only

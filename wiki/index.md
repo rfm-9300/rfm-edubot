@@ -22,7 +22,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [ai-assistant.md](ai-assistant.md) — the dashboard AI Assistant: its prompt, checked cards, settings, history
 - [agents-automations.md](agents-automations.md) — the opt-in Agents module, domain events, background jobs, Gmail and Google verification
 - [auth-and-access.md](auth-and-access.md) — Google sign-in for the backoffice and `/app`, admin emails, where the access rules live
-- [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker
+- [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker and column order
 - [dashboard-frontend.md](dashboard-frontend.md) — how `/app`'s and the backoffice's JavaScript is split: one script per page in one global scope, `admin/common.js`, the self-contained modules, where new code goes
 
 ## Mobile

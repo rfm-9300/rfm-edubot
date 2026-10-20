@@ -1397,8 +1397,10 @@ window.__I18N_CATALOGS['en'] = {
     },
     columns: {
       button: 'Columns', title: 'Columns',
-      intro: 'Choose the columns this list shows. Your choice is saved in this browser.',
+      intro: 'Choose the columns this list shows. To move one, drag its header in the list. Your choice is saved in this browser.',
       standard: 'Standard columns', reset: 'Restore the default columns',
+      moveHint: 'Drag to move the column. With the keyboard: ← and →',
+      resetOrder: 'Restore the column order',
     },
     notifications: {
       title: 'Notifications', aria: 'Notifications', ariaUnread: 'Notifications, {n} unread',

@@ -45,24 +45,32 @@ async function openQuoteForm(opts = {}) {
   openDrawer(STR.quoteFormTitle, form, true);
 }
 
+function quoteColumns() {
+  const t = CRM.quotes;
+  return [
+    { id: 'number', label: t.thNumber, cell: quote => `<td class="id">${escapeHTML(quote.number)}</td>` },
+    { id: 'client', label: t.thClient, cell: quote => `<td class="name">${escapeHTML(quote.clientName || '')}</td>` },
+    { id: 'status', label: t.thStatus, cell: quote => `<td>${quotePill(quote.status)}</td>` },
+    { id: 'validUntil', label: t.thValidUntil, cell: quote => `<td class="mono muted">${fmtDay(quote.validUntil)}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: quote => `<td class="num">${fmtEUR(quote.totalEur)}</td>` },
+    { id: 'pdf', label: t.thPdf, head: 'right', pin: 'end', cell: quote => `<td class="right"><div class="actions">${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}</div></td>` },
+  ];
+}
+
 function renderQuotes(root) {
   const t = CRM.quotes;
   const q = state.search.toLowerCase();
+  const columns = orderedColumns('quotes', quoteColumns());
   const rows = state.quotes
     .filter(quote => !state.filterQuoteStatus || quote.status === state.filterQuoteStatus)
     .filter(quote => !q || `${quote.number} ${quote.clientName || ''} ${quoteStatusLabel(quote.status)}`.toLowerCase().includes(q))
-    .map(quote => `<tr class="conversation-row ${quote.status === 'ACEITO' ? 'is-paid' : ''}" data-quote="${escapeHTML(quote.id)}">
-      <td class="id">${escapeHTML(quote.number)}</td>
-      <td class="name">${escapeHTML(quote.clientName || '')}</td>
-      <td>${quotePill(quote.status)}</td>
-      <td class="mono muted">${fmtDay(quote.validUntil)}</td>
-      <td class="num">${fmtEUR(quote.totalEur)}</td>
-      <td class="right"><div class="actions">${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}</div></td>
-    </tr>`).join('');
+    .map(quote => `<tr class="conversation-row ${quote.status === 'ACEITO' ? 'is-paid' : ''}" data-quote="${escapeHTML(quote.id)}">${columnCells(columns, quote)}</tr>`)
+    .join('');
   const accepted = state.quotes.filter(o => o.status === 'ACEITO').reduce((sum, o) => sum + Number(o.totalEur || 0), 0);
   const sent = state.quotes.filter(o => o.status === 'PENDENTE' || o.status === 'SENT').reduce((sum, o) => sum + Number(o.totalEur || 0), 0);
   const tools = `<button class="chip ${!state.filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(t.filterAll)}</button>`
-    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}</button>`).join('');
+    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}</button>`).join('')
+    + columnOrderButton('quotes');
   root.innerHTML = hero(labels.quotes, CRM.tabs.orcamentos.desc, statCards([
     { label: t.total, value: state.quotes.length },
     { label: t.sent, value: fmtEUR(sent) },
@@ -71,12 +79,13 @@ function renderQuotes(root) {
     title: t.proposals,
     tag: rows ? state.quotes.filter(o => !state.filterQuoteStatus || o.status === state.filterQuoteStatus).length : 0,
     tools,
-    head: `<tr><th>${escapeHTML(t.thNumber)}</th><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thStatus)}</th><th>${escapeHTML(t.thValidUntil)}</th><th class="right">${escapeHTML(t.thTotal)}</th><th class="right">${escapeHTML(t.thPdf)}</th></tr>`,
+    head: columnsHead(columns, 'quotes'),
     rows,
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
   wirePdfButtons(root);
+  wireColumnOrder(root, 'quotes', quoteColumns());
   $$('[data-filter-quote]', root).forEach(btn => btn.addEventListener('click', () => { state.filterQuoteStatus = btn.dataset.filterQuote; render(); }));
   $$('[data-quote]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pdf-url]')) return;

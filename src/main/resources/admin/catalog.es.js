@@ -1392,8 +1392,10 @@ window.__I18N_CATALOGS['es'] = {
     },
     columns: {
       button: 'Columnas', title: 'Columnas',
-      intro: 'Elige las columnas que muestra esta lista. Tu elección se guarda en este navegador.',
+      intro: 'Elige las columnas que muestra esta lista. Para mover una, arrastra su encabezado en la lista. Tu elección se guarda en este navegador.',
       standard: 'Columnas habituales', reset: 'Restablecer las columnas habituales',
+      moveHint: 'Arrastra para mover la columna. Con el teclado: ← y →',
+      resetOrder: 'Restablecer el orden de las columnas',
     },
     notifications: {
       title: 'Notificaciones', aria: 'Notificaciones', ariaUnread: 'Notificaciones, {n} sin leer',

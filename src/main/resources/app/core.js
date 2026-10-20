@@ -24,8 +24,9 @@ let state = {
   archivedView: '', archivedRows: [],
   // What the company asks for about clients: required standard fields and its own fields (GET /app/api/crm/clients/fields).
   clientFields: null,
-  // Column choices of the directory lists as read from this browser, by storage key (columnChoicesKey).
-  columnChoices: {},
+  // Column choices of the directory lists and the column order of every list as read from this browser, by
+  // storage key (columnChoicesKey, columnOrderKey).
+  columnChoices: {}, columnOrders: {},
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
