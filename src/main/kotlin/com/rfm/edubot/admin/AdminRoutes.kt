@@ -307,6 +307,8 @@ internal data class QuoteDto(
     val createdAt: String,
     val notes: String? = null,
     val items: List<LineItemDto> = emptyList(),
+    /** The project whose measurements bill this quote: it can't be invoiced or turned into a service any more. */
+    val projectId: String? = null,
 )
 
 @Serializable
@@ -497,6 +499,7 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     createdAt = createdAt.toString(),
     notes = notes,
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    projectId = projectId?.toHexString(),
 )
 
 @Serializable

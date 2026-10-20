@@ -27,6 +27,10 @@ function attentionTitle(item) {
     agent_failed: STR.agentFailed,
     integration_reconnect: STR.integrationReconnect,
     service_submission: STR.serviceSubmission,
+    project_delayed: STR.projectDelayed,
+    site_issue_overdue: STR.siteIssueOverdue,
+    change_order_pending: STR.changeOrderPending,
+    measurement_to_invoice: STR.measurementToInvoice,
   };
   return map[item.kind] || item.kind;
 }
@@ -43,6 +47,7 @@ function attentionPill(kind) {
     pending_booking: 'pill--info', instagram_comment: 'pill--accent', quote_expiring: 'pill--warn',
     assistant_action: 'pill--info', agent_approval: 'pill--warn', agent_task_due: 'pill--info', agent_failed: 'pill--bad',
     integration_reconnect: 'pill--bad', service_submission: 'pill--warn',
+    project_delayed: 'pill--bad', site_issue_overdue: 'pill--bad', change_order_pending: 'pill--warn', measurement_to_invoice: 'pill--info',
   };
   return map[kind] || '';
 }
@@ -65,12 +70,14 @@ function homeCardCopy(id) {
     financeiro: STR.snapFinance, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
     calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
     suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant, agents: STR.snapAgents,
+    projects: STR.snapProjects,
   };
   const descs = {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     financeiro: STR.homeCard_financeDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
     suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc, agents: STR.homeCard_agentsDesc,
+    projects: STR.homeCard_projectsDesc,
   };
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
@@ -317,6 +324,29 @@ function dashAgentsCard(o) {
   return dashCard({ order: 9, title: STR.snapAgents, go: 'agents', body });
 }
 
+// The projects running, the ones furthest behind their plan, and what the sites and the client wait on.
+function dashProjectsCard(o) {
+  const p = o.projects;
+  const behind = (p.atRisk || 0) + (p.delayed || 0);
+  const figures = [
+    [p.active || 0, STR.projectsActive, ''],
+    [behind, STR.projectsBehind, p.delayed ? 'bad' : behind ? 'warn' : ''],
+  ];
+  if (hasModule('site-issues')) figures.push([p.openIssues || 0, STR.projectsOpenIssues, p.overdueIssues ? 'bad' : '']);
+  const rows = (p.behind || []).map(r => worklistRow({
+    tone: r.health === 'DELAYED' ? 'bad' : 'warn', title: `${r.number} · ${r.name}`, detail: scheduleText(r.scheduleDays), meta: `${r.progressPct}%`, go: 'projects', open: r.id,
+  })).join('');
+  const body = `${dashFigures(figures)}
+    ${rows ? `<p class="dash-sub">${escapeHTML(STR.projectsFurthestBehind)}</p><ul class="worklist">${rows}</ul>` : (p.active ? `<p class="dash-empty">${escapeHTML(STR.projectsAllOnTrack)}</p>` : `<p class="dash-empty">${escapeHTML(STR.projectsNoneRunning)}</p>`)}
+    ${dashFacts([
+      hasModule('site-diary') && p.active ? [STR.projectsDiariesToday, tApp('projectsDiariesOf', { n: p.diariesToday || 0, total: (p.diariesToday || 0) + (p.activeWithoutDiary || 0) })] : null,
+      hasModule('measurements') ? [STR.projectsToInvoice, `${wholeCentsEUR(p.toInvoiceCents)} · ${p.toInvoiceCount || 0}`] : null,
+      hasModule('change-orders') && p.pendingChanges ? [STR.projectsChangesWaiting, `${p.pendingChanges} · ${wholeCentsEUR(p.pendingChangesCents)}`] : null,
+      p.planning ? [STR.projectsPlanning, p.planning] : null,
+    ])}`;
+  return dashCard({ order: 2, title: STR.snapProjects, go: 'projects', body });
+}
+
 function dashInboxCard(o) {
   const i = o.inbox;
   const convo = hasModule('conversations');
@@ -406,7 +436,8 @@ function renderOverview(root) {
       const detail = n.aggregate && n.kind === 'overdue_invoice'
         ? (o.cash?.topOverdue || []).map(t => t.name).filter(Boolean).join(', ')
         : (n.kind === 'assistant_action' ? '' : n.detail || '');
-      const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking', 'service_submission'].includes(n.kind);
+      const opens = ['overdue_invoice', 'due_soon_invoice', 'overdue_payment', 'due_soon_payment', 'quote_expiring', 'pending_booking', 'service_submission',
+        'project_delayed', 'site_issue_overdue', 'change_order_pending', 'measurement_to_invoice'].includes(n.kind);
       const agentRef = AGENT_ATTENTION_REFS[n.kind] && n.id ? `${AGENT_ATTENTION_REFS[n.kind]}:${n.id}` : '';
       return worklistRow({
         tone: n.kind === 'agent_task_due' && agentTaskLate(n) ? 'late' : attentionTone(n.kind), title: attentionTitle(n), detail, meta, when, amount: n.amountCents != null, go: n.tab,
@@ -420,6 +451,7 @@ function renderOverview(root) {
     cards.push({ col: 'main', order: 1, html: dashCard({ order: 1, title: STR.needsYou, tag: items.length || null, body, flush: !!rows }) });
   }
   if (o.calendar && !hidden.has('calendar')) cards.push({ col: 'side', order: 2, html: dashTodayCard(o) });
+  if (o.projects && !hidden.has('projects')) cards.push({ col: 'main', order: 2, html: dashProjectsCard(o) });
   if ((o.cash || o.payments) && money) {
     cards.push({ col: 'main', order: 3, html: dashCashFlowCard(o) });
     cards.push({ col: 'side', order: 4, html: dashMoneyCard(o) });
@@ -501,6 +533,10 @@ async function dashGo(el) {
   if (go === 'clients') return openClientDrawer(open);
   if (go === 'bookings') return openBookingById(open);
   if (go === 'employees') return openSubmissionDetail(open);
+  if (go === 'projects') return openProjectDrawer(open);
+  if (go === 'site-issues') return openIssueDetail(open);
+  if (go === 'change-orders') return openChangeDetail(open);
+  if (go === 'measurements') return openMeasurementDetail(open);
 }
 
 async function dashCreate(module) {

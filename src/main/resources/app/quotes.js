@@ -103,13 +103,14 @@ async function openQuoteDetail(id) {
   // Converting marks the quote accepted and bills it once: by its invoice, the one that points back at it, or by
   // the service made from it, which is invoiced later. A cancelled one frees the quote to be converted again.
   const accepted = quote.status === 'ACEITO';
-  const [ownInvoice, service] = await Promise.all([
+  const [ownInvoice, service, project] = await Promise.all([
     hasModule('invoices') && accepted
       ? api(`/app/api/crm/invoices?clientId=${encodeURIComponent(quote.clientId)}`).then(list => list.find(i => i.quoteId === quote.id && i.status !== 'CANCELLED') || null).catch(() => null)
       : null,
     hasModule('services') && accepted
       ? api(`/app/api/crm/services?quoteId=${encodeURIComponent(quote.id)}`).then(list => list.find(s => s.status !== 'CANCELLED') || null).catch(() => null)
       : null,
+    hasModule('projects') ? api(`/app/api/building/projects?quoteId=${encodeURIComponent(quote.id)}`).then(list => list[0] || null).catch(() => null) : null,
   ]);
   const invoice = ownInvoice || (service?.invoiceId && hasModule('invoices')
     ? await api(`/app/api/crm/invoices/${encodeURIComponent(service.invoiceId)}`).catch(() => null)
@@ -124,7 +125,9 @@ async function openQuoteDetail(id) {
   form.className = 'form';
   const canSend = quote.status === 'PENDENTE';
   const canAccept = isOpen;
-  const billable = quote.status !== 'CANCELLED' && !invoice && !service;
+  // A project's measurements bill its quote as the work gets done.
+  const billable = quote.status !== 'CANCELLED' && !invoice && !service && !quote.projectId;
+  const canProject = hasModule('projects') && quote.status !== 'CANCELLED' && !project;
   const canConvert = hasModule('invoices') && billable;
   const canService = hasModule('services') && billable;
   const clientLink = hasModule('clients') && !!quote.clientId && !linksBackTo(`client:${quote.clientId}`);
@@ -135,9 +138,11 @@ async function openQuoteDetail(id) {
       quote.validUntil ? { label: CRM.quotes.thValidUntil, value: validity } : null,
       service ? { label: STR.clientKindService, value: service.name } : null,
       invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
+      project ? { label: BLD.project, value: projectLabel(project) } : null,
     ])}
     ${itemsTable(quote.items)}
     ${quote.notes ? `<p class="hint">${escapeHTML(quote.notes)}</p>` : ''}
+    ${quote.projectId ? `<p class="hint">${escapeHTML(STR.quoteBilledByProject({ number: project?.number || '' }))}</p>` : ''}
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
       <input class="inp" id="q-due" type="date" value="${new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)}" /></div>` : ''}
     <div class="detail__foot">
@@ -146,14 +151,18 @@ async function openQuoteDetail(id) {
       ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
       ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
       ${canService ? `<button class="btn btn--sm" type="button" data-q-service>${escapeHTML(STR.quoteToService)}</button>` : ''}
+      ${canProject ? `<button class="btn btn--sm" type="button" data-q-project>${escapeHTML(STR.quoteToProject)}</button>` : ''}
       ${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}
       ${service && !linksBackTo(`service:${service.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-service>${escapeHTML(STR.bookingsOpenService)}</button>` : ''}
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
+      ${project && !linksBackTo(`project:${project.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(STR.detailOpenDoc({ number: project.number }))}</button>` : ''}
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
   $('[data-q-service]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteServiceForm(quote)));
   $('[data-open-service]', form)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(service.id)));
   $('[data-open-invoice]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
+  $('[data-q-project]', form)?.addEventListener('click', () => openFrom(here, () => openProjectForm(null, { quote })));
+  $('[data-open-project]', form)?.addEventListener('click', () => openFrom(here, () => openProjectDrawer(project.id)));
   $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('quote', quote.id, quote.number)));
   form.querySelectorAll('[data-q-status]').forEach(b => b.addEventListener('click', async () => {
     b.disabled = true;
@@ -188,7 +197,7 @@ async function openQuoteDetail(id) {
 }
 
 // Another tab may have billed the quote since this detail opened.
-const quoteBilledText = err => ({ already_invoiced: STR.quoteAlreadyInvoiced, already_serviced: STR.quoteAlreadyServiced }[err?.code] || '');
+const quoteBilledText = err => ({ already_invoiced: STR.quoteAlreadyInvoiced, already_serviced: STR.quoteAlreadyServiced, already_measured: STR.quoteAlreadyMeasured }[err?.code] || '');
 
 // The quote's lines become one service for its client, invoiced later with their other open work.
 function openQuoteServiceForm(quote) {

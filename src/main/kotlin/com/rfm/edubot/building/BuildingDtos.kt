@@ -51,6 +51,9 @@ internal data class ProjectDto(
     val managerName: String?,
     val address: String?,
     val description: String?,
+    /** The dates typed on the project itself (the ones agreed with the client), which [plannedEnd] prefers to the phases'. */
+    val projectStart: String?,
+    val projectEnd: String?,
     val plannedStart: String?,
     /** The project's own planned end, or its last phase's. */
     val plannedEnd: String?,

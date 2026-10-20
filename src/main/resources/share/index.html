@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="pt-PT" data-layout="minimal">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex, nofollow" />
+<meta name="referrer" content="no-referrer" />
+<title>Obra</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link rel="stylesheet" href="/admin/style.css" />
+<script src="/admin/theme.js"></script>
+<script src="/admin/catalog.en.js"></script>
+<script src="/admin/catalog.pt.js"></script>
+<script src="/admin/catalog.es.js"></script>
+<script src="/admin/i18n.js"></script>
+</head>
+<body class="share-page">
+  <main class="share" id="share" aria-live="polite"><p class="share__loading" data-i18n="share.loading">…</p></main>
+  <dialog class="share-viewer" id="share-viewer">
+    <img class="share-viewer__img" alt="" />
+    <p class="share-viewer__caption"></p>
+    <div class="share-viewer__bar">
+      <button class="btn btn--sm btn--ghost" type="button" data-viewer="prev" data-i18n-aria-label="share.previous" aria-label="Previous">‹</button>
+      <button class="btn btn--sm" type="button" data-viewer="close" data-i18n="share.close">Close</button>
+      <button class="btn btn--sm btn--ghost" type="button" data-viewer="next" data-i18n-aria-label="share.next" aria-label="Next">›</button>
+    </div>
+  </dialog>
+  <script src="/app/share/assets/share.js" defer></script>
+</body>
+</html>

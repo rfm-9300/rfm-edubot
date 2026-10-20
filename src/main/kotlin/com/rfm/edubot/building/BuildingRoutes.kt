@@ -100,6 +100,10 @@ private typealias Gate = suspend io.ktor.server.routing.RoutingContext.(String) 
 private fun Route.projectRoutes(store: PhotoStore, gate: Gate) {
     get("/projects") {
         val b = gate(DashboardModules.PROJECTS) ?: return@get
+        val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let {
+            it.toObjectIdOrNull() ?: return@get call.respondError(HttpStatusCode.BadRequest, "invalid_quoteId")
+        }
+        if (quoteId != null) return@get call.respond(b.projectDtos(b.projects.forQuote(quoteId)))
         val statuses = call.request.queryParameters["status"]?.split(',')?.mapNotNull { enumOf<ProjectStatus>(it) }.orEmpty()
         call.respond(b.projectDtos(b.projects.list(statuses)))
     }
