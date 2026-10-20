@@ -55,6 +55,8 @@ internal data class QuoteDto(
     val createdAt: String,
     val notes: String? = null,
     val items: List<LineItemDto> = emptyList(),
+    /** The project whose measurements bill this quote: it can't be invoiced or turned into a service any more. */
+    val projectId: String? = null,
 )
 
 @Serializable
@@ -76,6 +78,11 @@ internal data class InvoiceDto(
     val outstandingEur: Double,
     val taxOfficeCode: String? = null,
     val installments: List<InvoiceInstallmentDto> = emptyList(),
+    /** The project and measurement the invoice bills, when a measurement made it; the label and number only on its own record. */
+    val projectId: String? = null,
+    val projectLabel: String? = null,
+    val measurementId: String? = null,
+    val measurementNumber: Int? = null,
 )
 
 @Serializable
@@ -187,6 +194,7 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     createdAt = createdAt.toString(),
     notes = notes,
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    projectId = projectId?.toHexString(),
 )
 
 internal fun ClientService.dto(client: Client?) = ClientServiceDto(
@@ -211,7 +219,7 @@ internal fun ClientService.dto(client: Client?) = ClientServiceDto(
     quoteId = quoteId?.toHexString(),
 )
 
-internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = InvoiceDto(
+internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLabel: String? = null, measurementNumber: Int? = null) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -229,6 +237,10 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null) = Invoice
     outstandingEur = outstandingCents / 100.0,
     taxOfficeCode = taxOfficeCode,
     installments = installments.map { InvoiceInstallmentDto(it.amountCents / 100.0, it.dueDate.toString(), it.paidAt?.toString()) },
+    projectId = projectId?.toHexString(),
+    projectLabel = projectLabel,
+    measurementId = measurementId?.toHexString(),
+    measurementNumber = measurementNumber,
 )
 
 internal fun Employee.dto() = EmployeeDto(

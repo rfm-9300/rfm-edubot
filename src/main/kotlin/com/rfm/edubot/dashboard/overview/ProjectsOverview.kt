@@ -1,5 +1,9 @@
-package com.rfm.edubot.building
+package com.rfm.edubot.dashboard.overview
 
+import com.rfm.edubot.building.BuildingRecords
+import com.rfm.edubot.building.ProjectHealth
+import com.rfm.edubot.building.ProjectProgress
+import com.rfm.edubot.building.approvedEffect
 import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.building.model.MeasurementStatus
@@ -10,46 +14,42 @@ import com.rfm.edubot.dashboard.OverviewMath
 import com.rfm.edubot.dashboard.OverviewProjectRowDto
 import com.rfm.edubot.dashboard.OverviewProjectsDto
 import com.rfm.edubot.persistence.MongoModule
-import com.rfm.edubot.tenant.model.Tenant
-import com.rfm.edubot.timesheets.zone
-import kotlinx.datetime.Instant
-import kotlinx.datetime.toLocalDateTime
+import org.bson.types.ObjectId
 import kotlin.math.roundToInt
 
-/** Home's Building card and its Needs-you rows: delayed projects, overdue issues, changes waiting, measurements to invoice. */
-internal object BuildingOverview {
+/** The Building card and its Needs-you rows: delayed projects, overdue issues, changes waiting, measurements to invoice. */
+internal class ProjectsOverview(mongo: MongoModule) : OverviewQueries(mongo) {
     data class Block(val dto: OverviewProjectsDto, val attention: List<OverviewAttentionItemDto>)
 
-    private const val BEHIND_ROWS = 4
-    private const val ATTENTION_ROWS = 3
-
-    suspend fun build(mongo: MongoModule, tenant: Tenant, modules: Set<String>, now: Instant): Block {
-        val today = now.toLocalDateTime(tenant.zone()).date
-        val projects = ProjectRepository(mongo, tenant.id).list(listOf(ProjectStatus.PLANNING, ProjectStatus.ACTIVE, ProjectStatus.ON_HOLD))
-        val label = projects.associate { it.id to "${it.number} · ${it.name}" }
-        val changes = ChangeOrderRepository(mongo, tenant.id).list()
-        val daysByProject = changes.groupBy { it.projectId }.mapValues { (_, list) -> approvedEffect(list).days }
+    suspend fun projects(tenantId: ObjectId, window: OverviewMath.Window, modules: Set<String>): Block {
+        val records = BuildingRecords(mongo, tenantId)
+        val today = window.today
+        val projects = records.projects.list(listOf(ProjectStatus.PLANNING, ProjectStatus.ACTIVE, ProjectStatus.ON_HOLD))
+        val ids = projects.map { it.id }
+        val daysByProject = records.changes.forProjects(ids).groupBy { it.projectId }.mapValues { (_, list) -> approvedEffect(list).days }
         val active = projects.filter { it.status == ProjectStatus.ACTIVE }
         val health = active.associate { it.id to ProjectProgress.health(it, today, daysByProject[it.id] ?: 0) }
         val behind = active
             .map { it to ProjectProgress.scheduleDays(it, today) }
             .filter { (project, _) -> health[project.id] == ProjectHealth.AT_RISK || health[project.id] == ProjectHealth.DELAYED }
             .sortedBy { it.second ?: 0 }
-        val issues = if (DashboardModules.SITE_ISSUES in modules) {
-            SiteIssueRepository(mongo, tenant.id).list(statuses = listOf(IssueStatus.OPEN, IssueStatus.IN_PROGRESS))
-        } else {
-            emptyList()
-        }
+        // Issues and changes count on a finished project too: snags after the handover, an extra still to sign.
+        val issues = if (DashboardModules.SITE_ISSUES in modules) records.issues.list(statuses = listOf(IssueStatus.OPEN, IssueStatus.IN_PROGRESS)) else emptyList()
         val overdue = issues.filter { it.isOverdue(today) }.sortedBy { it.dueDate }
         val diaryOn = DashboardModules.SITE_DIARY in modules
-        val logged = if (diaryOn) SiteLogRepository(mongo, tenant.id).list(null, today, today).map { it.projectId }.toSet() else emptySet()
-        val changesOn = DashboardModules.CHANGE_ORDERS in modules
-        val waiting = if (changesOn) changes.filter { it.status == ChangeOrderStatus.SENT }.sortedBy { it.sentAt ?: it.updatedAt } else emptyList()
-        val toInvoice = if (DashboardModules.MEASUREMENTS in modules) {
-            MeasurementRepository(mongo, tenant.id).list(statuses = listOf(MeasurementStatus.APPROVED)).sortedBy { it.approvedAt ?: it.updatedAt }
+        val logged = if (diaryOn) records.logs.list(null, today, today).map { it.projectId }.toSet() else emptySet()
+        val waiting = if (DashboardModules.CHANGE_ORDERS in modules) {
+            records.changes.list(statuses = listOf(ChangeOrderStatus.SENT)).sortedBy { it.sentAt ?: it.updatedAt }
         } else {
             emptyList()
         }
+        val toInvoice = if (DashboardModules.MEASUREMENTS in modules) {
+            records.measurements.list(statuses = listOf(MeasurementStatus.APPROVED)).sortedBy { it.approvedAt ?: it.updatedAt }
+        } else {
+            emptyList()
+        }
+        val finished = (overdue.map { it.projectId } + waiting.map { it.projectId } + toInvoice.map { it.projectId }).toSet() - ids.toSet()
+        val label = (projects + records.projects.byIds(finished)).associate { it.id to "${it.number} · ${it.name}" }
 
         val attention = buildList {
             behind.filter { health[it.first.id] == ProjectHealth.DELAYED }.take(ATTENTION_ROWS).forEach { (project, _) ->
@@ -128,5 +128,10 @@ internal object BuildingOverview {
             ),
             attention,
         )
+    }
+
+    private companion object {
+        const val BEHIND_ROWS = 4
+        const val ATTENTION_ROWS = 3
     }
 }

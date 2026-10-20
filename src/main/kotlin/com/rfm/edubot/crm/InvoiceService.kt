@@ -7,13 +7,23 @@ import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 
 /**
+ * Work an invoice bills that lives outside the CRM (a project's measurement), freed to be billed again when the
+ * invoice is cancelled or deleted.
+ */
+fun interface InvoicedWork {
+    suspend fun release(invoiceId: ObjectId)
+}
+
+/**
  * Writes to a company's invoices. The Invoices and Serviços pages, the backoffice and the bot's tools change
- * invoices through it. An invoice that bills Serviços rows frees them again when it is cancelled or deleted.
+ * invoices through it. An invoice that bills Serviços rows or [billedWork] frees them again when it is cancelled
+ * or deleted.
  */
 class InvoiceService(
     private val invoices: InvoiceRepository,
     private val clientServices: ClientServiceRepository,
     private val clients: ClientRepository,
+    private val billedWork: List<InvoicedWork> = emptyList(),
 ) {
     sealed interface ServicesInvoiced {
         data class Invoiced(val invoice: Invoice, val client: Client) : ServicesInvoiced
@@ -24,8 +34,16 @@ class InvoiceService(
         data object ClientNotFound : ServicesInvoiced
     }
 
-    suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate, taxOfficeCode: String? = null): Invoice =
-        invoices.create(clientId, quoteId, items, dueDate, taxOfficeCode)
+    /** [projectId] and [measurementId] mark the invoice of a project's measurement. */
+    suspend fun create(
+        clientId: ObjectId,
+        quoteId: ObjectId?,
+        items: List<LineItem>,
+        dueDate: LocalDate,
+        taxOfficeCode: String? = null,
+        projectId: ObjectId? = null,
+        measurementId: ObjectId? = null,
+    ): Invoice = invoices.create(clientId, quoteId, items, dueDate, taxOfficeCode, projectId, measurementId)
 
     /** Pays the whole invoice; a paid or cancelled one comes back unchanged. */
     suspend fun markPaid(id: ObjectId): Invoice? = invoices.markPaid(id)
@@ -37,18 +55,23 @@ class InvoiceService(
 
     suspend fun receiveInstallment(id: ObjectId, index: Int): InvoiceChange = invoices.receiveInstallment(id, index)
 
-    /** Keeps the invoice, as cancelled, and frees the Serviços rows it billed. */
+    /** Keeps the invoice, as cancelled, and frees the Serviços rows and the work it billed. */
     suspend fun cancel(id: ObjectId): InvoiceChange {
         val change = invoices.cancel(id)
-        if (change is InvoiceChange.Done) clientServices.reopenInvoiced(id)
+        if (change is InvoiceChange.Done) release(id)
         return change
     }
 
-    /** Removes the invoice for good and frees the Serviços rows it billed; null when there was none. */
+    /** Removes the invoice for good and frees the Serviços rows and the work it billed; null when there was none. */
     suspend fun delete(id: ObjectId): Invoice? {
         val deleted = invoices.delete(id) ?: return null
-        clientServices.reopenInvoiced(id)
+        release(id)
         return deleted
+    }
+
+    private suspend fun release(invoiceId: ObjectId) {
+        clientServices.reopenInvoiced(invoiceId)
+        billedWork.forEach { it.release(invoiceId) }
     }
 
     /** One invoice of [serviceIds], open Serviços rows of [clientId], which are then marked invoiced by it. */

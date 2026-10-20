@@ -2,6 +2,8 @@ package com.rfm.edubot.dashboard.crm
 
 import com.mongodb.ErrorCategory
 import com.mongodb.MongoServerException
+import com.rfm.edubot.building.MeasurementRepository
+import com.rfm.edubot.building.ProjectRepository
 import com.rfm.edubot.crm.ClientDirectory
 import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.ClientRepository
@@ -10,6 +12,7 @@ import com.rfm.edubot.crm.DirectoryDelete
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.InvoiceService
+import com.rfm.edubot.crm.InvoicedWork
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteRepository
@@ -40,10 +43,12 @@ internal class TenantCrm(mongo: MongoModule, val tenant: Tenant) {
     val payments by lazy { PaymentRepository(mongo, tenant.id) }
     val standardItems by lazy { StandardItemRepository(mongo, tenant.id) }
     val clientServices by lazy { ClientServiceRepository(mongo, tenant.id) }
+    val projects by lazy { ProjectRepository(mongo, tenant.id) }
+    val measurements by lazy { MeasurementRepository(mongo, tenant.id) }
 
     val clientDirectory: ClientDirectory get() = ClientDirectory(clients, ClientFields.of(tenant))
     val quoteService: QuoteService get() = QuoteService(quotes, invoices, clientServices, clients)
-    val invoiceService: InvoiceService get() = InvoiceService(invoices, clientServices, clients)
+    val invoiceService: InvoiceService get() = InvoiceService(invoices, clientServices, clients, listOf(InvoicedWork { measurements.releaseInvoice(it) }))
 
     val pdfGenerator: PdfGenerator get() = PdfGenerator()
     val documentTemplate: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)

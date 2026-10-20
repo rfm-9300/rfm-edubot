@@ -64,9 +64,9 @@ async function startMeasurement(projectId, back = null, periodEnd = '') {
     refreshBuildingPage();
     openFrom(back, () => openMeasurementDetail(m.id));
   } catch (err) {
-    if (err?.code === 'measurement_open' && err.body?.id) {
+    if (err?.code === 'measurement_open' && err.detail) {
       toast(bt('errors.measurement_open'));
-      return openFrom(back, () => openMeasurementDetail(err.body.id));
+      return openFrom(back, () => openMeasurementDetail(err.detail));
     }
     toast(buildingErrorText(err, BLD.saveFailed));
   }
@@ -206,7 +206,7 @@ async function openMeasurementDetail(id) {
     try {
       return await api(`/app/api/building/measurements/${encodeURIComponent(m.id)}`, { method: 'PATCH', body: JSON.stringify({ periodEnd: $('#ms-period', body).value, notes: $('#ms-notes', body).value, lines }) });
     } catch (err) {
-      const line = m.lines.find(l => l.key === err?.body?.key);
+      const line = m.lines.find(l => l.key === err?.detail);
       toast(line && ['above_contract', 'below_previous'].includes(err.code) ? bt(`errors.${err.code}_line`, { line: line.description }) : buildingErrorText(err, BLD.saveFailed));
       return null;
     }

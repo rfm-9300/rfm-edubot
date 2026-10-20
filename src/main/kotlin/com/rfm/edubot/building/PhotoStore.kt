@@ -10,7 +10,7 @@ import java.nio.file.Path
  * The browser shrinks each photo and makes its thumbnail before uploading, so the server only checks that both
  * are JPEG and never decodes an image.
  */
-internal class PhotoStore(private val root: () -> String) {
+class PhotoStore(private val root: () -> String) {
     fun write(slug: String, projectId: ObjectId, photoId: ObjectId, full: ByteArray, thumb: ByteArray): Pair<String, String> {
         val dir = projectDir(slug, projectId)
         Files.createDirectories(dir)

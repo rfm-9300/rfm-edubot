@@ -267,6 +267,12 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
 
     suspend fun findById(id: ObjectId): Quote? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toQuote()
 
+    /** The quotes among [ids], read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Quote> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toQuote() }.associateBy { it.id }
+    }
+
     suspend fun list(clientId: ObjectId? = null, status: QuoteStatus? = null): List<Quote> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
@@ -430,6 +436,12 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Invoice? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toInvoice()
+
+    /** The invoices among [ids], read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Invoice> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toInvoice() }.associateBy { it.id }
+    }
 
     suspend fun findByNumber(number: String): Invoice? =
         collection.find(scoped(Filters.regex("number", "^${Regex.escape(number.trim())}$", "i"))).firstOrNull()?.toInvoice()

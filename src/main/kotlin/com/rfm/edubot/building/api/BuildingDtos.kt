@@ -1,7 +1,6 @@
-package com.rfm.edubot.building
+package com.rfm.edubot.building.api
 
-import com.rfm.edubot.admin.CreateLineItemRequest
-import com.rfm.edubot.admin.LineItemDto
+import com.rfm.edubot.crm.api.LineItemDto
 import kotlinx.serialization.Serializable
 
 // Responses carry no default values: the JSON config leaves out properties equal to their default, and the
@@ -249,119 +248,6 @@ internal data class MeasurementDto(
 
 @Serializable
 internal data class MeasurementInvoicedDto(val measurement: MeasurementDto, val invoiceId: String, val invoiceNumber: String)
-
-@Serializable
-internal data class ContractLineRequest(
-    val id: String? = null,
-    val description: String = "",
-    val quantity: Double = 1.0,
-    val unit: String = "",
-    val unitPriceEur: Double = 0.0,
-)
-
-/** Create and edit body: on an edit an omitted field keeps what is stored, and an empty string clears it. */
-@Serializable
-internal data class ProjectRequest(
-    val name: String? = null,
-    val status: String? = null,
-    val clientId: String? = null,
-    /** Only on create: the quote the project's contract and client come from. */
-    val quoteId: String? = null,
-    val managerId: String? = null,
-    val address: String? = null,
-    val description: String? = null,
-    val plannedStart: String? = null,
-    val plannedEnd: String? = null,
-    val actualStart: String? = null,
-    val actualEnd: String? = null,
-    val retentionPct: Double? = null,
-    val manualProgressPct: Int? = null,
-    val contract: List<ContractLineRequest>? = null,
-)
-
-@Serializable
-internal data class PhaseRequest(
-    val id: String? = null,
-    val name: String = "",
-    val plannedStart: String? = null,
-    val plannedEnd: String? = null,
-    val progressPct: Int = 0,
-    val weight: Int? = null,
-)
-
-@Serializable
-internal data class PhasesRequest(val phases: List<PhaseRequest> = emptyList())
-
-@Serializable
-internal data class PhaseProgressRequest(val progressPct: Int? = null)
-
-@Serializable
-internal data class PhaseProgressEntry(val phaseId: String = "", val progressPct: Int = 0)
-
-/** Create and edit body of a diary entry; on an edit an omitted field keeps what is stored, an empty string clears it. */
-@Serializable
-internal data class SiteLogRequest(
-    val projectId: String? = null,
-    val day: String? = null,
-    val weather: String? = null,
-    val temperatureC: Int? = null,
-    val workers: Int? = null,
-    val workDone: String? = null,
-    val equipment: String? = null,
-    val materials: String? = null,
-    val visitors: String? = null,
-    val incidents: String? = null,
-    val lostHours: Double? = null,
-    val shared: Boolean? = null,
-    val phaseProgress: List<PhaseProgressEntry>? = null,
-    /** Clears [temperatureC], [workers] or [lostHours] on an edit: a JSON null can't say it. */
-    val clear: List<String> = emptyList(),
-)
-
-@Serializable
-internal data class PhotoUpdateRequest(val caption: String? = null, val shared: Boolean? = null)
-
-@Serializable
-internal data class IssueRequest(
-    val projectId: String? = null,
-    val title: String? = null,
-    val description: String? = null,
-    val location: String? = null,
-    val kind: String? = null,
-    val priority: String? = null,
-    val phaseId: String? = null,
-    val employeeId: String? = null,
-    val supplierId: String? = null,
-    val dueDate: String? = null,
-    val status: String? = null,
-    /** Kept with a status change. */
-    val note: String? = null,
-)
-
-@Serializable
-internal data class ChangeOrderRequest(
-    val projectId: String? = null,
-    val title: String? = null,
-    val description: String? = null,
-    val kind: String? = null,
-    val items: List<CreateLineItemRequest>? = null,
-    val daysImpact: Int? = null,
-)
-
-@Serializable
-internal data class ChangeStatusRequest(val status: String = "", val decidedBy: String? = null, val note: String? = null)
-
-@Serializable
-internal data class MeasurementRequest(val projectId: String = "", val periodEnd: String? = null, val notes: String? = null)
-
-@Serializable
-internal data class MeasuredLineRequest(val key: String = "", val toDateQty: Double = 0.0)
-
-@Serializable
-internal data class MeasurementUpdateRequest(val periodEnd: String? = null, val notes: String? = null, val lines: List<MeasuredLineRequest>? = null)
-
-@Serializable
-internal data class MeasurementInvoiceRequest(val dueDate: String = "")
 
 /** What the client's page shows: progress, the plan and what the team chose to share. No money, issues or people. */
 @Serializable

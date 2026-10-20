@@ -71,11 +71,12 @@ class DashboardRouteAuditTest {
     /** What has to go for [module] to be off: modules that bring it along go with it. */
     private fun without(module: String): List<String> {
         val bringers = mapOf(
-            DashboardModules.SERVICES to DashboardModules.CLIENTS,
-            DashboardModules.SUPPLIERS to DashboardModules.PAYMENTS,
-            DashboardModules.EMPLOYEES to DashboardModules.TIMESHEETS,
+            DashboardModules.SERVICES to listOf(DashboardModules.CLIENTS),
+            DashboardModules.SUPPLIERS to listOf(DashboardModules.PAYMENTS),
+            DashboardModules.EMPLOYEES to listOf(DashboardModules.TIMESHEETS),
+            DashboardModules.PROJECTS to DashboardModules.building,
         )
-        return DashboardModules.catalog - setOfNotNull(module, bringers[module])
+        return DashboardModules.catalog - (bringers[module].orEmpty() + module).toSet()
     }
 
     private fun Endpoint.url() = path.replace(Regex("""\{[^}]+}"""), "0123456789abcdef01234567")

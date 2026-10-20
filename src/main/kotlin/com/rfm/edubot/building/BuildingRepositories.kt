@@ -156,13 +156,16 @@ class SiteLogRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         collection.deleteMany(scoped(Filters.eq("projectId", projectId)))
     }
 
-    /** Each project's latest diary day. */
-    suspend fun lastDays(): Map<ObjectId, LocalDate> = collection.aggregate<Document>(
-        listOf(
-            Document("\$match", Document("tenantId", tenantId)),
-            Document("\$group", Document("_id", "\$projectId").append("day", Document("\$max", "\$day"))),
-        ),
-    ).toList().mapNotNull { doc -> doc.getString("day")?.let { doc.getObjectId("_id") to LocalDate.parse(it) } }.toMap()
+    /** The latest diary day of each of [projectIds] that has one. */
+    suspend fun lastDays(projectIds: Collection<ObjectId>): Map<ObjectId, LocalDate> {
+        if (projectIds.isEmpty()) return emptyMap()
+        return collection.aggregate<Document>(
+            listOf(
+                Document("\$match", Document("tenantId", tenantId).append("projectId", Document("\$in", projectIds.distinct()))),
+                Document("\$group", Document("_id", "\$projectId").append("day", Document("\$max", "\$day"))),
+            ),
+        ).toList().mapNotNull { doc -> doc.getString("day")?.let { doc.getObjectId("_id") to LocalDate.parse(it) } }.toMap()
+    }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 
@@ -221,13 +224,16 @@ class SitePhotoRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         return photos
     }
 
-    /** Photos per project. */
-    suspend fun counts(): Map<ObjectId, Int> = collection.aggregate<Document>(
-        listOf(
-            Document("\$match", Document("tenantId", tenantId)),
-            Document("\$group", Document("_id", "\$projectId").append("n", Document("\$sum", 1))),
-        ),
-    ).toList().associate { it.getObjectId("_id") to (it.get("n") as Number).toInt() }
+    /** How many photos each of [projectIds] has. */
+    suspend fun counts(projectIds: Collection<ObjectId>): Map<ObjectId, Int> {
+        if (projectIds.isEmpty()) return emptyMap()
+        return collection.aggregate<Document>(
+            listOf(
+                Document("\$match", Document("tenantId", tenantId).append("projectId", Document("\$in", projectIds.distinct()))),
+                Document("\$group", Document("_id", "\$projectId").append("n", Document("\$sum", 1))),
+            ),
+        ).toList().associate { it.getObjectId("_id") to (it.get("n") as Number).toInt() }
+    }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 
@@ -251,6 +257,16 @@ class SiteIssueRepository(mongo: MongoModule, private val tenantId: ObjectId) {
             statuses.takeIf { it.isNotEmpty() }?.let { s -> Filters.`in`("status", s.map { it.name }) },
         )
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(MAX_LIST).toList().map { it.toIssue() }
+    }
+
+    /** The issues of [projectIds] in [statuses] (all when empty), however many. */
+    suspend fun forProjects(projectIds: Collection<ObjectId>, statuses: Collection<IssueStatus> = emptyList()): List<SiteIssue> {
+        if (projectIds.isEmpty()) return emptyList()
+        val filters = listOfNotNull(
+            Filters.`in`("projectId", projectIds.distinct()),
+            statuses.takeIf { it.isNotEmpty() }?.let { s -> Filters.`in`("status", s.map { it.name }) },
+        )
+        return collection.find(scoped(Filters.and(filters))).toList().map { it.toIssue() }
     }
 
     suspend fun findById(id: ObjectId): SiteIssue? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toIssue()
@@ -291,6 +307,10 @@ class ChangeOrderRepository(mongo: MongoModule, private val tenantId: ObjectId) 
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(MAX_LIST).toList().map { it.toChange() }
     }
 
+    /** Every change of [projectIds], however many. */
+    suspend fun forProjects(projectIds: Collection<ObjectId>): List<ChangeOrder> =
+        if (projectIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("projectId", projectIds.distinct()))).toList().map { it.toChange() }
+
     suspend fun findById(id: ObjectId): ChangeOrder? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toChange()
 
     suspend fun insert(change: ChangeOrder) {
@@ -329,8 +349,23 @@ class MeasurementRepository(mongo: MongoModule, private val tenantId: ObjectId) 
 
     suspend fun findById(id: ObjectId): Measurement? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toMeasurement()
 
+    /** Every measurement of [projectIds], however many. */
+    suspend fun forProjects(projectIds: Collection<ObjectId>): List<Measurement> =
+        if (projectIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("projectId", projectIds.distinct()))).toList().map { it.toMeasurement() }
+
     suspend fun latest(projectId: ObjectId): Measurement? =
         collection.find(scoped(Filters.eq("projectId", projectId))).sort(Document("number", -1)).limit(1).firstOrNull()?.toMeasurement()
+
+    /** The number of the latest measurement of each of [projectIds] that has one. */
+    suspend fun latestNumbers(projectIds: Collection<ObjectId>): Map<ObjectId, Int> {
+        if (projectIds.isEmpty()) return emptyMap()
+        return collection.aggregate<Document>(
+            listOf(
+                Document("\$match", Document("tenantId", tenantId).append("projectId", Document("\$in", projectIds.distinct()))),
+                Document("\$group", Document("_id", "\$projectId").append("number", Document("\$max", "\$number"))),
+            ),
+        ).toList().associate { it.getObjectId("_id") to (it.get("number") as Number).toInt() }
+    }
 
     suspend fun count(projectId: ObjectId): Long = collection.countDocuments(scoped(Filters.eq("projectId", projectId)))
 

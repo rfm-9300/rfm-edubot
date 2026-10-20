@@ -168,6 +168,8 @@ data class SiteIssue(
     val updatedAt: Instant,
 ) {
     val isOpen: Boolean get() = status == IssueStatus.OPEN || status == IssueStatus.IN_PROGRESS
+
+    fun isOverdue(today: LocalDate): Boolean = isOpen && dueDate != null && dueDate < today
 }
 
 /** Work added to the contract (trabalhos a mais) or taken out of it (trabalhos a menos). */

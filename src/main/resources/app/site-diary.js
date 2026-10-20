@@ -179,9 +179,9 @@ async function openDiaryForm(entry = null, opts = {}) {
       refreshBuildingPage();
     } catch (err) {
       btn.disabled = false;
-      if (err?.code === 'day_taken' && err.body?.id) {
+      if (err?.code === 'day_taken' && err.detail) {
         toast(bt('errors.day_taken'));
-        return openDiaryEntry(err.body.id);
+        return openDiaryEntry(err.detail);
       }
       toast(buildingErrorText(err, BLD.saveFailed));
     }

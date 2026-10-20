@@ -3,6 +3,11 @@ package com.rfm.edubot.dashboard
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.bookings.BookingRoutes
 import com.rfm.edubot.config.RuntimeConfig
+import com.rfm.edubot.dashboard.building.ChangeOrderRoutes
+import com.rfm.edubot.dashboard.building.MeasurementRoutes
+import com.rfm.edubot.dashboard.building.ProjectRoutes
+import com.rfm.edubot.dashboard.building.SiteDiaryRoutes
+import com.rfm.edubot.dashboard.building.SiteIssueRoutes
 import com.rfm.edubot.dashboard.crm.CatalogRoutes
 import com.rfm.edubot.dashboard.crm.ClientRoutes
 import com.rfm.edubot.dashboard.crm.EmployeeRoutes
@@ -71,6 +76,11 @@ internal object DashboardFeatures {
         SupplierRoutes,
         EmployeeRoutes,
         PaymentRoutes,
+        ProjectRoutes,
+        SiteDiaryRoutes,
+        SiteIssueRoutes,
+        ChangeOrderRoutes,
+        MeasurementRoutes,
         BookingRoutes,
         InstagramRoutes,
     )

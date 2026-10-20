@@ -1,6 +1,11 @@
-package com.rfm.edubot.building
+package com.rfm.edubot.building.api
 
-import com.rfm.edubot.admin.LineItemDto
+import com.rfm.edubot.building.BuildingRecords
+import com.rfm.edubot.building.MeasurementMath
+import com.rfm.edubot.building.PhaseState
+import com.rfm.edubot.building.ProjectProgress
+import com.rfm.edubot.building.approvedEffect
+import com.rfm.edubot.building.measuredLines
 import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.IssueStatus
@@ -10,69 +15,29 @@ import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
-import com.rfm.edubot.crm.ClientRepository
-import com.rfm.edubot.crm.EmployeeRepository
-import com.rfm.edubot.crm.InvoiceRepository
-import com.rfm.edubot.crm.QuoteRepository
-import com.rfm.edubot.crm.SupplierRepository
-import com.rfm.edubot.dashboard.DashboardContext
-import com.rfm.edubot.dashboard.requireModule
-import com.rfm.edubot.persistence.MongoModule
-import com.rfm.edubot.timesheets.zone
-import kotlinx.datetime.Instant
+import com.rfm.edubot.crm.api.LineItemDto
+import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.datetime.LocalDate
-import kotlinx.datetime.TimeZone
-import kotlinx.datetime.toLocalDateTime
-import org.bson.types.ObjectId
 import kotlin.math.roundToInt
 
-/** One request's view of a company's Building data: its repositories, today in its timezone, and who is asking. */
-internal class Building(val mongo: MongoModule, val ctx: DashboardContext, val now: Instant) {
-    val tenantId: ObjectId = ctx.tenant.id
-    val zone: TimeZone = ctx.tenant.zone()
-    val today: LocalDate = now.toLocalDateTime(zone).date
-    val projects = ProjectRepository(mongo, tenantId)
-    val logs = SiteLogRepository(mongo, tenantId)
-    val photos = SitePhotoRepository(mongo, tenantId)
-    val issues = SiteIssueRepository(mongo, tenantId)
-    val changes = ChangeOrderRepository(mongo, tenantId)
-    val measurements = MeasurementRepository(mongo, tenantId)
-    val clients = ClientRepository(mongo, tenantId)
-    val quotes = QuoteRepository(mongo, tenantId)
-    val invoices = InvoiceRepository(mongo, tenantId)
-    val employees = EmployeeRepository(mongo, tenantId)
-    val suppliers = SupplierRepository(mongo, tenantId)
-
-    val who: String get() = ctx.user?.email ?: "operator"
-
-    fun has(module: String): Boolean = ctx.requireModule(module)
-
-    fun localDay(at: Instant): LocalDate = at.toLocalDateTime(zone).date
-}
-
-/** What approved changes do to a project: value (signed) and days. */
-internal data class ChangeEffect(val cents: Long, val days: Int)
-
-internal fun approvedEffect(changes: List<ChangeOrder>): ChangeEffect {
-    val approved = changes.filter { it.status == ChangeOrderStatus.APPROVED }
-    return ChangeEffect(approved.sumOf { it.signedCents }, approved.sumOf { it.daysImpact })
-}
+// These records as the dashboard shows them. A list reads the names and figures it shows with one query per kind.
 
 private fun eur(cents: Long): Double = cents / 100.0
 
 private fun pct(value: Double?): Int? = value?.roundToInt()?.coerceIn(0, 100)
 
-internal suspend fun Building.projectDtos(list: List<Project>, detail: Boolean = false): List<ProjectDto> {
+/** [detail] adds the contract and the client's link, which only a project's own record shows. */
+internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: LocalDate, detail: Boolean = false): List<ProjectDto> {
     if (list.isEmpty()) return emptyList()
-    val ids = list.map { it.id }.toSet()
-    val clientsById = list.mapNotNull { it.clientId }.distinct().mapNotNull { clients.findById(it) }.associateBy { it.id }
-    val quoteNumbers = list.mapNotNull { it.quoteId }.distinct().mapNotNull { quotes.findById(it) }.associate { it.id to it.number }
-    val managers = list.mapNotNull { it.managerId }.distinct().mapNotNull { employees.findById(it) }.associate { it.id to it.name }
-    val changesByProject = changes.list().filter { it.projectId in ids }.groupBy { it.projectId }
-    val openIssues = issues.list(statuses = listOf(IssueStatus.OPEN, IssueStatus.IN_PROGRESS)).filter { it.projectId in ids }.groupBy { it.projectId }
-    val measurementsByProject = measurements.list().filter { it.projectId in ids }.groupBy { it.projectId }
-    val lastDays = logs.lastDays()
-    val photoCounts = photos.counts()
+    val ids = list.map { it.id }
+    val clientsById = clients.findByIds(list.mapNotNull { it.clientId })
+    val quoteNumbers = quotes.findByIds(list.mapNotNull { it.quoteId }).mapValues { it.value.number }
+    val managers = employees.findByIds(list.mapNotNull { it.managerId }).mapValues { it.value.name }
+    val changesByProject = changes.forProjects(ids).groupBy { it.projectId }
+    val openIssues = issues.forProjects(ids, listOf(IssueStatus.OPEN, IssueStatus.IN_PROGRESS)).groupBy { it.projectId }
+    val measurementsByProject = measurements.forProjects(ids).groupBy { it.projectId }
+    val lastDays = logs.lastDays(ids)
+    val photoCounts = photos.counts(ids)
     return list.map { project ->
         val projectChanges = changesByProject[project.id].orEmpty()
         val effect = approvedEffect(projectChanges)
@@ -159,8 +124,6 @@ internal suspend fun Building.projectDtos(list: List<Project>, detail: Boolean =
     }
 }
 
-internal fun SiteIssue.isOverdue(today: LocalDate): Boolean = isOpen && dueDate != null && dueDate < today
-
 internal fun SitePhoto.dto() = PhotoDto(
     id = id.toHexString(),
     projectId = projectId.toHexString(),
@@ -175,7 +138,7 @@ internal fun SitePhoto.dto() = PhotoDto(
     createdAt = createdAt.toString(),
 )
 
-internal suspend fun Building.logDtos(entries: List<SiteLogEntry>): List<SiteLogDto> {
+internal suspend fun BuildingRecords.logDtos(entries: List<SiteLogEntry>): List<SiteLogDto> {
     if (entries.isEmpty()) return emptyList()
     val projectsById = projects.byIds(entries.map { it.projectId }).associateBy { it.id }
     val photosByLog = photos.forLogs(entries.map { it.id }).groupBy { it.logId }
@@ -207,11 +170,12 @@ internal suspend fun Building.logDtos(entries: List<SiteLogEntry>): List<SiteLog
     }
 }
 
-internal suspend fun Building.issueDtos(list: List<SiteIssue>, withPhotos: Boolean = false): List<IssueDto> {
+/** [withPhotos] adds the issue's photos, which only its own record shows. */
+internal suspend fun BuildingRecords.issueDtos(list: List<SiteIssue>, today: LocalDate, withPhotos: Boolean = false): List<IssueDto> {
     if (list.isEmpty()) return emptyList()
     val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
-    val staff = list.mapNotNull { it.employeeId }.distinct().mapNotNull { employees.findById(it) }.associate { it.id to it.name }
-    val vendors = list.mapNotNull { it.supplierId }.distinct().mapNotNull { suppliers.findById(it) }.associate { it.id to it.name }
+    val staff = employees.findByIds(list.mapNotNull { it.employeeId }).mapValues { it.value.name }
+    val vendors = suppliers.findByIds(list.mapNotNull { it.supplierId }).mapValues { it.value.name }
     return list.map { issue ->
         val project = projectsById[issue.projectId]
         IssueDto(
@@ -244,17 +208,11 @@ internal suspend fun Building.issueDtos(list: List<SiteIssue>, withPhotos: Boole
     }
 }
 
-/** Whether a measurement of the project measured any of [change]'s lines. */
-internal fun measuredLines(change: ChangeOrder, measurements: List<Measurement>): Boolean {
-    val prefix = "co:${change.id.toHexString()}:"
-    return measurements.any { m -> m.lines.any { it.key.startsWith(prefix) && it.toDateQty > 0 } }
-}
-
-internal suspend fun Building.changeDtos(list: List<ChangeOrder>): List<ChangeOrderDto> {
+internal suspend fun BuildingRecords.changeDtos(list: List<ChangeOrder>): List<ChangeOrderDto> {
     if (list.isEmpty()) return emptyList()
     val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
-    val clientsById = projectsById.values.mapNotNull { it.clientId }.distinct().mapNotNull { clients.findById(it) }.associateBy { it.id }
-    val measured = measurements.list().groupBy { it.projectId }
+    val clientsById = clients.findByIds(projectsById.values.mapNotNull { it.clientId })
+    val measured = measurements.forProjects(projectsById.keys).groupBy { it.projectId }
     return list.map { change ->
         val project = projectsById[change.projectId]
         val client = project?.clientId?.let { clientsById[it] }
@@ -286,12 +244,12 @@ internal suspend fun Building.changeDtos(list: List<ChangeOrder>): List<ChangeOr
     }
 }
 
-internal suspend fun Building.measurementDtos(list: List<Measurement>): List<MeasurementDto> {
+internal suspend fun BuildingRecords.measurementDtos(list: List<Measurement>): List<MeasurementDto> {
     if (list.isEmpty()) return emptyList()
     val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
-    val clientsById = projectsById.values.mapNotNull { it.clientId }.distinct().mapNotNull { clients.findById(it) }.associateBy { it.id }
-    val latestNumber = list.map { it.projectId }.distinct().associateWith { measurements.latest(it)?.number }
-    val invoicesById = list.mapNotNull { it.invoiceId }.distinct().mapNotNull { invoices.findById(it) }.associateBy { it.id }
+    val clientsById = clients.findByIds(projectsById.values.mapNotNull { it.clientId })
+    val latestNumber = measurements.latestNumbers(list.map { it.projectId })
+    val invoicesById = invoices.findByIds(list.mapNotNull { it.invoiceId })
     return list.map { m ->
         val project = projectsById[m.projectId]
         val totals = MeasurementMath.totals(m.lines, m.retentionPct)
@@ -345,3 +303,43 @@ internal suspend fun Building.measurementDtos(list: List<Measurement>): List<Mea
         )
     }
 }
+
+/**
+ * The project as its client's page shows it: progress, the plan (moved by approved changes) and the diary days and
+ * photos the team shared. No money, issues, notes or people. A phase is late only on the team's side.
+ */
+internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: Tenant, today: LocalDate, hasLogo: Boolean): SharedProjectDto {
+    val shared = photos.list(project.id, sharedOnly = true, limit = SHARED_PHOTOS)
+    val updates = logs.list(project.id, null, null, limit = SHARED_UPDATES * 3).filter { it.shared }.take(SHARED_UPDATES)
+    val byLog = shared.filter { it.logId != null }.groupBy { it.logId }
+    val days = approvedEffect(changes.list(project.id)).days
+    fun SitePhoto.shown() = SharedPhotoDto(id.toHexString(), caption, day.toString())
+    return SharedProjectDto(
+        company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
+        hasLogo = hasLogo,
+        locale = tenant.locale,
+        number = project.number,
+        name = project.name,
+        status = project.status.name,
+        address = project.address,
+        progressPct = ProjectProgress.actualPct(project).roundToInt().coerceIn(0, 100),
+        plannedStart = (project.plannedStart ?: ProjectProgress.plannedWindow(project)?.first)?.toString(),
+        plannedEnd = ProjectProgress.revisedEnd(project, days)?.toString(),
+        actualStart = project.actualStart?.toString(),
+        actualEnd = project.actualEnd?.toString(),
+        phases = project.phases.map { phase ->
+            val state = when (ProjectProgress.phaseState(phase, today)) {
+                PhaseState.DONE -> PhaseState.DONE
+                PhaseState.NOT_STARTED -> PhaseState.NOT_STARTED
+                else -> if (phase.progressPct > 0) PhaseState.IN_PROGRESS else PhaseState.NOT_STARTED
+            }
+            SharedPhaseDto(phase.name, phase.plannedStart?.toString(), phase.plannedEnd?.toString(), phase.progressPct.coerceIn(0, 100), state.name)
+        },
+        updates = updates.map { entry -> SharedUpdateDto(entry.day.toString(), entry.weather?.name, entry.workDone, byLog[entry.id].orEmpty().map { it.shown() }) },
+        photos = shared.map { it.shown() },
+        updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt }).max().toString(),
+    )
+}
+
+private const val SHARED_PHOTOS = 60
+private const val SHARED_UPDATES = 30

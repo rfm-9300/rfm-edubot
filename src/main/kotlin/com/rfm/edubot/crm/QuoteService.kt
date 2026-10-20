@@ -34,6 +34,12 @@ class QuoteService(
     suspend fun service(quoteId: ObjectId, performedAt: LocalDate, name: String?): QuoteServicing.Outcome =
         QuoteServicing.service(quotes, invoices, clientServices, clients, quoteId, performedAt, name)
 
+    /**
+     * Marks the quote billed by [projectId]'s measurements, from the first one: it can no longer be invoiced or become
+     * a Serviços row ([QuoteInvoicing.ALREADY_MEASURED]). A null clears the mark, once the project has no measurement.
+     */
+    suspend fun setBillingProject(quoteId: ObjectId, projectId: ObjectId?) = quotes.setProject(quoteId, projectId)
+
     companion object {
         fun of(mongo: MongoModule, tenantId: ObjectId) = QuoteService(
             QuoteRepository(mongo, tenantId),
