@@ -2539,7 +2539,8 @@ body.share-page { display: block; }
 .share__none--flush { padding: 0; }
 .share__foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; color: var(--ink-mute); font-size: 12px; }
 .share-viewer { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--ink); }
-.share-viewer::backdrop { background: rgba(15, 18, 22, 0.72); }
+/* The drawer's and the confirm's scrim, darker: a photo is looked at on its own. */
+.share-viewer::backdrop { background: rgba(8, 9, 11, 0.72); backdrop-filter: blur(3px); }
 .share-viewer__img { display: block; width: 100%; max-height: calc(100vh - 150px); border-radius: var(--r-md); object-fit: contain; background: var(--surface-2); }
 .share-viewer__caption { margin: 10px 4px 0; color: var(--ink-2); font-size: 13px; }
 .share-viewer__bar { display: flex; justify-content: center; gap: 8px; margin-top: 10px; }
