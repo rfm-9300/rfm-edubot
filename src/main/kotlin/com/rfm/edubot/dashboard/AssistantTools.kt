@@ -82,6 +82,7 @@ internal class AssistantTools(
     private val clients by lazy { ClientRepository(mongo, tenant.id) }
     private val quotes by lazy { QuoteRepository(mongo, tenant.id) }
     private val invoices by lazy { InvoiceRepository(mongo, tenant.id) }
+    private val clientServices by lazy { ClientServiceRepository(mongo, tenant.id) }
     private val payments by lazy { PaymentRepository(mongo, tenant.id) }
 
     override val definitions: List<ToolDefinition> = DEFINITIONS.filter { offered(it.name) }
@@ -523,12 +524,15 @@ internal class AssistantTools(
         val quote = resolveQuote(args.text("quote_id") ?: throw missing("quote_id"))
         val dueDate = args.date("due_date") ?: throw Problem("due_date_required", "Ask when the invoice is due (YYYY-MM-DD).")
         invoicedQuotes(listOf(quote.id))[quote.id]?.let { throw Problem(QuoteInvoicing.ALREADY_INVOICED, "${quote.number} is already on invoice $it.") }
+        clientServices.findByQuoteId(quote.id).firstOrNull { it.status != ClientServiceStatus.CANCELLED }?.let {
+            throw Problem(QuoteInvoicing.ALREADY_SERVICED, "${quote.number} already became the service \"${it.name}\"; invoice that service instead.")
+        }
         return quote to dueDate
     }
 
     private suspend fun convertQuote(args: JsonObject): JsonObject {
         val (quote, dueDate) = quoteToInvoice(args)
-        return when (val outcome = QuoteInvoicing.invoice(quotes, invoices, clients, quote.id, dueDate)) {
+        return when (val outcome = QuoteInvoicing.invoice(quotes, invoices, clientServices, clients, quote.id, dueDate)) {
             is QuoteInvoicing.Outcome.Invoiced -> buildJsonObject {
                 put("created", true)
                 put("type", "invoice")
@@ -543,6 +547,7 @@ internal class AssistantTools(
                 outcome.reason,
                 when (outcome.reason) {
                     QuoteInvoicing.ALREADY_INVOICED -> "This quote already has an invoice that isn't cancelled."
+                    QuoteInvoicing.ALREADY_SERVICED -> "This quote already became a service; invoice that service instead."
                     else -> "That quote or its client no longer exists."
                 },
             )

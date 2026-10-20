@@ -46,6 +46,7 @@ import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.PdfGenerator
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.eurToCents
@@ -77,6 +78,7 @@ import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantLocales
+import com.rfm.edubot.timesheets.zone
 import com.rfm.edubot.whatsapp.TemplateDraft
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
@@ -108,6 +110,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.toLocalDateTime
 import org.bson.types.ObjectId
 import java.util.Date
 import kotlin.time.Duration.Companion.seconds
@@ -163,6 +166,11 @@ internal fun Route.dashboardRoutes(
                         employee = employee?.let { EmployeeMeDto(it.id.toHexString(), it.number, it.name) },
                     ),
                 )
+            }
+            // Every sign-in of the company shows its logo in the sidebar; only Settings changes it.
+            get("/me/logo") {
+                val ctx = call.dashboardContext() ?: return@get
+                call.respondLogo(ctx.tenant.documentTemplate)
             }
             get("/overview") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -411,10 +419,10 @@ internal fun Route.dashboardRoutes(
                     }
                     part.dispose()
                 }
-                val name = filename?.takeIf { it.isNotBlank() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no file provided"))
-                val data = bytes?.takeIf { it.isNotEmpty() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty file"))
-                if (data.size > MAX_LOGO_BYTES) return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "logo too large"))
-                val ext = logoExtension(name) ?: return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "logo must be png, jpg, or webp"))
+                if (filename.isNullOrBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no_file"))
+                val data = bytes?.takeIf { it.isNotEmpty() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty_file"))
+                if (data.size > MAX_LOGO_BYTES) return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "logo_too_large"))
+                val ext = logoFormat(data) ?: return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "logo_type"))
                 val brandingDir = Path.of(runtimeConfig.get().pdfStoragePath, ctx.tenant.slug, "branding")
                 Files.createDirectories(brandingDir)
                 val logoPath = brandingDir.resolve("logo.$ext")
@@ -441,15 +449,7 @@ internal fun Route.dashboardRoutes(
             get("/settings/document-template/logo") {
                 val ctx = call.dashboardContext() ?: return@get
                 if (!ctx.requireModule(DashboardModules.SETTINGS)) return@get call.respond(HttpStatusCode.Forbidden)
-                val path = ctx.tenant.documentTemplate.logoPath?.let(Path::of)
-                    ?: return@get call.respond(HttpStatusCode.NotFound)
-                if (!Files.isRegularFile(path)) return@get call.respond(HttpStatusCode.NotFound)
-                val contentType = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
-                    "png" -> ContentType.Image.PNG
-                    "webp" -> ContentType("image", "webp")
-                    else -> ContentType.Image.JPEG
-                }
-                call.respondBytes(Files.readAllBytes(path), contentType)
+                call.respondLogo(ctx.tenant.documentTemplate)
             }
             get("/settings/document-template/presets") {
                 val ctx = call.dashboardContext() ?: return@get
@@ -716,13 +716,22 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<ConvertQuoteRequest>()
             val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                 ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
-            when (val outcome = QuoteInvoicing.invoice(deps.quotes, deps.invoices, deps.clients, quote.id, dueDate)) {
+            when (val outcome = QuoteInvoicing.invoice(deps.quotes, deps.invoices, deps.clientServices, deps.clients, quote.id, dueDate)) {
                 is QuoteInvoicing.Outcome.Invoiced -> call.respond(HttpStatusCode.Created, outcome.invoice.dto(outcome.client))
-                is QuoteInvoicing.Outcome.Refused -> when (outcome.reason) {
-                    QuoteInvoicing.ALREADY_INVOICED -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
-                    QuoteInvoicing.CLIENT_NOT_FOUND -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                    else -> call.respond(HttpStatusCode.NotFound)
-                }
+                is QuoteInvoicing.Outcome.Refused -> call.respondQuoteRefused(outcome.reason)
+            }
+        }
+        post("/quotes/{id}/service") {
+            val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.QUOTES) && it.requireModule(DashboardModules.SERVICES) } ?: return@post call.respond(HttpStatusCode.Forbidden)
+            val deps = tenantDeps(ctx)
+            val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
+            val request = call.receive<QuoteServiceRequest>()
+            val performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let {
+                runCatching { LocalDate.parse(it) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_date"))
+            } ?: SystemClock.now().toLocalDateTime(ctx.tenant.zone()).date
+            when (val outcome = QuoteServicing.service(deps.quotes, deps.invoices, deps.clientServices, deps.clients, id, performedAt, request.name)) {
+                is QuoteServicing.Outcome.Created -> call.respond(HttpStatusCode.Created, outcome.service.dto(outcome.client))
+                is QuoteServicing.Outcome.Refused -> call.respondQuoteRefused(outcome.reason)
             }
         }
         get("/quotes/{id}/pdf") {
@@ -819,7 +828,11 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val deps = tenantDeps(ctx)
             val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
             val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
-            call.respond(deps.clientServices.list(clientId, status).map { it.dto(deps.clients.findById(it.clientId)) })
+            val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let {
+                runCatching { ObjectId(it) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
+            }
+            val rows = if (quoteId != null) deps.clientServices.findByQuoteId(quoteId) else deps.clientServices.list(clientId, status)
+            call.respond(rows.map { it.dto(deps.clients.findById(it.clientId)) })
         }
         get("/services/{id}") {
             val ctx = call.dashboardContext()?.takeIf { it.requireModule(DashboardModules.SERVICES) } ?: return@get call.respond(HttpStatusCode.Forbidden)
@@ -878,6 +891,13 @@ private fun Route.crmRoutes(mongo: MongoModule, runtimeConfig: RuntimeConfig, da
             val request = call.receive<UpdateClientServiceRequest>()
             serviceItemsError(request.items)?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
             val status = request.status?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
+            if (status == ClientServiceStatus.OPEN) {
+                val existing = deps.clientServices.findById(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
+                val quote = existing.quoteId?.takeIf { existing.status == ClientServiceStatus.CANCELLED }?.let { deps.quotes.findById(it) }
+                if (quote != null && QuoteInvoicing.billedBy(quote, deps.invoices, deps.clientServices) != null) {
+                    return@patch call.respond(HttpStatusCode.Conflict, mapOf("error" to "quote_billed"))
+                }
+            }
             val service = deps.clientServices.update(
                 id = id,
                 name = request.name,
@@ -1276,9 +1296,31 @@ private fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
     showDecor = showDecor,
     layout = layout.map { it.dto() },
     style = DocumentDesignStyle.sanitize(style),
-    hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
+    hasLogo = logoFile() != null,
     defaults = documentTemplateDefaults(),
 )
+
+/** The company's logo: one file for the sidebar and the quote and invoice PDFs, kept with the document template. */
+private fun DocumentTemplate.logoFile(): Path? = logoPath?.takeIf { it.isNotBlank() }?.let(Path::of)?.takeIf { Files.isRegularFile(it) }
+
+private suspend fun ApplicationCall.respondLogo(template: DocumentTemplate) {
+    val path = template.logoFile() ?: return respond(HttpStatusCode.NotFound)
+    val contentType = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+        "png" -> ContentType.Image.PNG
+        "webp" -> ContentType("image", "webp")
+        else -> ContentType.Image.JPEG
+    }
+    respondBytes(Files.readAllBytes(path), contentType)
+}
+
+private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
+/** "png" or "jpg" by the file's first bytes, whatever its name: the PDFs can't draw anything else. */
+private fun logoFormat(bytes: ByteArray): String? = when {
+    bytes.size >= PNG_SIGNATURE.size && bytes.copyOf(PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE) -> "png"
+    bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte() -> "jpg"
+    else -> null
+}
 
 private fun DocumentLayoutBlock.dto() = DocumentLayoutBlockDto(id, x, y, w, h, visible)
 
@@ -1311,13 +1353,6 @@ private fun SavedDocumentTemplate.dto(builtIn: Boolean) = DesignPresetDto(
 
 private fun Tenant.designPresets(): List<DesignPresetDto> =
     BuiltInDesignTemplates.ALL.map { it.dto(builtIn = true) } + savedDocumentTemplates.map { it.dto(builtIn = false) }
-
-private fun logoExtension(filename: String): String? = when (filename.substringAfterLast('.', "").lowercase()) {
-    "png" -> "png"
-    "jpg", "jpeg" -> "jpg"
-    "webp" -> "webp"
-    else -> null
-}
 
 internal fun dashboardToken(config: AppConfig.AdminConfig, user: DashboardUser, typ: String, expiryHours: Int): String = JWT.create()
     .withIssuer(config.jwtIssuer)
@@ -1353,7 +1388,16 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
 )
 @Serializable private data class EmployeeMeDto(val id: String, val number: String, val name: String)
 @Serializable private data class CompanyMeDto(val id: String, val name: String, val slug: String, val primary: Boolean)
-@Serializable private data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable private data class TenantMeDto(
+    val id: String,
+    val slug: String,
+    val name: String,
+    val locale: String,
+    val timezone: String,
+    val channels: List<ChannelMeDto> = emptyList(),
+    /** Whether `GET /app/api/me/logo` has an image to show. */
+    val hasLogo: Boolean = false,
+)
 @Serializable private data class ChannelMeDto(
     val platform: String,
     val externalId: String,
@@ -1365,6 +1409,15 @@ private fun dashboardToken(config: AppConfig.AdminConfig, tenant: Tenant, typ: S
 @Serializable private data class ContactDto(val id: String, val waId: String, val channel: String, val displayName: String?, val status: String, val lastSeenAt: String)
 @Serializable private data class QuoteStatusRequest(val status: String)
 @Serializable private data class ConvertQuoteRequest(val dueDate: String)
+/** Without [performedAt] the work is dated today, in the company's timezone. */
+@Serializable private data class QuoteServiceRequest(val performedAt: String? = null, val name: String? = null)
+
+/** A quote that is gone, whose client is gone, or that is already billed ([QuoteInvoicing.billedBy]). */
+private suspend fun ApplicationCall.respondQuoteRefused(reason: String) = when (reason) {
+    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
+    QuoteInvoicing.CLIENT_NOT_FOUND -> respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+    else -> respond(HttpStatusCode.NotFound)
+}
 @Serializable private data class ConversationDto(
     val id: String,
     val waId: String,
@@ -1463,6 +1516,7 @@ private fun Tenant.dto() = TenantMeDto(
             commentsEnabled = it.platform == Platform.INSTAGRAM && InstagramOAuthScopes.hasComments(it.grantedScopes),
         )
     },
+    hasLogo = documentTemplate.logoFile() != null,
 )
 private fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)
 private fun com.rfm.edubot.conversation.model.User.dto() = ContactDto(id.toHexString(), waId, channel.name, displayName, status.name, lastSeenAt.toString())

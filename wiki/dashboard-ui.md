@@ -212,4 +212,34 @@ Verified locally in headless Chrome: mouse drags on every list, Escape, a plain 
 with the focus kept, reload, both reset buttons, the picker interplay, a saved order with unknown and
 missing ids, pinned columns, row actions and record links after a move, auto-scroll on a wide table,
 a hold-and-drag and a swipe at 375px with touch emulation, light and dark, pt-PT, English and
-Spanish; `DashboardScriptsTest` passes.
+Spanish; `DashboardScriptsTest` passes. Shipped as `v1.2.0`.
+
+## Company logo (2026-10-20)
+
+Rodrigo asked for a way for a company to upload its logo. One upload existed, but only inside the
+template studio's logo block, for the PDFs. Decisions (he confirmed the first two the same day):
+
+- **One logo per company, for the sidebar and the PDFs alike**, kept where it already was
+  (`documentTemplate.logoPath`, a file on the `pdf_data` volume under `<slug>/branding/`), so the two
+  never disagree. It takes the brand mark's place in `/app`, and Settings → Appearance manages it, as
+  the studio still does; each side follows a change made in the other.
+- **Anyone with the Settings module changes it**, as with the document template; it isn't kept to
+  admins.
+- **Every sign-in of the company sees it**: `GET /app/api/me/logo` needs no module, and employee
+  sign-ins reach it (`EmployeePortal.allowsPath`); `/me` says `tenant.hasLogo`. An `<img>` can't send
+  the bearer token, so the page fetches the logo into an object URL (`paintBrandLogo` in
+  `app/companies.js`).
+- **Any image file works.** The server keeps only PNG and JPEG, recognized by the file's first bytes
+  rather than its name, up to 2 MB (`logo_type`, `logo_too_large`), because those are what the PDFs
+  can draw ([billing-and-pdfs.md](billing-and-pdfs.md)). The browser redraws anything else it can open
+  (WebP, SVG, GIF…), and any file over 2 MB, as a PNG at most 1000px on its longest side (an SVG at
+  1000px), before uploading. `apiFetch` no longer labels a FormData body as JSON, so uploads use `api()`.
+- **On paper white in both themes** (`--doc-page`), since logos are drawn for the page they print on;
+  the mark grows to 104px for a wide logo, and the company name beside it truncates (accepted: a
+  wordmark usually carries the name).
+- Not done: the backoffice can't see or set a tenant's logo, the company switcher doesn't show the
+  other companies' logos, and the website widget and emails don't use it.
+
+Verified with route tests (an employee reads the logo, a non-image is refused, the bytes decide) and in
+headless Chrome: PNG and SVG uploads, the PDF drawing it, a reload, the studio's upload reaching the
+sidebar, Remove through the confirm, light and dark, and a 375px phone.

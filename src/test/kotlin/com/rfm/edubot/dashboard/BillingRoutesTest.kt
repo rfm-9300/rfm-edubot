@@ -123,6 +123,7 @@ class BillingRoutesTest {
     }
 
     private suspend fun HttpResponse.obj(): JsonObject = json.parseToJsonElement(bodyAsText()).jsonObject
+    private suspend fun HttpResponse.arr(): JsonArray = json.parseToJsonElement(bodyAsText()).jsonArray
     private suspend fun HttpResponse.error(): String? = obj()["error"]?.jsonPrimitive?.content
     private fun JsonObject.text(name: String): String? = this[name]?.jsonPrimitive?.content
     private fun JsonObject.number(name: String): Double = this[name]!!.jsonPrimitive.double
@@ -200,6 +201,45 @@ class BillingRoutesTest {
         assertEquals("CANCELLED", http.send("POST", "/app/api/crm/invoices/${first.text("id")}/cancel", token).obj().text("status"))
         assertEquals("invoice_cancelled", http.send("POST", "/app/api/crm/invoices/${first.text("id")}/cancel", token).error())
         assertEquals(HttpStatusCode.Created, http.send("POST", convert, token, due).status, "a cancelled invoice frees its quote")
+    }
+
+    @Test
+    fun `a quote becomes a service and is billed once, by that service or by an invoice`() = routesTest { http, token, client ->
+        fun quote() = buildJsonObject {
+            put("clientId", client.id.toHexString())
+            putJsonArray("items") {
+                addJsonObject { put("description", "Limpeza - cozinha e sala"); put("quantity", 2.0); put("unitPriceEur", 40.0) }
+                addJsonObject { put("description", "Vidros"); put("unitPriceEur", 25.0) }
+            }
+        }
+        val id = http.send("POST", "/app/api/crm/quotes", token, quote()).obj().text("id")!!
+        val created = http.send("POST", "/app/api/crm/quotes/$id/service", token, buildJsonObject { put("performedAt", "2026-10-21") })
+        assertEquals(HttpStatusCode.Created, created.status)
+        val service = created.obj()
+        assertEquals("Limpeza + Vidros", service.text("name"), "named after its lines, catalog details left out")
+        assertEquals(105.0, service.number("totalEur"))
+        assertEquals(listOf("Limpeza - cozinha e sala", "Vidros"), service.list("items").map { it.jsonObject.text("description") })
+        assertEquals(id, service.text("quoteId"))
+        assertEquals("2026-10-21", service.text("performedAt"))
+        assertEquals("OPEN", service.text("status"))
+        assertEquals("ACEITO", http.send("GET", "/app/api/crm/quotes/$id", token).obj().text("status"))
+        assertEquals(listOf(service.text("id")), http.send("GET", "/app/api/crm/services?quoteId=$id", token).arr().map { it.jsonObject.text("id") })
+
+        val due = buildJsonObject { put("dueDate", "2026-11-01") }
+        assertEquals("already_serviced", http.send("POST", "/app/api/crm/quotes/$id/service", token, buildJsonObject {}).error())
+        assertEquals("already_serviced", http.send("POST", "/app/api/crm/quotes/$id/invoice", token, due).error())
+
+        val servicePath = "/app/api/crm/services/${service.text("id")}"
+        assertEquals("CANCELLED", http.send("PATCH", servicePath, token, buildJsonObject { put("status", "CANCELLED") }).obj().text("status"))
+        assertEquals(HttpStatusCode.Created, http.send("POST", "/app/api/crm/quotes/$id/invoice", token, due).status, "a cancelled service frees its quote")
+        assertEquals("already_invoiced", http.send("POST", "/app/api/crm/quotes/$id/service", token, buildJsonObject {}).error())
+        assertEquals("quote_billed", http.send("PATCH", servicePath, token, buildJsonObject { put("status", "OPEN") }).error(), "reopening it would bill the quote twice")
+
+        val other = http.send("POST", "/app/api/crm/quotes", token, quote()).obj().text("id")!!
+        assertEquals("invalid_date", http.send("POST", "/app/api/crm/quotes/$other/service", token, buildJsonObject { put("performedAt", "21/10") }).error())
+        val named = http.send("POST", "/app/api/crm/quotes/$other/service", token, buildJsonObject { put("name", "  Limpeza geral  ") }).obj()
+        assertEquals("Limpeza geral", named.text("name"))
+        assertEquals(10, named.text("performedAt")?.length, "dated today when no day is sent")
     }
 
     @Test

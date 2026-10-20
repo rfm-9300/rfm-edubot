@@ -55,6 +55,17 @@ class PdfGeneratorTest {
     }
 
     @Test
+    fun `a stored logo the PDF can't read leaves the company's name instead of failing`() {
+        val webp = kotlin.io.path.createTempFile("logo", ".webp").toFile().apply {
+            writeBytes("RIFF\u0000\u0000\u0000\u0000WEBPVP8 ".toByteArray())
+            deleteOnExit()
+        }
+        val template = DocumentTemplate(companyName = "Limpezas Sol", logoPath = webp.absolutePath)
+        val text = Loader.loadPDF(generator.generateQuote(quote(listOf(item("Limpeza", 80.0))), client, template)).use { PDFTextStripper().getText(it) }
+        assertTrue("LIMPEZAS SOL" in text, text)
+    }
+
+    @Test
     fun `totals appear on last page only`() {
         // Verify the PDF bytes are valid and parseable for both cases
         val few = quote(listOf(item("Pintura", 1000.0)))

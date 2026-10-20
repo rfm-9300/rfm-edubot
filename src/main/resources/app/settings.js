@@ -1,6 +1,6 @@
-/* Settings (/app → Settings): Home's cards, appearance, channels, WhatsApp templates, the website widget,
-   language, the quote and invoice template (doc-template.js) and companies. Connecting channels is in
-   integrations.js, templates in whatsapp-templates.js and companies in companies.js. */
+/* Settings (/app → Settings): Home's cards, appearance (the company's logo and the theme), channels, WhatsApp
+   templates, the website widget, language, the quote and invoice template (doc-template.js) and companies.
+   Connecting channels is in integrations.js, templates in whatsapp-templates.js and companies in companies.js. */
 
 function widgetDraft() {
   if (!state.widgetDraft) {
@@ -54,9 +54,112 @@ function appearancePanel() {
   const theme = prefs ? prefs.theme() : 'light';
   const choice = (group, id, title, detail, on) => `<button type="button" class="queue__item choice ${on ? 'is-on' : ''}" data-appearance-${group}="${id}" aria-pressed="${on}"><div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(detail)}</span></div><span class="queue__meta">${on ? `<span class="pill pill--ok">${escapeHTML(STR.appearanceActive)}</span>` : ''}</span></button>`;
   const section = (title, hint, choices) => `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(title)}</h2></header><div class="panel__body"><div class="form">${hint ? `<div class="hint">${escapeHTML(hint)}</div>` : ''}<div class="choice-list">${choices}</div></div></div></section>`;
-  return `<div class="settings-stack">${section(STR.appearanceThemeTitle, '',
+  return `<div class="settings-stack">${logoPanel()}${section(STR.appearanceThemeTitle, '',
     choice('theme', 'light', STR.themeLight, STR.themeLightDesc, theme === 'light')
     + choice('theme', 'dark', STR.themeDark, STR.themeDarkDesc, theme === 'dark'))}</div>`;
+}
+
+// One logo per company: the sidebar shows it and quotes and invoices print it (doc-template.js changes it too).
+function logoPanel() {
+  const has = !!state.me?.tenant?.hasLogo;
+  return `<section class="panel">
+    <header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.logoTitle)}</h2></header>
+    <div class="panel__body"><div class="form">
+      <div class="hint">${escapeHTML(STR.logoHint)}</div>
+      <div class="logo-field">
+        <div class="logo-tile" id="logo-preview"></div>
+        <div class="actions">
+          <input type="file" id="logo-file" accept="image/*" hidden />
+          <button class="btn btn--sm" type="button" data-logo-pick>${escapeHTML(has ? STR.logoReplace : STR.logoUpload)}</button>
+          ${has ? `<button class="btn btn--sm btn--ghost" type="button" data-logo-remove>${escapeHTML(STR.logoRemove)}</button>` : ''}
+        </div>
+      </div>
+    </div></div>
+  </section>`;
+}
+
+// The brand's object URL arrives after the first paint, so the preview fills in whenever it changes.
+function paintLogoPreview() {
+  const tile = $('#logo-preview');
+  if (!tile) return;
+  tile.classList.toggle('logo-tile--empty', !brandLogoUrl);
+  tile.innerHTML = brandLogoUrl
+    ? `<img src="${escapeHTML(brandLogoUrl)}" alt="${escapeHTML(STR.logoAlt)}" />`
+    : `<span>${escapeHTML(state.me?.tenant?.hasLogo ? STR.docLogoLoading : STR.logoNone)}</span>`;
+}
+
+const LOGO_MAX_BYTES = 2 * 1024 * 1024;
+
+// Quotes and invoices print only PNG and JPEG, so any other image the browser can open (WebP, SVG, GIF…), and one
+// over 2 MB, goes up as a PNG at most 1000px on its longest side; an SVG is drawn at that size.
+async function logoUploadFile(file) {
+  if (['image/png', 'image/jpeg'].includes(file.type) && file.size <= LOGO_MAX_BYTES) return file;
+  const url = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const image = new Image();
+      image.onload = () => resolve(image);
+      image.onerror = reject;
+      image.src = url;
+    });
+    const w = img.naturalWidth || 1000;
+    const h = img.naturalHeight || 1000;
+    const scale = file.type === 'image/svg+xml' ? 1000 / Math.max(w, h) : Math.min(1, 1000 / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('unreadable');
+    return new File([blob], 'logo.png', { type: 'image/png' });
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+// Settings → Documents and the sidebar follow whichever control changed the logo.
+async function logoSaved(template) {
+  state.documentTemplate = template;
+  if (state.me?.tenant) state.me.tenant.hasLogo = !!template.hasLogo;
+  await paintBrandLogo();
+  if (state.active === 'settings' && state.settingsSection === 'appearance') render();
+}
+
+async function uploadCompanyLogo(file) {
+  let upload;
+  try { upload = await logoUploadFile(file); } catch { return toast(STR.logoUnreadable); }
+  if (upload.size > LOGO_MAX_BYTES) return toast(STR.logoTooLarge);
+  const body = new FormData();
+  body.append('file', upload, upload.name || 'logo.png');
+  try {
+    await logoSaved(await api('/app/api/settings/document-template/logo', { method: 'POST', body }));
+    toast(STR.logoUploaded);
+  } catch (err) {
+    if (err?.message !== 'unauthorized') toast({ logo_too_large: STR.logoTooLarge, logo_type: STR.logoUnreadable }[err?.code] || STR.logoFailed);
+  }
+}
+
+async function removeCompanyLogo() {
+  const ok = await confirmDialog({ title: STR.logoRemoveTitle, body: STR.logoRemoveBody, okLabel: STR.logoRemove });
+  if (!ok) return;
+  try {
+    await logoSaved(await api('/app/api/settings/document-template/logo', { method: 'DELETE' }));
+    toast(STR.logoRemoved);
+  } catch (err) {
+    if (err?.message !== 'unauthorized') toast(STR.logoFailed);
+  }
+}
+
+function wireLogoPanel(root) {
+  const input = $('#logo-file', root);
+  $('[data-logo-pick]', root)?.addEventListener('click', () => input?.click());
+  input?.addEventListener('change', () => {
+    const file = input.files?.[0];
+    input.value = '';
+    if (file) uploadCompanyLogo(file);
+  });
+  $('[data-logo-remove]', root)?.addEventListener('click', removeCompanyLogo);
+  paintLogoPreview();
 }
 
 async function toggleHomeCard(id) {
@@ -284,6 +387,7 @@ function renderSettings(root) {
     try { state.webWidget = await api('/app/api/web-widget', { method: 'POST', body: JSON.stringify({ allowedOrigins }) }); toast(STR.webOriginsSaved); render(); }
     catch { toast(STR.webGenerateFailed); }
   });
+  if (section === 'appearance') wireLogoPanel(root);
   if (section === 'documents') wireDocumentTemplateForm();
   if (section === 'companies') wireCompaniesPanel(root);
   if (section === 'templates') wireWaTemplatesPanel(root);
@@ -308,6 +412,8 @@ function wireDocumentTemplateForm() {
     openDrawer,
     closeDrawer,
     confirmDialog,
+    prepareLogo: logoUploadFile,
+    onLogoChange: logoSaved,
   });
 }
 

@@ -145,7 +145,7 @@ The minimal skin retunes a few roles: page title 30px / 700 (26px under 920px), 
 | `--shadow-md` | medium | used on auth card |
 | `--shadow-lg` | large (drawer, confirm, toast) | 60% black |
 | `--glow-accent` | violet 35% | yellow 22% |
-| `--doc-page` | `#ffffff` | `#ffffff` (paper stays white) |
+| `--doc-page` | `#ffffff` | `#ffffff` (paper stays white; also behind a company's logo in the sidebar and in Settings) |
 | `--doc-page-ink` / `--doc-page-muted` / `--doc-page-faint` | PDF preview text | same |
 | `--doc-page-surface` / `--doc-page-wave` / `--doc-page-rule` | table fill, waves, snap grid | same |
 | `--doc-page-shadow` | soft ink | heavier black |

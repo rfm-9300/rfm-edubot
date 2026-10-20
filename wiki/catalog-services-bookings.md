@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-20
 ---
 
 # Catalog, Serviços and bookings
@@ -71,7 +71,7 @@ Production rollout (2026-10-06): backup right before; CI deployed `8c889ca` with
 
 ## Serviços rows
 
-A Serviços row (`crm.client_services`) records work done for a client and is what invoices bill. A completed booking creates one (below), an approved employee submission becomes one ([employee-portal-and-time-clock.md](employee-portal-and-time-clock.md)), and staff add them by hand.
+A Serviços row (`crm.client_services`) records work done for a client and is what invoices bill. A completed booking creates one (below), an approved employee submission becomes one ([employee-portal-and-time-clock.md](employee-portal-and-time-clock.md)), a quote converted to a service becomes one with all its lines (`quoteId`; the quote is then billed only through it, [billing-and-pdfs.md](billing-and-pdfs.md)), and staff add them by hand.
 
 - **A Serviços row can hold several lines** (since `b6448f9`, 2026-10-01; `crm.client_services.items`, the quote `LineItem` shape)
   and totals their sum. Its `quantity`/`unit`/`unitPriceCents` summarize the lines (a single line's

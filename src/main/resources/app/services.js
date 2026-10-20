@@ -7,7 +7,10 @@ function serviceColumns() {
     { id: 'pick', label: '', pin: 'start', cell: s => `<td class="check">${s.status === 'OPEN' ? `<input type="checkbox" data-pick-service="${escapeHTML(s.id)}" data-client="${escapeHTML(s.clientId)}" />` : ''}</td>` },
     { id: 'when', label: t.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>` },
     { id: 'client', label: t.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName || '')}</td>` },
-    { id: 'service', label: t.thService, cell: s => `<td>${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>` },
+    { id: 'service', label: t.thService, cell: s => {
+      const from = s.bookingId ? t.fromBooking : s.quoteId ? t.fromQuote : '';
+      return `<td>${escapeHTML(s.name)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</td>`;
+    } },
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
     { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
@@ -240,11 +243,13 @@ async function openServiceDetail(ref) {
   const known = (typeof ref === 'object' && ref) || (state.clientServices || []).find(s => s.id === id) || null;
   const service = await api(`/app/api/crm/services/${encodeURIComponent(id)}`).catch(() => known);
   if (!service) return toast(STR.loadFailed);
-  const [invoice, booking, doneBy] = await Promise.all([
+  const [invoice, booking, doneBy, quote] = await Promise.all([
     service.invoiceId && hasModule('invoices') ? api(`/app/api/crm/invoices/${encodeURIComponent(service.invoiceId)}`).catch(() => null) : null,
     service.bookingId && hasModule('bookings') ? api(`/app/api/bookings/${encodeURIComponent(service.bookingId)}`).catch(() => null) : null,
     service.employeeId && hasModule('employees') ? api(`/app/api/crm/employees/${encodeURIComponent(service.employeeId)}`).catch(() => null) : null,
+    service.quoteId && hasModule('quotes') ? api(`/app/api/crm/quotes/${encodeURIComponent(service.quoteId)}`).catch(() => null) : null,
   ]);
+  const quoteLink = !!quote && !linksBackTo(`quote:${quote.id}`);
   const here = serviceTrailEntry(service);
   const isOpen = service.status === 'OPEN';
   const tone = { OPEN: 'warn', INVOICED: 'ok' }[service.status] || '';
@@ -263,6 +268,7 @@ async function openServiceDetail(ref) {
       doneBy ? { label: SUB.doneBy, value: doneBy.name } : null,
       { label: STR.detailCreated, value: fmtDay(service.createdAt) },
     ])}
+    ${quote && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: quote.number }))}</p>` : ''}
     ${showLines ? itemsTable(lines) : ''}
     ${service.notes ? `<p class="hint">${escapeHTML(service.notes)}</p>` : ''}
     ${service.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : ''}
@@ -272,6 +278,7 @@ async function openServiceDetail(ref) {
       ${service.status === 'CANCELLED' && !service.bookingId ? `<button class="btn btn--sm" type="button" data-svc-reopen>${escapeHTML(t.reopen)}</button>` : ''}
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
       ${booking && !linksBackTo(`booking:${booking.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-booking>${escapeHTML(t.openBooking)}</button>` : ''}
+      ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-quote>${escapeHTML(STR.detailOpenDoc({ number: quote.number }))}</button>` : ''}
       ${doneBy && !linksBackTo(`employee:${doneBy.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-employee>${escapeHTML(SUB.openEmployee({ name: doneBy.name }))}</button>` : ''}
       ${isOpen ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-cancel>${escapeHTML(t.cancel)}</button>` : ''}
       ${service.status !== 'INVOICED' ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-delete>${escapeHTML(t.delete)}</button>` : ''}
@@ -284,6 +291,7 @@ async function openServiceDetail(ref) {
   }));
   $('[data-svc-open-invoice]', body)?.addEventListener('click', () => openFrom(here, () => openInvoiceDetail(invoice.id)));
   $('[data-svc-open-booking]', body)?.addEventListener('click', () => openFrom(here, () => openBookingDetail(booking)));
+  $('[data-svc-open-quote]', body)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(quote.id)));
   $('[data-svc-open-employee]', body)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer('employee', doneBy)));
   $('[data-svc-cancel]', body)?.addEventListener('click', () => cancelClientService(service));
   $('[data-svc-delete]', body)?.addEventListener('click', () => deleteClientService(service));
@@ -295,7 +303,7 @@ async function openServiceDetail(ref) {
       toast(t.reopened);
       if (state.active === 'services') { await loadModule('services').catch(() => {}); render(); }
       openServiceDetail(service.id);
-    } catch { btn.disabled = false; toast(t.reopenFailed); }
+    } catch (err) { btn.disabled = false; toast(err?.code === 'quote_billed' ? t.reopenQuoteBilled : t.reopenFailed); }
   });
   openDrawer(service.name, body);
 }

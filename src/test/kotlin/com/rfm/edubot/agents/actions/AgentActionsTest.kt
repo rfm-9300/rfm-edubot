@@ -25,6 +25,7 @@ import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.crm.lineItem
 import com.rfm.edubot.crm.model.ClientServiceStatus
@@ -225,6 +226,22 @@ class AgentActionsTest {
         val notices = ctx.services.notifications.listFor(tenant.id, "admin", isAdmin = true)
         assertEquals(listOf("A fatura venceu"), notices.mapNotNull { it.body })
         assertEquals("Ligar ao cliente", ctx.services.tasks.list(tenant.id).single().title)
+    }
+
+    @Test
+    fun `a quote that became a service is left to that service`(): Unit = runBlocking {
+        val tenant = tenant()
+        val clients = ClientRepository(mongo, tenant.id)
+        val client = clients.create("Rita", "+351 933 000 444")
+        val quotes = QuoteRepository(mongo, tenant.id)
+        val invoices = InvoiceRepository(mongo, tenant.id)
+        val quote = quotes.create(client.id, listOf(lineItem("Limpeza", unitPriceEur = 80.0)), null, null)
+        val made = QuoteServicing.service(quotes, invoices, ClientServiceRepository(mongo, tenant.id), clients, quote.id, LocalDate(2026, 10, 21))
+        assertTrue(made is QuoteServicing.Outcome.Created)
+        val ctx = context(tenant, SubjectRef.of(SubjectTypes.QUOTE, quote.id), StepSpec("s1", "crm.invoice.from_quote"))
+
+        assertEquals(ActionResult.Skipped("quote_serviced"), execute(InvoiceFromQuoteAction, buildJsonObject {}, ctx))
+        assertTrue(invoices.list(client.id).isEmpty())
     }
 
     @Test

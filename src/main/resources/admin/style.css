@@ -227,6 +227,10 @@ html[data-theme="dark"] .sidebar { background: var(--bg-deep); }
   font-size: 13px;
   box-shadow: var(--glow-accent);
 }
+/* /app: the company's logo in the mark's place, as wide as the logo needs up to 104px, on the paper white quotes
+   and invoices print it on, in both themes. */
+.brand .brand__mark.brand__mark--logo { width: auto; min-width: 32px; max-width: 104px; padding: 4px; background: var(--doc-page); box-shadow: inset 0 0 0 1px var(--line); }
+.brand__mark--logo img { display: block; height: 100%; max-width: 100%; object-fit: contain; }
 .brand__name { font-family: var(--display); font-weight: 700; letter-spacing: 0.02em; font-size: 14.5px; }
 .brand__sub  { font-size: 11.5px; color: var(--ink-mute); font-weight: 600; letter-spacing: 0.02em; margin-top: 1px; }
 /* /app: the brand is the company switcher; disabled, it looks like the plain brand. */
@@ -2162,6 +2166,11 @@ html[data-theme="dark"] .cal-grid__dayhead.is-today { color: var(--accent); }
 .tpl__pane .form { margin-top: 14px; }
 .tpl__logo-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .tpl__logo-row .btn { cursor: pointer; }
+/* Settings → Appearance: the company's logo on paper white, as it prints; dashed while there is none. */
+.logo-field { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.logo-tile { display: grid; place-items: center; width: 200px; height: 80px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--doc-page); }
+.logo-tile img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.logo-tile--empty { border-style: dashed; border-color: var(--hairline-strong); background: var(--surface-2); color: var(--ink-mute); font-size: 12.5px; text-align: center; }
 .tpl__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tpl-presets-section + .tpl-presets-section { margin-top: 18px; }
 .tpl-presets {

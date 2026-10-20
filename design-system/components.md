@@ -44,6 +44,8 @@ Strings in examples are placeholders — real copy goes through i18n.
 
 Mark is 40×40, gradient, display font (in the minimal skin a 32×32 solid yellow square). Surfaces: CRM SVG house, app `"AI"`, backoffice `"BO"`. Keep that 2-letter / SVG convention. The backoffice's name and eyebrow come from `backoffice.brandName` / `backoffice.brandSub`.
 
+In `/app` a company that uploaded a logo shows it in the mark's place: `.brand__mark--logo` holding an `img`, as wide as the logo needs up to 104px at the mark's height, on `--doc-page` white with a hairline in both themes, because logos are drawn for the paper they print on. Its 2-letter text comes back when the logo is removed. Settings → Appearance previews the logo in a `.logo-tile` (200×80, the same white; `.logo-tile--empty` is a dashed `--surface-2` box saying there is none yet) beside Upload or Replace and a ghost Remove, in a `.logo-field` row that wraps on phones.
+
 `/app` renders the brand as the company switcher: `button.brand.brand--switch` with `span` children and a `.brand__chevron`. It stays `disabled` (looks exactly like the plain brand, no chevron) until the tenant holds more than one company; enabled, it hovers on `--surface-2` and opens the "Switch company" drawer, a `.record` > `.panel` > `.worklist` of companies (current one `data-tone="ok"` with a "Current" pill). Settings → Companies reuses the same rows.
 
 ## Nav

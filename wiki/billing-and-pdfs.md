@@ -1,10 +1,43 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-20
 ---
 
 # Quotes, invoices, payments and PDFs
 
 Documents and money: quotes and invoices, installments and cancelling, payments to suppliers and employees, and the generated PDFs. The Serviços rows that invoices bill are in [catalog-services-bookings.md](catalog-services-bookings.md).
+
+## A quote becomes an invoice or a service, once (2026-10-20)
+
+Rodrigo asked that a quote can also be converted to a service, besides an invoice. Decisions:
+
+- **One Serviços row with all the quote's lines** (`crm.client_services.quoteId`), named after them like a
+  service typed without a name ("Limpeza + Vidros", the part of each line before " - ",
+  `QuoteServicing.nameFrom`, the twin of `serviceNameFrom` in `app/services.js`). The quote detail's
+  form asks for the work date (today by default; the API dates it today in the company's timezone when
+  none is sent) and an optional name. The quote turns accepted, as when it becomes an invoice (Rodrigo
+  confirmed this), and the row is invoiced later with the client's other open work (Serviços → Invoice).
+- **A quote is billed once.** `QuoteInvoicing.billedBy` refuses a conversion while the quote has an
+  invoice that isn't cancelled (`already_invoiced`) or a row made from it that isn't cancelled
+  (`already_serviced`). The dashboard routes, the assistant's `convert_quote_to_invoice` (also before
+  its confirmation card) and the agents' invoice-from-quote step (which skips with `quote_serviced`)
+  all apply it. Cancelling or deleting the row frees the quote, and reopening a cancelled row whose
+  quote has been billed since answers `409 quote_billed`.
+- The invoice that bills the row carries no `quoteId` (it bills services), so the quote detail finds it
+  through the row's `invoiceId` and shows both, and the row shows "From quote …" or opens the quote.
+- API: `POST /app/api/crm/quotes/{id}/service` (`performedAt`, `name`, both optional; needs the Quotes
+  and Serviços modules), `GET /app/api/crm/services?quoteId=`, `quoteId` on the row's DTO, and the
+  `service.created` event's payload and related records.
+- Not done: the dashboard assistant has no tool to turn a quote into a service, and the mobile app
+  shows a generic error for `already_serviced`.
+
+Verified with route, assistant and agent tests and in headless Chrome (pt-PT), both conversions
+included.
+
+**The company's logo on PDFs** is the one Settings → Appearance and the template studio upload
+([dashboard-ui.md](dashboard-ui.md)). Uploads used to be accepted by file name, WebP included, which
+PDFBox can't read: such a logo made every quote and invoice PDF of that company fail to generate. The
+server now takes only PNG and JPEG, by the file's first bytes, and `drawLogo` falls back to the
+company-name card when a stored logo can't be read.
 
 ## Supplier services, invoice tax code, installments, cancel and delete (shipped 2026-10-06, `17425b5`)
 

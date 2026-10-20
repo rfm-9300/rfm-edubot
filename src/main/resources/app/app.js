@@ -16,6 +16,7 @@ async function bootAuthed() {
   document.title = `${state.me.tenant.name} · ${STR.dashboardWord}`;
   $('#brand-name').textContent = state.me.tenant.name;
   $('#brand-sub').textContent = state.me.tenant.slug;
+  paintBrandLogo();
   $('#principal-type').textContent = state.me.principalType;
   // An operator opening the dashboard has no user account here.
   const accountBtn = $('#btn-account');

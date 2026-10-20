@@ -179,6 +179,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmClientServices.createIndex(Document("tenantId", 1).append("clientId", 1).append("status", 1))
             crmClientServices.createIndex(Document("tenantId", 1).append("status", 1).append("createdAt", -1))
             crmClientServices.createIndex(Document("tenantId", 1).append("invoiceId", 1))
+            crmClientServices.createIndex(Document("tenantId", 1).append("quoteId", 1))
             crmClientServices.createIndex(
                 Document("tenantId", 1).append("bookingId", 1),
                 IndexOptions().partialFilterExpression(Document("bookingId", Document("\$type", "objectId"))),

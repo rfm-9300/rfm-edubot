@@ -20,6 +20,7 @@ import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
+import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SupplierRepository
@@ -171,6 +172,10 @@ class AssistantToolsTest {
         assertEquals("already_invoiced", c.check("convert_quote_to_invoice") { put("quote_id", fresh.number); put("due_date", due) }!!.text("error"))
         assertEquals("due_date_required", c.check("convert_quote_to_invoice") { put("quote_id", old.number) }!!.text("error"))
         assertEquals("quote_not_found", c.check("convert_quote_to_invoice") { put("quote_id", "ORC-999"); put("due_date", due) }!!.text("error"))
+
+        val services = ClientServiceRepository(mongo, c.tenant.id)
+        assertTrue(QuoteServicing.service(c.quotes, c.invoices, services, c.clients, old.id, today) is QuoteServicing.Outcome.Created)
+        assertEquals("already_serviced", c.check("convert_quote_to_invoice") { put("quote_id", old.number); put("due_date", due) }!!.text("error"))
     }
 
     @Test

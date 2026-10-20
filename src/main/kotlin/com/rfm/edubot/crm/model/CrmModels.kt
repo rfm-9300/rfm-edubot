@@ -141,6 +141,8 @@ data class ClientService(
     val updatedAt: Instant,
     /** Who did the work, on a row made by approving an employee's registered service. */
     val employeeId: ObjectId? = null,
+    /** The quote this row was made from; while the row isn't cancelled, the quote can't be billed again. */
+    val quoteId: ObjectId? = null,
 )
 
 enum class ServiceSubmissionStatus { PENDING, APPROVED, REJECTED }

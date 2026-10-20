@@ -39,6 +39,9 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
     suspend fun findByBookingId(bookingId: ObjectId): ClientService? =
         collection.find(scoped(Filters.eq("bookingId", bookingId))).firstOrNull()?.toClientService()
 
+    suspend fun findByQuoteId(quoteId: ObjectId): List<ClientService> =
+        collection.find(scoped(Filters.eq("quoteId", quoteId))).toList().map { it.toClientService() }
+
     suspend fun list(clientId: ObjectId? = null, status: ClientServiceStatus? = null): List<ClientService> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
@@ -68,6 +71,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         items: List<LineItem> = emptyList(),
         employeeId: ObjectId? = null,
         id: ObjectId = ObjectId(),
+        quoteId: ObjectId? = null,
     ): ClientService {
         val now = SystemClock.now()
         val qty = quantity.takeIf { it > 0 } ?: 1.0
@@ -90,6 +94,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             createdAt = now,
             updatedAt = now,
             employeeId = employeeId,
+            quoteId = quoteId,
         )
         collection.insertOne(service.toDocument())
         events.append(tenantId, DomainEventTypes.SERVICE_CREATED, SubjectRef.of(SubjectTypes.SERVICE, service.id), EventPayloads.service(service), service.relatedRefs())
@@ -101,6 +106,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         bookingId?.let { SubjectRef.of(SubjectTypes.BOOKING, it) },
         invoiceId?.let { SubjectRef.of(SubjectTypes.INVOICE, it) },
         employeeId?.let { SubjectRef.of(SubjectTypes.EMPLOYEE, it) },
+        quoteId?.let { SubjectRef.of(SubjectTypes.QUOTE, it) },
     )
 
     /**
@@ -211,6 +217,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         employeeId = get("employeeId", ObjectId::class.java),
+        quoteId = get("quoteId", ObjectId::class.java),
     )
 
     private fun ClientService.toDocument() = Document("_id", id)
@@ -232,6 +239,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
         .apply { employeeId?.let { append("employeeId", it) } }
+        .apply { quoteId?.let { append("quoteId", it) } }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }

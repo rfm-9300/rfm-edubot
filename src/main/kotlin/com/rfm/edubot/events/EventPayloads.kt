@@ -60,6 +60,7 @@ internal object EventPayloads {
         put("status", service.status.name)
         put("totalCents", service.totalCents)
         service.bookingId?.let { put("bookingId", it.toHexString()) }
+        service.quoteId?.let { put("quoteId", it.toHexString()) }
         extra()
     }
 

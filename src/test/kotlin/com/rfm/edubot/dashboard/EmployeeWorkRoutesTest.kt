@@ -27,11 +27,16 @@ import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.patch
+import io.ktor.client.request.forms.formData
+import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.HttpResponse
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
+import io.ktor.http.Headers
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.routing.routing
@@ -64,6 +69,7 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import java.time.Instant
 import java.util.Date
 import kotlin.test.Test
+import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
@@ -213,6 +219,14 @@ class EmployeeWorkRoutesTest {
         return token(c.employeeEmail, EMPLOYEE_PASSWORD)
     }
 
+    private suspend fun HttpClient.uploadLogo(token: String, filename: String, bytes: ByteArray): HttpResponse =
+        submitFormWithBinaryData(
+            url = "/app/api/settings/document-template/logo",
+            formData = formData {
+                append("file", bytes, Headers.build { append(HttpHeaders.ContentDisposition, "filename=\"$filename\"") })
+            },
+        ) { bearerAuth(token) }
+
     private val today get() = Clock.System.todayIn(TimeZone.of("Europe/Lisbon"))
 
     private fun work(c: Company, hours: Double = 3.0, day: String = today.toString(), extra: JsonObjectBuilder.() -> Unit = {}) = buildJsonObject {
@@ -223,6 +237,30 @@ class EmployeeWorkRoutesTest {
             addJsonObject { put("description", "Tinta"); put("quantity", 1); put("unitPriceEur", 24.9) }
         }
         extra()
+    }
+
+    @Test
+    fun `every sign-in of a company sees its logo, which only Settings changes`() = workTest { http ->
+        val c = company()
+        val adminToken = http.token(c.admin.email)
+        val employeeToken = http.giveAccess(c, adminToken)
+        val tenantOf: suspend (String) -> JsonObject = { token -> http.send("GET", "/app/api/me", token).obj()["tenant"]!!.jsonObject }
+        assertNull(tenantOf(adminToken).text("hasLogo"))
+        assertEquals(HttpStatusCode.NotFound, http.send("GET", "/app/api/me/logo", employeeToken).status)
+
+        val png = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13)
+        assertEquals("logo_type", http.uploadLogo(adminToken, "logo.png", "<svg/>".toByteArray()).error())
+        val uploaded = http.uploadLogo(adminToken, "logo.webp", png)
+        assertEquals(HttpStatusCode.OK, uploaded.status, "the file's bytes decide its type, not its name")
+        assertEquals("true", uploaded.obj().text("hasLogo"))
+        assertEquals("true", tenantOf(employeeToken).text("hasLogo"))
+        val logo = http.send("GET", "/app/api/me/logo", employeeToken)
+        assertEquals(ContentType.Image.PNG, logo.contentType()?.withoutParameters())
+        assertContentEquals(png, logo.readRawBytes())
+        assertEquals(HttpStatusCode.Unauthorized, http.uploadLogo(employeeToken, "logo.png", png).status)
+
+        assertEquals("false", http.send("DELETE", "/app/api/settings/document-template/logo", adminToken).obj().text("hasLogo"))
+        assertEquals(HttpStatusCode.NotFound, http.send("GET", "/app/api/me/logo", adminToken).status)
     }
 
     @Test
