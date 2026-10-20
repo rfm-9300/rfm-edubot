@@ -1,5 +1,6 @@
 /* What the Clients, Suppliers and Employees lists share: the Active / Archived switch and the column
-   picker. Each page's own columns are defined beside it (clientColumns in clients.js…). */
+   picker. Each page's own columns are defined beside it (clientColumns in clients.js…), and their order is
+   in columns.js. */
 
 // The directory pages list active records; the Archived chip swaps in the archived ones, ready to restore.
 function directoryViewChips(kind) {
@@ -24,7 +25,7 @@ function wireDirectoryView(root) {
 
 // Each person picks the columns of a directory list. The choice stays in this browser, per company and
 // user, as on/off overrides of each column's default, so a column added later still follows its default.
-const columnChoicesKey = table => `tableColumns:${state.me?.tenant?.id || ''}:${state.me?.user?.id || 'operator'}:${table}`;
+const columnChoicesKey = table => tableStoreKey('tableColumns', table);
 
 function columnChoices(table) {
   const key = columnChoicesKey(table);
@@ -46,10 +47,7 @@ function saveColumnChoices(table, choices) {
 }
 
 const isColumnShown = (choices, column) => !!column.fixed || (choices[column.id] ?? !!column.default);
-const shownColumns = (table, columns) => columns.filter(c => isColumnShown(columnChoices(table), c));
-const columnsHead = columns => `<tr>${columns.map(c => `<th${c.head ? ` class="${c.head}"` : ''}>${escapeHTML(c.label)}</th>`).join('')}</tr>`;
-// A cell may read which other columns are shown (`ids`), e.g. the address leaves the city to its own column.
-const columnCells = (columns, ids, row) => columns.map(c => c.cell(row, ids)).join('');
+const shownColumns = (table, columns) => orderedColumns(table, columns).filter(c => isColumnShown(columnChoices(table), c));
 const columnsButton = table => `<button class="btn btn--sm btn--ghost" type="button" data-columns="${table}">${escapeHTML(COLUMNS.button)}</button>`;
 
 function openColumnPicker(table, columns, eyebrow) {
@@ -74,10 +72,13 @@ function openColumnPicker(table, columns, eyebrow) {
     if (input.checked === !!column(input).default) delete choices[input.dataset.column];
     else choices[input.dataset.column] = input.checked;
     saveColumnChoices(table, choices);
+    // Without the column someone moved, the rest may be in the list's own order again.
+    if (inOwnOrder(columns, shownColumns(table, columns).filter(c => !c.pin).map(c => c.id))) saveColumnOrder(table, []);
     render();
   }));
   $('[data-columns-reset]', body).addEventListener('click', () => {
     saveColumnChoices(table, {});
+    saveColumnOrder(table, []);
     $$('[data-column]', body).forEach(input => { input.checked = isColumnShown({}, column(input)); });
     render();
   });

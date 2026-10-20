@@ -443,11 +443,12 @@ private class CrmDeps(mongo: MongoModule, tenant: Tenant) {
     val quotes = QuoteRepository(mongo, tenant.id)
     val invoices = InvoiceRepository(mongo, tenant.id)
     val standardItems = StandardItemRepository(mongo, tenant.id)
+    val clientServices = ClientServiceRepository(mongo, tenant.id)
     val pdfGenerator = PdfGenerator()
     val documentTemplate: DocumentTemplate = tenant.documentTemplate.withCompanyFallback(tenant.name)
     val clientDirectory = ClientDirectory(clients, ClientFields.of(tenant))
-    val quoteService = QuoteService(quotes, invoices, clients)
-    val invoiceService = InvoiceService(invoices, ClientServiceRepository(mongo, tenant.id), clients)
+    val quoteService = QuoteService(quotes, invoices, clientServices, clients)
+    val invoiceService = InvoiceService(invoices, clientServices, clients)
 }
 
 private suspend fun tenantStats(mongo: MongoModule, tenantId: ObjectId): TenantStatsDto {

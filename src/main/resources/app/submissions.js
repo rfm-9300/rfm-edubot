@@ -116,21 +116,32 @@ function openEmployeeAccessForm(employee, access) {
   openDrawer(has ? SUB.accessEditTitle : SUB.accessGiveTitle, form);
 }
 
+function myServiceColumns() {
+  return [
+    { id: 'when', label: SUB.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td>` },
+    { id: 'client', label: SUB.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName)}</td>` },
+    { id: 'service', label: SUB.thService, cell: s => `<td>${escapeHTML(s.name)}</td>` },
+    { id: 'total', label: SUB.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
+    { id: 'status', label: SUB.thStatus, cell: s => `<td>${submissionPill(s.status)}</td>` },
+  ];
+}
+
 // An employee's own page: what they registered and where it stands.
 function renderMyServices(root) {
   const all = state.portal.submissions || [];
   const q = state.search.trim().toLowerCase();
   const filter = state.filterSubmissionStatus || '';
   const count = status => all.filter(s => s.status === status).length;
+  const columns = orderedColumns(PORTAL_TAB, myServiceColumns());
   const rows = all
     .filter(s => !filter || s.status === filter)
     .filter(s => !q || `${s.name} ${s.clientName}`.toLowerCase().includes(q))
-    .map(s => `<tr class="conversation-row" data-submission="${escapeHTML(s.id)}">
-        <td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td><td class="name">${escapeHTML(s.clientName)}</td><td>${escapeHTML(s.name)}</td>
-        <td class="num">${fmtEUR(s.totalEur)}</td><td>${submissionPill(s.status)}</td></tr>`).join('');
+    .map(s => `<tr class="conversation-row" data-submission="${escapeHTML(s.id)}">${columnCells(columns, s)}</tr>`)
+    .join('');
   const approved = approvedThisMonth(all);
   const chips = `<button class="chip ${filter ? '' : 'is-on'}" type="button" data-filter-submission="">${escapeHTML(SUB.filterAll)}</button>`
-    + SUBMISSION_STATUSES.map(s => `<button class="chip ${filter === s ? 'is-on' : ''}" type="button" data-filter-submission="${s}">${escapeHTML(SUB.status[s])}<span class="chip__count">${count(s)}</span></button>`).join('');
+    + SUBMISSION_STATUSES.map(s => `<button class="chip ${filter === s ? 'is-on' : ''}" type="button" data-filter-submission="${s}">${escapeHTML(SUB.status[s])}<span class="chip__count">${count(s)}</span></button>`).join('')
+    + columnOrderButton(PORTAL_TAB);
   const filtered = Boolean(filter || q);
   root.innerHTML = hero(labels[PORTAL_TAB], PORTAL.desc, statCards([
     { label: SUB.status.PENDING, value: count('PENDING') },
@@ -140,11 +151,12 @@ function renderMyServices(root) {
     title: PORTAL.listTitle,
     tag: all.length,
     tools: chips,
-    head: `<tr><th>${escapeHTML(SUB.thWhen)}</th><th>${escapeHTML(SUB.thClient)}</th><th>${escapeHTML(SUB.thService)}</th><th class="right">${escapeHTML(SUB.thTotal)}</th><th>${escapeHTML(SUB.thStatus)}</th></tr>`,
+    head: columnsHead(columns, PORTAL_TAB),
     rows,
     empty: filtered ? PORTAL.emptyFiltered : PORTAL.emptyTitle,
     emptyDesc: filtered ? PORTAL.emptyFilteredDesc : PORTAL.emptyDesc,
   });
+  wireColumnOrder(root, PORTAL_TAB, myServiceColumns());
   $$('[data-filter-submission]', root).forEach(b => b.addEventListener('click', () => { state.filterSubmissionStatus = b.dataset.filterSubmission; render(); }));
   $$('[data-submission]', root).forEach(r => r.addEventListener('click', () => openSubmissionDetail(r.dataset.submission)));
 }

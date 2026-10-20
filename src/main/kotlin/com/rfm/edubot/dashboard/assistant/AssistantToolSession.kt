@@ -4,6 +4,7 @@ import com.mongodb.client.model.Filters
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.model.Conversation
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.PaymentRepository
@@ -58,6 +59,7 @@ internal class AssistantToolSession(
     val clients by lazy { ClientRepository(mongo, tenant.id) }
     val quotes by lazy { QuoteRepository(mongo, tenant.id) }
     val invoices by lazy { InvoiceRepository(mongo, tenant.id) }
+    val clientServices by lazy { ClientServiceRepository(mongo, tenant.id) }
     val payments by lazy { PaymentRepository(mongo, tenant.id) }
 
     // ---- lookups ----

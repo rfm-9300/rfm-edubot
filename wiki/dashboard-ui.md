@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-20
 ---
 
 # Dashboard UI decisions
@@ -171,3 +171,75 @@ and on all three directories (Clients, Suppliers, Employees).
 Verified locally with headless Chrome: unchanged default columns, a 9-column choice, reload, reset,
 suppliers in dark pt-PT, employees at 375px in Spanish, no page errors; catalogs in parity. CI deployed
 `b84ef38` (Mongo not bounced, 0 `ERROR` lines); the app sends no cache headers, so a reload shows it.
+
+## Moving columns (2026-10-20)
+
+Rodrigo asked to drag a list's columns into another order (Clients, Services and the like). The rules
+for building such a table are in [`design-system/components.md`](../design-system/components.md#table).
+
+- **Which tables:** every `/app` list: Clients, Suppliers, Employees, Services, Quotes, Invoices,
+  Financeiro, Payments, Catalog, the bookings agenda and an employee's My services. Not the week and
+  month summaries (aggregates whose columns are the point), the bookings week grid and its "to confirm"
+  panel, record tabs, Contacts (its `panelTable` has no head to hold the reset button), Instagram's
+  feeds, the self-contained modules (Agents, Timesheets) or the backoffice.
+- **Built on column definitions,** as the directories already were: each list's columns sit beside it
+  (`serviceColumns()`, `quoteColumns()`…), and `app/columns.js` holds the order, the head and the drag.
+  `columnCells(columns, row, ids)` now takes the row before `ids`. The conversion left the markup the
+  same in the default order: all 17 list and summary views compared in headless Chrome before and after,
+  whitespace between cells aside.
+- **Kept in the browser,** like the column picker: `localStorage` key
+  `tableColumnOrder:<tenantId>:<userId|operator>:<table>` holds the ids of the columns that were shown
+  at the last move. A hidden column, or a company field added since, comes right after the column it
+  follows by default. Back in the list's own order (dragged back, or the moved column hidden in the
+  picker) the key goes, and with it the **Restore the column order** button, which shows only while
+  the order differs. The first version saved every column, hidden ones too: moving Phone and back left
+  postal code and city shifted, so the button stayed with nothing visibly changed. The directories'
+  **Restore the default columns** puts the order back too.
+- **Pinned:** the Services tick box (`pin: 'start'`) and each row's actions (`pin: 'end'`: PDF, mark
+  paid, edit and delete, confirm a booking) don't move, and a drop beyond them lands beside them.
+- **Pointer Events, not HTML5 drag and drop,** which Android Chrome doesn't fire for touch. A mouse
+  drags after 4px. A finger or pen holds the heading 350ms first, so a swipe across the headings still
+  scrolls the table; once it drags, a non-passive `touchmove` on the heading row stops the page
+  scrolling. Gotcha: Chrome makes touch events uncancelable while a fling runs, so a hold right after a
+  swipe can turn into a scroll; holding again works. ← and → move a focused heading, Escape cancels a
+  drag, and a table wider than its panel scrolls while the pointer is within 32px of its edge, faster
+  nearer the edge. A flat 40px zone at 12px a frame ran a phone's table away from a drop just inside it.
+- **Look:** the dragged column takes the `--accent-soft` selection tint and a 2px `--ink` line down
+  the table marks where it lands. A first version also floated the heading under the pointer; it hid
+  the heading it passed over and left a gap where it had been, so the line alone shows the drop.
+
+Verified locally in headless Chrome: mouse drags on every list, Escape, a plain click, the arrow keys
+with the focus kept, reload, both reset buttons, the picker interplay, a saved order with unknown and
+missing ids, pinned columns, row actions and record links after a move, auto-scroll on a wide table,
+a hold-and-drag and a swipe at 375px with touch emulation, light and dark, pt-PT, English and
+Spanish; `DashboardScriptsTest` passes. Shipped as `v1.2.0`.
+
+## Company logo (2026-10-20)
+
+Rodrigo asked for a way for a company to upload its logo. One upload existed, but only inside the
+template studio's logo block, for the PDFs. Decisions (he confirmed the first two the same day):
+
+- **One logo per company, for the sidebar and the PDFs alike**, kept where it already was
+  (`documentTemplate.logoPath`, a file on the `pdf_data` volume under `<slug>/branding/`), so the two
+  never disagree. It takes the brand mark's place in `/app`, and Settings → Appearance manages it, as
+  the studio still does; each side follows a change made in the other.
+- **Anyone with the Settings module changes it**, as with the document template; it isn't kept to
+  admins.
+- **Every sign-in of the company sees it**: `GET /app/api/me/logo` needs no module, and employee
+  sign-ins reach it (`EmployeePortal.allowsPath`); `/me` says `tenant.hasLogo`. An `<img>` can't send
+  the bearer token, so the page fetches the logo into an object URL (`paintBrandLogo` in
+  `app/companies.js`).
+- **Any image file works.** The server keeps only PNG and JPEG, recognized by the file's first bytes
+  rather than its name, up to 2 MB (`logo_type`, `logo_too_large`), because those are what the PDFs
+  can draw ([billing-and-pdfs.md](billing-and-pdfs.md)). The browser redraws anything else it can open
+  (WebP, SVG, GIF…), and any file over 2 MB, as a PNG at most 1000px on its longest side (an SVG at
+  1000px), before uploading. `apiFetch` no longer labels a FormData body as JSON, so uploads use `api()`.
+- **On paper white in both themes** (`--doc-page`), since logos are drawn for the page they print on;
+  the mark grows to 104px for a wide logo, and the company name beside it truncates (accepted: a
+  wordmark usually carries the name).
+- Not done: the backoffice can't see or set a tenant's logo, the company switcher doesn't show the
+  other companies' logos, and the website widget and emails don't use it.
+
+Verified with route tests (an employee reads the logo, a non-image is refused, the bytes decide) and in
+headless Chrome: PNG and SVG uploads, the PDF drawing it, a reload, the studio's upload reaching the
+sidebar, Remove through the confirm, light and dark, and a 375px phone.

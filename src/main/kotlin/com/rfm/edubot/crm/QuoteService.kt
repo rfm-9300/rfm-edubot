@@ -14,6 +14,7 @@ import org.bson.types.ObjectId
 class QuoteService(
     private val quotes: QuoteRepository,
     private val invoices: InvoiceRepository,
+    private val clientServices: ClientServiceRepository,
     private val clients: ClientRepository,
 ) {
     suspend fun create(clientId: ObjectId, items: List<LineItem>, notes: String?, validUntil: LocalDate?): Quote =
@@ -27,10 +28,18 @@ class QuoteService(
 
     /** The quote's invoice, with its lines; the quote turns accepted. */
     suspend fun invoice(quoteId: ObjectId, dueDate: LocalDate): QuoteInvoicing.Outcome =
-        QuoteInvoicing.invoice(quotes, invoices, clients, quoteId, dueDate)
+        QuoteInvoicing.invoice(quotes, invoices, clientServices, clients, quoteId, dueDate)
+
+    /** The quote's Serviços row, with its lines, invoiced later with the client's other open work; the quote turns accepted. */
+    suspend fun service(quoteId: ObjectId, performedAt: LocalDate, name: String?): QuoteServicing.Outcome =
+        QuoteServicing.service(quotes, invoices, clientServices, clients, quoteId, performedAt, name)
 
     companion object {
-        fun of(mongo: MongoModule, tenantId: ObjectId) =
-            QuoteService(QuoteRepository(mongo, tenantId), InvoiceRepository(mongo, tenantId), ClientRepository(mongo, tenantId))
+        fun of(mongo: MongoModule, tenantId: ObjectId) = QuoteService(
+            QuoteRepository(mongo, tenantId),
+            InvoiceRepository(mongo, tenantId),
+            ClientServiceRepository(mongo, tenantId),
+            ClientRepository(mongo, tenantId),
+        )
     }
 }

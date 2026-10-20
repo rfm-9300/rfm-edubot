@@ -113,14 +113,14 @@ class SettingsApiTest {
             assertEquals(HttpStatusCode.UnsupportedMediaType, it.status)
             assertEquals("unsupported_media_type", it.error)
         }
-        a.upload("$studio/logo", "logo.gif", png).let {
+        a.upload("$studio/logo", "logo.png", "GIF89a".toByteArray()).let {
             assertEquals(HttpStatusCode.UnsupportedMediaType, it.status)
-            assertEquals("logo must be png, jpg, or webp", it.error)
+            assertEquals("logo_type", it.error, "the file's bytes decide its type, not its name")
         }
-        assertEquals("empty file", a.upload("$studio/logo", "logo.png", ByteArray(0)).error)
+        assertEquals("empty_file", a.upload("$studio/logo", "logo.png", ByteArray(0)).error)
         a.upload("$studio/logo", "logo.png", ByteArray(2 * 1024 * 1024 + 1)).let {
             assertEquals(HttpStatusCode.PayloadTooLarge, it.status)
-            assertEquals("logo too large", it.error)
+            assertEquals("logo_too_large", it.error)
         }
         assertEquals(HttpStatusCode.NotFound, a.get("$studio/logo").status)
 

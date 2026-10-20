@@ -9,11 +9,13 @@ import com.rfm.edubot.http.ApiException
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.BuiltInDesignTemplates
 import com.rfm.edubot.tenant.model.DocumentDesignStyle
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.content.PartData
 import io.ktor.http.content.forEachPart
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.contentType
 import io.ktor.server.request.receive
 import io.ktor.server.request.receiveMultipart
@@ -61,10 +63,10 @@ internal object DocumentTemplateRoutes : DashboardFeature(DashboardModules.SETTI
                 }
                 part.dispose()
             }
-            val name = filename?.takeIf { it.isNotBlank() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no file provided"))
-            val data = bytes?.takeIf { it.isNotEmpty() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty file"))
-            if (data.size > MAX_LOGO_BYTES) return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "logo too large"))
-            val ext = logoExtension(name) ?: return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "logo must be png, jpg, or webp"))
+            if (filename.isNullOrBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "no_file"))
+            val data = bytes?.takeIf { it.isNotEmpty() } ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "empty_file"))
+            if (data.size > MAX_LOGO_BYTES) return@post call.respond(HttpStatusCode.PayloadTooLarge, mapOf("error" to "logo_too_large"))
+            val ext = logoFormat(data) ?: return@post call.respond(HttpStatusCode.UnsupportedMediaType, mapOf("error" to "logo_type"))
             val brandingDir = Path.of(deps.runtimeConfig.get().pdfStoragePath, ctx.tenant.slug, "branding")
             Files.createDirectories(brandingDir)
             val logoPath = brandingDir.resolve("logo.$ext")
@@ -88,16 +90,7 @@ internal object DocumentTemplateRoutes : DashboardFeature(DashboardModules.SETTI
             call.respond(updated.documentTemplate.dto(updated.name))
         }
         get("/settings/document-template/logo") {
-            val ctx = call.moduleContext()
-            val path = ctx.tenant.documentTemplate.logoPath?.let(Path::of)
-                ?: return@get call.respond(HttpStatusCode.NotFound)
-            if (!Files.isRegularFile(path)) return@get call.respond(HttpStatusCode.NotFound)
-            val contentType = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
-                "png" -> ContentType.Image.PNG
-                "webp" -> ContentType("image", "webp")
-                else -> ContentType.Image.JPEG
-            }
-            call.respondBytes(Files.readAllBytes(path), contentType)
+            call.respondLogo(call.moduleContext().tenant.documentTemplate)
         }
         get("/settings/document-template/presets") {
             val ctx = call.moduleContext()
@@ -152,9 +145,24 @@ internal object DocumentTemplateRoutes : DashboardFeature(DashboardModules.SETTI
 private const val MAX_LOGO_BYTES = 2 * 1024 * 1024
 private const val MAX_SAVED_PRESETS = 20
 
-private fun logoExtension(filename: String): String? = when (filename.substringAfterLast('.', "").lowercase()) {
-    "png" -> "png"
-    "jpg", "jpeg" -> "jpg"
-    "webp" -> "webp"
+/** The company's logo: one file for the sidebar and the quote and invoice PDFs, kept with the document template. */
+internal fun DocumentTemplate.logoFile(): Path? = logoPath?.takeIf { it.isNotBlank() }?.let(Path::of)?.takeIf { Files.isRegularFile(it) }
+
+internal suspend fun ApplicationCall.respondLogo(template: DocumentTemplate) {
+    val path = template.logoFile() ?: return respond(HttpStatusCode.NotFound)
+    val contentType = when (path.fileName.toString().substringAfterLast('.', "").lowercase()) {
+        "png" -> ContentType.Image.PNG
+        "webp" -> ContentType("image", "webp")
+        else -> ContentType.Image.JPEG
+    }
+    respondBytes(Files.readAllBytes(path), contentType)
+}
+
+private val PNG_SIGNATURE = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A)
+
+/** "png" or "jpg" by the file's first bytes, whatever its name: the PDFs can't draw anything else. */
+private fun logoFormat(bytes: ByteArray): String? = when {
+    bytes.size >= PNG_SIGNATURE.size && bytes.copyOf(PNG_SIGNATURE.size).contentEquals(PNG_SIGNATURE) -> "png"
+    bytes.size >= 3 && bytes[0] == 0xFF.toByte() && bytes[1] == 0xD8.toByte() && bytes[2] == 0xFF.toByte() -> "jpg"
     else -> null
 }

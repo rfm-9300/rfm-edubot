@@ -57,8 +57,10 @@ async function apiError(res) {
 
 /** What each page's api() calls with its session: sends `options.body` as JSON, signed with [bearer]. A 401 calls
     [onUnauthorized], which signs the page out, and throws `unauthorized`; any other failure throws apiError(). */
+// A FormData body sets its own multipart Content-Type, boundary included.
 async function apiFetch(path, options, bearer, onUnauthorized) {
-  const headers = { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) };
+  const json = options.body && !(options.body instanceof FormData);
+  const headers = { ...(json ? { 'Content-Type': 'application/json' } : {}), ...(bearer ? { Authorization: `Bearer ${bearer}` } : {}) };
   const res = await fetch(path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
   if (res.status === 401) { onUnauthorized(); throw new Error('unauthorized'); }
   if (!res.ok) throw await apiError(res);

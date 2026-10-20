@@ -3,6 +3,8 @@ package com.rfm.edubot.dashboard
 import com.rfm.edubot.ai.AiClient
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.model.DashboardUser
+import com.rfm.edubot.dashboard.settings.logoFile
+import com.rfm.edubot.dashboard.settings.respondLogo
 import com.rfm.edubot.instagram.InstagramSocialService
 import com.rfm.edubot.oauth.InstagramOAuthScopes
 import com.rfm.edubot.persistence.MongoModule
@@ -90,6 +92,12 @@ internal fun Route.dashboardRoutes(
                     )
                 }
             }
+            openToEverySession("the company's logo, which every sign-in of the company shows in the sidebar; only Settings changes it") {
+                get("/me/logo") {
+                    val ctx = call.dashboardContext() ?: return@get
+                    call.respondLogo(ctx.tenant.documentTemplate)
+                }
+            }
             installDashboardFeatures(deps)
         }
     }
@@ -108,7 +116,16 @@ internal fun Route.dashboardRoutes(
 )
 @Serializable private data class EmployeeMeDto(val id: String, val number: String, val name: String)
 @Serializable private data class CompanyMeDto(val id: String, val name: String, val slug: String, val primary: Boolean)
-@Serializable internal data class TenantMeDto(val id: String, val slug: String, val name: String, val locale: String, val timezone: String, val channels: List<ChannelMeDto> = emptyList())
+@Serializable internal data class TenantMeDto(
+    val id: String,
+    val slug: String,
+    val name: String,
+    val locale: String,
+    val timezone: String,
+    val channels: List<ChannelMeDto> = emptyList(),
+    /** Whether `GET /app/api/me/logo` has an image to show. */
+    val hasLogo: Boolean = false,
+)
 @Serializable internal data class ChannelMeDto(
     val platform: String,
     val externalId: String,
@@ -132,6 +149,7 @@ internal fun Tenant.meDto() = TenantMeDto(
             commentsEnabled = it.platform == Platform.INSTAGRAM && InstagramOAuthScopes.hasComments(it.grantedScopes),
         )
     },
+    hasLogo = documentTemplate.logoFile() != null,
 )
 
 internal fun DashboardUser.dto() = DashboardUserDto(id.toHexString(), email, role.name, status.name)

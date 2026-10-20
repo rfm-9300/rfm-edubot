@@ -1,6 +1,7 @@
 package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.QuoteInvoicing
+import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.api.CreateQuoteRequest
 import com.rfm.edubot.crm.api.dto
 import com.rfm.edubot.crm.api.dtos
@@ -14,7 +15,10 @@ import com.rfm.edubot.http.dateValue
 import com.rfm.edubot.http.enumValue
 import com.rfm.edubot.http.idParam
 import com.rfm.edubot.http.idValue
+import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.timesheets.zone
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -23,9 +27,13 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 
-/** `/crm/quotes`: quotes, their status and PDF, and invoicing one (which needs invoices too). */
+/**
+ * `/crm/quotes`: quotes, their status and PDF, and billing one, by invoicing it (which needs invoices too) or by turning
+ * it into a Serviços row (which needs services too).
+ */
 internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
@@ -70,11 +78,20 @@ internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
                         ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
                     when (val outcome = crm.quoteService.invoice(quote.id, dueDate)) {
                         is QuoteInvoicing.Outcome.Invoiced -> call.respond(HttpStatusCode.Created, outcome.invoice.dto(outcome.client))
-                        is QuoteInvoicing.Outcome.Refused -> when (outcome.reason) {
-                            QuoteInvoicing.ALREADY_INVOICED -> call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_invoiced"))
-                            QuoteInvoicing.CLIENT_NOT_FOUND -> call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
-                            else -> call.respond(HttpStatusCode.NotFound)
-                        }
+                        is QuoteInvoicing.Outcome.Refused -> call.respondQuoteRefused(outcome.reason)
+                    }
+                }
+            }
+            requireModules(DashboardModules.SERVICES) {
+                post("/quotes/{id}/service") {
+                    val crm = deps.crm(call)
+                    val id = call.idParam("id")
+                    val request = call.receive<QuoteServiceRequest>()
+                    val performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { dateValue(it, "performedAt") }
+                        ?: SystemClock.now().toLocalDateTime(crm.tenant.zone()).date
+                    when (val outcome = crm.quoteService.service(id, performedAt, request.name)) {
+                        is QuoteServicing.Outcome.Created -> call.respond(HttpStatusCode.Created, outcome.service.dto(outcome.client))
+                        is QuoteServicing.Outcome.Refused -> call.respondQuoteRefused(outcome.reason)
                     }
                 }
             }
@@ -90,3 +107,12 @@ internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
 
 @Serializable private data class QuoteStatusRequest(val status: String)
 @Serializable private data class ConvertQuoteRequest(val dueDate: String)
+/** Without [performedAt] the work is dated today, in the company's timezone. */
+@Serializable private data class QuoteServiceRequest(val performedAt: String? = null, val name: String? = null)
+
+/** A quote that is gone, whose client is gone, or that is already billed ([QuoteInvoicing.billedBy]). */
+private suspend fun ApplicationCall.respondQuoteRefused(reason: String) = when (reason) {
+    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
+    QuoteInvoicing.CLIENT_NOT_FOUND -> respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
+    else -> respond(HttpStatusCode.NotFound)
+}

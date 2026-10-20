@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-20
 ---
 
 # Dashboard frontend: how the dashboards' scripts are split
@@ -78,7 +78,8 @@ Signup (`loadFacebookSdk()`, `waitForWhatsAppSignupMessage()`, `facebookLoginFor
 | `drawer.js` | `openDrawer()`, `closeDrawer()`, the drawer trail (`openFrom()`, `linksBackTo()`) |
 | `components.js` | Shared markup: `hero()`, `statCards()`, `crmPanel()`, `panelTable()`, `periodNav()`, `dashFacts()`, `detailHead()` / `detailMeta()` / `itemsTable()` |
 | `records.js` | The client, supplier and employee records' blocks: contact links, record card, KPIs, worklist rows, delete / archive / restore |
-| `directories.js` | The three directories' Active / Archived switch and column picker |
+| `columns.js` | The list tables' columns: head and cells from each list's column definitions, the order each person drags them into, the drag ([dashboard-ui.md](dashboard-ui.md)) |
+| `directories.js` | The three directories' Active / Archived switch and column picker (which columns show) |
 | `account.js`, `notifications.js`, `companies.js` | Sign-in screen and account drawer; the bell; the company switcher and Settings → Companies |
 | `home.js` | Home |
 | `inbox.js`, `whatsapp-templates.js`, `instagram.js` | Contacts, Conversations and the template drawer; Settings → WhatsApp templates; Instagram |

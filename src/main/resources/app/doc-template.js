@@ -277,7 +277,7 @@
         ${id === 'company' ? field(S.docAddress, 'address', '', true) : ''}
         <div class="form__row form__row--full"><label class="lbl">${esc(S.docLogo)}</label>
           <div class="tpl__logo-row">
-            <label class="btn btn--sm"><input type="file" id="tpl-logo" accept="image/png,image/jpeg,image/webp" hidden />${esc(S.docLogoUpload)}</label>
+            <label class="btn btn--sm"><input type="file" id="tpl-logo" accept="image/*" hidden />${esc(S.docLogoUpload)}</label>
             ${draft.hasLogo ? `<button class="btn btn--sm btn--ghost" type="button" id="tpl-logo-remove">${esc(S.docLogoRemove)}</button>` : `<span class="muted">${esc(S.docLogoNone)}</span>`}
           </div>
           <p class="hint">${esc(S.docLogoHint)}</p>
@@ -774,12 +774,15 @@
     refreshPresets(body);
   }
 
+  // `deps.prepareLogo` turns an image the PDFs can't draw into one they can; `deps.onLogoChange` tells the page.
   async function uploadLogo(e) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const picked = e.target.files?.[0];
+    e.target.value = '';
+    if (!picked) return;
     const fd = new FormData();
-    fd.append('file', file);
     try {
+      const file = deps.prepareLogo ? await deps.prepareLogo(picked) : picked;
+      fd.append('file', file, file.name || 'logo.png');
       const res = await fetch('/app/api/settings/document-template/logo', {
         method: 'POST',
         headers: deps.getToken() ? { Authorization: `Bearer ${deps.getToken()}` } : {},
@@ -793,11 +796,11 @@
       await loadLogo();
       applyInspector(true);
       applyContent();
+      deps.onLogoChange?.(saved);
       deps.toast(STR().docLogoUploaded);
     } catch {
       deps.toast(STR().docLogoUploadFailed);
     }
-    e.target.value = '';
   }
 
   async function removeLogo() {
@@ -809,6 +812,7 @@
       logoUrl = '';
       applyInspector(true);
       applyContent();
+      deps.onLogoChange?.(saved);
       deps.toast(STR().docLogoRemoved);
     } catch {
       deps.toast(STR().docLogoUploadFailed);

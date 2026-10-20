@@ -183,6 +183,10 @@ object InvoiceFromQuoteAction : AgentAction {
         invoices.list(quote.clientId).firstOrNull { it.quoteId == quote.id && it.status != InvoiceStatus.CANCELLED }?.let {
             return ActionResult.Done(buildJsonObject { put("invoiceId", it.id.toHexString()); put("number", it.number) }, note = "already_invoiced")
         }
+        // A quote that became a Serviços row is invoiced through that row, with the client's other open work.
+        if (ClientServiceRepository(ctx.services.mongo, ctx.tenant.id).findByQuoteId(quote.id).any { it.status != ClientServiceStatus.CANCELLED }) {
+            return ActionResult.Skipped("quote_serviced")
+        }
         val percent = (input.int("depositPercent") ?: 100).coerceIn(1, 100)
         val items: List<LineItem> = if (percent == 100) {
             quote.items

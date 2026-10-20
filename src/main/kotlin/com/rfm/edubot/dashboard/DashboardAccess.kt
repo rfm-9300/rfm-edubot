@@ -40,8 +40,8 @@ internal object DashboardAccessPolicy {
 }
 
 /**
- * What an employee's sign-in reaches: their own pages (`/app/api/portal/…`), their account and `/me`, in the
- * one company their employee record is in. Never a company module.
+ * What an employee's sign-in reaches: their own pages (`/app/api/portal/…`), their account, `/me` and the company's
+ * logo, in the one company their employee record is in. Never a company module.
  */
 internal object EmployeePortal {
     /** The services they register; they become Serviços rows, so the company needs `services`. */
@@ -73,7 +73,8 @@ internal object EmployeePortal {
      */
     fun allowsPath(path: String): Boolean {
         if (path.split('/').any { it == "." || it == ".." } || path.contains("%2e", ignoreCase = true)) return false
-        return path == "/app/api/me" || path == "/app/api/account" || path.startsWith("/app/api/account/") || path.startsWith("/app/api/portal/")
+        return path == "/app/api/me" || path == "/app/api/me/logo" || path == "/app/api/account" || path.startsWith("/app/api/account/") ||
+            path.startsWith("/app/api/portal/")
     }
 
     /** The employee [user] signs in as, while that record exists in [tenant] and isn't archived. */

@@ -88,6 +88,17 @@ Local sessions push straight to `main`. What a session should know:
   Nothing deployed: the first release tag ships both. #84's GitGuardian check stayed red on its known
   false positive (the `autocomplete` value `'new-password'`, described in #84), which has to be marked
   in GitGuardian itself.
+- **#87 merged on 2026-10-20** at Rodrigo's request, a day after it was opened. Meanwhile `main` had
+  gained `f334754` (front end only, merged cleanly) and `68729e8` (a quote becoming a Serviços row, the
+  company logo), whose backend changes went into the files #87 had split up, so `DashboardRoutes.kt`,
+  `AssistantTools.kt` and `AdminRoutes.kt` conflicted. In a worktree the session merged `main` into
+  the branch, took #87's side of those three files, and re-applied what `68729e8` changed in them to
+  the per-area files that now hold that code, by [dashboard-api.md](dashboard-api.md)'s rules: the
+  quote route behind a nested `requireModules(SERVICES)`, `QuoteService.service`, the
+  `http/RequestValues` helpers, `/me/logo` under `openToEverySession`. `68729e8`'s own tests, which
+  the merge brought in, checked the port, and the full suite passed (894 tests). Then the usual flow:
+  push, mark ready, Test and GitGuardian, merge. For a structural PR, porting the feature commits'
+  diffs beats resolving the conflict hunks, which only show the old file.
 - **Agent environments differ:** #51's agent reported no Docker in its VM and ran no Kotlin tests,
   while #52's ran the full suite (577 tests), and #53's, #54's and #55's did too (638, 700 and 643
   tests on their own branches). Don't assume an agent PR was tested beyond what its body says; CI's

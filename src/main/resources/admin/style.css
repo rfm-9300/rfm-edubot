@@ -227,6 +227,10 @@ html[data-theme="dark"] .sidebar { background: var(--bg-deep); }
   font-size: 13px;
   box-shadow: var(--glow-accent);
 }
+/* /app: the company's logo in the mark's place, as wide as the logo needs up to 104px, on the paper white quotes
+   and invoices print it on, in both themes. */
+.brand .brand__mark.brand__mark--logo { width: auto; min-width: 32px; max-width: 104px; padding: 4px; background: var(--doc-page); box-shadow: inset 0 0 0 1px var(--line); }
+.brand__mark--logo img { display: block; height: 100%; max-width: 100%; object-fit: contain; }
 .brand__name { font-family: var(--display); font-weight: 700; letter-spacing: 0.02em; font-size: 14.5px; }
 .brand__sub  { font-size: 11.5px; color: var(--ink-mute); font-weight: 600; letter-spacing: 0.02em; margin-top: 1px; }
 /* /app: the brand is the company switcher; disabled, it looks like the plain brand. */
@@ -665,6 +669,17 @@ table.tbl { width: 100%; border-collapse: collapse; font-size: 13px; }
 .tbl tbody tr.is-current td:first-child { box-shadow: inset 4px 0 0 var(--accent); }
 .tbl tbody tr.is-total td,
 .tbl tbody tr.is-total:hover td { background: var(--surface-2); font-weight: 800; }
+/* A list whose columns move (app/columns.js): a heading with data-col drags sideways, or moves with ← and → once
+   it has the focus. While it drags, its column takes the selection tint and a line down the table marks where
+   the column will land. */
+.tbl thead th[data-col] { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.tbl thead th[data-col]:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-border); }
+.tbl.is-col-dragging, .tbl.is-col-dragging thead th[data-col] { cursor: grabbing; }
+.tbl.is-col-dragging tbody { pointer-events: none; }
+.tbl :is(thead th[data-col], tbody td).is-col-dragged { background: var(--accent-soft); }
+.tbl thead th[data-col].is-col-dragged { color: var(--ink); }
+.tbl :is(thead th[data-col], tbody td):is(.is-drop-before, .is-drop-after) { background-image: linear-gradient(var(--ink), var(--ink)); background-size: 2px 100%; background-repeat: no-repeat; }
+.tbl :is(thead th[data-col], tbody td).is-drop-after { background-position: right; }
 /* Phones and tablets (under 920px, where the sidebar is a menu): a .tbl--stack table turns each row into a
    card. A cell with data-label (its column heading) shows the label above its value and shares a grid of
    four columns, two under 560px; a cell without one (the row's name, its actions, an empty state), a long
@@ -2151,6 +2166,11 @@ html[data-theme="dark"] .cal-grid__dayhead.is-today { color: var(--accent); }
 .tpl__pane .form { margin-top: 14px; }
 .tpl__logo-row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 6px; }
 .tpl__logo-row .btn { cursor: pointer; }
+/* Settings → Appearance: the company's logo on paper white, as it prints; dashed while there is none. */
+.logo-field { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.logo-tile { display: grid; place-items: center; width: 200px; height: 80px; padding: 10px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--doc-page); }
+.logo-tile img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.logo-tile--empty { border-style: dashed; border-color: var(--hairline-strong); background: var(--surface-2); color: var(--ink-mute); font-size: 12.5px; text-align: center; }
 .tpl__actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .tpl-presets-section + .tpl-presets-section { margin-top: 18px; }
 .tpl-presets {

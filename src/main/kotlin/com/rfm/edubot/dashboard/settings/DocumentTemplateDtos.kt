@@ -9,8 +9,6 @@ import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.SavedDocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.serialization.Serializable
-import java.nio.file.Files
-import java.nio.file.Path
 
 @Serializable
 internal data class DocumentTemplateRequest(
@@ -143,7 +141,7 @@ internal fun DocumentTemplate.dto(tenantName: String) = DocumentTemplateDto(
     showDecor = showDecor,
     layout = layout.map { it.dto() },
     style = DocumentDesignStyle.sanitize(style),
-    hasLogo = !logoPath.isNullOrBlank() && Files.isRegularFile(Path.of(logoPath)),
+    hasLogo = logoFile() != null,
     defaults = documentTemplateDefaults(),
 )
 

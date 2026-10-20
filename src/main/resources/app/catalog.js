@@ -102,26 +102,36 @@ function catalogItemLabel(item) {
   return [item.code, item.title].filter(Boolean).join(' · ');
 }
 
+function catalogColumns() {
+  const t = CRM.items;
+  const title = i => {
+    const details = catalogDetails(i);
+    return `<td><div class="col"><span class="name">${escapeHTML(i.title)}</span>${details ? `<span class="sub">${escapeHTML(details)}</span>` : ''}</div></td>`;
+  };
+  return [
+    { id: 'code', label: t.thCode, cell: i => `<td class="id">${escapeHTML(i.code || '')}</td>` },
+    { id: 'title', label: t.thTitle, cell: title },
+    { id: 'type', label: t.thType, cell: i => `<td>${catalogTypePill(i.type)}${i.bookable && i.durationMinutes && hasModule('bookings') ? ` <span class="pill pill--ok">${escapeHTML(t.bookablePill({ min: i.durationMinutes }))}</span>` : ''}</td>` },
+    { id: 'category', label: t.thCategory, cell: i => `<td class="muted">${escapeHTML(i.category)}</td>` },
+    { id: 'unit', label: t.thUnit, cell: i => `<td class="mono muted">${escapeHTML(i.unit)}</td>` },
+    { id: 'price', label: t.thPrice, head: 'right', cell: i => `<td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>` },
+    {
+      id: 'actions', label: t.thActions, head: 'right', pin: 'end', cell: i => `<td class="right"><div class="actions">
+        <button class="iconbtn" type="button" title="${escapeHTML(t.editTitle)}" data-edit-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
+        <button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(t.deleteTitle)}" data-delete-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 5 L13 5 M6 5 L6 3 L10 3 L10 5 M5 5 L6 13 L10 13 L11 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
+      </div></td>`,
+    },
+  ];
+}
+
 function renderCatalog(root) {
   const t = CRM.items;
   const q = state.search.toLowerCase();
+  const columns = orderedColumns('catalog', catalogColumns());
   const rows = state.catalog
     .filter(i => !q || `${i.code || ''} ${i.title || ''} ${i.description || ''} ${i.category || ''}`.toLowerCase().includes(q))
-    .map(i => {
-      const details = catalogDetails(i);
-      return `<tr>
-      <td class="id">${escapeHTML(i.code || '')}</td>
-      <td><div class="col"><span class="name">${escapeHTML(i.title)}</span>${details ? `<span class="sub">${escapeHTML(details)}</span>` : ''}</div></td>
-      <td>${catalogTypePill(i.type)}${i.bookable && i.durationMinutes && hasModule('bookings') ? ` <span class="pill pill--ok">${escapeHTML(t.bookablePill({ min: i.durationMinutes }))}</span>` : ''}</td>
-      <td class="muted">${escapeHTML(i.category)}</td>
-      <td class="mono muted">${escapeHTML(i.unit)}</td>
-      <td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>
-      <td class="right"><div class="actions">
-        <button class="iconbtn" type="button" title="${escapeHTML(t.editTitle)}" data-edit-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
-        <button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(t.deleteTitle)}" data-delete-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M3 5 L13 5 M6 5 L6 3 L10 3 L10 5 M5 5 L6 13 L10 13 L11 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
-      </div></td>
-    </tr>`;
-    }).join('');
+    .map(i => `<tr>${columnCells(columns, i)}</tr>`)
+    .join('');
   const nSrv = state.catalog.filter(i => i.type === 'service' || i.type === 'servico').length;
   const nMat = state.catalog.length - nSrv;
   root.innerHTML = hero(labels.catalog, CRM.tabs.items.desc, statCards([
@@ -130,11 +140,13 @@ function renderCatalog(root) {
   ])) + crmPanel({
     title: t.catalogTitle,
     tag: t.tag({ n: state.catalog.length }),
-    head: `<tr><th>${escapeHTML(t.thCode)}</th><th>${escapeHTML(t.thTitle)}</th><th>${escapeHTML(t.thType)}</th><th>${escapeHTML(t.thCategory)}</th><th>${escapeHTML(t.thUnit)}</th><th class="right">${escapeHTML(t.thPrice)}</th><th class="right">${escapeHTML(t.thActions)}</th></tr>`,
+    tools: columnOrderButton('catalog'),
+    head: columnsHead(columns, 'catalog'),
     rows,
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
   $$('[data-edit-item]', root).forEach(btn => btn.addEventListener('click', () => openCatalogForm(btn.dataset.editItem)));
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
+  wireColumnOrder(root, 'catalog', catalogColumns());
 }

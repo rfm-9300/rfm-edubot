@@ -42,7 +42,7 @@ internal class TenantCrm(mongo: MongoModule, val tenant: Tenant) {
     val clientServices by lazy { ClientServiceRepository(mongo, tenant.id) }
 
     val clientDirectory: ClientDirectory get() = ClientDirectory(clients, ClientFields.of(tenant))
-    val quoteService: QuoteService get() = QuoteService(quotes, invoices, clients)
+    val quoteService: QuoteService get() = QuoteService(quotes, invoices, clientServices, clients)
     val invoiceService: InvoiceService get() = InvoiceService(invoices, clientServices, clients)
 
     val pdfGenerator: PdfGenerator get() = PdfGenerator()

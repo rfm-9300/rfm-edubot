@@ -10,6 +10,22 @@ function renderCompanySwitch() {
   brand.title = switchable ? STR.companySwitchAria : '';
 }
 
+// The company's logo takes the brand mark's place. An <img> can't send the session's token, so it is fetched
+// and kept as an object URL, which Settings → Appearance previews too.
+let brandLogoUrl = '';
+async function paintBrandLogo() {
+  const mark = $('#brand .brand__mark');
+  if (!mark) return;
+  mark.dataset.initials ??= mark.textContent;
+  const url = state.me?.tenant?.hasLogo ? await apiBlob('/app/api/me/logo').then(blob => URL.createObjectURL(blob)).catch(() => '') : '';
+  if (brandLogoUrl) URL.revokeObjectURL(brandLogoUrl);
+  brandLogoUrl = url;
+  mark.classList.toggle('brand__mark--logo', !!url);
+  mark.textContent = url ? '' : mark.dataset.initials;
+  if (url) mark.append(Object.assign(new Image(), { src: url, alt: '' }));
+  paintLogoPreview();
+}
+
 function companyErrorText(err, fallback) {
   const key = `companyErr_${err?.code || ''}`;
   return err?.code && STR[key] !== `app.${key}` ? STR[key] : fallback;

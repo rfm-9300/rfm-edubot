@@ -75,6 +75,7 @@ function renderBookings(root) {
   </div>`;
   const body = agenda ? bookingAgendaHtml() : bookingPendingPanel(pending) + bookingWeekHtml(days, today);
   root.innerHTML = hero(labels.bookings, STR.bookingsDesc, stats) + bookingSetupHtml() + toolbar + body;
+  wireColumnOrder(root, 'bookings', agendaColumns());
 
   $$('[data-booking-view]', root).forEach(b => b.addEventListener('click', () => { state.bookingView = b.dataset.bookingView; render(); }));
   $$('[data-week-shift]', root).forEach(b => b.addEventListener('click', async () => {
@@ -181,10 +182,26 @@ function bookingWeekHtml(days, today) {
   return `<div class="panel cal-wrap"><div class="cal-grid">${head}${rows}</div></div>`;
 }
 
+function agendaColumns() {
+  return [
+    { id: 'when', label: STR.bookingsThWhen, cell: b => `<td class="mono">${escapeHTML(bookingTimeRange(b))}</td>` },
+    { id: 'contact', label: STR.bookingsThContact, cell: b => `<td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td>` },
+    { id: 'service', label: STR.bookingsThService, cell: b => `<td>${escapeHTML(bookingServiceName(b))}</td>` },
+    { id: 'price', label: STR.bookingsPrice, head: 'right', cell: b => `<td class="num">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : '—'}</td>` },
+    { id: 'status', label: STR.bookingsThStatus, cell: b => `<td>${bookingPill(b.status)}</td>` },
+    {
+      id: 'action', label: '', pin: 'end', cell: b => `<td class="right">${b.status === 'PENDING'
+        ? `<button class="btn btn--sm btn--accent" type="button" data-booking-status="CONFIRMED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsConfirm)}</button>`
+        : `<span class="muted">${escapeHTML(bookingSourceLabel(b.source))}</span>`}</td>`,
+    },
+  ];
+}
+
 function bookingAgendaHtml() {
   const q = state.search.toLowerCase();
   const filter = state.bookingStatusFilter;
   const today = todayKey();
+  const columns = orderedColumns('bookings', agendaColumns());
   const list = state.bookingUpcoming
     .filter(b => bookingLocal(b).slice(0, 10) >= today)
     .filter(b => !filter || b.status === filter)
@@ -193,19 +210,9 @@ function bookingAgendaHtml() {
   let lastDay = '';
   const rows = list.map(b => {
     const day = bookingLocal(b).slice(0, 10);
-    const dayRow = day === lastDay ? '' : `<tr class="is-day"><td colspan="6">${escapeHTML(capFirst([relativeDayLabel(day), fmtDayKey(day, { weekday: 'long', day: 'numeric', month: 'long' })].filter(Boolean).join(' · ')))}</td></tr>`;
+    const dayRow = day === lastDay ? '' : `<tr class="is-day"><td colspan="${columns.length}">${escapeHTML(capFirst([relativeDayLabel(day), fmtDayKey(day, { weekday: 'long', day: 'numeric', month: 'long' })].filter(Boolean).join(' · ')))}</td></tr>`;
     lastDay = day;
-    const action = b.status === 'PENDING'
-      ? `<button class="btn btn--sm btn--accent" type="button" data-booking-status="CONFIRMED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsConfirm)}</button>`
-      : `<span class="muted">${escapeHTML(bookingSourceLabel(b.source))}</span>`;
-    return `${dayRow}<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-booking-open="${escapeHTML(b.id)}">
-      <td class="mono">${escapeHTML(bookingTimeRange(b))}</td>
-      <td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td>
-      <td>${escapeHTML(bookingServiceName(b))}</td>
-      <td class="num">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : '—'}</td>
-      <td>${bookingPill(b.status)}</td>
-      <td class="right">${action}</td>
-    </tr>`;
+    return `${dayRow}<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-booking-open="${escapeHTML(b.id)}">${columnCells(columns, b)}</tr>`;
   }).join('');
   const chips = [''].concat(BOOKING_STATUSES)
     .map(s => `<button class="chip ${filter === s ? 'is-on' : ''}" type="button" data-booking-filter="${s}">${escapeHTML(s ? bookingStatusLabel(s) : STR.bookingsStatusAll)}</button>`)
@@ -214,8 +221,8 @@ function bookingAgendaHtml() {
   return crmPanel({
     title: STR.bookingsAgendaTitle({ days: BOOKING_AGENDA_DAYS }),
     tag: list.length,
-    tools: chips,
-    head: `<tr><th>${escapeHTML(STR.bookingsThWhen)}</th><th>${escapeHTML(STR.bookingsThContact)}</th><th>${escapeHTML(STR.bookingsThService)}</th><th class="right">${escapeHTML(STR.bookingsPrice)}</th><th>${escapeHTML(STR.bookingsThStatus)}</th><th></th></tr>`,
+    tools: chips + columnOrderButton('bookings'),
+    head: columnsHead(columns, 'bookings'),
     rows,
     empty: narrowed ? STR.bookingsEmptyList : STR.bookingsEmptyAgenda,
     emptyDesc: narrowed ? '' : STR.bookingsEmptyAgendaDesc,

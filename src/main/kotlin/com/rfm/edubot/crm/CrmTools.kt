@@ -31,7 +31,7 @@ class CrmTools(
     clientServices: ClientServiceRepository,
 ) {
     private val directory = ClientDirectory(clients)
-    private val quoteService = QuoteService(quotes, invoices, clients)
+    private val quoteService = QuoteService(quotes, invoices, clientServices, clients)
     private val invoiceService = InvoiceService(invoices, clientServices, clients)
 
     val definitions: List<ToolDefinition> = listOf(

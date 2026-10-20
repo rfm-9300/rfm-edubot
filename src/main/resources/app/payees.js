@@ -61,7 +61,7 @@ function renderSuppliers(root) {
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
     .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
-    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, ids, s)}</tr>`)
+    .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, s, ids)}</tr>`)
     .join('');
   const typeFilter = types.length
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
@@ -74,8 +74,8 @@ function renderSuppliers(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: typeFilter + directoryViewChips('suppliers') + columnsButton('suppliers'),
-    head: columnsHead(columns),
+    tools: typeFilter + directoryViewChips('suppliers') + columnsButton('suppliers') + columnOrderButton('suppliers'),
+    head: columnsHead(columns, 'suppliers'),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
@@ -83,6 +83,7 @@ function renderSuppliers(root) {
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
   $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('suppliers', supplierColumns(), labels.suppliers));
+  wireColumnOrder(root, 'suppliers', supplierColumns());
   wireDirectoryView(root);
 }
 
@@ -95,7 +96,7 @@ function renderEmployees(root) {
   const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
-    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, ids, e)}</tr>`)
+    .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, e, ids)}</tr>`)
     .join('');
   const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
   root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
@@ -105,14 +106,15 @@ function renderEmployees(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('employees') + columnsButton('employees'),
-    head: columnsHead(columns),
+    tools: directoryViewChips('employees') + columnsButton('employees') + columnOrderButton('employees'),
+    head: columnsHead(columns, 'employees'),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
     emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
   });
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
+  wireColumnOrder(root, 'employees', employeeColumns());
   wireDirectoryView(root);
 }
 

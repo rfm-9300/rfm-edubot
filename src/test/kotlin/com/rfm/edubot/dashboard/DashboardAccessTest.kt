@@ -169,7 +169,7 @@ class DashboardAccessTest {
 
     @Test
     fun `an employee's session only reaches its own pages`() {
-        listOf("/app/api/me", "/app/api/account", "/app/api/account/password", "/app/api/portal/services", "/app/api/portal/services/abc")
+        listOf("/app/api/me", "/app/api/me/logo", "/app/api/account", "/app/api/account/password", "/app/api/portal/services", "/app/api/portal/services/abc")
             .forEach { assertTrue(EmployeePortal.allowsPath(it), it) }
         listOf(
             "/app/api/overview", "/app/api/crm/clients", "/app/api/crm/service-submissions", "/app/api/notifications",

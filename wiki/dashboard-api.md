@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Dashboard API structure
@@ -47,18 +47,19 @@ a route that isn't behind one.
 - **Denial bodies are what each area answered before.** `SILENT` is a bare 403 (most areas);
   `MODULE_DISABLED` is `{"error":"module_disabled"}` (agents, integrations, email).
 - **Nested gates take the union.** Invoicing a quote needs quotes and invoices, so it nests
-  `requireModules(INVOICES)` inside the quotes area (likewise Serviços → invoice, and agents' client
+  `requireModules(INVOICES)` inside the quotes area, and turning a quote into a Serviços row nests
+  `requireModules(SERVICES)` there (likewise Serviços → invoice, and agents' client
   automation inside `agents`). Ktor runs only the innermost installation of a
   route-scoped plugin, so the nested gate adds the modules of the gate around it (`enclosingGate()`);
   without that, the outer check would be skipped.
 - **Open routes say why.** `openToEverySession(reason) { … }` marks what every session needs whatever
-  its modules: `/me`, the account, notifications, switching company, connecting a channel. The reason
-  is required and appears in the route tree the audit reads.
+  its modules: `/me` and the company's logo (`/me/logo`), the account, notifications, switching
+  company, connecting a channel. The reason is required and appears in the route tree the audit reads.
 - **Checks that depend on the request stay in the handler**: a payment to an employee needs
   `employees`, linking a payment to a client needs `clients`, emailing a quote or an invoice needs
   that module, recording what an email suggestion led to needs the record's module, and the assistant
   only offers the tools of enabled modules.
-- An employee's sign-in never carries modules; the validator limits it to `/app/api/me`,
+- An employee's sign-in never carries modules; the validator limits it to `/app/api/me`, `/me/logo`,
   `/account*` and `/portal/*` ([employee-portal-and-time-clock.md](employee-portal-and-time-clock.md)).
 - `Route.intercept` is deprecated in Ktor 3, hence a route-scoped plugin; its `on(AuthenticationChecked)`
   hook runs after the JWT validator has stored the context.
@@ -73,11 +74,11 @@ feature.
 - **CRM writes have one implementation.** The dashboard, the backoffice (`admin/TenantAdminRoutes.kt`),
   the bot's `CrmTools` and the assistant all write through `ClientDirectory` (a client's required
   fields, details and custom fields, phone uniqueness, create-or-restore by phone), `QuoteService`
-  (create, revise, status, invoice) and `InvoiceService` (create, paid, tax office code, installments,
-  cancel, delete, invoicing Serviços). Services take and return domain types and outcomes
-  (`ClientDirectory.Outcome`, `InvoiceService.ServicesInvoiced`), never HTTP, so each caller keeps its
-  own answers: the routes their 4xx bodies, `CrmTools` the exception messages `MessagePipeline`
-  matches.
+  (create, revise, status, invoice, turn into a Serviços row) and `InvoiceService` (create, paid, tax
+  office code, installments, cancel, delete, invoicing Serviços). Services take and return domain
+  types and outcomes (`ClientDirectory.Outcome`, `InvoiceService.ServicesInvoiced`), never HTTP, so
+  each caller keeps its own answers: the routes their 4xx bodies, `CrmTools` the exception messages
+  `MessagePipeline` matches.
 - `ClientDirectory`, not `ClientService`: `crm.model.ClientService` is already a Serviços row.
 - **Lists don't look up per row.** Quotes, invoices, Serviços and payments load the names they show
   with one `findByIds` per kind (clients, suppliers, employees) and map through the batched `dtos(...)`
@@ -142,3 +143,9 @@ Every refusal is `{"error": code, "detail": field}`, `detail` only when it names
   `OverviewApiTest`, `BookingApiTest`, `InstagramApiTest`) covers its gate, isolation (company B
   can't read, change or list company A's records, and A's are unchanged after B tries) and its error
   codes. `StatusPagesTest` pins the contract on its own.
+- **Gotcha:** the route tests older than #87 (`EmployeeWorkRoutesTest`, `PersonaRoutesTest`,
+  `AgentRoutesTest` and about a dozen more) mount their routes by hand, without StatusPages. There a
+  handler's `ApiException` (the `invalid_id`, `invalid_date` and `invalid_status` of
+  `http/RequestValues.kt`) isn't turned into its 400, so a test that asserts one of those codes needs
+  `configureStatusPages()` in its `application { }`, as `BillingRoutesTest` has since the merge of
+  `main` into #87, or `dashboardApiTest`.

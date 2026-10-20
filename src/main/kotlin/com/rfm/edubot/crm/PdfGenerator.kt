@@ -414,8 +414,9 @@ class PdfGenerator {
 
         val x = block.x
         val y = block.pdfY()
-        if (logoBytes != null) {
-            val image = PDImageXObject.createFromByteArray(doc, logoBytes, "logo")
+        // A stored logo PDFBox can't read (a WebP from before uploads were checked) leaves the name card, not a failed PDF.
+        val image = logoBytes?.let { runCatching { PDImageXObject.createFromByteArray(doc, it, "logo") }.getOrNull() }
+        if (image != null) {
             val scale = minOf(block.w / image.width, block.h / image.height)
             val imageW = image.width * scale
             val imageH = image.height * scale

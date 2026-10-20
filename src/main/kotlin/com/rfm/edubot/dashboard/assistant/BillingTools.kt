@@ -1,7 +1,6 @@
 package com.rfm.edubot.dashboard.assistant
 
 import com.mongodb.client.model.Filters
-import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.model.ClientServiceStatus
@@ -115,12 +114,15 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
         val quote = s.resolveQuote(args.text("quote_id") ?: throw missing("quote_id"))
         val dueDate = args.date("due_date") ?: throw ToolProblem("due_date_required", "Ask when the invoice is due (YYYY-MM-DD).")
         invoicedQuotes(listOf(quote.id))[quote.id]?.let { throw ToolProblem(QuoteInvoicing.ALREADY_INVOICED, "${quote.number} is already on invoice $it.") }
+        s.clientServices.findByQuoteId(quote.id).firstOrNull { it.status != ClientServiceStatus.CANCELLED }?.let {
+            throw ToolProblem(QuoteInvoicing.ALREADY_SERVICED, "${quote.number} already became the service \"${it.name}\"; invoice that service instead.")
+        }
         return quote to dueDate
     }
 
     private suspend fun convertQuote(args: JsonObject): JsonObject {
         val (quote, dueDate) = quoteToInvoice(args)
-        return when (val outcome = QuoteService(s.quotes, s.invoices, s.clients).invoice(quote.id, dueDate)) {
+        return when (val outcome = QuoteService(s.quotes, s.invoices, s.clientServices, s.clients).invoice(quote.id, dueDate)) {
             is QuoteInvoicing.Outcome.Invoiced -> buildJsonObject {
                 put("created", true)
                 put("type", "invoice")
@@ -135,6 +137,7 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
                 outcome.reason,
                 when (outcome.reason) {
                     QuoteInvoicing.ALREADY_INVOICED -> "This quote already has an invoice that isn't cancelled."
+                    QuoteInvoicing.ALREADY_SERVICED -> "This quote already became a service; invoice that service instead."
                     else -> "That quote or its client no longer exists."
                 },
             )
@@ -155,7 +158,7 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
             ClientServiceStatus.entries.firstOrNull { it.name == st } ?: throw ToolProblem("invalid_status", "Use OPEN, INVOICED or CANCELLED.")
         }
         val clientId = args.text("client_id")?.let { s.resolveClient(it).id }
-        val found = ClientServiceRepository(s.mongo, s.tenant.id).list(clientId, status)
+        val found = s.clientServices.list(clientId, status)
         val shown = found.take(s.limit(args))
         val names = s.clientNames(shown.map { it.clientId })
         return buildJsonObject {

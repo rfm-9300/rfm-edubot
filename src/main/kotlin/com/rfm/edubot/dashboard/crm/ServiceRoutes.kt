@@ -2,6 +2,7 @@ package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.ClientServiceDelete
 import com.rfm.edubot.crm.InvoiceService
+import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.api.CreateClientServiceRequest
 import com.rfm.edubot.crm.api.InvoiceClientServicesRequest
 import com.rfm.edubot.crm.api.UpdateClientServiceRequest
@@ -14,6 +15,7 @@ import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.requireModules
+import com.rfm.edubot.http.idValue
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -34,7 +36,9 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val crm = deps.crm(call)
                 val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
                 val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
-                call.respond(crm.clientServices.list(clientId, status).dtos(crm.clients))
+                val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "quoteId") }
+                val rows = if (quoteId != null) crm.clientServices.findByQuoteId(quoteId) else crm.clientServices.list(clientId, status)
+                call.respond(rows.dtos(crm.clients))
             }
             get("/services/{id}") {
                 val crm = deps.crm(call)
@@ -84,6 +88,13 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val request = call.receive<UpdateClientServiceRequest>()
                 serviceItemsError(request.items)?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val status = request.status?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
+                if (status == ClientServiceStatus.OPEN) {
+                    val existing = crm.clientServices.findById(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
+                    val quote = existing.quoteId?.takeIf { existing.status == ClientServiceStatus.CANCELLED }?.let { crm.quotes.findById(it) }
+                    if (quote != null && QuoteInvoicing.billedBy(quote, crm.invoices, crm.clientServices) != null) {
+                        return@patch call.respond(HttpStatusCode.Conflict, mapOf("error" to "quote_billed"))
+                    }
+                }
                 val service = crm.clientServices.update(
                     id = id,
                     name = request.name,
