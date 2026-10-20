@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-19
+updated: 2026-10-20
 ---
 
 # Cursor cloud agents on this repo
@@ -131,7 +131,14 @@ Local sessions push straight to `main`. What a session should know:
   `/app/api` and backoffice endpoint's status and body for several sessions and module mixes, from a
   `testApplication` mounting the real routes over a throwaway Mongo, before and after, and diffed the
   two; a `git worktree` of the old commit gave the "before". It kept that probe out of git, since the
-  HTTP tests ([dashboard-api.md](dashboard-api.md)) hold the behavior from then on.
+  HTTP tests ([dashboard-api.md](dashboard-api.md)) hold the behavior from then on. #88's VM
+  (2026-10-20) had no Docker until `apt-get update` (before it, apt found no `docker.io`). A
+  standalone `mongod` binary with `TEST_MONGO_URI` runs the `TestMongo` tests without Docker, but
+  `PersonaCompilerTest`'s note-order assertions fail on it and pass on the Testcontainers replica set,
+  so judge the suite on the replica set, as CI runs it. For a walkthrough without Google, `./gradlew
+  run` takes every setting as an environment variable (no `.env` needed), `htpasswd` in
+  `httpd:2.4-alpine` gives the BCrypt `ADMIN_PASSWORD_HASH`, and the backoffice's **Open Dashboard**
+  signs a computer-use agent into a company.
 - The roughly 25 Dependabot PRs of 2026-09-25 and 2026-10-02 (Kotlin 2.4.20, Ktor 3.6.0, the Mongo
   driver 5.12, kotest 6, Testcontainers 1.21.4 and, for mobile, AGP 9.4.1, among others) were closed
   unmerged on 2026-10-06, and the 2026-10-09 batch on 2026-10-11. Only Testcontainers went in, by hand

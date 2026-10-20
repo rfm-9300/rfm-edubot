@@ -57,7 +57,12 @@ the structure and diagrams are in [`docs/architecture.md` → Building](../docs/
   changes add) has passed, or when it is more than the larger of 7 days and 10% of its duration
   behind; at risk past the larger of 2 days and 3%, or when any phase is late (past its end, or 20
   points behind its own plan). A finished project (100%) is on track whatever the dates.
-- Changing a project to active stamps its actual start with today, and to completed its actual end.
+- Changing a project to active stamps its actual start with today, and to completed its actual end,
+  unless the form gives the day: a project entered while it already runs keeps the day it really
+  started (found in the walkthrough, where every seeded project otherwise started "today").
+- The Projects timeline draws each project's plan, planned start to revised end, which progress and
+  today are read against; a finished project's bar is the time it took. Mixing the actual start with the
+  planned end drew a project that started after its planned end as a sliver.
 - These thresholds are product choices, not industry standards: change them in one place and the
   pages, Home and the client's page follow.
 
