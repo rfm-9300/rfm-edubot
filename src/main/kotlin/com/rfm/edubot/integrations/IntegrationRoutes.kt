@@ -4,9 +4,10 @@ import com.rfm.edubot.dashboard.DashboardAccessPolicy
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.DashboardUserRepository
-import com.rfm.edubot.dashboard.dashboardContext
+import com.rfm.edubot.dashboard.ModuleDenial
+import com.rfm.edubot.dashboard.moduleContext
 import com.rfm.edubot.dashboard.model.DashboardUserRole
-import com.rfm.edubot.dashboard.requireModule
+import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.integrations.email.EmailAddresses
 import com.rfm.edubot.integrations.email.EmailSendResult
@@ -60,100 +61,102 @@ fun Route.integrationRoutes(
 
     authenticate("dashboard") {
         route("/app/api/integrations") {
-            get {
-                val ctx = call.integrationsContext() ?: return@get
-                val today = email.today(ctx.tenant)
-                val limit = email.dailyLimit(ctx.tenant)
-                call.respond(
-                    IntegrationsDto(
-                        google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect(), inbox = google.inboxAvailable),
-                        connections = connections.list(ctx.tenant.id).map { it.dto(today, limit) },
-                        canManage = ctx.canManageIntegrations(),
-                    ),
-                )
-            }
+            requireModules(DashboardModules.SETTINGS, denial = ModuleDenial.MODULE_DISABLED) {
+                get {
+                    val ctx = call.moduleContext()
+                    val today = email.today(ctx.tenant)
+                    val limit = email.dailyLimit(ctx.tenant)
+                    call.respond(
+                        IntegrationsDto(
+                            google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect(), inbox = google.inboxAvailable),
+                            connections = connections.list(ctx.tenant.id).map { it.dto(today, limit) },
+                            canManage = ctx.canManageIntegrations(),
+                        ),
+                    )
+                }
 
-            // The operator would consent with their own Google account, so only the company's admins connect.
-            get("/google/connect") {
-                val ctx = call.integrationsContext() ?: return@get
-                if (ctx.principalType == DashboardAccessPolicy.OPERATOR_IMPERSONATION) {
-                    return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "operator_not_allowed"))
+                // The operator would consent with their own Google account, so only the company's admins connect.
+                get("/google/connect") {
+                    val ctx = call.moduleContext()
+                    if (ctx.principalType == DashboardAccessPolicy.OPERATOR_IMPERSONATION) {
+                        return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "operator_not_allowed"))
+                    }
+                    val user = ctx.user?.takeIf { ctx.canConnect() }
+                        ?: return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    if (!google.configured) {
+                        return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "google_not_configured"))
+                    }
+                    val inbox = call.request.queryParameters["inbox"] in TRUTHY
+                    if (inbox && !google.inboxAvailable) {
+                        return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
+                    }
+                    val state = oauthState.mint(
+                        ctx.tenant.slug,
+                        origin = OAuthState.ORIGIN_DASHBOARD,
+                        purpose = if (inbox) OAuthState.PURPOSE_GOOGLE_INBOX else OAuthState.PURPOSE_GOOGLE,
+                        tenantId = ctx.tenant.id.toHexString(),
+                        userId = user.id.toHexString(),
+                    )
+                    val reconnecting = call.request.queryParameters["account"]?.let(EmailAddresses::normalize)
+                        ?.takeIf { account -> connections.list(ctx.tenant.id).any { it.accountEmail == account } }
+                    val scopes = if (inbox) GoogleScopes.inbox else GoogleScopes.send
+                    call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state, scopes = scopes, loginHint = reconnecting)))
                 }
-                val user = ctx.user?.takeIf { ctx.canConnect() }
-                    ?: return@get call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                if (!google.configured) {
-                    return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "google_not_configured"))
-                }
-                val inbox = call.request.queryParameters["inbox"] in TRUTHY
-                if (inbox && !google.inboxAvailable) {
-                    return@get call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
-                }
-                val state = oauthState.mint(
-                    ctx.tenant.slug,
-                    origin = OAuthState.ORIGIN_DASHBOARD,
-                    purpose = if (inbox) OAuthState.PURPOSE_GOOGLE_INBOX else OAuthState.PURPOSE_GOOGLE,
-                    tenantId = ctx.tenant.id.toHexString(),
-                    userId = user.id.toHexString(),
-                )
-                val reconnecting = call.request.queryParameters["account"]?.let(EmailAddresses::normalize)
-                    ?.takeIf { account -> connections.list(ctx.tenant.id).any { it.accountEmail == account } }
-                val scopes = if (inbox) GoogleScopes.inbox else GoogleScopes.send
-                call.respond(mapOf("authorizeUrl" to google.oauth.authorizeUrl(state, scopes = scopes, loginHint = reconnecting)))
-            }
 
-            patch("/{id}") {
-                val ctx = call.integrationsContext() ?: return@patch
-                if (!ctx.canManageIntegrations()) return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                val connection = call.connectionParam(connections, ctx) ?: return@patch
-                val request = runCatching { call.receive<UpdateConnectionRequest>() }.getOrNull()
-                    ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val settings = when (val update = request.applyTo(connection.settings)) {
-                    is SettingsUpdate.Invalid -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to update.error))
-                    is SettingsUpdate.Ok -> update.settings
+                patch("/{id}") {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageIntegrations()) return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    val connection = call.connectionParam(connections, ctx) ?: return@patch
+                    val request = runCatching { call.receive<UpdateConnectionRequest>() }.getOrNull()
+                        ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                    val settings = when (val update = request.applyTo(connection.settings)) {
+                        is SettingsUpdate.Invalid -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to update.error))
+                        is SettingsUpdate.Ok -> update.settings
+                    }
+                    val inboxSync = request.inboxSync?.takeIf { it != connection.settings.inboxSync }
+                    if (inboxSync == true) {
+                        // Reading a company's mail is its admins' decision: an operator may turn it off, never on.
+                        if (!ctx.canConnect()) return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                        if (!google.inboxAvailable) return@patch call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
+                        if (!GoogleScopes.canRead(connection.scopes)) return@patch call.respond(HttpStatusCode.Conflict, mapOf("error" to "needs_consent"))
+                    }
+                    var updated: IntegrationConnection? = connection
+                    if (settings != connection.settings) updated = connections.updateSettings(ctx.tenant.id, connection.id, settings)
+                    if (request.isDefault == true && !connection.isDefault) updated = connections.makeDefault(ctx.tenant.id, connection.id)
+                    if (inboxSync != null) {
+                        updated = connections.setInboxSync(ctx.tenant.id, connection.id, inboxSync)
+                        log.info("Inbox sync {}: tenant={} connection={}", if (inboxSync) "on" else "off", ctx.tenant.slug, connection.id)
+                    }
+                    updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant))) } ?: call.respond(HttpStatusCode.NotFound)
                 }
-                val inboxSync = request.inboxSync?.takeIf { it != connection.settings.inboxSync }
-                if (inboxSync == true) {
-                    // Reading a company's mail is its admins' decision: an operator may turn it off, never on.
-                    if (!ctx.canConnect()) return@patch call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                    if (!google.inboxAvailable) return@patch call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "inbox_not_available"))
-                    if (!GoogleScopes.canRead(connection.scopes)) return@patch call.respond(HttpStatusCode.Conflict, mapOf("error" to "needs_consent"))
-                }
-                var updated: IntegrationConnection? = connection
-                if (settings != connection.settings) updated = connections.updateSettings(ctx.tenant.id, connection.id, settings)
-                if (request.isDefault == true && !connection.isDefault) updated = connections.makeDefault(ctx.tenant.id, connection.id)
-                if (inboxSync != null) {
-                    updated = connections.setInboxSync(ctx.tenant.id, connection.id, inboxSync)
-                    log.info("Inbox sync {}: tenant={} connection={}", if (inboxSync) "on" else "off", ctx.tenant.slug, connection.id)
-                }
-                updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant))) } ?: call.respond(HttpStatusCode.NotFound)
-            }
 
-            post("/{id}/test-email") {
-                val ctx = call.integrationsContext() ?: return@post
-                if (!ctx.canManageIntegrations()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                val connection = call.connectionParam(connections, ctx) ?: return@post
-                // Never a third party: the button can't be used to write to anyone else.
-                val to = ctx.user?.email ?: connection.accountEmail
-                when (val sent = email.sendTest(ctx.tenant, connection, to)) {
-                    is EmailSendResult.Sent -> call.respond(TestEmailDto(to = to, messageId = sent.messageId))
-                    is EmailSendResult.Failed -> call.respond(sent.httpStatus(), mapOf("error" to sent.key))
+                post("/{id}/test-email") {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageIntegrations()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    val connection = call.connectionParam(connections, ctx) ?: return@post
+                    // Never a third party: the button can't be used to write to anyone else.
+                    val to = ctx.user?.email ?: connection.accountEmail
+                    when (val sent = email.sendTest(ctx.tenant, connection, to)) {
+                        is EmailSendResult.Sent -> call.respond(TestEmailDto(to = to, messageId = sent.messageId))
+                        is EmailSendResult.Failed -> call.respond(sent.httpStatus(), mapOf("error" to sent.key))
+                    }
                 }
-            }
 
-            delete("/{id}") {
-                val ctx = call.integrationsContext() ?: return@delete
-                if (!ctx.canManageIntegrations()) return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
-                val connection = call.connectionParam(connections, ctx) ?: return@delete
-                connections.delete(ctx.tenant.id, connection.id) ?: return@delete call.respond(HttpStatusCode.NotFound)
-                email.forget(connection)
-                if (connections.countForAccount(connection.provider, connection.accountEmail) == 0L) {
-                    val token = (connection.refreshToken ?: connection.accessToken)?.let { google.cipher?.open(it) }
-                    val revoked = token != null && google.oauth.revoke(token)
-                    log.info("Google account disconnected: tenant={} connection={} revoked={}", ctx.tenant.slug, connection.id, revoked)
-                } else {
-                    log.info("Google account disconnected, grant kept for another company: tenant={} connection={}", ctx.tenant.slug, connection.id)
+                delete("/{id}") {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageIntegrations()) return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    val connection = call.connectionParam(connections, ctx) ?: return@delete
+                    connections.delete(ctx.tenant.id, connection.id) ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    email.forget(connection)
+                    if (connections.countForAccount(connection.provider, connection.accountEmail) == 0L) {
+                        val token = (connection.refreshToken ?: connection.accessToken)?.let { google.cipher?.open(it) }
+                        val revoked = token != null && google.oauth.revoke(token)
+                        log.info("Google account disconnected: tenant={} connection={} revoked={}", ctx.tenant.slug, connection.id, revoked)
+                    } else {
+                        log.info("Google account disconnected, grant kept for another company: tenant={} connection={}", ctx.tenant.slug, connection.id)
+                    }
+                    call.respond(HttpStatusCode.NoContent)
                 }
-                call.respond(HttpStatusCode.NoContent)
             }
         }
     }
@@ -257,18 +260,6 @@ internal fun DashboardContext.canManageIntegrations(): Boolean =
 
 internal fun DashboardContext.canConnect(): Boolean =
     principalType == DashboardAccessPolicy.TENANT_USER && user?.role == DashboardUserRole.TENANT_ADMIN
-
-private suspend fun ApplicationCall.integrationsContext(): DashboardContext? {
-    val ctx = dashboardContext() ?: run {
-        respond(HttpStatusCode.Unauthorized)
-        return null
-    }
-    if (!ctx.requireModule(DashboardModules.SETTINGS)) {
-        respond(HttpStatusCode.Forbidden, mapOf("error" to "module_disabled"))
-        return null
-    }
-    return ctx
-}
 
 private suspend fun ApplicationCall.connectionParam(connections: IntegrationConnectionRepository, ctx: DashboardContext): IntegrationConnection? {
     val id = parameters["id"]?.toObjectIdOrNull() ?: run {

@@ -1,5 +1,9 @@
 package com.rfm.edubot.instagram
 
+import com.rfm.edubot.dashboard.DashboardDeps
+import com.rfm.edubot.dashboard.DashboardFeature
+import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.moduleContext
 import com.rfm.edubot.tenant.model.Tenant
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
@@ -14,6 +18,13 @@ data class InstagramSocialDeps(
     val tenant: Tenant,
     val service: InstagramSocialService,
 )
+
+/** `/instagram` in the dashboard: the account's posts and the comments on them. */
+internal object InstagramRoutes : DashboardFeature(DashboardModules.INSTAGRAM) {
+    override fun Route.routes(deps: DashboardDeps) {
+        installInstagramSocialRoutes { InstagramSocialDeps(moduleContext().tenant, deps.instagramSocial) }
+    }
+}
 
 fun Route.installInstagramSocialRoutes(resolve: suspend ApplicationCall.() -> InstagramSocialDeps?) {
     route("/instagram") {

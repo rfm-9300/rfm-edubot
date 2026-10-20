@@ -3,12 +3,7 @@ package com.rfm.edubot.dashboard
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.mongodb.ErrorCategory
 import com.mongodb.MongoServerException
-import com.rfm.edubot.admin.ClientServiceDto
-import com.rfm.edubot.admin.CreateClientRequest
-import com.rfm.edubot.admin.CreateLineItemRequest
-import com.rfm.edubot.admin.LineItemDto
-import com.rfm.edubot.admin.dto
-import com.rfm.edubot.admin.serviceItemsError
+import com.rfm.edubot.crm.ClientDraft
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.EmployeeRepository
@@ -17,6 +12,11 @@ import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.crm.SubmissionChange
 import com.rfm.edubot.crm.SubmissionContent
+import com.rfm.edubot.crm.api.ClientServiceDto
+import com.rfm.edubot.crm.api.CreateLineItemRequest
+import com.rfm.edubot.crm.api.LineItemDto
+import com.rfm.edubot.crm.api.dto
+import com.rfm.edubot.crm.api.serviceItemsError
 import com.rfm.edubot.crm.content
 import com.rfm.edubot.crm.isBookable
 import com.rfm.edubot.crm.model.Employee
@@ -123,119 +123,128 @@ fun Route.employeeWorkRoutes(mongo: MongoModule, dashboardUsers: DashboardUserRe
         }
 
         route("/app/api/crm") {
-            get("/service-submissions") {
-                val ctx = call.reviewContext() ?: return@get
-                val params = call.request.queryParameters
-                val employeeId = params["employeeId"]?.takeIf { it.isNotBlank() }?.let { it.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest) }
-                val status = params["status"]?.takeIf { it.isNotBlank() }?.let { raw ->
-                    ServiceSubmissionStatus.entries.firstOrNull { it.name == raw.uppercase() } ?: return@get call.respond(HttpStatusCode.BadRequest)
-                }
-                val rows = ServiceSubmissionRepository(mongo, ctx.tenant.id).list(employeeId, status)
-                call.respond(SubmissionNames.load(mongo, ctx.tenant.id, rows).dtos(rows))
-            }
-            get("/service-submissions/{id}") {
-                val ctx = call.reviewContext() ?: return@get
-                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.NotFound)
-                val submission = ServiceSubmissionRepository(mongo, ctx.tenant.id).findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
-                call.respond(SubmissionNames.load(mongo, ctx.tenant.id, listOf(submission)).dto(submission))
-            }
-            // Claimed before the service is saved, so approving twice (two people, a double click) saves one.
-            post("/service-submissions/{id}/approve") {
-                val ctx = call.reviewContext() ?: return@post
-                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@post call.respond(HttpStatusCode.NotFound)
-                val request = runCatching { call.receive<ApproveSubmissionRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val submissions = ServiceSubmissionRepository(mongo, ctx.tenant.id)
-                val submission = submissions.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
-                if (submission.status != ServiceSubmissionStatus.PENDING) return@post call.respondNotPending()
-                val content = request.changes?.let { call.parsed(it, mongo, ctx.tenant, latest = null) ?: return@post } ?: submission.content()
-                val serviceId = ObjectId()
-                val approved = submissions.approve(submission, content, serviceId, ctx.reviewer()) ?: return@post call.respondNotPending()
-                val service = try {
-                    ClientServiceRepository(mongo, ctx.tenant.id).create(
-                        clientId = approved.clientId,
-                        name = approved.name,
-                        notes = approved.notes,
-                        quantity = 1.0,
-                        unit = "",
-                        unitPriceCents = 0,
-                        bookingServiceId = null,
-                        catalogItemId = approved.catalogItemId,
-                        performedAt = approved.performedAt,
-                        items = approved.items,
-                        employeeId = approved.employeeId,
-                        id = serviceId,
-                    )
-                } catch (e: Exception) {
-                    submissions.reopen(submission, serviceId)
-                    throw e
-                }
-                val names = SubmissionNames.load(mongo, ctx.tenant.id, listOf(approved))
-                call.respond(ApprovedSubmissionDto(names.dto(approved), service.dto(ClientRepository(mongo, ctx.tenant.id).findById(service.clientId))))
-            }
-            post("/service-submissions/{id}/reject") {
-                val ctx = call.reviewContext() ?: return@post
-                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@post call.respond(HttpStatusCode.NotFound)
-                val request = runCatching { call.receive<RejectSubmissionRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                if ((request.reason?.trim()?.length ?: 0) > ServiceSubmissionRepository.MAX_REASON) {
-                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "reason_too_long"))
-                }
-                val submissions = ServiceSubmissionRepository(mongo, ctx.tenant.id)
-                val rejected = submissions.reject(id, request.reason, ctx.reviewer())
-                    ?: return@post if (submissions.findById(id) == null) call.respond(HttpStatusCode.NotFound) else call.respondNotPending()
-                call.respond(SubmissionNames.load(mongo, ctx.tenant.id, listOf(rejected)).dto(rejected))
-            }
-
-            get("/employees/{id}/access") {
-                val (ctx, employee) = call.accessTarget(mongo) ?: return@get
-                call.respond(dashboardUsers.findByEmployee(employee.id).accessDto(ctx.canManageAccess()))
-            }
-            post("/employees/{id}/access") {
-                val (ctx, employee) = call.accessTarget(mongo, manage = true) ?: return@post
-                if (employee.archivedAt != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "employee_archived"))
-                val request = runCatching { call.receive<GiveAccessRequest>() }.getOrNull()
-                    ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val email = EmailAddresses.normalize(request.email) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_email"))
-                newPasswordProblem(request.password)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
-                if (dashboardUsers.findByEmployee(employee.id) != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_has_access"))
-                val user = DashboardUser(
-                    tenantId = ctx.tenant.primaryTenantId,
-                    email = email,
-                    passwordHash = hashPassword(request.password),
-                    role = DashboardUserRole.TENANT_EMPLOYEE,
-                    createdAt = SystemClock.now(),
-                    employeeId = employee.id,
-                    employeeTenantId = ctx.tenant.id,
-                )
-                val created = call.uniqueEmail { dashboardUsers.create(user) } ?: return@post
-                log.info("Employee {} of tenant {} can now sign in as {}", employee.number, ctx.tenant.slug, email)
-                call.respond(HttpStatusCode.Created, created.accessDto(canManage = true))
-            }
-            patch("/employees/{id}/access") {
-                val (ctx, employee) = call.accessTarget(mongo, manage = true) ?: return@patch
-                val request = runCatching { call.receive<ChangeAccessRequest>() }.getOrNull()
-                    ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
-                val user = dashboardUsers.findByEmployee(employee.id) ?: return@patch call.respond(HttpStatusCode.NotFound, mapOf("error" to "no_access"))
-                val email = request.email?.let { EmailAddresses.normalize(it) ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_email")) }
-                val password = request.password?.takeIf { it.isNotEmpty() }
-                password?.let { newPasswordProblem(it)?.let { problem -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to problem)) } }
-                if (email != null && email != user.email) {
-                    val changed = call.uniqueEmail { dashboardUsers.setEmail(user.id, email) != null } ?: return@patch
-                    if (!changed) return@patch call.respond(HttpStatusCode.NotFound, mapOf("error" to "no_access"))
-                }
-                password?.let { dashboardUsers.setPasswordHash(user.id, hashPassword(it)) }
-                request.active?.let { active ->
-                    dashboardUsers.setStatus(user.id, user.tenantId, if (active) DashboardUserStatus.ACTIVE else DashboardUserStatus.DISABLED)
-                }
-                call.respond(dashboardUsers.findById(user.id).accessDto(canManage = true))
-            }
-            delete("/employees/{id}/access") {
-                val (_, employee) = call.accessTarget(mongo, manage = true) ?: return@delete
-                dashboardUsers.deleteByEmployee(employee.id)
-                call.respond(EmployeeAccessDto(canManage = true))
-            }
+            requireModules(DashboardModules.EMPLOYEES, DashboardModules.SERVICES) { reviewRoutes(mongo) }
+            requireModules(DashboardModules.EMPLOYEES) { accessRoutes(mongo, dashboardUsers) }
         }
+    }
+}
+
+/** The team reviewing employees' submissions: the employees and services modules, never an employee. */
+private fun Route.reviewRoutes(mongo: MongoModule) {
+    get("/service-submissions") {
+        val ctx = call.moduleContext()
+        val params = call.request.queryParameters
+        val employeeId = params["employeeId"]?.takeIf { it.isNotBlank() }?.let { it.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest) }
+        val status = params["status"]?.takeIf { it.isNotBlank() }?.let { raw ->
+            ServiceSubmissionStatus.entries.firstOrNull { it.name == raw.uppercase() } ?: return@get call.respond(HttpStatusCode.BadRequest)
+        }
+        val rows = ServiceSubmissionRepository(mongo, ctx.tenant.id).list(employeeId, status)
+        call.respond(SubmissionNames.load(mongo, ctx.tenant.id, rows).dtos(rows))
+    }
+    get("/service-submissions/{id}") {
+        val ctx = call.moduleContext()
+        val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@get call.respond(HttpStatusCode.NotFound)
+        val submission = ServiceSubmissionRepository(mongo, ctx.tenant.id).findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+        call.respond(SubmissionNames.load(mongo, ctx.tenant.id, listOf(submission)).dto(submission))
+    }
+    // Claimed before the service is saved, so approving twice (two people, a double click) saves one.
+    post("/service-submissions/{id}/approve") {
+        val ctx = call.moduleContext()
+        val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@post call.respond(HttpStatusCode.NotFound)
+        val request = runCatching { call.receive<ApproveSubmissionRequest>() }.getOrNull()
+            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+        val submissions = ServiceSubmissionRepository(mongo, ctx.tenant.id)
+        val submission = submissions.findById(id) ?: return@post call.respond(HttpStatusCode.NotFound)
+        if (submission.status != ServiceSubmissionStatus.PENDING) return@post call.respondNotPending()
+        val content = request.changes?.let { call.parsed(it, mongo, ctx.tenant, latest = null) ?: return@post } ?: submission.content()
+        val serviceId = ObjectId()
+        val approved = submissions.approve(submission, content, serviceId, ctx.reviewer()) ?: return@post call.respondNotPending()
+        val service = try {
+            ClientServiceRepository(mongo, ctx.tenant.id).create(
+                clientId = approved.clientId,
+                name = approved.name,
+                notes = approved.notes,
+                quantity = 1.0,
+                unit = "",
+                unitPriceCents = 0,
+                bookingServiceId = null,
+                catalogItemId = approved.catalogItemId,
+                performedAt = approved.performedAt,
+                items = approved.items,
+                employeeId = approved.employeeId,
+                id = serviceId,
+            )
+        } catch (e: Exception) {
+            submissions.reopen(submission, serviceId)
+            throw e
+        }
+        val names = SubmissionNames.load(mongo, ctx.tenant.id, listOf(approved))
+        call.respond(ApprovedSubmissionDto(names.dto(approved), service.dto(ClientRepository(mongo, ctx.tenant.id).findById(service.clientId))))
+    }
+    post("/service-submissions/{id}/reject") {
+        val ctx = call.moduleContext()
+        val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@post call.respond(HttpStatusCode.NotFound)
+        val request = runCatching { call.receive<RejectSubmissionRequest>() }.getOrNull()
+            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+        if ((request.reason?.trim()?.length ?: 0) > ServiceSubmissionRepository.MAX_REASON) {
+            return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "reason_too_long"))
+        }
+        val submissions = ServiceSubmissionRepository(mongo, ctx.tenant.id)
+        val rejected = submissions.reject(id, request.reason, ctx.reviewer())
+            ?: return@post if (submissions.findById(id) == null) call.respond(HttpStatusCode.NotFound) else call.respondNotPending()
+        call.respond(SubmissionNames.load(mongo, ctx.tenant.id, listOf(rejected)).dto(rejected))
+    }
+}
+
+/** The team managing employees' sign-ins: whenever employees have a page to sign in to (services or the time clock). */
+private fun Route.accessRoutes(mongo: MongoModule, dashboardUsers: DashboardUserRepository) {
+    get("/employees/{id}/access") {
+        val (ctx, employee) = call.accessTarget(mongo) ?: return@get
+        call.respond(dashboardUsers.findByEmployee(employee.id).accessDto(ctx.canManageAccess()))
+    }
+    post("/employees/{id}/access") {
+        val (ctx, employee) = call.accessTarget(mongo, manage = true) ?: return@post
+        if (employee.archivedAt != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "employee_archived"))
+        val request = runCatching { call.receive<GiveAccessRequest>() }.getOrNull()
+            ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+        val email = EmailAddresses.normalize(request.email) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_email"))
+        newPasswordProblem(request.password)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+        if (dashboardUsers.findByEmployee(employee.id) != null) return@post call.respond(HttpStatusCode.Conflict, mapOf("error" to "already_has_access"))
+        val user = DashboardUser(
+            tenantId = ctx.tenant.primaryTenantId,
+            email = email,
+            passwordHash = hashPassword(request.password),
+            role = DashboardUserRole.TENANT_EMPLOYEE,
+            createdAt = SystemClock.now(),
+            employeeId = employee.id,
+            employeeTenantId = ctx.tenant.id,
+        )
+        val created = call.uniqueEmail { dashboardUsers.create(user) } ?: return@post
+        log.info("Employee {} of tenant {} can now sign in as {}", employee.number, ctx.tenant.slug, email)
+        call.respond(HttpStatusCode.Created, created.accessDto(canManage = true))
+    }
+    patch("/employees/{id}/access") {
+        val (ctx, employee) = call.accessTarget(mongo, manage = true) ?: return@patch
+        val request = runCatching { call.receive<ChangeAccessRequest>() }.getOrNull()
+            ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+        val user = dashboardUsers.findByEmployee(employee.id) ?: return@patch call.respond(HttpStatusCode.NotFound, mapOf("error" to "no_access"))
+        val email = request.email?.let { EmailAddresses.normalize(it) ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_email")) }
+        val password = request.password?.takeIf { it.isNotEmpty() }
+        password?.let { newPasswordProblem(it)?.let { problem -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to problem)) } }
+        if (email != null && email != user.email) {
+            val changed = call.uniqueEmail { dashboardUsers.setEmail(user.id, email) != null } ?: return@patch
+            if (!changed) return@patch call.respond(HttpStatusCode.NotFound, mapOf("error" to "no_access"))
+        }
+        password?.let { dashboardUsers.setPasswordHash(user.id, hashPassword(it)) }
+        request.active?.let { active ->
+            dashboardUsers.setStatus(user.id, user.tenantId, if (active) DashboardUserStatus.ACTIVE else DashboardUserStatus.DISABLED)
+        }
+        call.respond(dashboardUsers.findById(user.id).accessDto(canManage = true))
+    }
+    delete("/employees/{id}/access") {
+        val (_, employee) = call.accessTarget(mongo, manage = true) ?: return@delete
+        dashboardUsers.deleteByEmployee(employee.id)
+        call.respond(EmployeeAccessDto(canManage = true))
     }
 }
 
@@ -245,16 +254,9 @@ private const val PORTAL_CLIENT_LIMIT = 2000
 
 private suspend fun ApplicationCall.portalSession(): PortalSession? = portalSession(EmployeePortal.MY_SERVICES)
 
-/** The team reviewing employees' submissions: the employees and services modules, never an employee. */
-private suspend fun ApplicationCall.reviewContext(): DashboardContext? {
-    val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) && it.requireModule(DashboardModules.SERVICES) }
-    if (ctx == null) respond(HttpStatusCode.Forbidden)
-    return ctx
-}
-
-/** The team managing employees' sign-ins: whenever employees have a page to sign in to (services or the time clock). */
+/** The session behind the employees gate, when employees have a page to sign in to; answers 403 otherwise. */
 private suspend fun ApplicationCall.accessContext(): DashboardContext? {
-    val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.EMPLOYEES) && EmployeePortal.isAvailable(it.tenant) }
+    val ctx = moduleContext().takeIf { EmployeePortal.isAvailable(it.tenant) }
     if (ctx == null) respond(HttpStatusCode.Forbidden)
     return ctx
 }
@@ -353,11 +355,9 @@ private class SubmissionNames(private val clients: Map<ObjectId, String>, privat
 
     companion object {
         suspend fun load(mongo: MongoModule, tenantId: ObjectId, rows: List<ServiceSubmission>): SubmissionNames {
-            val clients = ClientRepository(mongo, tenantId)
-            val employees = EmployeeRepository(mongo, tenantId)
             return SubmissionNames(
-                clients = rows.map { it.clientId }.distinct().mapNotNull { id -> clients.findById(id)?.let { id to it.name } }.toMap(),
-                employees = rows.map { it.employeeId }.distinct().mapNotNull { id -> employees.findById(id)?.let { id to it.name } }.toMap(),
+                clients = ClientRepository(mongo, tenantId).findByIds(rows.map { it.clientId }).mapValues { it.value.name },
+                employees = EmployeeRepository(mongo, tenantId).findByIds(rows.map { it.employeeId }).mapValues { it.value.name },
             )
         }
     }
@@ -386,7 +386,7 @@ internal data class SubmissionRequest(
         if (latest != null && day > latest) return ParsedSubmission.Invalid("date_in_future")
         if (items.isEmpty()) return ParsedSubmission.Invalid("items_required")
         serviceItemsError(items)?.let { return ParsedSubmission.Invalid(it) }
-        if ((notes?.trim()?.length ?: 0) > CreateClientRequest.MAX_NOTES) return ParsedSubmission.Invalid("notes_too_long")
+        if ((notes?.trim()?.length ?: 0) > ClientDraft.MAX_NOTES) return ParsedSubmission.Invalid("notes_too_long")
         val lines = items.map { it.copy(description = it.description.trim(), unit = it.unit.trim()).toLineItem() }
         val title = name?.trim()?.takeIf { it.isNotEmpty() }
             ?: lines.joinToString(" + ") { it.description.substringBefore(" - ").trim() }.take(ServiceSubmissionRepository.MAX_NAME)

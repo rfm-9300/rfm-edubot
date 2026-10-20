@@ -1,7 +1,7 @@
 package com.rfm.edubot.crm
 
 import com.mongodb.MongoServerException
-import com.rfm.edubot.admin.StandardItemRequest
+import com.rfm.edubot.crm.api.StandardItemRequest
 import com.rfm.edubot.bookings.BookableServiceRepository
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.persistence.MongoModule

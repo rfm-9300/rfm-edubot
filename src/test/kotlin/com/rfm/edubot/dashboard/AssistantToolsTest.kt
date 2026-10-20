@@ -333,7 +333,7 @@ class AssistantToolsTest {
     fun `quote, invoice and booking cards name what their ids point at, and doomed ones are caught first`() = runBlocking<Unit> {
         val c = Company()
         val ana = c.clients.create("Ana Ribeiro", c.phone(), "Rua A", taxId = "123456789")
-        val crm = CrmToolPack(CrmTools(c.clients, c.quotes, c.invoices, StandardItemRepository(mongo, c.tenant.id)))
+        val crm = CrmToolPack(CrmTools(c.clients, c.quotes, c.invoices, StandardItemRepository(mongo, c.tenant.id), ClientServiceRepository(mongo, c.tenant.id)))
         val items = buildJsonObject {
             put("client_id", ana.id.toHexString())
             put("items", kotlinx.serialization.json.buildJsonArray { add(buildJsonObject { put("description", "Pintura"); put("quantity", 3); put("price_eur", 20.5) }) })

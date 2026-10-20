@@ -4,9 +4,9 @@ import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardModules
-import com.rfm.edubot.dashboard.dashboardContext
 import com.rfm.edubot.dashboard.isAdmin
-import com.rfm.edubot.dashboard.requireModule
+import com.rfm.edubot.dashboard.moduleContext
+import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
@@ -48,177 +48,179 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
     val settings = TimesheetSettingsRepository(mongo)
     authenticate("dashboard") {
         route("/app/api/timesheets") {
-            get {
-                val ctx = call.timesheetContext() ?: return@get
-                val now = clock()
-                val zone = ctx.tenant.zone()
-                val weekStart = ShiftMath.weekStart(ShiftMath.localDay(now, zone))
-                val (from, to) = call.dayRange(weekStart, weekStart.plus(6, DateTimeUnit.DAY)) ?: return@get
-                val employeeId = call.optionalId("employeeId") ?: return@get
-                val rules = settings.get(ctx.tenant.id)
-                val shifts = ShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
-                val employees = ShiftView.employees(mongo, ctx.tenant.id, shifts)
-                val view = ShiftView(zone, rules, now, employees)
-                val totals = Timesheets.totals(shifts, rules, now).map { t ->
-                    val employee = employees[t.employeeId]
-                    EmployeeTotalsDto(
-                        employeeId = t.employeeId.toHexString(),
-                        employeeName = employee?.name.orEmpty(),
-                        employeeNumber = employee?.number.orEmpty(),
-                        workedMinutes = t.workedMinutes,
-                        days = t.days,
-                        overDailyMinutes = t.overDailyMinutes,
-                        overWeeklyMinutes = t.overWeeklyMinutes,
-                        toReview = t.toReview,
-                        flagged = t.flagged,
-                        open = t.open,
-                    )
-                }.sortedBy { it.employeeName.lowercase() }
-                call.respond(TimesheetDto(from.toString(), to.toString(), shifts.map { view.dto(it) }, totals, rules.dto(canEdit = ctx.isAdmin())))
-            }
-            get("/board") {
-                val ctx = call.timesheetContext() ?: return@get
-                val now = clock()
-                val open = ShiftRepository(mongo, ctx.tenant.id).openShifts()
-                val view = ShiftView(ctx.tenant.zone(), settings.get(ctx.tenant.id), now, ShiftView.employees(mongo, ctx.tenant.id, open))
-                call.respond(BoardDto(open.map { view.dto(it) }, now.toString()))
-            }
-            get("/shifts/{id}") {
-                val ctx = call.timesheetContext() ?: return@get
-                val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { ShiftRepository(mongo, ctx.tenant.id).findById(it) }
-                    ?: return@get call.respond(HttpStatusCode.NotFound)
-                call.respond(view(mongo, ctx, settings, clock, listOf(shift)).dto(shift, detail = true))
-            }
-            post("/shifts") {
-                val ctx = call.timesheetContext() ?: return@post
-                val request = call.receiveOrNull<ShiftTimesRequest>() ?: return@post call.respondInvalidBody()
-                val employee = request.employeeId?.toObjectIdOrNull()?.let { EmployeeRepository(mongo, ctx.tenant.id).findById(it) }
-                    ?: return@post call.respondError(HttpStatusCode.BadRequest, "employee_not_found")
-                val zone = ctx.tenant.zone()
-                val day = request.day.parseDay() ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_day")
-                val times = request.times(day, zone) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
-                val now = clock()
-                when (val t = ShiftRules.manual(ctx.tenant.id, employee.id, times, request.note, ctx.who(), request.reason, settings.get(ctx.tenant.id), zone, now)) {
-                    is Transition.Refused -> call.respondError(HttpStatusCode.BadRequest, t.error)
-                    is Transition.Ok -> {
-                        ShiftRepository(mongo, ctx.tenant.id).insert(t.shift)
-                        call.respond(HttpStatusCode.Created, view(mongo, ctx, settings, clock, listOf(t.shift)).dto(t.shift, detail = true))
+            requireModules(DashboardModules.TIMESHEETS) {
+                get {
+                    val ctx = call.moduleContext()
+                    val now = clock()
+                    val zone = ctx.tenant.zone()
+                    val weekStart = ShiftMath.weekStart(ShiftMath.localDay(now, zone))
+                    val (from, to) = call.dayRange(weekStart, weekStart.plus(6, DateTimeUnit.DAY)) ?: return@get
+                    val employeeId = call.optionalId("employeeId") ?: return@get
+                    val rules = settings.get(ctx.tenant.id)
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
+                    val employees = ShiftView.employees(mongo, ctx.tenant.id, shifts)
+                    val view = ShiftView(zone, rules, now, employees)
+                    val totals = Timesheets.totals(shifts, rules, now).map { t ->
+                        val employee = employees[t.employeeId]
+                        EmployeeTotalsDto(
+                            employeeId = t.employeeId.toHexString(),
+                            employeeName = employee?.name.orEmpty(),
+                            employeeNumber = employee?.number.orEmpty(),
+                            workedMinutes = t.workedMinutes,
+                            days = t.days,
+                            overDailyMinutes = t.overDailyMinutes,
+                            overWeeklyMinutes = t.overWeeklyMinutes,
+                            toReview = t.toReview,
+                            flagged = t.flagged,
+                            open = t.open,
+                        )
+                    }.sortedBy { it.employeeName.lowercase() }
+                    call.respond(TimesheetDto(from.toString(), to.toString(), shifts.map { view.dto(it) }, totals, rules.dto(canEdit = ctx.isAdmin())))
+                }
+                get("/board") {
+                    val ctx = call.moduleContext()
+                    val now = clock()
+                    val open = ShiftRepository(mongo, ctx.tenant.id).openShifts()
+                    val view = ShiftView(ctx.tenant.zone(), settings.get(ctx.tenant.id), now, ShiftView.employees(mongo, ctx.tenant.id, open))
+                    call.respond(BoardDto(open.map { view.dto(it) }, now.toString()))
+                }
+                get("/shifts/{id}") {
+                    val ctx = call.moduleContext()
+                    val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { ShiftRepository(mongo, ctx.tenant.id).findById(it) }
+                        ?: return@get call.respond(HttpStatusCode.NotFound)
+                    call.respond(view(mongo, ctx, settings, clock, listOf(shift)).dto(shift, detail = true))
+                }
+                post("/shifts") {
+                    val ctx = call.moduleContext()
+                    val request = call.receiveOrNull<ShiftTimesRequest>() ?: return@post call.respondInvalidBody()
+                    val employee = request.employeeId?.toObjectIdOrNull()?.let { EmployeeRepository(mongo, ctx.tenant.id).findById(it) }
+                        ?: return@post call.respondError(HttpStatusCode.BadRequest, "employee_not_found")
+                    val zone = ctx.tenant.zone()
+                    val day = request.day.parseDay() ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_day")
+                    val times = request.times(day, zone) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
+                    val now = clock()
+                    when (val t = ShiftRules.manual(ctx.tenant.id, employee.id, times, request.note, ctx.who(), request.reason, settings.get(ctx.tenant.id), zone, now)) {
+                        is Transition.Refused -> call.respondError(HttpStatusCode.BadRequest, t.error)
+                        is Transition.Ok -> {
+                            ShiftRepository(mongo, ctx.tenant.id).insert(t.shift)
+                            call.respond(HttpStatusCode.Created, view(mongo, ctx, settings, clock, listOf(t.shift)).dto(t.shift, detail = true))
+                        }
                     }
                 }
-            }
-            patch("/shifts/{id}") {
-                val ctx = call.timesheetContext() ?: return@patch
-                val shifts = ShiftRepository(mongo, ctx.tenant.id)
-                val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { shifts.findById(it) } ?: return@patch call.respond(HttpStatusCode.NotFound)
-                val request = call.receiveOrNull<ShiftTimesRequest>() ?: return@patch call.respondInvalidBody()
-                val zone = ctx.tenant.zone()
-                val day = if (request.day.isBlank()) shift.day else request.day.parseDay() ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_day")
-                val times = request.times(day, zone) ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_time")
-                val rules = settings.get(ctx.tenant.id)
-                call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.edit(it, times, ctx.who(), request.reason, rules, zone, clock()) })
-            }
-            post("/shifts/{id}/close") {
-                val ctx = call.timesheetContext() ?: return@post
-                val shifts = ShiftRepository(mongo, ctx.tenant.id)
-                val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { shifts.findById(it) } ?: return@post call.respond(HttpStatusCode.NotFound)
-                val request = call.receiveOrNull<CloseShiftRequest>() ?: return@post call.respondInvalidBody()
-                val time = ShiftMath.parseTime(request.end) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
-                val zone = ctx.tenant.zone()
-                val endAt = ShiftMath.endAfter(shift.startAt, time, zone)
-                val rules = settings.get(ctx.tenant.id)
-                call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.closeByTeam(it, endAt, ctx.who(), request.reason, rules, zone, clock()) })
-            }
-            post("/shifts/approve") {
-                val ctx = call.timesheetContext() ?: return@post
-                val request = call.receiveOrNull<ApproveRequest>() ?: return@post call.respondInvalidBody()
-                if (request.ids.size > MAX_APPROVE) return@post call.respondError(HttpStatusCode.BadRequest, "too_many")
-                val ids = request.ids.mapNotNull { it.toObjectIdOrNull() }.distinct()
-                val shifts = ShiftRepository(mongo, ctx.tenant.id)
-                val approved = ids.count { id -> shifts.update(id) { ShiftRules.approve(it, ctx.who(), clock()) } is Transition.Ok }
-                call.respond(ApprovedDto(approved))
-            }
-            get("/export.csv") {
-                val ctx = call.timesheetContext() ?: return@get
-                val now = clock()
-                val zone = ctx.tenant.zone()
-                val weekStart = ShiftMath.weekStart(ShiftMath.localDay(now, zone))
-                val (from, to) = call.dayRange(weekStart, weekStart.plus(6, DateTimeUnit.DAY)) ?: return@get
-                val employeeId = call.optionalId("employeeId") ?: return@get
-                val shifts = ShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
-                val csv = TimesheetExport.csv(shifts, ShiftView.employees(mongo, ctx.tenant.id, shifts), zone, ctx.tenant.locale, now)
-                call.response.header(
-                    HttpHeaders.ContentDisposition,
-                    ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, "timesheets-$from-$to.csv").toString(),
-                )
-                call.respondText(csv, ContentType.Text.CSV.withCharset(Charsets.UTF_8))
-            }
-
-            get("/settings") {
-                val ctx = call.timesheetContext() ?: return@get
-                call.respond(settings.get(ctx.tenant.id).dto(canEdit = ctx.isAdmin()))
-            }
-            put("/settings") {
-                val ctx = call.timesheetAdmin() ?: return@put
-                val request = call.receiveOrNull<SettingsRequest>() ?: return@put call.respondInvalidBody()
-                val current = settings.get(ctx.tenant.id)
-                val next = request.applyTo(current) ?: return@put call.respondError(HttpStatusCode.BadRequest, "invalid_policy")
-                if (next.maxShiftHours !in TimesheetSettings.MAX_SHIFT_HOURS || next.dailyHours !in TimesheetSettings.DAILY_HOURS ||
-                    next.weeklyHours !in TimesheetSettings.WEEKLY_HOURS
-                ) {
-                    return@put call.respondError(HttpStatusCode.BadRequest, "invalid_hours")
+                patch("/shifts/{id}") {
+                    val ctx = call.moduleContext()
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id)
+                    val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { shifts.findById(it) } ?: return@patch call.respond(HttpStatusCode.NotFound)
+                    val request = call.receiveOrNull<ShiftTimesRequest>() ?: return@patch call.respondInvalidBody()
+                    val zone = ctx.tenant.zone()
+                    val day = if (request.day.isBlank()) shift.day else request.day.parseDay() ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_day")
+                    val times = request.times(day, zone) ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_time")
+                    val rules = settings.get(ctx.tenant.id)
+                    call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.edit(it, times, ctx.who(), request.reason, rules, zone, clock()) })
                 }
-                call.respond(settings.save(ctx.tenant.id, next.copy(updatedAt = clock(), updatedBy = ctx.who())).dto(canEdit = true))
-            }
+                post("/shifts/{id}/close") {
+                    val ctx = call.moduleContext()
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id)
+                    val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { shifts.findById(it) } ?: return@post call.respond(HttpStatusCode.NotFound)
+                    val request = call.receiveOrNull<CloseShiftRequest>() ?: return@post call.respondInvalidBody()
+                    val time = ShiftMath.parseTime(request.end) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
+                    val zone = ctx.tenant.zone()
+                    val endAt = ShiftMath.endAfter(shift.startAt, time, zone)
+                    val rules = settings.get(ctx.tenant.id)
+                    call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.closeByTeam(it, endAt, ctx.who(), request.reason, rules, zone, clock()) })
+                }
+                post("/shifts/approve") {
+                    val ctx = call.moduleContext()
+                    val request = call.receiveOrNull<ApproveRequest>() ?: return@post call.respondInvalidBody()
+                    if (request.ids.size > MAX_APPROVE) return@post call.respondError(HttpStatusCode.BadRequest, "too_many")
+                    val ids = request.ids.mapNotNull { it.toObjectIdOrNull() }.distinct()
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id)
+                    val approved = ids.count { id -> shifts.update(id) { ShiftRules.approve(it, ctx.who(), clock()) } is Transition.Ok }
+                    call.respond(ApprovedDto(approved))
+                }
+                get("/export.csv") {
+                    val ctx = call.moduleContext()
+                    val now = clock()
+                    val zone = ctx.tenant.zone()
+                    val weekStart = ShiftMath.weekStart(ShiftMath.localDay(now, zone))
+                    val (from, to) = call.dayRange(weekStart, weekStart.plus(6, DateTimeUnit.DAY)) ?: return@get
+                    val employeeId = call.optionalId("employeeId") ?: return@get
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
+                    val csv = TimesheetExport.csv(shifts, ShiftView.employees(mongo, ctx.tenant.id, shifts), zone, ctx.tenant.locale, now)
+                    call.response.header(
+                        HttpHeaders.ContentDisposition,
+                        ContentDisposition.Attachment.withParameter(ContentDisposition.Parameters.FileName, "timesheets-$from-$to.csv").toString(),
+                    )
+                    call.respondText(csv, ContentType.Text.CSV.withCharset(Charsets.UTF_8))
+                }
 
-            get("/sites") {
-                val ctx = call.timesheetContext() ?: return@get
-                call.respond(siteDtos(mongo, ctx.tenant.id, WorkSiteRepository(mongo, ctx.tenant.id).list()))
-            }
-            post("/sites") {
-                val ctx = call.timesheetAdmin() ?: return@post
-                val request = call.receiveOrNull<SiteRequest>() ?: return@post call.respondInvalidBody()
-                val sites = WorkSiteRepository(mongo, ctx.tenant.id)
-                if (sites.count() >= WorkSiteRepository.MAX_SITES) return@post call.respondError(HttpStatusCode.Conflict, "too_many_sites")
-                val now = clock()
-                val draft = WorkSite(
-                    tenantId = ctx.tenant.id,
-                    name = "",
-                    latitude = Double.NaN,
-                    longitude = Double.NaN,
-                    radiusM = WorkSiteRepository.DEFAULT_RADIUS_M,
-                    createdAt = now,
-                    updatedAt = now,
-                )
-                val site = call.siteFrom(mongo, ctx, request, draft) ?: return@post
-                call.respond(HttpStatusCode.Created, siteDtos(mongo, ctx.tenant.id, listOf(sites.create(site))).single())
-            }
-            patch("/sites/{id}") {
-                val ctx = call.timesheetAdmin() ?: return@patch
-                val sites = WorkSiteRepository(mongo, ctx.tenant.id)
-                val existing = call.parameters["id"]?.toObjectIdOrNull()?.let { sites.findById(it) } ?: return@patch call.respond(HttpStatusCode.NotFound)
-                val request = call.receiveOrNull<SiteRequest>() ?: return@patch call.respondInvalidBody()
-                val site = call.siteFrom(mongo, ctx, request, existing.copy(updatedAt = clock())) ?: return@patch
-                val saved = sites.replace(site) ?: return@patch call.respond(HttpStatusCode.NotFound)
-                call.respond(siteDtos(mongo, ctx.tenant.id, listOf(saved)).single())
-            }
-            delete("/sites/{id}") {
-                val ctx = call.timesheetAdmin() ?: return@delete
-                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@delete call.respond(HttpStatusCode.NotFound)
-                if (!WorkSiteRepository(mongo, ctx.tenant.id).delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
-                call.respond(mapOf("deleted" to true))
-            }
+                get("/settings") {
+                    val ctx = call.moduleContext()
+                    call.respond(settings.get(ctx.tenant.id).dto(canEdit = ctx.isAdmin()))
+                }
+                put("/settings") {
+                    val ctx = call.timesheetAdmin() ?: return@put
+                    val request = call.receiveOrNull<SettingsRequest>() ?: return@put call.respondInvalidBody()
+                    val current = settings.get(ctx.tenant.id)
+                    val next = request.applyTo(current) ?: return@put call.respondError(HttpStatusCode.BadRequest, "invalid_policy")
+                    if (next.maxShiftHours !in TimesheetSettings.MAX_SHIFT_HOURS || next.dailyHours !in TimesheetSettings.DAILY_HOURS ||
+                        next.weeklyHours !in TimesheetSettings.WEEKLY_HOURS
+                    ) {
+                        return@put call.respondError(HttpStatusCode.BadRequest, "invalid_hours")
+                    }
+                    call.respond(settings.save(ctx.tenant.id, next.copy(updatedAt = clock(), updatedBy = ctx.who())).dto(canEdit = true))
+                }
 
-            get("/devices") {
-                val ctx = call.timesheetContext() ?: return@get
-                val employeeId = call.request.queryParameters["employeeId"]?.toObjectIdOrNull()
-                    ?: return@get call.respondError(HttpStatusCode.BadRequest, "employee_required")
-                call.respond(TimeDeviceRepository(mongo, ctx.tenant.id).list(employeeId).map { it.dto() })
-            }
-            delete("/devices/{id}") {
-                val ctx = call.timesheetAdmin() ?: return@delete
-                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@delete call.respond(HttpStatusCode.NotFound)
-                val device = TimeDeviceRepository(mongo, ctx.tenant.id).revoke(id, ctx.who(), clock()) ?: return@delete call.respond(HttpStatusCode.NotFound)
-                call.respond(device.dto())
+                get("/sites") {
+                    val ctx = call.moduleContext()
+                    call.respond(siteDtos(mongo, ctx.tenant.id, WorkSiteRepository(mongo, ctx.tenant.id).list()))
+                }
+                post("/sites") {
+                    val ctx = call.timesheetAdmin() ?: return@post
+                    val request = call.receiveOrNull<SiteRequest>() ?: return@post call.respondInvalidBody()
+                    val sites = WorkSiteRepository(mongo, ctx.tenant.id)
+                    if (sites.count() >= WorkSiteRepository.MAX_SITES) return@post call.respondError(HttpStatusCode.Conflict, "too_many_sites")
+                    val now = clock()
+                    val draft = WorkSite(
+                        tenantId = ctx.tenant.id,
+                        name = "",
+                        latitude = Double.NaN,
+                        longitude = Double.NaN,
+                        radiusM = WorkSiteRepository.DEFAULT_RADIUS_M,
+                        createdAt = now,
+                        updatedAt = now,
+                    )
+                    val site = call.siteFrom(mongo, ctx, request, draft) ?: return@post
+                    call.respond(HttpStatusCode.Created, siteDtos(mongo, ctx.tenant.id, listOf(sites.create(site))).single())
+                }
+                patch("/sites/{id}") {
+                    val ctx = call.timesheetAdmin() ?: return@patch
+                    val sites = WorkSiteRepository(mongo, ctx.tenant.id)
+                    val existing = call.parameters["id"]?.toObjectIdOrNull()?.let { sites.findById(it) } ?: return@patch call.respond(HttpStatusCode.NotFound)
+                    val request = call.receiveOrNull<SiteRequest>() ?: return@patch call.respondInvalidBody()
+                    val site = call.siteFrom(mongo, ctx, request, existing.copy(updatedAt = clock())) ?: return@patch
+                    val saved = sites.replace(site) ?: return@patch call.respond(HttpStatusCode.NotFound)
+                    call.respond(siteDtos(mongo, ctx.tenant.id, listOf(saved)).single())
+                }
+                delete("/sites/{id}") {
+                    val ctx = call.timesheetAdmin() ?: return@delete
+                    val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    if (!WorkSiteRepository(mongo, ctx.tenant.id).delete(id)) return@delete call.respond(HttpStatusCode.NotFound)
+                    call.respond(mapOf("deleted" to true))
+                }
+
+                get("/devices") {
+                    val ctx = call.moduleContext()
+                    val employeeId = call.request.queryParameters["employeeId"]?.toObjectIdOrNull()
+                        ?: return@get call.respondError(HttpStatusCode.BadRequest, "employee_required")
+                    call.respond(TimeDeviceRepository(mongo, ctx.tenant.id).list(employeeId).map { it.dto() })
+                }
+                delete("/devices/{id}") {
+                    val ctx = call.timesheetAdmin() ?: return@delete
+                    val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    val device = TimeDeviceRepository(mongo, ctx.tenant.id).revoke(id, ctx.who(), clock()) ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    call.respond(device.dto())
+                }
             }
         }
     }
@@ -288,15 +290,9 @@ internal data class SiteRequest(
 
 private class OptionalId(val value: ObjectId?)
 
-/** The team with the time clock module; an employee's own sign-in never has it. */
-private suspend fun ApplicationCall.timesheetContext(): DashboardContext? {
-    val ctx = dashboardContext()?.takeIf { it.requireModule(DashboardModules.TIMESHEETS) }
-    if (ctx == null) respond(HttpStatusCode.Forbidden)
-    return ctx
-}
-
+/** The session behind the time clock's gate, for a change only admins make: 403 `not_allowed` for anyone else. */
 private suspend fun ApplicationCall.timesheetAdmin(): DashboardContext? {
-    val ctx = timesheetContext() ?: return null
+    val ctx = moduleContext()
     if (!ctx.isAdmin()) {
         respondError(HttpStatusCode.Forbidden, "not_allowed")
         return null

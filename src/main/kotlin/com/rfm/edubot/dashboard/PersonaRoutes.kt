@@ -18,6 +18,7 @@ import com.rfm.edubot.bookings.bookingDeps
 import com.rfm.edubot.bookings.model.BookingSource
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.crm.ClientRepository
+import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
@@ -78,7 +79,13 @@ import org.bson.types.ObjectId
  * `/app/api/persona`: how the company's bot talks to customers. Everyone with the module reads it and
  * chats with the test bot; only admins (and operators) change it, since it speaks for the whole company.
  */
-internal fun Route.personaRoutes(
+internal object PersonaRoutes : DashboardFeature(DashboardModules.PERSONA) {
+    override fun Route.routes(deps: DashboardDeps) {
+        personaRoutes(deps.mongo, deps.pipelineFactory, deps.personaCompiler, deps.aiClient)
+    }
+}
+
+private fun Route.personaRoutes(
     mongo: MongoModule,
     pipelineFactory: TenantPipelineFactory,
     personaCompiler: PersonaCompiler,
@@ -91,7 +98,7 @@ internal fun Route.personaRoutes(
 
     route("/persona") {
         get {
-            val ctx = call.personaContext() ?: return@get
+            val ctx = call.moduleContext()
             call.reply(ctx, repo.findByTenant(ctx.tenant.id))
         }
         put {
@@ -174,7 +181,7 @@ internal fun Route.personaRoutes(
             call.reply(ctx, repo.findByTenant(ctx.tenant.id), HttpStatusCode.Accepted)
         }
         get("/sources/{id}") {
-            val ctx = call.personaContext() ?: return@get
+            val ctx = call.moduleContext()
             val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@get call.problem(PersonaProblem("not_found"), HttpStatusCode.NotFound)
             val source = repo.findSource(ctx.tenant.id, id) ?: return@get call.problem(PersonaProblem("not_found"), HttpStatusCode.NotFound)
             call.respond(
@@ -215,12 +222,12 @@ internal fun Route.personaRoutes(
             call.reply(ctx, repo.findByTenant(ctx.tenant.id), HttpStatusCode.Accepted)
         }
         get("/versions") {
-            val ctx = call.personaContext() ?: return@get
+            val ctx = call.moduleContext()
             val live = repo.findByTenant(ctx.tenant.id)?.version
             call.respond(repo.listVersions(ctx.tenant.id).map { it.dto(live) })
         }
         get("/versions/{version}") {
-            val ctx = call.personaContext() ?: return@get
+            val ctx = call.moduleContext()
             val number = call.parameters["version"]?.toIntOrNull() ?: return@get call.problem(PersonaProblem("not_found"), HttpStatusCode.NotFound)
             val version = repo.findVersion(ctx.tenant.id, number) ?: return@get call.problem(PersonaProblem("not_found"), HttpStatusCode.NotFound)
             call.respond(version.detailDto(repo.findByTenant(ctx.tenant.id)?.version))
@@ -234,7 +241,7 @@ internal fun Route.personaRoutes(
             call.reply(ctx, restored)
         }
         get("/menus") {
-            val ctx = call.personaContext() ?: return@get
+            val ctx = call.moduleContext()
             val flows = ChatFlowRepository(mongo, ctx.tenant.id).load()
             call.respond(menusDto(flows, ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
         }
@@ -246,14 +253,14 @@ internal fun Route.personaRoutes(
             call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
         }
         post("/preview") {
-            val ctx = call.personaContext() ?: return@post
+            val ctx = call.moduleContext()
             val request = call.body<PersonaPreviewRequest>() ?: return@post
             val persona = call.draftPersona(repo, ctx.tenant.id, request.draft) ?: return@post
             val block = PersonaPrompt.personaBlock(persona)
             call.respond(PersonaPreviewDto(block = block, chars = block?.length ?: 0, tokenEstimate = PersonaPrompt.estimateTokens(block)))
         }
         post("/test") {
-            val ctx = call.personaContext() ?: return@post
+            val ctx = call.moduleContext()
             val request = call.body<PersonaTestRequest>() ?: return@post
             val history = request.messages
                 .filter { it.content.isNotBlank() }
@@ -314,19 +321,9 @@ private const val MULTIPART_OVERHEAD = 64 * 1024
 private suspend fun menuUsage(mongo: MongoModule, tenantId: ObjectId) =
     ChatFlowUsage.of(MessageRepository(mongo, tenantId).countByOrigin(ChatFlowUsage.ORIGIN_PREFIX, ChatFlowUsage.since(SystemClock.now())))
 
-/** The caller's context when the company has the persona module; answers 403 otherwise. */
-private suspend fun ApplicationCall.personaContext(): DashboardContext? {
-    val ctx = dashboardContext() ?: return null
-    if (!ctx.requireModule(DashboardModules.PERSONA)) {
-        respond(HttpStatusCode.Forbidden)
-        return null
-    }
-    return ctx
-}
-
-/** [personaContext] for a change: only admins and operators change how the bot speaks for the company. */
+/** The session, for a change: only admins and operators change how the bot speaks for the company. */
 private suspend fun ApplicationCall.personaEditor(): DashboardContext? {
-    val ctx = personaContext() ?: return null
+    val ctx = moduleContext()
     if (!ctx.isAdmin()) {
         problem(PersonaProblem("not_allowed"), HttpStatusCode.Forbidden)
         return null
@@ -405,7 +402,7 @@ private suspend fun runPersonaTest(
     history.forEach { context += ChatMessage(role = if (it.role == "assistant") "assistant" else "user", content = it.content) }
 
     val handoff = PlaygroundHandoff()
-    val crm = CrmToolPack(CrmTools(ClientRepository(mongo, tenant.id), QuoteRepository(mongo, tenant.id), InvoiceRepository(mongo, tenant.id), StandardItemRepository(mongo, tenant.id)))
+    val crm = CrmToolPack(CrmTools(ClientRepository(mongo, tenant.id), QuoteRepository(mongo, tenant.id), InvoiceRepository(mongo, tenant.id), StandardItemRepository(mongo, tenant.id), ClientServiceRepository(mongo, tenant.id)))
     val booking = if (bookings) BookingToolPack(bookingDeps(mongo, tenant, BookingSource.WEB).tools()) else null
     val definitions = buildList<ToolDefinition> {
         addAll(crm.readOnlyDefinitionsFor(modules))

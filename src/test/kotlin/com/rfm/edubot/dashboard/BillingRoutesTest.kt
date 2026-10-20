@@ -10,6 +10,7 @@ import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.plugins.configureSerialization
+import com.rfm.edubot.plugins.configureStatusPages
 import com.rfm.edubot.tenant.TenantRepository
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
@@ -73,6 +74,7 @@ class BillingRoutesTest {
         val lookup: EmployeeLookup = { tenantId, id -> EmployeeRepository(mongo, tenantId).findById(id) }
         application {
             configureSerialization()
+            configureStatusPages()
             configureAdminAuth(runtime, tenants, users, lookup)
             routing {
                 dashboardAccountRoutes(tenants, users, runtime, employees = lookup)
