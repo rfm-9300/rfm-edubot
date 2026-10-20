@@ -87,6 +87,7 @@ const nextMonthKey = key => {
  * without dates says so in its track. `open` makes the label a button with that data-gantt-open value.
  */
 function ganttHtml(rows, headLabel) {
+  rows = rows.map(r => (r.start && r.end && r.end < r.start ? { ...r, start: r.end, end: r.start } : r));
   const dated = rows.filter(r => r.start && r.end);
   if (!dated.length) return '';
   const today = todayKey();
@@ -99,7 +100,7 @@ function ganttHtml(rows, headLabel) {
   for (let key = first; key < end; key = nextMonthKey(key)) months.push(key);
   const step = Math.max(1, Math.ceil(months.length / 12));
   const ticks = months.map((key, i) => {
-    const label = i % step ? '' : new Date(`${key}T00:00:00Z`).toLocaleDateString(uiLocale(), { month: 'short', ...(i === 0 || key.endsWith('-01-01') ? { year: '2-digit' } : {}), timeZone: 'UTC' });
+    const label = i % step ? '' : new Date(`${key}T00:00:00Z`).toLocaleDateString(uiLocale(), { month: 'short', ...(i === 0 || key.endsWith('-01-01') ? { year: 'numeric' } : {}), timeZone: 'UTC' });
     return `<span class="gantt__tick" style="left:${at(key).toFixed(2)}%">${escapeHTML(label)}</span>`;
   }).join('');
   const lines = months.slice(1).map(key => `<span class="gantt__line" style="left:${at(key).toFixed(2)}%"></span>`).join('');

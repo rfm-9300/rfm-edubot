@@ -57,15 +57,20 @@ function renderProjects(root) {
   }).join('') + (view === 'list' ? columnOrderButton('projects') : '');
   let panel;
   if (view === 'timeline') {
-    const rows = shown.map(p => ({
-      label: p.name,
-      sub: [p.number, p.clientName].filter(Boolean).join(' · '),
-      start: p.actualStart || p.plannedStart,
-      end: p.actualEnd || p.revisedEnd,
-      pct: p.progressPct,
-      tone: projectTone(p),
-      open: p.id,
-    }));
+    // A bar is the plan, moved by approved changes, which the progress and today are read against; a finished
+    // project's is the time it took.
+    const rows = shown.map(p => {
+      const took = p.status === 'COMPLETED' && p.actualStart && p.actualEnd;
+      return {
+        label: p.name,
+        sub: [p.number, p.clientName].filter(Boolean).join(' · '),
+        start: took ? p.actualStart : (p.plannedStart || p.actualStart),
+        end: took ? p.actualEnd : (p.revisedEnd || p.actualEnd),
+        pct: p.progressPct,
+        tone: projectTone(p),
+        open: p.id,
+      };
+    });
     const gantt = ganttHtml(rows, BLD.thProject);
     panel = bldPanel({ title: BLD.portfolio, tag: shown.length, views, tools: chips, body: gantt ? `<div class="panel__body">${gantt}</div>` : bldEmptyHtml(BLD.timelineEmpty, BLD.timelineEmptyDesc) });
   } else {
@@ -477,6 +482,8 @@ async function openProjectForm(project = null, opts = {}) {
         <input class="inp" id="pj-address" maxlength="300" value="${escapeHTML(p.address || '')}" /></div>
       <div class="form__row"><label class="lbl" for="pj-start">${escapeHTML(BLD.formPlannedStart)}</label><input class="inp inp--mono" id="pj-start" type="date" value="${escapeHTML(p.projectStart || '')}" /></div>
       <div class="form__row"><label class="lbl" for="pj-end">${escapeHTML(BLD.formPlannedEnd)}</label><input class="inp inp--mono" id="pj-end" type="date" value="${escapeHTML(p.projectEnd || '')}" /></div>
+      <div class="form__row" data-actual="start"><label class="lbl" for="pj-actual-start">${escapeHTML(BLD.formActualStart)}</label><input class="inp inp--mono" id="pj-actual-start" type="date" max="${todayKey()}" value="${escapeHTML(p.actualStart || '')}" /><p class="hint">${escapeHTML(BLD.formActualHint)}</p></div>
+      <div class="form__row" data-actual="end"><label class="lbl" for="pj-actual-end">${escapeHTML(BLD.formActualEnd)}</label><input class="inp inp--mono" id="pj-actual-end" type="date" max="${todayKey()}" value="${escapeHTML(p.actualEnd || '')}" /></div>
       ${hasModule('measurements') ? `<div class="form__row"><label class="lbl" for="pj-retention">${escapeHTML(BLD.formRetention)}</label>
         <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-retention" type="number" min="0" max="20" step="0.5" value="${p.retentionPct ?? 0}" /><span class="inp-unit__label">%</span></div><p class="hint">${escapeHTML(BLD.formRetentionHint)}</p></div>` : ''}
       <div class="form__row form__row--full"><label class="lbl" for="pj-desc">${escapeHTML(BLD.formDescription)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
@@ -489,6 +496,14 @@ async function openProjectForm(project = null, opts = {}) {
     li.wire(form, { initial });
     $$('.line', form).forEach((row, i) => { if (initial[i]?.id) row.dataset.lineId = initial[i].id; });
   }
+  // A project entered while it already runs keeps the day it really started; finished ones, the day they ended.
+  const syncActualDates = () => {
+    const status = $('#pj-status', form).value;
+    $('[data-actual="start"]', form).hidden = status === 'PLANNING';
+    $('[data-actual="end"]', form).hidden = status !== 'COMPLETED';
+  };
+  $('#pj-status', form).addEventListener('change', syncActualDates);
+  syncActualDates();
   bindDrawerClose(form);
   form.addEventListener('submit', async e => {
     e.preventDefault();
@@ -502,6 +517,9 @@ async function openProjectForm(project = null, opts = {}) {
     if (!payload.name) delete payload.name;
     Object.assign(payload, { plannedStart: $('#pj-start', form).value, plannedEnd: $('#pj-end', form).value });
     if (payload.plannedStart && payload.plannedEnd && payload.plannedEnd < payload.plannedStart) return toast(bt('errors.invalid_dates'));
+    if (!$('[data-actual="start"]', form).hidden) payload.actualStart = $('#pj-actual-start', form).value;
+    if (!$('[data-actual="end"]', form).hidden) payload.actualEnd = $('#pj-actual-end', form).value;
+    if (payload.actualStart && payload.actualEnd && payload.actualEnd < payload.actualStart) return toast(bt('errors.invalid_dates'));
     if ($('#pj-client', form) && !fromQuote) payload.clientId = $('#pj-client', form).value;
     if ($('#pj-manager', form)) payload.managerId = $('#pj-manager', form).value;
     if ($('#pj-retention', form)) payload.retentionPct = Number($('#pj-retention', form).value || 0);

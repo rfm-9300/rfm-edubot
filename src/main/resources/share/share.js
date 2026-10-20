@@ -11,6 +11,8 @@
   const clamp = n => Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
   const locale = () => I18N.locale();
   const day = (key, opts = { day: 'numeric', month: 'long', year: 'numeric' }) => (key ? new Date(`${key}T00:00:00Z`).toLocaleDateString(locale(), { ...opts, timeZone: 'UTC' }) : '');
+  // "terça-feira, 20 de outubro" starts a heading in capitals, and only its first letter.
+  const capFirst = s => (s ? s.charAt(0).toLocaleUpperCase(locale()) + s.slice(1) : s);
   const photoUrl = (id, thumb) => `${base}/photos/${encodeURIComponent(id)}${thumb ? '?size=thumb' : ''}`;
   let gallery = [];
   let current = 0;
@@ -50,7 +52,7 @@
       <span class="pill${p.state === 'DONE' ? ' pill--ok' : p.state === 'IN_PROGRESS' ? ' pill--info' : ''}">${esc(t(`phase.${p.state}`))}</span>
     </div>`).join('');
     const updates = d.updates.map(u => `<article class="share__update">
-      <header class="share__update-head"><strong>${esc(day(u.day, { weekday: 'long', day: 'numeric', month: 'long' }))}</strong>${u.weather ? `<span class="pill">${esc(t(`weather.${u.weather}`))}</span>` : ''}</header>
+      <header class="share__update-head"><strong>${esc(capFirst(day(u.day, { weekday: 'long', day: 'numeric', month: 'long' })))}</strong>${u.weather ? `<span class="pill">${esc(t(`weather.${u.weather}`))}</span>` : ''}</header>
       <p class="panel__text">${esc(u.workDone)}</p>
       ${u.photos.length ? photos(u.photos) : ''}
     </article>`).join('');

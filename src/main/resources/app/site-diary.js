@@ -5,7 +5,7 @@ function diaryRowHtml(e) {
   const excerpt = e.workDone.length > 120 ? `${e.workDone.slice(0, 119)}…` : e.workDone;
   return `<tr class="conversation-row" data-diary="${escapeHTML(e.id)}" tabindex="0">
     <td class="name long">${escapeHTML(e.projectName)}<div class="sub mono">${escapeHTML(e.projectNumber)}</div></td>
-    <td${cellLabel(BLD.thWeather)}>${escapeHTML([weatherLabel(e.weather), e.temperatureC != null ? `${e.temperatureC} °C` : ''].filter(Boolean).join(' · ') || '—')}</td>
+    <td${cellLabel(BLD.thWeather)}>${escapeHTML([weatherLabel(e.weather), e.temperatureC != null ? `${e.temperatureC}\u00a0°C` : ''].filter(Boolean).join(' · ') || '—')}</td>
     <td class="num"${cellLabel(BLD.thWorkers)}>${e.workers ?? '—'}</td>
     <td class="long"${cellLabel(BLD.thWorkDone)}>${escapeHTML(excerpt)}</td>
     <td class="num"${cellLabel(BLD.thPhotos)}>${e.photos.length || '—'}</td>
@@ -203,7 +203,7 @@ async function openDiaryEntry(id) {
         <div class="detail__amount">${entry.shared ? bldPill(BLD.diarySharedYes, 'info') : bldPill(BLD.diaryInternal, '')}</div>
       </div>
       ${dashFacts([
-        [BLD.thWeather, [weatherLabel(entry.weather), entry.temperatureC != null ? `${entry.temperatureC} °C` : ''].filter(Boolean).join(' · ') || '—'],
+        [BLD.thWeather, [weatherLabel(entry.weather), entry.temperatureC != null ? `${entry.temperatureC}\u00a0°C` : ''].filter(Boolean).join(' · ') || '—'],
         [BLD.thWorkers, entry.workers ?? '—'],
         entry.lostHours ? [BLD.diaryLostHours, fmtQty(entry.lostHours)] : null,
         [BLD.diaryWrittenBy, entry.updatedBy !== entry.createdBy ? `${entry.createdBy} · ${entry.updatedBy}` : entry.createdBy],

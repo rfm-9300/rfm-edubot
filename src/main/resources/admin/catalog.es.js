@@ -1367,6 +1367,7 @@ window.__I18N_CATALOGS['es'] = {
       formName: 'Nombre', formNamePh: 'p. ej., Reforma de la vivienda, Calle del Sol 12', formNameRequired: 'Pon un nombre a la obra',
       formNoClient: 'Sin cliente', formManager: 'Jefe de obra', formNoManager: 'Nadie aún',
       formAddress: 'Dirección de la obra', formPlannedStart: 'Inicio previsto', formPlannedEnd: 'Final previsto',
+      formActualStart: 'Iniciada el', formActualEnd: 'Terminada el', formActualHint: 'En blanco, queda el día en que la pongas en curso (o terminada).',
       formRetention: 'Retención de garantía', formRetentionHint: 'Se retiene en cada certificación hasta el final de la obra.',
       formDescription: 'Descripción',
       formDatesFromPhases: 'Las fechas acordadas con el cliente. Sin ellas, la obra sigue las fechas de sus fases.',

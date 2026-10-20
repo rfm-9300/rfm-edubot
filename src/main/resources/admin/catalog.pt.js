@@ -1368,6 +1368,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
       formName: 'Nome', formNamePh: 'ex.: Remodelação da moradia, Rua do Sol 12', formNameRequired: 'Dê um nome à obra',
       formNoClient: 'Sem cliente', formManager: 'Encarregado', formNoManager: 'Ninguém ainda',
       formAddress: 'Morada da obra', formPlannedStart: 'Início previsto', formPlannedEnd: 'Fim previsto',
+      formActualStart: 'Iniciada em', formActualEnd: 'Concluída em', formActualHint: 'Em branco, fica o dia em que a puser em curso (ou concluída).',
       formRetention: 'Retenção de garantia', formRetentionHint: 'Retida em cada auto até ao fim da obra.',
       formDescription: 'Descrição',
       formDatesFromPhases: 'As datas combinadas com o cliente. Sem elas, a obra segue as datas das fases.',
