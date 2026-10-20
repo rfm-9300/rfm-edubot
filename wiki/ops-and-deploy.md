@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-18
+updated: 2026-10-20
 ---
 
 # Production ops and deploy lore
@@ -92,6 +92,11 @@ default `HEALTH_URL` (`localhost:8080` on the host) remains wrong because prod d
   `backup-mongo.sh`, which now takes a `flock` so it can't overlap the nightly job. `<archive>.uploaded` markers show off-box copies;
   archives from before that day show "Not recorded" although the nightly job uploaded them.
   Why this shape: the internet-facing app must never hold Docker access or the GCS key.
+
+- **The PDF volume is in no backup.** The archives are Mongo only; files under `PDF_STORAGE_PATH`
+  (the `pdf_data` volume) are not: the companies' logos and, since PR #88, the Building photos
+  ([building-projects.md](building-projects.md)). Restoring a company brings back its photo records
+  without their files. Copying that volume off-box with the archives is still to do.
 
 - **Off-box Mongo backups** go to a private Cloud Storage bucket in the Firebase/GCP project `thebotslab` (90-day lifecycle, 7-day soft delete). The VPS uploads with a service account that can only create and read objects in that bucket: it gets 403 on delete, so a compromised VPS can't wipe the copies. The runbook has the restore commands. Browse the archives in the Cloud console (Storage); the Firebase console's Storage tab doesn't list the bucket. Keep it that way. Any Google account can get a Firebase ID token in this project, because `ADMIN_EMAILS` is enforced only by our server, so importing the bucket into Firebase Storage with a rule like `request.auth != null` would expose the backups.
 

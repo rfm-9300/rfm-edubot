@@ -214,8 +214,10 @@ Changes to existing models: `Quote.projectId` (the project whose measurements bi
 
 ## 5. API
 
-Everything under `/app/api/building`, behind the `dashboard` JWT and each route's module; an
-employee's sign-in never reaches it. Money in euros in JSON, cents in Mongo, like the CRM.
+Everything under `/app/api/building`, one dashboard feature per module behind its gate (invoicing a
+measurement nests the `invoices` gate), on services in `building/` that never touch HTTP, as
+[wiki/dashboard-api.md](../wiki/dashboard-api.md) lays out; an employee's sign-in never reaches it.
+Refusals follow the error contract. Money in euros in JSON, cents in Mongo, like the CRM.
 
 ```
 GET    /projects                     list with progress, health and money
@@ -243,7 +245,7 @@ Public: `GET /app/share/{token}` (the page), `/data`, `/photos/{id}`, `/logo`, a
 - **Projects**: hero (active, at risk or delayed, open issues, to invoice) and a `crmPanel` with a
   List / Timeline view switch. List: number and name over the client, the progress bar (actual with
   the planned mark), days ahead or behind, revised end, health pill. Timeline: one Gantt row per
-  project across the months, today marked. Chips: Active / Planning / Finished / All.
+  project across the months, today marked. Chips: Running / Planning / Finished / All.
 - **Project record** (wide drawer): record card (client link, address on Maps, dates, share), four
   KPIs (progress vs plan, schedule, contract, measured), Needs attention (late phases, overdue
   issues, changes waiting for the client, measurements to invoice, no diary for 3+ days), chip tabs
@@ -276,11 +278,13 @@ Public: `GET /app/share/{token}` (the page), `/data`, `/photos/{id}`, `/logo`, a
 - `ProjectProgressTest`: weights, planned curve, earned-schedule days, phase status, health.
 - `MeasurementMathTest`: lines from contract and changes, to date and this period, rounding, retention,
   refusals, invoice lines.
-- `BuildingRoutesTest` (HTTP, Mongo): module gating and employee tokens, a project from a quote, phases
-  and progress from the diary, one diary entry per day, photos stored and served, issues through their
-  statuses, a change's effect on the contract, a measurement approved and invoiced and released when
-  its invoice is cancelled, the quote billed once both ways, and the public link showing only what it
-  should.
+- `BuildingApiTest` (HTTP over the whole server, Mongo): each page's gate and the modules each brings,
+  isolation between companies, the error contract, a project from a quote, phases and progress from
+  the diary, one diary entry per day, photos stored and served (JPEG only), issues through their
+  statuses, a change's effect on the contract and the next measurement, a measurement approved and
+  invoiced and released when its invoice is cancelled, the quote billed once both ways, Home's card and
+  Needs-you rows, and the public link showing only what it should. `DashboardRouteAuditTest` checks
+  every Building route's gate, and `ArchitectureBoundariesTest` that `building/` stays free of HTTP.
 
 ## 9. Open points for Rodrigo
 

@@ -74,6 +74,7 @@ graph TD
         Health["/health  /ready  /app  /backoffice"]
         AGR[Agent, integration<br/>and email routes]
         SP[StatusPages<br/>error contract]
+        SH["Client's project page<br/>/app/share/{token}"]
     end
 
     subgraph Messaging
@@ -93,6 +94,7 @@ graph TD
         DA[Dashboard AI Assistant<br/>threads, settings, confirmed changes]
         EV[DomainEventLog<br/>domain_events outbox]
         TC[Time clock<br/>shifts, punches, work sites,<br/>phone keys, timesheets]
+        BLD[Building services<br/>projects, diary, photos, issues,<br/>change orders, measurements]
     end
 
     subgraph Automations["Agents runtime"]
@@ -128,9 +130,11 @@ graph TD
     MP --> AI
     MP --> OC
     MP --> PDF
-    DR --> CS & CRM & DA & TC
+    DR --> CS & CRM & DA & TC & BLD
     AR --> CS & CRM
     CS --> CRM
+    BLD --> CS & CRM
+    SH --> BLD
     DR & AR & AGR -. refusals .-> SP
     TC --> NT
     DA --> AI & CS & CRM & Mongo
@@ -146,7 +150,7 @@ graph TD
     GI --> GAPI
     ES & GS --> EV
     UR & CR & MR & CRM & DS & CF --> Mongo
-    EV & AEX & NT & GI & ES & GS & EI & TC --> Mongo
+    EV & AEX & NT & GI & ES & GS & EI & TC & BLD --> Mongo
     Health --> Mongo
 ```
 
@@ -159,7 +163,8 @@ graph TD
 | `conversation/` | `User`, `Conversation`, `Message` repositories + domain models |
 | `crm/` | Client, quote, invoice, supplier, payment models/repositories; the write services every caller shares (`ClientDirectory`, `QuoteService`, `InvoiceService`, with `ClientDraft` validation); CRM tool executor; PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio). `crm/api/` holds the HTTP request and response types and the helpers the dashboard and backoffice routes share |
 | `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
-| `dashboard/` | The tenant dashboard's API (`/app/api`): sessions and tokens (`DashboardAccess`), the module gate (`ModuleGate.kt`) and the feature registry (`DashboardFeature.kt`); one route file per area in `crm/`, `inbox/` and `settings/`, plus Home, persona and the assistant; the assistant's tool groups in `assistant/` and Home's card queries in `overview/` ([Dashboard API](#dashboard-api)) |
+| `building/` | The Building category ([Building](#building)): projects with phases and contract, site diary, photos on disk (`PhotoStore`), issues, change orders and measurements; the progress math (`ProjectProgress`) and the billing math (`MeasurementMath`); drafts and the services every page writes through, which return an `Outcome` and never HTTP. `building/api/` holds the requests, DTOs and views |
+| `dashboard/` | The tenant dashboard's API (`/app/api`): sessions and tokens (`DashboardAccess`), the module gate (`ModuleGate.kt`) and the feature registry (`DashboardFeature.kt`); one route file per area in `crm/`, `inbox/`, `settings/` and `building/` (with the client's share page), plus Home, persona and the assistant; the assistant's tool groups in `assistant/` and Home's card queries in `overview/` ([Dashboard API](#dashboard-api)) |
 | `http/` | The error contract: `ErrorBody`, `ApiException`, the `ApiErrors` codes, and `idParam` / `idValue` / `dateValue` / `enumValue` for values a handler can't use. Depends on no feature |
 | `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing; the team's work board in `admin/board/` and its password vault in `admin/vault/` ([Backoffice board and password vault](#backoffice-board-and-password-vault)) |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
@@ -181,9 +186,9 @@ graph TD
 Layering is route → service → repository. Route files read the request and map results to HTTP;
 services take and return domain types and outcomes, never HTTP; repositories own the Mongo queries,
 or a service does for a report such as Home. `ArchitectureBoundariesTest` checks the rules that can
-be read off the sources: nothing in `crm/` outside `crm/api/` imports Ktor's server, `http/` imports
-no feature, dashboard route files don't call `getCollection`, and every dashboard feature is
-registered. Gradle modules per domain are a proposal, not done: [plan-gradle-modules.md](plan-gradle-modules.md).
+be read off the sources: nothing in `crm/` outside `crm/api/`, nor in `building/` outside
+`building/api/`, imports Ktor's server, `http/` imports no feature, dashboard route files don't call
+`getCollection`, and every dashboard feature is registered. Gradle modules per domain are a proposal, not done: [plan-gradle-modules.md](plan-gradle-modules.md).
 
 ## Dashboard API
 
@@ -213,10 +218,12 @@ flowchart LR
   needs (`/me`, account, notifications, switching company, connecting a channel).
   `DashboardRouteAuditTest` reads the mounted route tree and fails for an `/app/api` endpoint that is
   neither gated, open with a reason, nor an employee's own page.
-- **CRM services.** The dashboard, the backoffice, `CrmTools` and the assistant write clients, quotes
-  and invoices through `ClientDirectory`, `QuoteService` and `InvoiceService`, and each maps the
-  outcome to its own answers. List endpoints load the clients, suppliers and employees they name with
-  one `findByIds` per kind instead of one lookup per row.
+- **CRM services.** The dashboard, the backoffice, `CrmTools`, the assistant and the Building
+  services write clients, quotes and invoices through `ClientDirectory`, `QuoteService` and
+  `InvoiceService`, and each maps the outcome to its own answers. `InvoiceService` frees what an
+  invoice billed outside the CRM (a measurement) through the `InvoicedWork` hooks its caller passes,
+  so `crm/` doesn't import `building/`. List endpoints load the clients, suppliers and employees they
+  name with one `findByIds` per kind instead of one lookup per row.
 - **Error contract.** Every refusal is `{"error": code, "detail": field}`. Malformed or empty JSON
   answers 400 `invalid_body`, a missing or unconvertible query parameter 400 `invalid_request`, an id,
   date or status a handler can't read 400 `invalid_id` / `invalid_date` / `invalid_status` with the
@@ -238,10 +245,12 @@ catalog lives in `DashboardModules`:
   `quotes`, `invoices`, `suppliers`, `employees`, `payments`, `catalog`, `ai-assistant`, `bookings`, `instagram`.
   Enabling `clients` also enables `services` so existing CRM tenants get the work ledger.
   Enabling `payments` also enables `suppliers` so outgoing bills always have a vendor directory.
-- Opt-in: `agents`, `timesheets` and `email` are left out of a legacy tenant's full catalog and are on
-  only when selected. Enabling `timesheets` also enables `employees`, since the people clocking in are
-  employee records. `email` shows the company's Gmail inbox to its whole team, so the platform turns it
-  on deliberately.
+- Opt-in: `agents`, `timesheets`, `email` and the Building modules (`projects`, `site-diary`,
+  `site-issues`, `change-orders`, `measurements`) are left out of a legacy tenant's full catalog and
+  are on only when selected. Enabling `timesheets` also enables `employees`, since the people clocking
+  in are employee records. `email` shows the company's Gmail inbox to its whole team, so the platform
+  turns it on deliberately. Building is for construction companies only, and each of its pages brings
+  `projects`, the records they work on.
 
 The product is no longer WhatsApp-first: messaging, contacts and settings are opt-in like every
 other module, so a tenant can be provisioned CRM-only.
@@ -603,6 +612,52 @@ sequenceDiagram
     S-->>P: new status + shift (or 409 outside_sites with the nearest site)
 ```
 
+### Building
+
+Five opt-in modules for construction companies (`building/`, plan and market research in
+[plan-building.md](plan-building.md), decisions in [wiki/building-projects.md](../wiki/building-projects.md)),
+each a dashboard feature under `/app/api/building`:
+
+- **Projects** (`projects`): a project, optionally made from a quote (its client, name and lines become
+  the contract and the quote turns accepted), with phases (planned dates, progress, weight), a
+  manager, a retention percentage, photos and the client's link. Progress is the phases' weighted by
+  planned days, compared with the plan as of the end of yesterday; days ahead or behind are earned
+  schedule, and health (on track, at risk, delayed) follows from them, the revised end and late phases.
+- **Site diary** (`site-diary`): one entry per project and day, with weather, workers, work done,
+  equipment, materials, visitors, incidents, lost hours and photos; an entry moves phases' progress and
+  records it.
+- **Issues** (`site-issues`): punch items, defects and safety problems with an assignee (employee or
+  supplier), due date, photos and a status history.
+- **Change orders** (`change-orders`): additions and omissions with lines, value and days, sent and
+  decided by the client; approved ones change the contract, the revised end and what measurements bill.
+- **Measurements** (`measurements`): autos de medição against the contract and approved additions,
+  quantities to date, retention held, invoiced as CRM invoices.
+- **The client's page** `/app/share/{token}` shows progress, the plan and the shared diary days and
+  photos, no money or issues, while the link is on and the company active.
+
+Photos are shrunk in the browser and stored on the PDF volume (`<PDF_STORAGE_PATH>/<slug>/building/`),
+outside the Mongo backups. Home shows a Projects card and Needs-you rows for delayed projects, overdue
+issues, changes waiting for the client and measurements to invoice.
+
+```mermaid
+sequenceDiagram
+    participant U as Dashboard
+    participant MS as MeasurementService
+    participant QS as QuoteService
+    participant IS as InvoiceService
+    participant M as MongoDB (wabot)
+    U->>MS: POST /building/measurements (project)
+    MS->>M: building.measurements #n (lines from the contract,<br/>approved additions, last quantities to date)
+    MS->>QS: first one: mark the project's quote billed
+    U->>MS: PATCH quantities to date, then approve
+    U->>MS: POST /measurements/{id}/invoice (needs invoices)
+    MS->>M: claim it (INVOICED)
+    MS->>IS: create(lines billed this period, retention as a negative line,<br/>projectId, measurementId)
+    U->>IS: POST /crm/invoices/{id}/cancel
+    IS->>M: invoice CANCELLED, Serviços rows reopened
+    IS->>M: InvoicedWork: the measurement back to APPROVED
+```
+
 ### Removing clients, suppliers and employees
 
 `DELETE /app/api/crm/{clients|suppliers|employees}/{id}` deletes the record only when no document
@@ -810,8 +865,8 @@ flowchart LR
 | `conversations` | One conversation per user: summary, token totals, `autoReplyEnabled` (+ who paused it), `lastInboundAt`, `unreadCount` | unique on `userId` |
 | `messages` | Full message history (user + assistant turns, text, templates and customer media by Meta media id); outbound rows carry `author`, `waMessageId`, delivery `status`/`statusAt` and Meta's error | `conversationId`, `createdAt`; unique partial `(tenantId, waMessageId)` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows; `customFields` holds the values of the company's own fields by key ([Client fields](#client-fields)) | unique on `phone` |
-| `crm.quotes` | Quote records, line items, totals, PDF path | unique on `number` |
-| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments | unique on `number` |
+| `crm.quotes` | Quote records, line items, totals, PDF path; `projectId` once a project's measurements bill it | unique on `number` |
+| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments; `projectId` and `measurementId` when a measurement made it | unique on `number` |
 | `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
 | `crm.service_submissions` | Services employees registered from their own sign-in: client, day, lines, status (PENDING/APPROVED/REJECTED), the approved Serviços row (`serviceId`) or the rejection reason | `tenantId+employeeId+createdAt`; `tenantId+status+createdAt` |
 | `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
@@ -829,6 +884,12 @@ flowchart LR
 | `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
 | `timesheets.devices` | Employees' phone keys for the time clock: key id, public key, platform, name, active or revoked (by whom) | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
 | `timesheets.settings` | A company's time clock rules | `_id` = tenant id |
+| `building.projects` | Projects: status, client, quote, manager, address, planned and actual dates, `contract[]` lines, retention, `phases[]` (dates, progress, weight), the client's link (`share.token`, enabled), `version` | unique `(tenantId, number)`; `tenantId+status+updatedAt`; `tenantId+clientId`; `tenantId+quoteId`; unique partial `share.token` |
+| `building.site_logs` | Site diary entries, one per project and company-local `day`: weather, workers, work done, other notes, lost hours, `shared`, `progress[]` (phase from → to) | unique `(tenantId, projectId, day)`; `tenantId+day` |
+| `building.photos` | Photo metadata (the files are on the PDF volume): project, diary day, issue or phase, caption, day, `shared`, paths, size | `tenantId+projectId+day`; `tenantId+logId`; `tenantId+issueId` |
+| `building.issues` | Issues: kind, priority, status, phase, employee or supplier, due date, `history[]` | unique `(tenantId, number)`; `tenantId+projectId+status`; `tenantId+status+dueDate` |
+| `building.change_orders` | Change orders: kind (addition, omission), `items[]`, total, days, status, who decided and when | unique `(tenantId, number)`; `tenantId+projectId+status` |
+| `building.measurements` | Measurements: number per project, period end, `lines[]` (quantity contracted, previous and to date), retention, totals, status, the invoice | unique `(tenantId, projectId, number)`; `tenantId+status`; `tenantId+invoiceId` |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
 | `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |

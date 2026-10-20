@@ -20,7 +20,8 @@ feature. It now mounts `/app/api/me` and `installDashboardFeatures(deps)`. Each 
 (`dashboard/DashboardFeature.kt`). The areas are Home (`OverviewRoutes`), `dashboard/inbox/`
 (Conversations and Contacts), `dashboard/settings/` (Settings and the document studio),
 `dashboard/crm/` (clients, catalog, quotes, invoices, services, suppliers, employees, payments),
-persona, the assistant, bookings and Instagram.
+`dashboard/building/` (projects, site diary, issues, change orders, measurements:
+[building-projects.md](building-projects.md)), persona, the assistant, bookings and Instagram.
 
 - A new area is a new file, `internal object FooRoutes : DashboardFeature(DashboardModules.FOO)`, plus
   one line in `DashboardFeatures.all`. `ArchitectureBoundariesTest` fails when a feature object is
@@ -80,12 +81,22 @@ feature.
   each caller keeps its own answers: the routes their 4xx bodies, `CrmTools` the exception messages
   `MessagePipeline` matches.
 - `ClientDirectory`, not `ClientService`: `crm.model.ClientService` is already a Serviços row.
+- **Work an invoice bills outside the CRM** is an `InvoicedWork` hook given to `InvoiceService`, which
+  cancel and delete call with the invoice's id. The dashboard's `TenantCrm` passes the one that frees a
+  project's measurement, so `crm/` never imports `building/` (that would be one more domain cycle).
+- **Building follows the same layering** (PR #88): services in `building/` (`ProjectService`,
+  `MeasurementService`…) take drafts and return an `Outcome` (done, refused with a code, not found),
+  `building/api/` has the requests, DTOs and views, and the routes in `dashboard/building/` map outcomes
+  to 400 or 409 with the error contract's body. Its quote and invoice writes go through `QuoteService`
+  and `InvoiceService`.
 - **Lists don't look up per row.** Quotes, invoices, Serviços and payments load the names they show
   with one `findByIds` per kind (clients, suppliers, employees) and map through the batched `dtos(...)`
-  in `crm/api/CrmDtos.kt`. The assistant's payables and conversation tools do the same.
-- `ArchitectureBoundariesTest` checks that nothing in `crm/` outside `crm/api/` imports Ktor's server,
-  that `http/` imports no feature, that dashboard route files don't call `getCollection` (a query goes
-  in a repository, or in a service for reports like Home), and that every feature is registered.
+  in `crm/api/CrmDtos.kt`. The assistant's payables and conversation tools do the same, and so do the
+  Building lists (quotes and invoices have `findByIds` too).
+- `ArchitectureBoundariesTest` checks that nothing in `crm/` outside `crm/api/`, nor in `building/`
+  outside `building/api/`, imports Ktor's server, that `http/` imports no feature, that dashboard route
+  files don't call `getCollection` (a query goes in a repository, or in a service for reports like
+  Home), and that every feature is registered.
 - Not on the services yet: agents' CRM actions (`agents/actions/CrmActions.kt`) write through the
   repositories with their own rules, except setting a quote's status, and the backoffice's tenant
   stats count collections directly. Quote and invoice creation still writes before checking that the
@@ -140,7 +151,7 @@ Every refusal is `{"error": code, "detail": field}`, `detail` only when it names
   with its denial body; an employee's token gets 401 on every team endpoint; a company with every
   module passes every gate. A route added without a gate fails it, listed by method and path.
 - Per area, an `*ApiTest` (`dashboard/crm/`, `dashboard/inbox/`, `dashboard/settings/`,
-  `OverviewApiTest`, `BookingApiTest`, `InstagramApiTest`) covers its gate, isolation (company B
+  `dashboard/building/`, `OverviewApiTest`, `BookingApiTest`, `InstagramApiTest`) covers its gate, isolation (company B
   can't read, change or list company A's records, and A's are unchanged after B tries) and its error
   codes. `StatusPagesTest` pins the contract on its own.
 - **Gotcha:** the route tests older than #87 (`EmployeeWorkRoutesTest`, `PersonaRoutesTest`,

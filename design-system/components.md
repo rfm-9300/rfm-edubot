@@ -1064,6 +1064,53 @@ The backoffice's Board ([patterns.md](patterns.md#board-backoffice)): one `.pane
 - **Quick add:** "+ Add a card" turns the foot into `form.board-col__new` (an `.inp` and Add / Cancel); Enter adds and keeps the field for the next card, Escape closes it.
 - **The card's drawer** puts the checklist and the comments under the form, each a `.board-detail__section` with a `.board-detail__title` (and its `.tag` count). The checklist is a `.meter` (filled `--ok`) over `ul.checklist` of `.form__check` items with a `.checklist__rm` ×, then `form.checklist__add`; a done item's text is struck through in `--ink-mute`. Comments are `ul.comments` of `.comment` (`.comment__head` with the author's initials, name and time, and Delete for the author's own; `.comment__body` keeps line breaks), then `form.comment-form`.
 
+## Building
+
+The Building pages' parts ([patterns.md](patterns.md#building-projects-and-their-progress)). Script: `app/building.js`, which the five pages share.
+
+```html
+<!-- Progress: the work done as a fill in the project's tone, a tick where the plan is by the end of yesterday. -->
+<div class="progress-cell">
+  <div class="progress" role="img" aria-label="47% done, the plan expects 67%">
+    <span class="progress__fill" data-tone="warn" style="width:47%"></span>
+    <span class="progress__plan" style="left:67%"></span>
+  </div>
+  <span class="progress-cell__label"><strong>47%</strong> · plan 67%</span>
+</div>
+<span class="schedule--behind">6 days behind</span>
+
+<!-- Timeline: one row per project or phase across whole months, today in red. -->
+<div class="gantt" role="table" aria-label="Project">
+  <div class="gantt__head"><span class="gantt__head-label">Project</span><div class="gantt__scale"><span class="gantt__tick" style="left:0%">Oct 26</span>…</div></div>
+  <div class="gantt__row">
+    <button class="gantt__label" type="button" data-gantt-open="…"><span class="gantt__name">OB-001 · Moradia</span><span class="gantt__sub">At risk · 47%</span></button>
+    <div class="gantt__track"><span class="gantt__line" style="left:33%"></span><span class="gantt__bar" data-tone="warn" style="left:3%;width:64%"><span class="gantt__done" style="width:47%"></span></span><span class="gantt__now" style="left:52%"></span></div>
+  </div>
+</div>
+
+<!-- Photos: square thumbnails; the ones the client doesn't see carry a pill. -->
+<div class="photo-grid">
+  <figure class="photo">
+    <button class="photo__open" type="button" data-photo-open="…" aria-label="Façade"><img class="photo__img" data-photo="…" data-size="thumb" alt="" loading="lazy" /></button>
+    <span class="pill photo__flag">Team only</span>
+    <figcaption class="photo__caption">Façade</figcaption>
+  </figure>
+</div>
+```
+
+- **Tone** (`data-tone` on `.progress__fill` and `.gantt__bar`) follows the project's health: `ok` on track or done, `warn` at risk, `bad` delayed, `neutral` planning, `muted` on hold or cancelled. A phase's follows its state: `ok` done, `accent` in progress, `bad` late, `neutral` not started. The tones are the shared `:is(.dash, .record, .worklist, .progress, .gantt) [data-tone]` mapping, never a colour of their own. Behind and ahead read in `--bad-ink` / `--ok-ink`; on plan is plain text.
+- `.progress` is 8px (12px on the client's page) on `--bg-deep`; the plan tick is a 2px `--ink` mark that stands out of the bar, so "behind" reads without colour. Its `aria-label` says both numbers. In a table use `.progress-cell` (bar over the label).
+- `.gantt` is `bldPanel`'s body for the Timeline view and the project record's Phases tab: the bar spans planned start to end on a `color-mix` of the tone, `.gantt__done` fills the share done, `.gantt__now` marks today. A row without dates says so in its track (`.gantt__undated`). Labels are buttons when the row opens something. Under 560px the label column narrows; nothing scrolls sideways.
+- Photos come from the API as blobs (`apiBlob`, the token in a header), so `img.photo__img` starts without `src` and `hydratePhotos()` fills it; an image without `src` stays hidden. Opening one shows `.photo-view` (contained, at most 62vh) in a drawer with its caption, the shared switch and Delete through `.confirm`.
+- `.panel__text` is text someone wrote (a diary's work done, an issue's description): 13.5px, line breaks kept, long words wrapped.
+- Typed values in a table row (a measurement's quantity to date and %): `.tbl__input` (104px, 32px tall; `.tbl__input--pct` 76px) in a `td.tbl__cell-input`, mono and right-aligned like the numbers around them.
+- The phases editor is a `.lines.lines--phases` (name, planned start, planned end, weight, progress, remove), like the line items editor; under 560px the name takes the whole row and weight and progress move under the dates.
+- **Nav:** the Building group's counts are delayed projects (alert) or the running ones, active sites without today's diary, open issues (overdue ones as an alert), changes waiting for the client and measurements to invoice. Its tabs have their own outline masks in the minimal block.
+
+### The client's page (`/app/share/{token}`)
+
+`body.share-page` with one `main.share` column (760px, no sidebar or topbar): `.share__head` (the company's logo on `--doc-page` in `.share__logo`, the company's name, the project's number as `.share__eyebrow`, `.share__title`, `.share__sub` with status and address), a `.panel` with `.share__figure` (the percentage at 40px) over the 12px `.progress` and `.dash-facts` (planned start, end, started), a **Plan** panel of `.share__phase` rows (name and dates, bar, state pill: never "late", which is the team's word), **Updates** (`.share__update`: the day, weather, work done as `.panel__text`, its photos in a `.photo-grid`), all shared **Photos**, and `.share__foot` (updated when, "made with"). Photos open in `dialog.share-viewer` (previous, close, next; arrow keys and Escape) over the house scrim, darker. The page is in the company's language unless the visitor chose another on that browser, and in the visitor's theme; it sends `noindex`.
+
 ## Utilities
 
 `.row` `.col` `.muted` `.mono` `.sub` `.right` — use these instead of one-off flex/color classes.
