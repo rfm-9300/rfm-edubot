@@ -43,11 +43,12 @@
   function render(d, thanks = '') {
     document.title = `${d.number} · ${d.title} · ${d.company}`;
     const addition = d.kind !== 'OMISSION';
+    const label = key => ` data-label="${esc(t(key))}"`;
     const rows = d.items.map(it => `<tr>
       <td class="name long">${esc(it.description)}</td>
-      <td class="right mono nowrap">${esc(qty(it.quantity))}${it.unit ? ` ${esc(it.unit)}` : ''}</td>
-      <td class="right mono nowrap">${esc(money(it.unitPriceEur))}</td>
-      <td class="right mono nowrap">${esc(money(it.quantity * it.unitPriceEur))}</td>
+      <td class="right mono nowrap"${label('thQty')}>${esc(qty(it.quantity))}${it.unit ? ` ${esc(it.unit)}` : ''}</td>
+      <td class="right mono nowrap"${label('thPrice')}>${esc(money(it.unitPriceEur))}</td>
+      <td class="right mono nowrap"${label('thTotal')}>${esc(money(it.quantity * it.unitPriceEur))}</td>
     </tr>`).join('');
     root.innerHTML = `
       <header class="share__head">

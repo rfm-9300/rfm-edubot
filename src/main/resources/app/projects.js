@@ -257,7 +257,7 @@ function projectCostsPane(r) {
     : `<p class="hint">${escapeHTML(bt('costs.noBudget'))}</p>`;
   const summary = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.marginTitle'))}</h2>
       <div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-project-act="edit">${escapeHTML(bt('costs.setUp'))}</button></div></header>
-    <div class="panel__body">
+    <div class="panel__body record__stack">
       ${dashFacts([
         [bt('costs.contract'), fmtEUR(c.currentContractEur)],
         [bt('costs.total'), fmtEUR(c.totalCostEur)],
@@ -311,8 +311,8 @@ function projectReportsPane(r) {
     return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(bt('reports.empty'))}</p><p class="empty__desc">${escapeHTML(bt('reports.emptyDesc'))}</p><div class="empty__actions">${add}</div></div></div>`;
   }
   const rows = r.reports.map(rep => {
-    const first = rep.text.split(/\n\s*\n/)[0].replace(/\s+/g, ' ');
-    return recordRowHtml({ tone: 'info', title: reportPeriod(rep), detail: first.length > 140 ? `${first.slice(0, 139)}…` : first, when: relDay(rep.postedAt.slice(0, 10)), open: `report:${rep.id}` });
+    const text = rep.text.replace(/\s+/g, ' ');
+    return recordRowHtml({ tone: 'info', title: reportPeriod(rep), detail: text.length > 160 ? `${text.slice(0, 159)}…` : text, when: relDay(rep.postedAt.slice(0, 10)), open: `report:${rep.id}` });
   }).join('');
   return `<div class="record__stack"><section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('reports.title'))} <span class="tag">${r.reports.length}</span></h2></header>
     <ul class="worklist worklist--wrap">${rows}</ul></section>

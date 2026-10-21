@@ -52,7 +52,7 @@ function contactButtons(phone, extra = '') {
 
 // `lines` and `actions` are trusted HTML built by the caller (escaped values); everything else is escaped here.
 // `warning` is a one-line status under the head, like automations being paused for a client.
-function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null, warning = '' }) {
+function recordCardHtml({ name, lines, since, contact = '', notes = '', actions = '', archivedAt = null, warning = '', editable = true }) {
   return `<section class="record-card">
     <div class="record-card__head">
       <span class="record-card__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
@@ -60,7 +60,7 @@ function recordCardHtml({ name, lines, since, contact = '', notes = '', actions 
         <div class="record-card__lines">${lines}</div>
         <p class="record-card__since">${escapeHTML(since)}</p>
       </div>
-      <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${actions}</div>
+      <div class="actions">${editable ? `<button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>` : ''}${actions}</div>
     </div>
     ${archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(archivedAt) }))}</p>` : ''}
     ${warning ? `<p class="hint hint--warn">${escapeHTML(warning)}</p>` : ''}

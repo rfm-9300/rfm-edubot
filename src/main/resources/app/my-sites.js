@@ -47,8 +47,9 @@ async function openMySite(id) {
       ? `<div class="panel__body">${dashFacts([[BLD.thWeather, weatherLabel(today.weather) || '—'], [BLD.thWorkers, today.workers ?? '—']], true)}<p class="panel__text">${escapeHTML(today.workDone)}</p></div>`
       : `<div class="empty"><p class="empty__title">${escapeHTML(BLD.diaryNotYet)}</p><div class="empty__actions"><button class="btn btn--sm btn--primary" type="button" data-site-diary="">${escapeHTML(BLD.diaryNew)}</button></div></div>`}
     ${earlier.length ? `<ul class="worklist">${earlier.map(e => recordRowHtml({ tone: 'neutral', title: capFirst(fmtDay(e.day)), detail: e.workDone, when: relDay(e.day), open: e.id })).join('')}</ul>` : ''}</section>`;
+  const phaseRows = d.phases.map(ph => `<tr><td class="name long">${escapeHTML(ph.name)}</td><td${cellLabel(BLD.thProgress)}>${progressCellHtml(ph.progressPct, null, PHASE_TONES[ph.state])}</td><td${cellLabel(BLD.thStatus)}>${phaseStatePill(ph.state)}</td></tr>`).join('');
   const phases = d.phases.length ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.scheduleTitle)} <span class="tag">${d.phases.length}</span></h2></header>
-    <div class="panel__body">${d.phases.map(ph => `<div class="form__row"><span class="lbl">${escapeHTML(ph.name)}</span>${progressCellHtml(ph.progressPct, null, PHASE_TONES[ph.state])}</div>`).join('')}</div></section>` : '';
+    <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(BLD.thPhase)}</th><th>${escapeHTML(BLD.thProgress)}</th><th>${escapeHTML(BLD.thStatus)}</th></tr></thead><tbody>${phaseRows}</tbody></table></div></section>` : '';
   const issues = !d.canIssues ? '' : `<section class="panel" data-site-panel="issues"><header class="panel__head"><h2 class="panel__title">${escapeHTML(labels['site-issues'])} <span class="tag">${d.issues.length}</span></h2>
       <div class="panel__tools"><button class="btn btn--sm" type="button" data-site-issue-new><span class="btn__plus">+</span> ${escapeHTML(BLD.issueNew)}</button></div></header>
     ${d.issues.length ? `<ul class="worklist">${d.issues.map(i => recordRowHtml({
@@ -62,7 +63,7 @@ async function openMySite(id) {
       <div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-site-photos>${escapeHTML(BLD.photosAdd)}</button></div></header>
     <div class="panel__body">${d.photos.length ? photoGridHtml(d.photos) : `<p class="dash-empty">${escapeHTML(BLD.photosEmpty)}</p>`}</div></section>`;
   body.innerHTML = `
-    ${recordCardHtml({ name: s.name, lines: s.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(s.address))}" target="_blank" rel="noopener">${escapeHTML(s.address)}</a>` : `<span class="record-card__line mono">${escapeHTML(s.number)}</span>`, since: mySite('progress', { pct: s.progressPct }) })}
+    ${recordCardHtml({ name: s.name, lines: s.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(s.address))}" target="_blank" rel="noopener">${escapeHTML(s.address)}</a>` : `<span class="record-card__line mono">${escapeHTML(s.number)}</span>`, since: mySite('progress', { pct: s.progressPct }), editable: false })}
     <div class="record__stack">${todayPanel}${phases}${issues}${photos}</div>`;
   hydratePhotos(body);
   $('[data-site-diary]', body)?.addEventListener('click', () => diaryForm(today || null));
