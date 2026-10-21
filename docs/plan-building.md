@@ -1,7 +1,7 @@
 # Implementation Plan — Building (construction projects and their progress)
 
-Status: **Phase 1 implemented** (server, `/app` pages, Home, the client's progress page) · Owner:
-Rodrigo · Last updated: 2026-10-20
+Status: **Phase 1 implemented** (server, `/app` pages, Home, the client's progress page), **Phase 2 in
+progress** ([§10](#10-phase-2-design)) · Owner: Rodrigo · Last updated: 2026-10-21
 
 A new nav category, **Building**, for construction and renovation companies: the projects (obras) a
 company runs and how far along each one is. The schedule and its phases, the site diary, photos,
@@ -263,13 +263,14 @@ Public: `GET /app/share/{token}` (the page), `/data`, `/photos/{id}`, `/logo`, a
 
 ## 7. Phases
 
-1. **Phase 1 (this change)** — everything above.
+1. **Phase 1 (PR #88)** — everything above.
 2. **Phase 2** — a foreman's **My sites** page on an employee's sign-in (diary, photos, issues on their
    projects only); **job costing**: supplier bills and time-clock hours by project, budget vs actual
    and margin (Obra Sys, Empreitek, JobTread); **client approval of a change** from the link, with its
    own signed token and a typed name; a **weekly client update** drafted by the AI from the diary
    (Buildertrend); retention **release** at closeout; domain events so Agents can act on a delayed
    project, an overdue issue or an approved measurement; PDF of a measurement and of the diary.
+   Designed in [§10](#10-phase-2-design).
 3. **Phase 3** — drawings with issue pins, inspections and checklists, the KMP app offline capture,
    BC3 import (Spain), weather filled in from a forecast service.
 
@@ -292,3 +293,90 @@ Public: `GET /app/share/{token}` (the page), `/data`, `/photos/{id}`, `/logo`, a
   A volume backup (or object storage) becomes worth it once companies rely on their photo history.
 - The public page is under `/app/share/…` so it needs no Caddy change; a shorter `/p/…` would need a
   `handle /p*` route in the website's Caddyfile.
+
+## 10. Phase 2 design
+
+Same structure as Phase 1: services in `building/`, routes in `dashboard/building/`, every string in the
+three catalogs, HTTP tests per area. Built in this order, one commit each.
+
+### 10.1 Domain events, for Agents
+
+| Subject | Events |
+|---|---|
+| `project` | `project.created`, `project.status_changed` (from → to), `project.health_changed` (from → to) |
+| `site_log` | `site_log.created` |
+| `site_issue` | `site_issue.created`, `site_issue.status_changed` (from → to) |
+| `change_order` | `change_order.sent`, `change_order.decided` (to `APPROVED` or `REJECTED`, `via` the team or the client's link) |
+| `measurement` | `measurement.approved`, `measurement.invoiced` |
+
+- Each event names the project and its client as related records, so the client's activity timeline
+  shows it and an agent's actions (a WhatsApp to the client, a task, a notice) have the client.
+- The services append the events after their own writes. Health is computed, not written, so an hourly
+  job (on a lease, like the agents' scheduler) stores each active project's health and appends
+  `project.health_changed` when it moves: an agent can tell the manager the day a project turns delayed.
+- The agents' context builder loads each new subject (the project's figures, the issue, the change, the
+  measurement, the diary day) with its project and client; the Agents page lists the events in the
+  company's language and offers each one's statuses.
+
+### 10.2 The client approves a change from a link
+
+- Sending a change to the client gives it its own link, `/app/share/change/{token}` (32 random bytes).
+  The page shows the company, the project, the change's lines, value and days, and asks for the
+  client's name to approve or reject it, with an optional note.
+- The link works while the change is sent. Editing a sent change takes it back to draft and ends the link,
+  so the client never approves something other than what they read; deciding from the dashboard ends it
+  too. A decision records the typed name, the time and that it came by the link, notifies the team (the
+  bell) and appends `change_order.decided`.
+- The change's drawer shows the link (copy, send by WhatsApp, open) while it waits, and who decided.
+
+### 10.3 Releasing the retention
+
+- Once the project is finished, the retention held (the retention of its invoiced measurements, less
+  what was released) is invoiced in one line to the project's client. The project keeps the releases;
+  cancelling or deleting that invoice frees the amount again (`InvoicedWork`).
+- `POST /building/projects/{id}/retention/invoice {dueDate}` needs measurements and invoices.
+
+### 10.4 PDFs
+
+- **Measurement** (`GET /building/measurements/{id}/pdf`): the company's logo, name and colour; project,
+  client, number and period; per line the unit, contracted, previous, this period, to date, % and value
+  this period; the totals, retention and net; signature boxes for the contractor and the client.
+- **Diary** (`GET /building/diary/pdf?projectId&from&to`): the project's days in the period with
+  weather, people, work done, the other notes, the phases each day moved and up to six photos.
+- Both in the company's language, from `building/BuildingPdf.kt` over PDFBox with the bundled fonts;
+  the quote and invoice generator is left alone.
+
+### 10.5 Job costing
+
+- A payment can name the project it was for (`crm.payments.projectId`), like the client it was for; the
+  Payments form offers the projects with the projects module.
+- A work site can belong to a project (`timesheets.sites.projectId`): shifts clocked at it are the
+  project's hours.
+- A project can have a cost budget and a labour cost per hour (both optional).
+- A **Costs** tab: revenue (current contract, measured, invoiced), costs (bills by supplier, paid and to
+  pay; hours by employee at the project's rate), the budget against the costs, and the margin, expected
+  (current contract less costs) and to date (measured less costs). `GET /building/projects/{id}/costs`;
+  bills need payments, hours need the time clock.
+
+### 10.6 A weekly update for the client
+
+- `POST /building/projects/{id}/updates/draft {from?, to?}` (the last 7 days by default): the AI writes a
+  short update from the shared diary days, the phases' progress and approved changes, in the company's
+  language, inside its monthly token budget (`409 token_budget` past it), recorded as `building` usage.
+- The team edits and posts it (`building.updates`); the client's page shows the posted updates, newest
+  first. Copy and WhatsApp buttons send it too.
+
+### 10.7 My sites, for the site manager
+
+- An employee page, `my-sites`, when the company has employees and the site diary or issues: the active
+  projects whose manager they are.
+- Under `/app/api/portal/sites`: the list, a project (phases, today's entry, open issues, recent photos),
+  writing and editing the diary (moving phases), uploading photos, logging issues and moving their status.
+  The same services, stamped with the employee's name; no money anywhere.
+
+### 10.8 Testing
+
+HTTP tests per area: events appended with their related records and loaded by the agents' context;
+the change link (decide once, editing ends it, isolation, headers); the retention invoice and its release;
+both PDFs parse and carry the figures; costs from linked bills and hours; the draft with `FakeModel` and
+the budget refusal; My sites only for the manager's projects, refused to the team.
