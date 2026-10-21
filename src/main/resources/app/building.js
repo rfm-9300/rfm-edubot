@@ -173,7 +173,9 @@ const buildingPhotoUrls = new Map();
 async function buildingPhotoSrc(id, size) {
   const key = `${id}:${size}`;
   if (!buildingPhotoUrls.has(key)) {
-    buildingPhotoUrls.set(key, apiBlob(`/app/api/building/photos/${encodeURIComponent(id)}${size === 'thumb' ? '?size=thumb' : ''}`).then(blob => URL.createObjectURL(blob)));
+    // A site manager's own sign-in reads the photos of the sites they run through their portal.
+    const base = isPortal() ? '/app/api/portal/photos' : '/app/api/building/photos';
+    buildingPhotoUrls.set(key, apiBlob(`${base}/${encodeURIComponent(id)}${size === 'thumb' ? '?size=thumb' : ''}`).then(blob => URL.createObjectURL(blob)));
   }
   try {
     return await buildingPhotoUrls.get(key);
@@ -260,7 +262,8 @@ async function uploadProjectPhotos(projectId, files, extra = {}) {
       body.append('thumb', thumb, 'thumb.jpg');
       if (file.lastModified) body.append('takenAt', new Date(file.lastModified).toISOString());
       Object.entries(extra).forEach(([k, v]) => { if (v != null && v !== '') body.append(k, String(v)); });
-      stored.push(await api(`/app/api/building/projects/${encodeURIComponent(projectId)}/photos`, { method: 'POST', body }));
+      const url = isPortal() ? `/app/api/portal/sites/${encodeURIComponent(projectId)}/photos` : `/app/api/building/projects/${encodeURIComponent(projectId)}/photos`;
+      stored.push(await api(url, { method: 'POST', body }));
     } catch (err) {
       if (err?.message === 'unauthorized') return stored;
       toast(err?.code ? buildingErrorText(err, BLD.photoFailed) : BLD.photoUnreadable);

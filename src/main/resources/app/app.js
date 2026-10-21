@@ -70,6 +70,7 @@ function renderNav() {
     bookings: pendingBookings || (state.fetched.bookings ? weekBookings().filter(b => b.status !== 'CANCELLED').length : o.calendar?.thisWeek) || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
     [PORTAL_TAB]: state.portal.submissions.filter(s => s.status === 'PENDING').length,
+    [SITES_TAB]: state.mySites.filter(s => !s.todayEntryId).length,
   };
   const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
   if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
@@ -82,7 +83,7 @@ function renderNav() {
   Object.assign(counts, building.counts);
   Object.assign(alerts, building.alerts);
   const groups = [
-    { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB] },
+    { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB, SITES_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
@@ -166,6 +167,7 @@ async function loadModule(tab) {
     state.portal = { submissions, clients, catalog };
   }
   if (tab === HOURS_TAB) await window.TimesheetsUI.loadMine();
+  if (tab === SITES_TAB) state.mySites = await api('/app/api/portal/sites');
   if (tab === 'timesheets') await window.TimesheetsUI.loadTeam();
   if (tab === 'payments') {
     const [payments, suppliers, employees] = await Promise.all([
@@ -301,6 +303,7 @@ function render() {
   if (state.active === 'email') return window.EmailUI.render(root);
   if (state.active === PORTAL_TAB) return renderMyServices(root);
   if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
+  if (state.active === SITES_TAB) return renderMySites(root);
   if (state.active === 'timesheets') return window.TimesheetsUI.renderTeam(root);
   if (state.active === 'projects') return renderProjects(root);
   if (state.active === 'site-diary') return renderSiteDiary(root);

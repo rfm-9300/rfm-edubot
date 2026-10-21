@@ -140,6 +140,37 @@ internal data class CostHoursDto(val employeeId: String, val name: String, val h
 @Serializable
 internal data class CostSiteDto(val id: String, val name: String)
 
+/** A project on its site manager's My sites page: no money anywhere. */
+@Serializable
+internal data class MySiteDto(
+    val id: String,
+    val number: String,
+    val name: String,
+    val address: String?,
+    val status: String,
+    val progressPct: Int,
+    val plannedEnd: String?,
+    /** Today's diary entry, once written. */
+    val todayEntryId: String?,
+    val openIssues: Int,
+)
+
+@Serializable
+internal data class MySitePhaseDto(val id: String, val name: String, val progressPct: Int, val state: String)
+
+/** [canDiary] and [canIssues] follow the company's modules; the diary is its last two weeks. */
+@Serializable
+internal data class MySiteDetailDto(
+    val site: MySiteDto,
+    val today: String,
+    val phases: List<MySitePhaseDto>,
+    val diary: List<SiteLogDto>,
+    val issues: List<IssueDto>,
+    val photos: List<PhotoDto>,
+    val canDiary: Boolean,
+    val canIssues: Boolean,
+)
+
 @Serializable
 internal data class ReportDraftDto(val from: String, val to: String, val text: String, val sharedDays: Int)
 

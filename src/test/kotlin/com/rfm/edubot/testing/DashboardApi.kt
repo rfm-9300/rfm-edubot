@@ -159,7 +159,7 @@ internal class DashboardApi(
     }
 
     /** [bytes] posted as a file named [fileName], the way a browser's file input sends it, with the form's [fields]. */
-    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap()): Reply {
+    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap(), token: String = this.token): Reply {
         val form = formData {
             append("file", bytes, Headers.build { append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"") })
             fields.forEach { (name, value) -> append(name, value) }

@@ -7,7 +7,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
       clients: 'Clientes', services: 'Serviços', quotes: 'Orçamentos', invoices: 'Faturas', financeiro: 'Financeiro', suppliers: 'Fornecedores', employees: 'Colaboradores', payments: 'Pagamentos', catalog: 'Catálogo',
       persona: 'Persona', settings: 'Definições', 'ai-assistant': 'Assistente IA', bookings: 'Marcações', instagram: 'Instagram', agents: 'Agentes',
       timesheets: 'Registo de horas',
-      'my-services': 'Os meus serviços', 'my-hours': 'As minhas horas',
+      'my-services': 'Os meus serviços', 'my-sites': 'As minhas obras', 'my-hours': 'As minhas horas',
       projects: 'Obras', 'site-diary': 'Diário de obra', 'site-issues': 'Ocorrências', 'change-orders': 'Alterações', measurements: 'Autos de medição',
       groupInbox: 'Inbox', groupBusiness: 'Negócio', groupBuilding: 'Construção', groupBot: 'Automação', groupSetup: 'Configuração',
     },
@@ -1465,6 +1465,12 @@ window.__I18N_CATALOGS['pt-PT'] = {
       retentionWaitHint: 'Quando a obra estiver concluída, fature ao cliente a retenção que ainda guarda.',
       retentionInvoice: 'Faturar a retenção ({amount})', retentionInvoiced: 'Fatura {number} emitida', retentionReleaseLabel: 'Devolução da retenção',
       retentionInvoiceIntro: '{client} recebe uma fatura com a retenção ainda retida: {amount}. Se cancelar ou eliminar essa fatura, a retenção volta a ficar retida.',
+      mySites: {
+        desc: 'As obras que dirige: escreva o diário do dia, junte fotografias e registe ocorrências quando surgem.',
+        title: 'As suas obras', statSites: 'Obras', statToday: 'Diário escrito hoje', statIssues: 'Ocorrências abertas',
+        progress: '{pct} % executado', openIssues: p => (p.n === 1 ? '1 ocorrência aberta' : `${p.n} ocorrências abertas`),
+        empty: 'Ainda sem obras para dirigir', emptyDesc: 'Quando o escritório o indicar como encarregado de uma obra, ela aparece aqui.',
+      },
       reports: {
         title: 'Pontos de situação publicados para o cliente', new: 'Escrever ponto de situação', empty: 'Ainda sem pontos de situação',
         emptyDesc: 'Uma vez por semana, conte ao cliente como correu a obra. A IA faz o rascunho a partir dos dias do diário que partilhou com ele.',

@@ -358,6 +358,19 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
     )
 }
 
+/** The project as its site manager's My sites page lists it. */
+internal fun Project.mySiteDto(todayEntryId: ObjectId?, openIssues: Int) = MySiteDto(
+    id = id.toHexString(),
+    number = number,
+    name = name,
+    address = address,
+    status = status.name,
+    progressPct = ProjectProgress.actualPct(this).roundToInt().coerceIn(0, 100),
+    plannedEnd = ProjectProgress.plannedEnd(this)?.toString(),
+    todayEntryId = todayEntryId?.toHexString(),
+    openIssues = openIssues,
+)
+
 internal fun ProjectReport.dto() = ReportDto(
     id = id.toHexString(),
     projectId = projectId.toHexString(),

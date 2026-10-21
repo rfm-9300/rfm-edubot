@@ -122,11 +122,14 @@ function diaryPhasesHtml(project) {
     </div></section>`;
 }
 
-// `opts.projectId` and `opts.day` start a new entry on that project and day (today by default).
+// `opts.projectId` and `opts.day` start a new entry on that project and day (today by default). `opts.site` is the
+// site manager's own project on My sites, with its `opts.phases`, written through their portal; `opts.onSaved` runs
+// after a save there.
 async function openDiaryForm(entry = null, opts = {}) {
-  await ensureBuildingProjects().catch(() => {});
+  const site = opts.site || null;
+  if (!site) await ensureBuildingProjects().catch(() => {});
   const e = entry || {};
-  const projectId = entry ? entry.projectId : opts.projectId || state.diaryProject || '';
+  const projectId = site ? site.id : entry ? entry.projectId : opts.projectId || state.diaryProject || '';
   const form = document.createElement('form');
   form.className = 'form';
   let weather = e.weather || '';
@@ -135,7 +138,7 @@ async function openDiaryForm(entry = null, opts = {}) {
     <textarea class="txt" id="${id}" maxlength="4000"${rows}>${escapeHTML(value || '')}</textarea></div>`;
   form.innerHTML = `
     <div class="form__grid">
-      ${entry ? '' : projectSelectHtml('dy-project', projectId)}
+      ${entry || site ? '' : projectSelectHtml('dy-project', projectId)}
       <div class="form__row"><label class="lbl" for="dy-day">${escapeHTML(BLD.thDay)}</label><input class="inp inp--mono" id="dy-day" type="date" max="${todayKey()}" value="${escapeHTML(e.day || opts.day || todayKey())}" /></div>
     </div>
     <div class="form__row"><span class="lbl" id="dy-weather-label">${escapeHTML(BLD.thWeather)}</span>
@@ -165,7 +168,8 @@ async function openDiaryForm(entry = null, opts = {}) {
     phasesBox.innerHTML = '';
     project = null;
     if (!id) return;
-    try { project = await api(`/app/api/building/projects/${encodeURIComponent(id)}`); } catch { return; }
+    if (site) project = { phases: opts.phases || [] };
+    else try { project = await api(`/app/api/building/projects/${encodeURIComponent(id)}`); } catch { return; }
     phasesBox.innerHTML = diaryPhasesHtml(project);
   };
   loadPhases(projectId);
@@ -181,7 +185,7 @@ async function openDiaryForm(entry = null, opts = {}) {
   bindDrawerClose(form);
   form.addEventListener('submit', async ev => {
     ev.preventDefault();
-    const target = entry ? entry.projectId : $('#dy-project', form).value;
+    const target = site ? site.id : entry ? entry.projectId : $('#dy-project', form).value;
     if (!target) return toast(BLD.chooseProject);
     const workDone = $('#dy-work', form).value.trim();
     if (!workDone) return toast(bt('errors.work_required'));
@@ -204,27 +208,28 @@ async function openDiaryForm(entry = null, opts = {}) {
     };
     if (entry) payload.clear = ['temperatureC', 'workers', 'lostHours'].filter(k => payload[k] == null);
     else payload.projectId = target;
+    const siteBase = site ? `/app/api/portal/sites/${encodeURIComponent(site.id)}/diary` : '';
+    const url = site ? (entry ? `${siteBase}/${encodeURIComponent(entry.id)}` : siteBase) : (entry ? `/app/api/building/diary/${encodeURIComponent(entry.id)}` : '/app/api/building/diary');
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      const saved = await api(entry ? `/app/api/building/diary/${encodeURIComponent(entry.id)}` : '/app/api/building/diary', {
-        method: entry ? 'PATCH' : 'POST',
-        body: JSON.stringify(payload),
-      });
+      const saved = await api(url, { method: entry ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       if (queued.length) await uploadProjectPhotos(target, queued, { logId: saved.id, shared: payload.shared ? 'true' : 'false' });
       toast(entry ? BLD.diaryUpdated : BLD.diarySaved);
       closeDrawer();
-      refreshBuildingPage();
+      if (opts.onSaved) opts.onSaved(saved);
+      else refreshBuildingPage();
     } catch (err) {
       btn.disabled = false;
-      if (err?.code === 'day_taken' && err.detail) {
+      if (err?.code === 'day_taken' && err.detail && !site) {
         toast(bt('errors.day_taken'));
         return openDiaryEntry(err.detail);
       }
       toast(buildingErrorText(err, BLD.saveFailed));
     }
   });
-  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { eyebrow: entry ? projectLabel({ number: entry.projectNumber, name: entry.projectName }) : labels['site-diary'] });
+  const eyebrow = site ? projectLabel(site) : entry ? projectLabel({ number: entry.projectNumber, name: entry.projectName }) : labels['site-diary'];
+  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { eyebrow });
 }
 
 async function openDiaryEntry(id) {

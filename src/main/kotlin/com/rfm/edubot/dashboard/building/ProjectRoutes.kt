@@ -148,7 +148,7 @@ private suspend fun TenantBuilding.detail(project: Project) = records.projectDto
  * The photo the browser uploads, shrunk, as the `file` part with its `thumb`, and the photo's fields; or null
  * after answering why not: too large (413), missing (400) or not JPEG (415). The server never decodes an image.
  */
-private suspend fun ApplicationCall.receivePhoto(): SitePhotoService.Upload? {
+internal suspend fun ApplicationCall.receivePhoto(): SitePhotoService.Upload? {
     var full: ByteArray? = null
     var thumb: ByteArray? = null
     var tooLarge = false

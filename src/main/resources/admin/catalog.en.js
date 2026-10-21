@@ -8,7 +8,7 @@ window.__I18N_CATALOGS['en'] = {
       clients: 'Clients', services: 'Services', quotes: 'Quotes', invoices: 'Invoices', financeiro: 'Finances', suppliers: 'Suppliers', employees: 'Employees', payments: 'Payments', catalog: 'Catalog',
       persona: 'Persona', settings: 'Settings', 'ai-assistant': 'AI Assistant', bookings: 'Bookings', instagram: 'Instagram', agents: 'Agents',
       timesheets: 'Timesheets',
-      'my-services': 'My services', 'my-hours': 'My hours',
+      'my-services': 'My services', 'my-sites': 'My sites', 'my-hours': 'My hours',
       projects: 'Projects', 'site-diary': 'Site diary', 'site-issues': 'Issues', 'change-orders': 'Changes', measurements: 'Measurements',
       groupInbox: 'Inbox', groupBusiness: 'Business', groupBuilding: 'Building', groupBot: 'Automation', groupSetup: 'Setup',
     },
@@ -1465,6 +1465,12 @@ window.__I18N_CATALOGS['en'] = {
       retentionWaitHint: 'Once the project is finished, invoice the client the retention it still holds.',
       retentionInvoice: 'Invoice the retention ({amount})', retentionInvoiced: 'Invoice {number} issued', retentionReleaseLabel: 'Retention given back',
       retentionInvoiceIntro: '{client} gets one invoice for the retention still held: {amount}. Cancelling or deleting that invoice holds it again.',
+      mySites: {
+        desc: 'The sites you run: write the day’s diary, add photos and log issues as they come up.',
+        title: 'Your sites', statSites: 'Sites', statToday: 'Diary written today', statIssues: 'Open issues',
+        progress: '{pct}% done', openIssues: p => (p.n === 1 ? '1 open issue' : `${p.n} open issues`),
+        empty: 'No sites to run yet', emptyDesc: 'When the office makes you a project’s site manager, it shows here.',
+      },
       reports: {
         title: 'Updates posted to the client', new: 'Write an update', empty: 'No updates posted yet',
         emptyDesc: 'Once a week, tell the client how the work went. The AI drafts it from the diary days you shared with them.',

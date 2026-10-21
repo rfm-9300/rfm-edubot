@@ -7,7 +7,7 @@ window.__I18N_CATALOGS['es'] = {
       clients: 'Clientes', services: 'Servicios', quotes: 'Presupuestos', invoices: 'Facturas', financeiro: 'Finanzas', suppliers: 'Proveedores', employees: 'Colaboradores', payments: 'Pagos', catalog: 'Catálogo',
       persona: 'Persona', settings: 'Ajustes', 'ai-assistant': 'Asistente IA', bookings: 'Reservas', instagram: 'Instagram', agents: 'Agentes',
       timesheets: 'Control horario',
-      'my-services': 'Mis servicios', 'my-hours': 'Mis horas',
+      'my-services': 'Mis servicios', 'my-sites': 'Mis obras', 'my-hours': 'Mis horas',
       projects: 'Obras', 'site-diary': 'Diario de obra', 'site-issues': 'Incidencias', 'change-orders': 'Modificados', measurements: 'Certificaciones',
       groupInbox: 'Bandeja', groupBusiness: 'Negocio', groupBuilding: 'Construcción', groupBot: 'Automatización', groupSetup: 'Configuración',
     },
@@ -1464,6 +1464,12 @@ window.__I18N_CATALOGS['es'] = {
       retentionWaitHint: 'Cuando la obra esté terminada, factura al cliente la retención que aún guarda.',
       retentionInvoice: 'Facturar la retención ({amount})', retentionInvoiced: 'Factura {number} emitida', retentionReleaseLabel: 'Devolución de la retención',
       retentionInvoiceIntro: '{client} recibe una factura con la retención aún retenida: {amount}. Si cancelas o eliminas esa factura, la retención vuelve a quedar retenida.',
+      mySites: {
+        desc: 'Las obras que diriges: escribe el diario del día, añade fotos y registra incidencias cuando surgen.',
+        title: 'Tus obras', statSites: 'Obras', statToday: 'Diario escrito hoy', statIssues: 'Incidencias abiertas',
+        progress: '{pct} % ejecutado', openIssues: p => (p.n === 1 ? '1 incidencia abierta' : `${p.n} incidencias abiertas`),
+        empty: 'Aún sin obras que dirigir', emptyDesc: 'Cuando la oficina te nombre jefe de obra de un proyecto, aparece aquí.',
+      },
       reports: {
         title: 'Informes publicados para el cliente', new: 'Escribir informe', empty: 'Aún sin informes',
         emptyDesc: 'Una vez por semana, cuenta al cliente cómo fue la obra. La IA hace el borrador a partir de los días del diario que compartiste con él.',

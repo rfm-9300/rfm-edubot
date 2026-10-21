@@ -50,6 +50,9 @@ internal object EmployeePortal {
     /** Their time clock and hours, with `timesheets`. */
     const val MY_HOURS = "my-hours"
 
+    /** The projects they run as site manager: the diary (with `site-diary`), photos and issues (with `site-issues`). */
+    const val MY_SITES = "my-sites"
+
     /** The pages an employee's session has, in place of the company's modules; the first is where it lands. */
     fun pages(tenant: Tenant): List<String> {
         val modules = DashboardModules.effectiveFor(tenant)
@@ -57,6 +60,7 @@ internal object EmployeePortal {
         return listOfNotNull(
             MY_HOURS.takeIf { DashboardModules.TIMESHEETS in modules },
             MY_SERVICES.takeIf { DashboardModules.SERVICES in modules },
+            MY_SITES.takeIf { DashboardModules.SITE_DIARY in modules || DashboardModules.SITE_ISSUES in modules },
         )
     }
 
