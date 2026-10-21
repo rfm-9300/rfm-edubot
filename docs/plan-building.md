@@ -303,7 +303,7 @@ three catalogs, HTTP tests per area. Built in this order, one commit each.
 
 | Subject | Events |
 |---|---|
-| `project` | `project.created`, `project.status_changed` (from → to), `project.health_changed` (from → to) |
+| `project` | `project.created`, `project.status_changed` (from → to), `project.at_risk`, `project.delayed` |
 | `site_log` | `site_log.created` |
 | `site_issue` | `site_issue.created`, `site_issue.status_changed` (from → to) |
 | `change_order` | `change_order.sent`, `change_order.decided` (to `APPROVED` or `REJECTED`, `via` the team or the client's link) |
@@ -313,7 +313,9 @@ three catalogs, HTTP tests per area. Built in this order, one commit each.
   shows it and an agent's actions (a WhatsApp to the client, a task, a notice) have the client.
 - The services append the events after their own writes. Health is computed, not written, so an hourly
   job (on a lease, like the agents' scheduler) stores each active project's health and appends
-  `project.health_changed` when it moves: an agent can tell the manager the day a project turns delayed.
+  `project.at_risk` or `project.delayed` when it turns so: an agent can tell the manager that day. Two
+  events rather than one "health changed" with a status filter, whose choices would be the project's
+  statuses, not its health.
 - The agents' context builder loads each new subject (the project's figures, the issue, the change, the
   measurement, the diary day) with its project and client; the Agents page lists the events in the
   company's language and offers each one's statuses.
