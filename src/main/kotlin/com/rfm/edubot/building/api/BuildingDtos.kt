@@ -188,6 +188,10 @@ internal data class ChangeOrderDto(
     val decidedAt: String?,
     val decidedBy: String?,
     val decisionNote: String?,
+    /** `TEAM` or `CLIENT_LINK`, once decided. */
+    val decidedVia: String?,
+    /** The client's approval link (`/app/share/change/{token}`), from when it was sent until it goes back to draft. */
+    val approvalToken: String?,
     /** A measurement measured some of its lines: it can't go back to draft. */
     val measured: Boolean,
     val createdBy: String,
@@ -278,3 +282,28 @@ internal data class SharedUpdateDto(val day: String, val weather: String?, val w
 
 @Serializable
 internal data class SharedPhotoDto(val id: String, val caption: String?, val day: String)
+
+/** What the client's approval page shows: the change as sent, and the decision once there is one. */
+@Serializable
+internal data class SharedChangeDto(
+    val company: String,
+    val hasLogo: Boolean,
+    val locale: String,
+    val projectNumber: String,
+    val projectName: String,
+    val address: String?,
+    val number: String,
+    val title: String,
+    val description: String?,
+    val kind: String,
+    val items: List<LineItemDto>,
+    /** Negative for work taken out. */
+    val totalEur: Double,
+    val daysImpact: Int,
+    val status: String,
+    val sentAt: String?,
+    val decidedAt: String?,
+    val decidedBy: String?,
+    val decidedVia: String?,
+    val decisionNote: String?,
+)

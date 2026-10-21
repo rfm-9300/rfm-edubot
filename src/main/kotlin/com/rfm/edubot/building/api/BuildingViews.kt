@@ -236,6 +236,8 @@ internal suspend fun BuildingRecords.changeDtos(list: List<ChangeOrder>): List<C
             decidedAt = change.decidedAt?.toString(),
             decidedBy = change.decidedBy,
             decisionNote = change.decisionNote,
+            decidedVia = change.decidedVia?.name,
+            approvalToken = change.approval?.token,
             measured = measuredLines(change, measured[change.projectId].orEmpty()),
             createdBy = change.createdBy,
             createdAt = change.createdAt.toString(),
@@ -340,6 +342,29 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
         updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt }).max().toString(),
     )
 }
+
+/** The change as its client's approval page shows it. */
+internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean) = SharedChangeDto(
+    company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
+    hasLogo = hasLogo,
+    locale = tenant.locale,
+    projectNumber = project.number,
+    projectName = project.name,
+    address = project.address,
+    number = number,
+    title = title,
+    description = description,
+    kind = kind.name,
+    items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    totalEur = eur(signedCents),
+    daysImpact = daysImpact,
+    status = status.name,
+    sentAt = sentAt?.toString(),
+    decidedAt = decidedAt?.toString(),
+    decidedBy = decidedBy,
+    decidedVia = decidedVia?.name,
+    decisionNote = decisionNote,
+)
 
 private const val SHARED_PHOTOS = 60
 private const val SHARED_UPDATES = 30

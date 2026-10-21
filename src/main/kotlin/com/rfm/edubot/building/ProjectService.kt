@@ -6,8 +6,6 @@ import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.model.QuoteStatus
 import org.bson.types.ObjectId
-import java.security.SecureRandom
-import java.util.Base64
 
 /**
  * Writes to a company's projects: the record, its phases, the link its client follows it from, and removing it
@@ -71,12 +69,12 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
     /** Turns the client's link on, with the token it had before, or a new one. */
     suspend fun share(id: ObjectId, stamp: Stamp): Outcome<Project> =
         records.projects.update(id) { current ->
-            ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = true) ?: ProjectShare(shareToken(), true, stamp.now), updatedAt = stamp.now))
+            ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = true) ?: ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now))
         }.outcome()
 
     /** A new link; the old one stops working. */
     suspend fun rotateShare(id: ObjectId, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = ProjectShare(shareToken(), true, stamp.now), updatedAt = stamp.now)) }.outcome()
+        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now)) }.outcome()
 
     suspend fun stopSharing(id: ObjectId, stamp: Stamp): Outcome<Project> =
         records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = false), updatedAt = stamp.now)) }.outcome()
@@ -145,12 +143,6 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
                 contract = contract,
             ),
         )
-    }
-
-    private companion object {
-        val random = SecureRandom()
-
-        fun shareToken(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
     }
 }
 

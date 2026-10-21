@@ -5,9 +5,12 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
 
-enum class ActorType { USER, OPERATOR, BOT, AGENT, SYSTEM }
+enum class ActorType { USER, OPERATOR, BOT, AGENT, SYSTEM, CLIENT }
 
-/** Who caused a change: a dashboard user, a backoffice operator, the customer-facing bot, an agent run, or the system. */
+/**
+ * Who caused a change: a dashboard user, a backoffice operator, the customer-facing bot, an agent run, the system,
+ * or the company's client through a link the company sent them (approving a change order), by the name they typed.
+ */
 data class Actor(
     val type: ActorType,
     val id: String? = null,

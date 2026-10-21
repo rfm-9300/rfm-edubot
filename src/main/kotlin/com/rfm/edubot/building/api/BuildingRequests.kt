@@ -159,6 +159,10 @@ internal data class ChangeOrderRequest(
 @Serializable
 internal data class ChangeStatusRequest(val status: String = "", val decidedBy: String? = null, val note: String? = null)
 
+/** The client's answer on the change's link: `APPROVED` or `REJECTED`, in their own name. */
+@Serializable
+internal data class ChangeDecisionRequest(val decision: String = "", val name: String = "", val note: String? = null)
+
 @Serializable
 internal data class MeasurementRequest(val projectId: String = "", val periodEnd: String? = null, val notes: String? = null)
 

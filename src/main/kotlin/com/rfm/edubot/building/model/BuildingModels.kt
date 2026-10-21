@@ -179,6 +179,15 @@ enum class ChangeOrderKind { ADDITION, OMISSION }
 
 enum class ChangeOrderStatus { DRAFT, SENT, APPROVED, REJECTED }
 
+/** How a change order was decided: by someone on the team, or by the client from the change's link. */
+enum class DecidedVia { TEAM, CLIENT_LINK }
+
+/**
+ * The link a sent change gives its client to approve or reject it (`/app/share/change/{token}`). It keeps
+ * showing the decision afterwards, and ends when the change goes back to draft, edited or not.
+ */
+data class ChangeApproval(val token: String, val createdAt: Instant)
+
 /**
  * A change to a project's contract. Approved, an addition's lines are measured and billed like the contract's,
  * an omission lowers the contract's value, and [daysImpact] moves the planned end.
@@ -200,6 +209,8 @@ data class ChangeOrder(
     /** Who said yes or no: the client's name, or the team member who recorded it. */
     val decidedBy: String? = null,
     val decisionNote: String? = null,
+    val decidedVia: DecidedVia? = null,
+    val approval: ChangeApproval? = null,
     val createdBy: String,
     val createdAt: Instant,
     val updatedAt: Instant,

@@ -5,6 +5,11 @@ const NOTIFICATIONS_POLL_MS = 60000;
 const NOTIFICATION_TONES = {
   agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad',
   service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', conversation_handoff: 'warn',
+  change_order_decided: n => (n.params?.decision === 'REJECTED' ? 'warn' : 'ok'),
+};
+const notificationTone = n => {
+  const tone = NOTIFICATION_TONES[n.kind];
+  return (typeof tone === 'function' ? tone(n) : tone) || 'neutral';
 };
 let notifications = { items: [], unread: 0 };
 let notificationsAt = 0;
@@ -78,13 +83,14 @@ function notificationText(n) {
     case 'time_device_enrolled': return { title: kind('time_device_enrolled'), detail: p.device || '' };
     case 'time_missed_clock_out': return { title: kind('time_missed_clock_out'), detail: line(p.day ? fmtDay(p.day) : '', p.end ? `${TIME.overdueEnd} ${p.end}` : '') };
     case 'conversation_handoff': return { title: kind('conversation_handoff'), detail: line(p.reason, p.channel ? channelName(p.channel) : '') };
+    case 'change_order_decided': return { title: kind(p.decision === 'REJECTED' ? 'change_order_rejected' : 'change_order_approved'), detail: line(p.title, p.project) };
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
 }
 
 function notificationRow(n) {
   const { title, detail } = notificationText(n);
-  return `<li><button class="worklist__item" type="button" data-notification="${escapeHTML(n.id)}" data-tone="${n.read ? 'muted' : NOTIFICATION_TONES[n.kind] || 'neutral'}">
+  return `<li><button class="worklist__item" type="button" data-notification="${escapeHTML(n.id)}" data-tone="${n.read ? 'muted' : notificationTone(n)}">
     <span class="worklist__dot" aria-hidden="true"></span>
     <span class="worklist__main"><span class="worklist__title">${escapeHTML(title)}</span>${detail ? `<span class="worklist__detail">${escapeHTML(detail)}</span>` : ''}</span>
     <span class="worklist__side"><span class="worklist__when">${escapeHTML(relTime(n.createdAt))}</span></span>

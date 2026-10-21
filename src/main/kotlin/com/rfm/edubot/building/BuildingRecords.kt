@@ -9,6 +9,7 @@ import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.persistence.MongoModule
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -31,6 +32,7 @@ class BuildingRecords(mongo: MongoModule, val tenantId: ObjectId) {
     val employees by lazy { EmployeeRepository(mongo, tenantId) }
     val suppliers by lazy { SupplierRepository(mongo, tenantId) }
     val events by lazy { BuildingEvents(DomainEventLog(mongo), tenantId) }
+    val notifications by lazy { NotificationRepository(mongo) }
 
     /** The CRM's own writes: a project's quote turns accepted, and a measurement's invoice is an invoice like the others. */
     val quoteService: QuoteService get() = QuoteService(quotes, invoices, clientServices, clients)

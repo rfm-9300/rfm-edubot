@@ -6,10 +6,12 @@ import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
+import com.rfm.edubot.building.model.ChangeApproval
 import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.building.model.ChangeOrderKind
 import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.ContractLine
+import com.rfm.edubot.building.model.DecidedVia
 import com.rfm.edubot.building.model.IssueEvent
 import com.rfm.edubot.building.model.IssueKind
 import com.rfm.edubot.building.model.IssuePriority
@@ -325,6 +327,12 @@ class ChangeOrderRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     suspend fun replace(change: ChangeOrder): ChangeOrder? =
         change.takeIf { collection.replaceOne(scoped(Filters.eq("_id", change.id)), change.toDocument()).matchedCount > 0 }
 
+    /** Stores [next] only while the stored change still has [expected]'s status and update time. */
+    suspend fun replace(expected: ChangeOrder, next: ChangeOrder): ChangeOrder? {
+        val guard = Filters.and(Filters.eq("_id", expected.id), Filters.eq("status", expected.status.name), Filters.eq("updatedAt", expected.updatedAt.toDate()))
+        return next.takeIf { collection.replaceOne(scoped(guard), next.toDocument()).matchedCount > 0 }
+    }
+
     suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
 
     suspend fun deleteForProject(projectId: ObjectId) {
@@ -336,6 +344,12 @@ class ChangeOrderRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     companion object {
         const val COLLECTION = "building.change_orders"
         const val MAX_LIST = 1000
+
+        /** The change a client's approval link opens, whatever its company. */
+        suspend fun byApprovalToken(mongo: MongoModule, token: String): ChangeOrder? {
+            if (token.isBlank() || token.length > 100) return null
+            return mongo.database.getCollection<Document>(COLLECTION).find(Filters.eq("approval.token", token)).firstOrNull()?.toChange()
+        }
     }
 }
 
@@ -654,6 +668,8 @@ private fun ChangeOrder.toDocument(): Document = Document("_id", id)
     .append("decidedAt", decidedAt?.toDate())
     .append("decidedBy", decidedBy)
     .append("decisionNote", decisionNote)
+    .append("decidedVia", decidedVia?.name)
+    .append("approval", approval?.let { Document("token", it.token).append("createdAt", it.createdAt.toDate()) })
     .append("createdBy", createdBy)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -674,6 +690,8 @@ private fun Document.toChange() = ChangeOrder(
     decidedAt = instantOrNull("decidedAt"),
     decidedBy = getString("decidedBy"),
     decisionNote = getString("decisionNote"),
+    decidedVia = enumOrNull<DecidedVia>(getString("decidedVia")),
+    approval = get("approval", Document::class.java)?.let { ChangeApproval(it.getString("token").orEmpty(), it.getInstant("createdAt")) },
     createdBy = getString("createdBy").orEmpty(),
     createdAt = getInstant("createdAt"),
     updatedAt = getInstant("updatedAt"),

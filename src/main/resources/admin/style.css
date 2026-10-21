@@ -2538,6 +2538,10 @@ body.share-page { display: block; }
 .share__none { margin: 0; padding: 14px 16px; color: var(--ink-mute); font-size: 13px; }
 .share__none--flush { padding: 0; }
 .share__foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; color: var(--ink-mute); font-size: 12px; }
+/* The client's answer to a change: two buttons side by side, then the decision once given. */
+.share__decide { display: flex; flex-wrap: wrap; gap: 8px; }
+.share__decided { display: grid; justify-items: start; gap: 8px; }
+.share__decided-by { margin: 0; color: var(--ink-2); font-size: 13.5px; }
 .share-viewer { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--ink); }
 /* The drawer's and the confirm's scrim, darker: a photo is looked at on its own. */
 .share-viewer::backdrop { background: rgba(8, 9, 11, 0.72); backdrop-filter: blur(3px); }

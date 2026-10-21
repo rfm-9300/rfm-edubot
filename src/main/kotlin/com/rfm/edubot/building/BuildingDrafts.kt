@@ -13,6 +13,8 @@ import com.rfm.edubot.crm.model.LineItem
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
+import java.security.SecureRandom
+import java.util.Base64
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -135,6 +137,11 @@ internal inline fun <reified E : Enum<E>> enumOf(value: String?): E? =
     value?.trim()?.uppercase()?.let { raw -> enumValues<E>().firstOrNull { it.name == raw } }
 
 internal fun newLineId(): String = ObjectId().toHexString()
+
+private val random = SecureRandom()
+
+/** A link only its holder can open: 32 random bytes, base64url. */
+internal fun secretToken(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
 
 internal fun objectIdOrNull(raw: String): ObjectId? = raw.takeIf(ObjectId::isValid)?.let(::ObjectId)
 

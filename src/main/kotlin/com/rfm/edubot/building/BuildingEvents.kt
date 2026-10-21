@@ -1,6 +1,7 @@
 package com.rfm.edubot.building
 
 import com.rfm.edubot.building.model.ChangeOrder
+import com.rfm.edubot.building.model.DecidedVia
 import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.Project
@@ -17,9 +18,6 @@ import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
-
-/** How a change order was decided: by someone on the team, or by the client from the change's link. */
-enum class DecidedVia { TEAM, CLIENT_LINK }
 
 /**
  * The domain events Building appends after its writes, best effort like the CRM's: agents react to them,

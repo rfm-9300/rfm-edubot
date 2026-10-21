@@ -78,7 +78,8 @@ internal fun Route.projectShareRoutes(mongo: MongoModule, tenants: TenantReposit
     }
 }
 
-private fun ApplicationCall.noIndex() {
+/** The client's pages are for one person: no search engine indexes them, and their address isn't passed on. */
+internal fun ApplicationCall.noIndex() {
     response.header("X-Robots-Tag", "noindex, nofollow")
     response.header("Referrer-Policy", "no-referrer")
 }
