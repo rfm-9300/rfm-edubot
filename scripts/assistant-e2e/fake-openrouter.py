@@ -3,7 +3,8 @@
 It reads a request the way the assistant's model would: it calls the tools the request offers (searches,
 lists, proposals of writes) from simple intent rules in Portuguese, English and Spanish, and summarises
 tool results in markdown (bold, lists and tables). It checks plumbing and UI, not model quality. Every
-request and answer is appended to the log file, so a run can be inspected afterwards.
+request and answer is appended to the log file, so a run can be inspected afterwards. A Building client
+update draft gets an update written from the facts in its prompt.
 
     python3 fake-openrouter.py [port] [log]     # defaults: 8099, /tmp/fake-openrouter.jsonl
     # then run the app with OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1
@@ -440,8 +441,45 @@ def assistant(body):
     return completion(t["help"], prompt=prompt)
 
 
+def project_update(systems, facts, prompt):
+    """A Building client update written from the facts it was given, in the language the instructions ask for."""
+    lang = "en" if "Write in English" in systems else "es" if "Write in Spanish" in systems else "pt"
+    company = find(r'company "([^"]+)"', systems) or ""
+    progress = find(r"Overall progress now: (\d+)%", facts) or "0"
+    end = find(r"Planned completion: (\S+)", facts)
+
+    def section(title):
+        items = []
+        for line in (facts.split(title, 1)[1].lstrip("\n").split("\n") if title in facts else []):
+            if not line.startswith("- "):
+                break
+            items.append(line[2:])
+        return items
+
+    moved_as = {"pt": r"\1: de \2 % para \3 %", "en": r"\1: from \2% to \3%", "es": r"\1: del \2 % al \3 %"}[lang]
+    work = [re.sub(r"^\d{4}-\d{2}-\d{2}: ", "", w) for w in section("Work done, from the site diary days shown to the client:")]
+    moved = [re.sub(r"^(.+): from (\d+)% to (\d+)%$", moved_as, m) for m in section("Phases that moved in the period:")]
+    words = {
+        "pt": ("Caro cliente,", "Esta semana na obra:", "Fases que avançaram:", "A obra está {p} % concluída", ", com conclusão prevista para {e}", "Com os melhores cumprimentos,"),
+        "en": ("Dear client,", "This week on site:", "Phases that moved:", "The work is {p}% done", ", with completion planned for {e}", "Kind regards,"),
+        "es": ("Estimado cliente:", "Esta semana en la obra:", "Fases que avanzaron:", "La obra está al {p} %", ", con la finalización prevista para el {e}", "Un saludo,"),
+    }[lang]
+    parts = [words[0], ""]
+    if work:
+        parts += [words[1]] + [f"- {w}" for w in work] + [""]
+    if moved:
+        parts += [words[2]] + [f"- {m}" for m in moved] + [""]
+    parts += [words[3].format(p=progress) + (words[4].format(e=end) if end else "") + ".", "", words[5], company]
+    return completion("\n".join(parts).strip(), prompt=prompt)
+
+
 def other(body):
-    return completion("OK.", prompt=sum(len(m.get("content") or "") for m in body["messages"]) // 4)
+    prompt = sum(len(m.get("content") or "") for m in body["messages"]) // 4
+    systems = " ".join(m.get("content") or "" for m in body["messages"] if m["role"] == "system")
+    if "construction company sends the client" in systems:
+        users = [m.get("content") or "" for m in body["messages"] if m["role"] == "user"]
+        return project_update(systems, users[-1] if users else "", prompt)
+    return completion("OK.", prompt=prompt)
 
 
 class Handler(BaseHTTPRequestHandler):
