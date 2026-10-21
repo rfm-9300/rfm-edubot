@@ -58,7 +58,15 @@ class ChangeOrderService(private val records: BuildingRecords) {
             )
             ChangeOrderStatus.DRAFT -> change.copy(status = target, decidedAt = null, decidedBy = null, decisionNote = null)
         }.copy(updatedAt = stamp.now)
-        return records.changes.replace(next)?.let { Outcome.Done(it) } ?: Outcome.NotFound
+        val stored = records.changes.replace(next) ?: return Outcome.NotFound
+        records.projects.findById(stored.projectId)?.let { project ->
+            when (stored.status) {
+                ChangeOrderStatus.SENT -> records.events.changeSent(stored, project)
+                ChangeOrderStatus.APPROVED, ChangeOrderStatus.REJECTED -> records.events.changeDecided(stored, project, DecidedVia.TEAM)
+                ChangeOrderStatus.DRAFT -> Unit
+            }
+        }
+        return Outcome.Done(stored)
     }
 
     /** An approved change is part of the contract: take it back to draft first. */

@@ -67,6 +67,8 @@ data class Project(
     val manualProgressPct: Int = 0,
     val phases: List<ProjectPhase> = emptyList(),
     val share: ProjectShare? = null,
+    /** The health (a `ProjectHealth` name) the hourly watch last saw while the project ran, to tell when it moves. */
+    val watchedHealth: String? = null,
     val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,

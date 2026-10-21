@@ -364,9 +364,16 @@ function recordStatusLabel(entity, status) {
   if (entity === 'invoice') return invoiceStatusLabel(status);
   if (entity === 'payment') return paymentStatusLabel(status);
   if (entity === 'booking') return bookingStatusLabel(status);
+  if (entity === 'project') return projectStatusLabel(status);
+  if (entity === 'site_issue' || entity === 'issue') return issueStatusLabel(status);
+  if (entity === 'change_order' || entity === 'change') return changeStatusLabel(status);
+  if (entity === 'measurement') return measurementStatusLabel(status);
   return status;
 }
-const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations', email: 'email' };
+const AGENT_SUBJECT_MODULES = {
+  client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations', email: 'email',
+  project: 'projects', site_log: 'site-diary', site_issue: 'site-issues', change_order: 'change-orders', measurement: 'measurements',
+};
 const AGENT_SUBJECT_OPENERS = {
   client: id => openClientDrawer(id),
   quote: id => openQuoteDetail(id),
@@ -374,9 +381,17 @@ const AGENT_SUBJECT_OPENERS = {
   payment: id => openPaymentDetail(id),
   booking: id => openBookingById(id),
   service: id => openServiceDetail(id),
+  project: id => openProjectDrawer(id),
+  site_log: id => openDiaryEntry(id),
+  site_issue: id => openIssueDetail(id),
+  change_order: id => openChangeDetail(id),
+  measurement: id => openMeasurementDetail(id),
 };
-// Trail keys are `${type}:${id}` like subjects, so a run opened from its own record doesn't link back to it.
-const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) && !linksBackTo(`${subject.type}:${subject.id}`);
+// Trail keys are `${type}:${id}` like subjects (Building's drawers use shorter types), so a run opened from its own
+// record doesn't link back to it.
+const AGENT_SUBJECT_TRAIL = { site_log: 'diary', site_issue: 'issue', change_order: 'change' };
+const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) &&
+  !linksBackTo(`${AGENT_SUBJECT_TRAIL[subject.type] || subject.type}:${subject.id}`);
 async function openAgentSubject(subject, back) {
   if (!canOpenAgentSubject(subject)) return;
   if (subject.type === 'conversation') {

@@ -1107,6 +1107,10 @@ window.__I18N_CATALOGS['en'] = {
         booking_created: 'A booking is made', booking_rescheduled: 'A booking is moved', booking_status_changed: 'A booking changes status',
         contact_created: 'Someone writes for the first time', message_received: 'A customer sends a message', conversation_handoff: 'A chat is handed to the team',
         instagram_comment_received: 'Someone comments on Instagram', email_received: 'An email arrives', email_sent: 'An email is sent',
+        project_created: 'A project is created', project_status_changed: 'A project changes status', project_at_risk: 'A project falls at risk', project_delayed: 'A project falls behind (delayed)',
+        site_log_created: 'The site diary is written', site_issue_created: 'An issue is logged', site_issue_status_changed: 'An issue changes status',
+        change_order_sent: 'A change is sent to the client', change_order_decided: 'The client decides on a change',
+        measurement_approved: 'A measurement is approved', measurement_invoiced: 'A measurement is invoiced',
       },
       actionCategories: { MESSAGE: 'Messages', TEAM: 'Team', CRM: 'Records', DOCUMENT: 'Documents', DATA: 'Data', FLOW: 'Flow', AI: 'AI' },
       actions: {
@@ -1143,7 +1147,8 @@ window.__I18N_CATALOGS['en'] = {
         empty: 'Your Persona is still empty: until you teach it, these agents only use their own Voice settings.', emptyHint: 'Your Persona is still empty, so only the settings above apply.',
         readOnly: 'Only admins can change which agents follow it.',
       },
-      entities: { client: 'Client', quote: 'Quote', invoice: 'Invoice', payment: 'Payment to make', booking: 'Booking', service: 'Service', conversation: 'Chat', contact: 'Contact', instagram_comment: 'Instagram comment', email: 'Email', none: 'No record', company: 'Company', event: 'Event', now: 'Now', today: 'Today' },
+      entities: { client: 'Client', quote: 'Quote', invoice: 'Invoice', payment: 'Payment to make', booking: 'Booking', service: 'Service', conversation: 'Chat', contact: 'Contact', instagram_comment: 'Instagram comment', email: 'Email', none: 'No record', company: 'Company', event: 'Event', now: 'Now', today: 'Today',
+        project: 'Project', site_log: 'Site diary', diary: 'Site diary', site_issue: 'Issue', issue: 'Issue', change_order: 'Change', change: 'Change', measurement: 'Measurement' },
       fields: {
         event: 'Event', toStatus: 'To status', channel: 'Channel', keywords: 'Words in the message', frequency: 'How often', time: 'Time', weekdays: 'Days', dayOfMonth: 'Day of the month', everyHours: 'Every (hours)', forEach: 'For each', where: 'Only records where',
         entity: 'Record', offsetDays: 'Days (negative = before)', offsetHours: 'Hours (negative = before)', at: 'At', statuses: 'Only with status', days: 'Days', hours: 'Hours', minutes: 'Minutes', subjectType: 'Runs on',
@@ -1189,6 +1194,11 @@ window.__I18N_CATALOGS['en'] = {
         displayName: 'Name', text: 'Text', fromUsername: 'Username', mediaId: 'Post',
         from: 'From', fromName: 'Sender name', subject: 'Subject', snippet: 'Preview', hasAttachments: 'Has attachments', hasPdf: 'Has a PDF', knownClient: 'Is a client', threadId: 'Thread', automated: 'Sent automatically',
         type: 'Type', to: 'To', actorType: 'Done by',
+        health: 'Health', progressPct: 'Progress (%)', plannedPct: 'Planned (%)', scheduleDays: 'Days ahead (negative: behind)', revisedEnd: 'Expected end', daysToEnd: 'Days to the end',
+        managerName: 'Site manager', managerPhone: 'Site manager’s phone', openIssues: 'Open issues', openIssuesOverdue: 'Overdue issues', contract: 'Contract', contractCents: 'Contract (cents)',
+        day: 'Day', workDone: 'Work done', workers: 'People on site', weather: 'Weather', shared: 'Shown to the client',
+        title: 'Title', kind: 'Kind', priority: 'Priority', location: 'Where', assigneeName: 'Who fixes it', daysImpact: 'Days added', decidedBy: 'Decided by',
+        periodEnd: 'Measured up to', gross: 'This period', retention: 'Retention', net: 'Net', netCents: 'Net (cents)', invoiceNumber: 'Invoice number',
       },
       outputs: {
         clientId: 'Client', number: 'Number', existing: 'Already existed', invoiceId: 'Invoice', totalCents: 'Total (cents)', rows: 'Services invoiced',

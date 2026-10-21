@@ -85,7 +85,9 @@ class MeasurementService(private val records: BuildingRecords) {
         if (measurement.status != MeasurementStatus.DRAFT) return conflict("measurement_locked")
         if (measurement.lines.all { abs(MeasurementMath.periodQty(it)) < 1e-9 }) return invalid("nothing_measured")
         val next = measurement.copy(status = MeasurementStatus.APPROVED, approvedAt = stamp.now, approvedBy = stamp.who, updatedAt = stamp.now)
-        return records.measurements.replace(measurement, next)?.let { Outcome.Done(it) } ?: conflict("conflict")
+        val stored = records.measurements.replace(measurement, next) ?: return conflict("conflict")
+        records.projects.findById(stored.projectId)?.let { records.events.measurementApproved(stored, it) }
+        return Outcome.Done(stored)
     }
 
     /** Back to draft: only the project's latest, and only before it is invoiced. */
@@ -119,6 +121,7 @@ class MeasurementService(private val records: BuildingRecords) {
         val invoice = records.invoiceService.create(clientId, null, items, dueDate, projectId = project.id, measurementId = measurement.id)
         val stored = claimed.copy(invoiceId = invoice.id)
         records.measurements.replace(claimed, stored)
+        records.events.measurementInvoiced(stored, project, invoice)
         return Outcome.Done(Invoiced(stored, invoice))
     }
 

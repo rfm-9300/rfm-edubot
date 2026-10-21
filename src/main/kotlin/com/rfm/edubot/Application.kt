@@ -19,6 +19,7 @@ import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.agents.store.AgentSettingsRepository
 import com.rfm.edubot.agents.store.OutboundLogRepository
 import com.rfm.edubot.bookings.BookingCatalogMigration
+import com.rfm.edubot.building.ProjectHealthWatch
 import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.PlatformSettingsRepository
 import com.rfm.edubot.config.PlatformSettingsService
@@ -198,6 +199,7 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
         .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
     TimesheetLocationRetention(mongoModule).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 3.minutes)
+    ProjectHealthWatch(mongoModule, tenantRepository).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 4.minutes)
     if (appConfig.google.inboxEnabled) {
         GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
             .job(SchedulerLease(mongoModule), appConfig.google.syncSeconds.seconds)

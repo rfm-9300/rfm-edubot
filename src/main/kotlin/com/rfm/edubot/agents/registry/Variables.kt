@@ -92,6 +92,39 @@ object AgentVariables {
         "knownClient" to VarType.BOOLEAN, "threadId" to VarType.TEXT, "automated" to VarType.BOOLEAN,
     )
 
+    val project = vars(
+        "project",
+        "id" to VarType.ID, "number" to VarType.TEXT, "name" to VarType.TEXT, "status" to VarType.TEXT, "health" to VarType.TEXT,
+        "address" to VarType.TEXT, "progressPct" to VarType.NUMBER, "plannedPct" to VarType.NUMBER, "scheduleDays" to VarType.NUMBER,
+        "revisedEnd" to VarType.DATE, "daysToEnd" to VarType.NUMBER, "managerName" to VarType.TEXT, "managerPhone" to VarType.TEXT,
+        "openIssues" to VarType.NUMBER, "openIssuesOverdue" to VarType.NUMBER, "contract" to VarType.MONEY, "contractCents" to VarType.NUMBER,
+    )
+
+    val diary = vars(
+        "diary",
+        "id" to VarType.ID, "day" to VarType.DATE, "workDone" to VarType.TEXT, "workers" to VarType.NUMBER, "weather" to VarType.TEXT,
+        "shared" to VarType.BOOLEAN,
+    )
+
+    val issue = vars(
+        "issue",
+        "id" to VarType.ID, "number" to VarType.TEXT, "title" to VarType.TEXT, "kind" to VarType.TEXT, "priority" to VarType.TEXT,
+        "status" to VarType.TEXT, "dueDate" to VarType.DATE, "isOverdue" to VarType.BOOLEAN, "location" to VarType.TEXT,
+        "assigneeName" to VarType.TEXT,
+    )
+
+    val change = vars(
+        "change",
+        "id" to VarType.ID, "number" to VarType.TEXT, "title" to VarType.TEXT, "kind" to VarType.TEXT, "status" to VarType.TEXT,
+        "total" to VarType.MONEY, "totalCents" to VarType.NUMBER, "daysImpact" to VarType.NUMBER, "decidedBy" to VarType.TEXT,
+    )
+
+    val measurement = vars(
+        "measurement",
+        "id" to VarType.ID, "number" to VarType.NUMBER, "status" to VarType.TEXT, "periodEnd" to VarType.DATE, "gross" to VarType.MONEY,
+        "retention" to VarType.MONEY, "net" to VarType.MONEY, "netCents" to VarType.NUMBER, "invoiceNumber" to VarType.TEXT,
+    )
+
     fun forSubject(subjectType: String?): List<VariableSpec> {
         val specific = when (subjectType) {
             SubjectTypes.CLIENT -> client
@@ -104,6 +137,11 @@ object AgentVariables {
             SubjectTypes.CONTACT -> contact + client
             SubjectTypes.INSTAGRAM_COMMENT -> instagramComment
             SubjectTypes.EMAIL -> email + client
+            SubjectTypes.PROJECT -> project + client
+            SubjectTypes.SITE_LOG -> diary + project + client
+            SubjectTypes.SITE_ISSUE -> issue + project + client
+            SubjectTypes.CHANGE_ORDER -> change + project + client
+            SubjectTypes.MEASUREMENT -> measurement + project + client
             else -> emptyList()
         }
         return common + company + event + specific

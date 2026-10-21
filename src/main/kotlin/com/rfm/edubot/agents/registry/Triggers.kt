@@ -23,6 +23,11 @@ object TriggerTypes {
         SubjectTypes.PAYMENT to DashboardModules.PAYMENTS,
         SubjectTypes.BOOKING to DashboardModules.BOOKINGS,
         SubjectTypes.CONVERSATION to DashboardModules.CONVERSATIONS,
+        SubjectTypes.PROJECT to DashboardModules.PROJECTS,
+        SubjectTypes.SITE_LOG to DashboardModules.SITE_DIARY,
+        SubjectTypes.SITE_ISSUE to DashboardModules.SITE_ISSUES,
+        SubjectTypes.CHANGE_ORDER to DashboardModules.CHANGE_ORDERS,
+        SubjectTypes.MEASUREMENT to DashboardModules.MEASUREMENTS,
     )
 
     val all: List<AgentTriggerType> = listOf(EventTrigger, ScheduleTrigger, DateOffsetTrigger, InactivityTrigger, ManualTrigger, EmailReceivedTrigger)

@@ -55,6 +55,11 @@ object SubjectTypes {
     const val EMAIL = "email"
     const val SUPPLIER = "supplier"
     const val EMPLOYEE = "employee"
+    const val PROJECT = "project"
+    const val SITE_LOG = "site_log"
+    const val SITE_ISSUE = "site_issue"
+    const val CHANGE_ORDER = "change_order"
+    const val MEASUREMENT = "measurement"
     const val NONE = "none"
 
     /** Records an agent can run on by hand from their drawer. */
@@ -87,6 +92,19 @@ object DomainEventTypes {
     const val INSTAGRAM_COMMENT_RECEIVED = "instagram.comment.received"
     const val EMAIL_RECEIVED = "email.received"
     const val EMAIL_SENT = "email.sent"
+    const val PROJECT_CREATED = "project.created"
+    const val PROJECT_STATUS_CHANGED = "project.status_changed"
+    /** Health is computed, not written: an hourly watch appends these the first time it sees a project turn at risk or delayed. */
+    const val PROJECT_AT_RISK = "project.at_risk"
+    const val PROJECT_DELAYED = "project.delayed"
+    const val SITE_LOG_CREATED = "site_log.created"
+    const val SITE_ISSUE_CREATED = "site_issue.created"
+    const val SITE_ISSUE_STATUS_CHANGED = "site_issue.status_changed"
+    const val CHANGE_ORDER_SENT = "change_order.sent"
+    /** Approved or rejected (`to`), by the team or by the client from the change's link (`via`). */
+    const val CHANGE_ORDER_DECIDED = "change_order.decided"
+    const val MEASUREMENT_APPROVED = "measurement.approved"
+    const val MEASUREMENT_INVOICED = "measurement.invoiced"
 
     /** Agents react to events at most this many agent steps deep, so two agents can't feed each other forever. */
     const val MAX_DEPTH = 3
@@ -117,6 +135,17 @@ object DomainEventTypes {
         EventTypeSpec(INSTAGRAM_COMMENT_RECEIVED, SubjectTypes.INSTAGRAM_COMMENT, DashboardModules.INSTAGRAM),
         EventTypeSpec(EMAIL_RECEIVED, SubjectTypes.EMAIL, null, integration = "gmail_inbox"),
         EventTypeSpec(EMAIL_SENT, SubjectTypes.EMAIL, null, integration = "gmail"),
+        EventTypeSpec(PROJECT_CREATED, SubjectTypes.PROJECT, DashboardModules.PROJECTS),
+        EventTypeSpec(PROJECT_STATUS_CHANGED, SubjectTypes.PROJECT, DashboardModules.PROJECTS),
+        EventTypeSpec(PROJECT_AT_RISK, SubjectTypes.PROJECT, DashboardModules.PROJECTS),
+        EventTypeSpec(PROJECT_DELAYED, SubjectTypes.PROJECT, DashboardModules.PROJECTS),
+        EventTypeSpec(SITE_LOG_CREATED, SubjectTypes.SITE_LOG, DashboardModules.SITE_DIARY),
+        EventTypeSpec(SITE_ISSUE_CREATED, SubjectTypes.SITE_ISSUE, DashboardModules.SITE_ISSUES),
+        EventTypeSpec(SITE_ISSUE_STATUS_CHANGED, SubjectTypes.SITE_ISSUE, DashboardModules.SITE_ISSUES),
+        EventTypeSpec(CHANGE_ORDER_SENT, SubjectTypes.CHANGE_ORDER, DashboardModules.CHANGE_ORDERS),
+        EventTypeSpec(CHANGE_ORDER_DECIDED, SubjectTypes.CHANGE_ORDER, DashboardModules.CHANGE_ORDERS),
+        EventTypeSpec(MEASUREMENT_APPROVED, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
+        EventTypeSpec(MEASUREMENT_INVOICED, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
     )
 
     private val byType = specs.associateBy { it.type }

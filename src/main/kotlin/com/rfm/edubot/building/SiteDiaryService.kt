@@ -23,6 +23,7 @@ class SiteDiaryService(private val records: BuildingRecords) {
         val progress = moveProgress(project.id, draft.phaseProgress, day, emptyList(), stamp).orElse { return it.refused() }
         val stored = entry.copy(progress = progress)
         if (!records.logs.insert(stored)) return conflict("day_taken")
+        records.events.siteLogCreated(stored, project)
         return Outcome.Done(stored)
     }
 

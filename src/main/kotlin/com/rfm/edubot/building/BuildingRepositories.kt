@@ -97,6 +97,11 @@ class ProjectRepository(mongo: MongoModule, private val tenantId: ObjectId) {
 
     suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
 
+    /** Only the watch writes it, and without a new version: nobody edits it, so it can't overwrite someone's edit. */
+    suspend fun setWatchedHealth(id: ObjectId, health: String) {
+        collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("watchedHealth", health))
+    }
+
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 
     companion object {
@@ -456,6 +461,7 @@ private fun Project.toDocument(): Document = Document("_id", id)
         },
     )
     .append("share", share?.let { Document("token", it.token).append("enabled", it.enabled).append("createdAt", it.createdAt.toDate()) })
+    .append("watchedHealth", watchedHealth)
     .append("version", version)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -502,6 +508,7 @@ private fun Document.toProject(): Project {
             )
         },
         share = share?.let { ProjectShare(it.getString("token").orEmpty(), it.getBoolean("enabled") ?: false, it.getInstant("createdAt")) },
+        watchedHealth = getString("watchedHealth"),
         version = (get("version") as? Number)?.toLong() ?: 0,
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),

@@ -36,13 +36,20 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         val stored = project.copy(number = records.projects.nextNumber())
         records.projects.insert(stored)
         if (quote != null && quote.status != QuoteStatus.ACEITO) records.quoteService.setStatus(quote.id, QuoteStatus.ACEITO)
+        records.events.projectCreated(stored)
         return Outcome.Done(stored)
     }
 
     /** The contract can't change once a measurement exists, except its lines' descriptions. */
     suspend fun update(id: ObjectId, draft: ProjectDraft, stamp: Stamp): Outcome<Project> {
         val locked = records.measurements.count(id) > 0
-        return records.projects.update(id) { current -> projectFrom(draft, current.copy(updatedAt = stamp.now), stamp, locked) }.outcome()
+        var before: ProjectStatus? = null
+        val outcome = records.projects.update(id) { current ->
+            before = current.status
+            projectFrom(draft, current.copy(updatedAt = stamp.now), stamp, locked)
+        }
+        if (outcome is ProjectChange.Ok) before?.takeIf { it != outcome.project.status }?.let { records.events.projectStatusChanged(outcome.project, it) }
+        return outcome.outcome()
     }
 
     suspend fun setPhases(id: ObjectId, phases: List<PhaseDraft>, stamp: Stamp): Outcome<Project> =

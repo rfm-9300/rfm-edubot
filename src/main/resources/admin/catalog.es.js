@@ -1106,6 +1106,10 @@ window.__I18N_CATALOGS['es'] = {
         booking_created: 'Se hace una reserva', booking_rescheduled: 'Se mueve una reserva', booking_status_changed: 'Una reserva cambia de estado',
         contact_created: 'Alguien escribe por primera vez', message_received: 'Un cliente envía un mensaje', conversation_handoff: 'Una conversación pasa al equipo',
         instagram_comment_received: 'Alguien comenta en Instagram', email_received: 'Llega un email', email_sent: 'Se envía un email',
+        project_created: 'Se crea una obra', project_status_changed: 'Una obra cambia de estado', project_at_risk: 'Una obra entra en riesgo', project_delayed: 'Una obra se retrasa',
+        site_log_created: 'Se escribe el diario de obra', site_issue_created: 'Se registra una incidencia', site_issue_status_changed: 'Una incidencia cambia de estado',
+        change_order_sent: 'Se envía un modificado al cliente', change_order_decided: 'El cliente decide un modificado',
+        measurement_approved: 'Se aprueba una certificación', measurement_invoiced: 'Se factura una certificación',
       },
       actionCategories: { MESSAGE: 'Mensajes', TEAM: 'Equipo', CRM: 'Registros', DOCUMENT: 'Documentos', DATA: 'Datos', FLOW: 'Flujo', AI: 'IA' },
       actions: {
@@ -1142,7 +1146,8 @@ window.__I18N_CATALOGS['es'] = {
         empty: 'Tu Persona aún está vacía: hasta que la enseñes, estos agentes solo usan sus propios ajustes de Voz.', emptyHint: 'Tu Persona aún está vacía, así que solo se aplican los ajustes de arriba.',
         readOnly: 'Solo los administradores pueden cambiar qué agentes la siguen.',
       },
-      entities: { client: 'Cliente', quote: 'Presupuesto', invoice: 'Factura', payment: 'Pago pendiente', booking: 'Reserva', service: 'Servicio', conversation: 'Conversación', contact: 'Contacto', instagram_comment: 'Comentario de Instagram', email: 'Email', none: 'Sin registro', company: 'Empresa', event: 'Evento', now: 'Ahora', today: 'Hoy' },
+      entities: { client: 'Cliente', quote: 'Presupuesto', invoice: 'Factura', payment: 'Pago pendiente', booking: 'Reserva', service: 'Servicio', conversation: 'Conversación', contact: 'Contacto', instagram_comment: 'Comentario de Instagram', email: 'Email', none: 'Sin registro', company: 'Empresa', event: 'Evento', now: 'Ahora', today: 'Hoy',
+        project: 'Obra', site_log: 'Diario de obra', diary: 'Diario de obra', site_issue: 'Incidencia', issue: 'Incidencia', change_order: 'Modificado', change: 'Modificado', measurement: 'Certificación' },
       fields: {
         event: 'Evento', toStatus: 'Al estado', channel: 'Canal', keywords: 'Palabras en el mensaje', frequency: 'Frecuencia', time: 'Hora', weekdays: 'Días', dayOfMonth: 'Día del mes', everyHours: 'Cada (horas)', forEach: 'Para cada', where: 'Solo registros donde',
         entity: 'Registro', offsetDays: 'Días (negativo = antes)', offsetHours: 'Horas (negativo = antes)', at: 'A las', statuses: 'Solo con el estado', days: 'Días', hours: 'Horas', minutes: 'Minutos', subjectType: 'Funciona sobre',
@@ -1188,6 +1193,11 @@ window.__I18N_CATALOGS['es'] = {
         displayName: 'Nombre', text: 'Texto', fromUsername: 'Nombre de usuario', mediaId: 'Publicación',
         from: 'De', fromName: 'Nombre del remitente', subject: 'Asunto', snippet: 'Vista previa', hasAttachments: 'Tiene adjuntos', hasPdf: 'Tiene un PDF', knownClient: 'Es cliente', threadId: 'Hilo', automated: 'Enviado automáticamente',
         type: 'Tipo', to: 'Para', actorType: 'Hecho por',
+        health: 'Situación', progressPct: 'Avance (%)', plannedPct: 'Previsto (%)', scheduleDays: 'Días de adelanto (negativo: retraso)', revisedEnd: 'Final previsto', daysToEnd: 'Días hasta el final',
+        managerName: 'Jefe de obra', managerPhone: 'Teléfono del jefe de obra', openIssues: 'Incidencias abiertas', openIssuesOverdue: 'Incidencias vencidas', contract: 'Contrato', contractCents: 'Contrato (céntimos)',
+        day: 'Día', workDone: 'Trabajos realizados', workers: 'Personas en obra', weather: 'Tiempo', shared: 'Mostrado al cliente',
+        title: 'Título', kind: 'Tipo', priority: 'Prioridad', location: 'Lugar', assigneeName: 'Quién lo resuelve', daysImpact: 'Días añadidos', decidedBy: 'Decidido por',
+        periodEnd: 'Medido hasta', gross: 'Este periodo', retention: 'Retención', net: 'Neto', netCents: 'Neto (céntimos)', invoiceNumber: 'Número de factura',
       },
       outputs: {
         clientId: 'Cliente', number: 'Número', existing: 'Ya existía', invoiceId: 'Factura', totalCents: 'Total (céntimos)', rows: 'Servicios facturados',

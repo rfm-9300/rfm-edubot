@@ -1,6 +1,10 @@
 package com.rfm.edubot.agents.registry
 
 import com.rfm.edubot.bookings.model.BookingStatus
+import com.rfm.edubot.building.model.ChangeOrderStatus
+import com.rfm.edubot.building.model.IssueStatus
+import com.rfm.edubot.building.model.MeasurementStatus
+import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.crm.model.QuoteStatus
@@ -70,12 +74,17 @@ object AgentCatalog {
         SubjectTypes.INVOICE to InvoiceStatus.entries.map { it.name },
         SubjectTypes.PAYMENT to PaymentStatus.entries.map { it.name },
         SubjectTypes.BOOKING to BookingStatus.entries.map { it.name },
+        SubjectTypes.PROJECT to ProjectStatus.entries.map { it.name },
+        SubjectTypes.SITE_ISSUE to IssueStatus.entries.map { it.name },
+        SubjectTypes.CHANGE_ORDER to ChangeOrderStatus.entries.map { it.name },
+        SubjectTypes.MEASUREMENT to MeasurementStatus.entries.map { it.name },
     )
 
     fun build(registry: AgentRegistry, availability: Availability, templates: List<JsonObject> = emptyList()): AgentCatalogDto {
         val subjectTypes = listOf(
             SubjectTypes.CLIENT, SubjectTypes.QUOTE, SubjectTypes.INVOICE, SubjectTypes.PAYMENT, SubjectTypes.BOOKING,
             SubjectTypes.SERVICE, SubjectTypes.CONVERSATION, SubjectTypes.CONTACT, SubjectTypes.INSTAGRAM_COMMENT, SubjectTypes.EMAIL,
+            SubjectTypes.PROJECT, SubjectTypes.SITE_LOG, SubjectTypes.SITE_ISSUE, SubjectTypes.CHANGE_ORDER, SubjectTypes.MEASUREMENT,
         )
         return AgentCatalogDto(
             triggers = registry.triggers.map { trigger ->
