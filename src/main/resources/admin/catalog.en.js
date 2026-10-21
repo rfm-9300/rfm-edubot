@@ -1348,6 +1348,7 @@ window.__I18N_CATALOGS['en'] = {
         latePhase: 'Late: {name}', latePhaseDetail: '{done}% done, {plan}% planned by now',
         overdueIssue: 'Overdue: {title}', changeWaiting: 'Waiting for the client: {title}', measurementToInvoice: 'Measurement no. {n} to invoice',
         noDiary: 'No site diary lately', lastDiary: 'Last one {when}', noDiaryYet: 'No entry yet',
+        retention: 'Retention to give back', retentionDetail: 'The project is finished: invoice it to the client',
       },
       tab: { schedule: 'Schedule', photos: 'Photos', contract: 'Contract' },
       scheduleTitle: 'Schedule',
@@ -1458,6 +1459,10 @@ window.__I18N_CATALOGS['en'] = {
       measurementReopen: 'Back to draft', measurementReopened: 'Back to draft', measurementApprovedBy: 'Approved',
       measurementInvoice: 'Invoice {amount}', measurementInvoiced: 'Invoice {number} issued',
       measurementNoClient: 'The project has no client yet: give it one to invoice.',
+      retentionTitle: 'Retention', retentionHeld: 'Still held', retentionReleased: 'Given back', retentionReleasedOn: 'Invoiced',
+      retentionWaitHint: 'Once the project is finished, invoice the client the retention it still holds.',
+      retentionInvoice: 'Invoice the retention ({amount})', retentionInvoiced: 'Invoice {number} issued', retentionReleaseLabel: 'Retention given back',
+      retentionInvoiceIntro: '{client} gets one invoice for the retention still held: {amount}. Cancelling or deleting that invoice holds it again.',
       measurementDeleteTitle: 'Delete measurement no. {n}?', measurementDeleteBody: 'It is removed for good. Only the latest one can be deleted.', measurementDeleted: 'Measurement deleted',
       share: {
         title: 'Client link', onIntro: 'Anyone with this link sees the project\'s progress. Send it to the client.',
@@ -1503,6 +1508,7 @@ window.__I18N_CATALOGS['en'] = {
         above_contract_line: p => `${p.line}: more than was contracted. Record a change instead.`,
         below_previous_line: p => `${p.line}: less than the previous measurement.`,
         unknown_line: 'A line no longer exists', invalid_range: 'The dates aren\'t valid',
+        project_not_completed: 'Mark the project finished first', measurement_pending: 'Invoice or delete the project’s last measurement first', nothing_held: 'The project holds no retention',
       },
     },
     time: {

@@ -33,6 +33,18 @@ data class ProjectPhase(
     val weight: Int? = null,
 )
 
+/**
+ * Retention given back at the end of the job: one invoice to the client of what was still held. [invoiceId] is null
+ * only while that invoice is being written; cancelling or deleting it removes the release, and the amount is held again.
+ */
+data class RetentionRelease(
+    val id: String,
+    val invoiceId: ObjectId?,
+    val amountCents: Long,
+    val releasedBy: String,
+    val releasedAt: Instant,
+)
+
 /** The link the client follows the project from. A new [token] replaces the old one, which stops working. */
 data class ProjectShare(
     val token: String,
@@ -64,6 +76,7 @@ data class Project(
     val contract: List<ContractLine> = emptyList(),
     /** Held back from each measurement until the end of the job (5 = 5%). */
     val retentionPct: Double = 0.0,
+    val retentionReleases: List<RetentionRelease> = emptyList(),
     val manualProgressPct: Int = 0,
     val phases: List<ProjectPhase> = emptyList(),
     val share: ProjectShare? = null,

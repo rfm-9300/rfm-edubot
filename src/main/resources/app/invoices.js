@@ -277,7 +277,7 @@ async function openInvoiceDetail(id) {
       unpaid && received > 0 ? { label: STR.invoiceReceived, value: fmtEUR(received) } : null,
       unpaid && received > 0 ? { label: STR.invoiceStillOwed, value: fmtEUR(invoiceOutstandingEur(inv)) } : null,
       inv.taxOfficeCode ? { label: STR.invoiceTaxCode, value: inv.taxOfficeCode } : null,
-      inv.projectLabel ? { label: BLD.project, value: inv.measurementNumber ? `${inv.projectLabel} · ${bt('measurementN', { n: inv.measurementNumber })}` : inv.projectLabel } : null,
+      inv.projectLabel ? { label: BLD.project, value: [inv.projectLabel, inv.measurementNumber ? bt('measurementN', { n: inv.measurementNumber }) : '', inv.retentionRelease ? BLD.retentionReleaseLabel : ''].filter(Boolean).join(' · ') } : null,
     ])}
     ${inv.quoteNumber && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
     ${itemsTable(inv.items)}

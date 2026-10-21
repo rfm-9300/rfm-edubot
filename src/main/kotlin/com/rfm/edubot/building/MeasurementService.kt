@@ -2,8 +2,12 @@ package com.rfm.edubot.building
 
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.MeasurementStatus
+import com.rfm.edubot.building.model.Project
+import com.rfm.edubot.building.model.ProjectStatus
+import com.rfm.edubot.building.model.RetentionRelease
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.model.Invoice
+import com.rfm.edubot.crm.model.LineItem
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 import kotlin.math.abs
@@ -11,10 +15,13 @@ import kotlin.math.abs
 /**
  * A project's measurements (autos de medição), numbered in order: a draft with every billable line at the
  * quantities of the one before, quantities to date typed in, approved, then invoiced for what it adds, less the
- * retention. From its first measurement the project's quote is billed only through them.
+ * retention, which is invoiced back once the project is finished. From its first measurement the project's quote is
+ * billed only through them.
  */
 class MeasurementService(private val records: BuildingRecords) {
     data class Invoiced(val measurement: Measurement, val invoice: Invoice)
+
+    data class RetentionInvoiced(val project: Project, val invoice: Invoice)
 
     /** Refused while the latest one is still a draft ([Outcome.Refused.detail] is its id). */
     suspend fun create(projectId: ObjectId?, periodEnd: LocalDate?, notes: String?, stamp: Stamp): Outcome<Measurement> {
@@ -123,6 +130,42 @@ class MeasurementService(private val records: BuildingRecords) {
         records.measurements.replace(claimed, stored)
         records.events.measurementInvoiced(stored, project, invoice)
         return Outcome.Done(Invoiced(stored, invoice))
+    }
+
+    /**
+     * The retention a finished project still holds, invoiced to its client in one line labelled in the company's
+     * [locale], and kept on the project as a release. Refused while one of its measurements is still a draft or to
+     * invoice ([Outcome.Refused.detail] is its id): its retention would be held after the release.
+     */
+    suspend fun invoiceRetention(projectId: ObjectId, dueDate: LocalDate, locale: String, stamp: Stamp): Outcome<RetentionInvoiced> {
+        val project = records.projects.findById(projectId) ?: return Outcome.NotFound
+        if (project.status != ProjectStatus.COMPLETED) return conflict("project_not_completed")
+        val clientId = project.clientId?.takeIf { records.clients.findById(it) != null } ?: return invalid("no_client")
+        val measurements = records.measurements.list(project.id)
+        measurements.firstOrNull { it.status != MeasurementStatus.INVOICED }?.let { return conflict("measurement_pending", it.id.toHexString()) }
+        val release = RetentionRelease(ObjectId().toHexString(), invoiceId = null, amountCents = 0, releasedBy = stamp.who, releasedAt = stamp.now)
+        // Claimed before the invoice exists, so a second click finds nothing held.
+        val claimed = records.projects.update(project.id) { current ->
+            val held = MeasurementMath.retentionHeldCents(current, measurements)
+            if (held <= 0) ProjectChange.Refused("nothing_held")
+            else ProjectChange.Ok(current.copy(retentionReleases = current.retentionReleases + release.copy(amountCents = held), updatedAt = stamp.now))
+        }
+        val amount = when (claimed) {
+            null -> return Outcome.NotFound
+            is ProjectChange.Refused -> return conflict(claimed.error)
+            is ProjectChange.Ok -> claimed.project.retentionReleases.single { it.id == release.id }.amountCents
+        }
+        val label = BuildingCopy.t(locale, "retentionRelease", "project" to "${project.number} · ${project.name}")
+        val invoice = runCatching {
+            records.invoiceService.create(clientId, null, listOf(LineItem(label, 1.0, "", amount, amount)), dueDate, projectId = project.id)
+        }.getOrElse { error ->
+            records.projects.update(project.id) { ProjectChange.Ok(it.copy(retentionReleases = it.retentionReleases.filterNot { r -> r.id == release.id })) }
+            throw error
+        }
+        val stored = records.projects.update(project.id) { current ->
+            ProjectChange.Ok(current.copy(retentionReleases = current.retentionReleases.map { if (it.id == release.id) it.copy(invoiceId = invoice.id) else it }))
+        }
+        return Outcome.Done(RetentionInvoiced((stored as? ProjectChange.Ok)?.project ?: project, invoice))
     }
 
     /** Only the project's latest, before it is invoiced. Removing the last one frees the quote to be billed again. */

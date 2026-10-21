@@ -24,6 +24,7 @@ import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.ProjectPhase
 import com.rfm.edubot.building.model.ProjectShare
 import com.rfm.edubot.building.model.ProjectStatus
+import com.rfm.edubot.building.model.RetentionRelease
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
@@ -103,6 +104,16 @@ class ProjectRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     suspend fun setWatchedHealth(id: ObjectId, health: String) {
         collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("watchedHealth", health))
     }
+
+    /**
+     * A cancelled or deleted invoice gives back the retention release it billed, so the amount is held again. A new
+     * version, so an edit read before can't write the release back.
+     */
+    suspend fun releaseRetentionInvoice(invoiceId: ObjectId): Int =
+        collection.updateMany(
+            scoped(Filters.eq("retentionReleases.invoiceId", invoiceId)),
+            Updates.combine(Updates.pull("retentionReleases", Document("invoiceId", invoiceId)), Updates.inc("version", 1)),
+        ).modifiedCount.toInt()
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 
@@ -464,6 +475,13 @@ private fun Project.toDocument(): Document = Document("_id", id)
         },
     )
     .append("retentionPct", retentionPct)
+    .append(
+        "retentionReleases",
+        retentionReleases.map {
+            Document("id", it.id).append("invoiceId", it.invoiceId).append("amountCents", it.amountCents)
+                .append("releasedBy", it.releasedBy).append("releasedAt", it.releasedAt.toDate())
+        },
+    )
     .append("manualProgressPct", manualProgressPct)
     .append(
         "phases",
@@ -508,6 +526,15 @@ private fun Document.toProject(): Project {
             )
         },
         retentionPct = double("retentionPct") ?: 0.0,
+        retentionReleases = docs("retentionReleases").map {
+            RetentionRelease(
+                id = it.getString("id").orEmpty(),
+                invoiceId = it.objectId("invoiceId"),
+                amountCents = it.getLongValue("amountCents"),
+                releasedBy = it.getString("releasedBy").orEmpty(),
+                releasedAt = it.getInstant("releasedAt"),
+            )
+        },
         manualProgressPct = int("manualProgressPct") ?: 0,
         phases = docs("phases").map {
             ProjectPhase(

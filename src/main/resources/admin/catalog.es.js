@@ -1347,6 +1347,7 @@ window.__I18N_CATALOGS['es'] = {
         latePhase: 'Retrasada: {name}', latePhaseDetail: '{done}% hecho, {plan}% previsto hasta ahora',
         overdueIssue: 'Vencida: {title}', changeWaiting: 'Esperando al cliente: {title}', measurementToInvoice: 'Certificación n.º {n} por facturar',
         noDiary: 'Sin diario de obra en los últimos días', lastDiary: 'El último fue {when}', noDiaryYet: 'Aún sin partes',
+        retention: 'Retención por devolver', retentionDetail: 'La obra está terminada: factúrala al cliente',
       },
       tab: { schedule: 'Planificación', photos: 'Fotos', contract: 'Contrato' },
       scheduleTitle: 'Planificación',
@@ -1457,6 +1458,10 @@ window.__I18N_CATALOGS['es'] = {
       measurementReopen: 'Volver a borrador', measurementReopened: 'De vuelta a borrador', measurementApprovedBy: 'Aprobada',
       measurementInvoice: 'Facturar {amount}', measurementInvoiced: 'Factura {number} emitida',
       measurementNoClient: 'La obra aún no tiene cliente: indica uno para facturar.',
+      retentionTitle: 'Retención de garantía', retentionHeld: 'Aún retenida', retentionReleased: 'Devuelta', retentionReleasedOn: 'Facturada',
+      retentionWaitHint: 'Cuando la obra esté terminada, factura al cliente la retención que aún guarda.',
+      retentionInvoice: 'Facturar la retención ({amount})', retentionInvoiced: 'Factura {number} emitida', retentionReleaseLabel: 'Devolución de la retención',
+      retentionInvoiceIntro: '{client} recibe una factura con la retención aún retenida: {amount}. Si cancelas o eliminas esa factura, la retención vuelve a quedar retenida.',
       measurementDeleteTitle: '¿Eliminar la certificación n.º {n}?', measurementDeleteBody: 'Se elimina para siempre. Solo se puede eliminar la última.', measurementDeleted: 'Certificación eliminada',
       share: {
         title: 'Enlace del cliente', onIntro: 'Cualquiera con este enlace ve el avance de la obra. Envíaselo al cliente.',
@@ -1502,6 +1507,7 @@ window.__I18N_CATALOGS['es'] = {
         above_contract_line: p => `${p.line}: más de lo contratado. Registra un modificado.`,
         below_previous_line: p => `${p.line}: menos que la certificación anterior.`,
         unknown_line: 'Una partida ya no existe', invalid_range: 'Las fechas no son válidas',
+        project_not_completed: 'Da primero la obra por terminada', measurement_pending: 'Factura o elimina primero la última certificación de la obra', nothing_held: 'La obra no tiene retención por devolver',
       },
     },
     time: {

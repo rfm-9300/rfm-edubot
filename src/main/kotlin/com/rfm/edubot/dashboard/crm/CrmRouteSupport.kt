@@ -48,7 +48,10 @@ internal class TenantCrm(mongo: MongoModule, val tenant: Tenant) {
 
     val clientDirectory: ClientDirectory get() = ClientDirectory(clients, ClientFields.of(tenant))
     val quoteService: QuoteService get() = QuoteService(quotes, invoices, clientServices, clients)
-    val invoiceService: InvoiceService get() = InvoiceService(invoices, clientServices, clients, listOf(InvoicedWork { measurements.releaseInvoice(it) }))
+    val invoiceService: InvoiceService get() = InvoiceService(
+        invoices, clientServices, clients,
+        listOf(InvoicedWork { measurements.releaseInvoice(it) }, InvoicedWork { projects.releaseRetentionInvoice(it) }),
+    )
 
     val pdfGenerator: PdfGenerator get() = PdfGenerator()
     val documentTemplate: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)

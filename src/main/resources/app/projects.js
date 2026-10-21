@@ -185,6 +185,9 @@ function projectAttention(r) {
   r.issues.filter(i => i.overdue).forEach(i => items.push({ tone: 'bad', title: bt('attn.overdueIssue', { title: i.title }), detail: [i.number, i.assigneeName].filter(Boolean).join(' · '), when: relDay(i.dueDate), open: `issue:${i.id}` }));
   r.changes.filter(c => c.status === 'SENT').forEach(c => items.push({ tone: 'warn', title: bt('attn.changeWaiting', { title: c.title }), detail: c.number, amount: c.signedEur, open: `change:${c.id}` }));
   r.measurements.filter(m => m.status === 'APPROVED').forEach(m => items.push({ tone: 'info', title: bt('attn.measurementToInvoice', { n: m.number }), detail: fmtDay(m.periodEnd), amount: m.netEur, open: `measurement:${m.id}` }));
+  if (p.status === 'COMPLETED' && p.retentionHeldEur > 0 && hasModule('invoices') && p.clientId) {
+    items.push({ tone: 'info', title: bt('attn.retention'), detail: bt('attn.retentionDetail'), amount: p.retentionHeldEur, open: 'act:retention' });
+  }
   if (hasModule('site-diary') && p.status === 'ACTIVE') {
     const last = p.lastDiaryDay;
     const quiet = !last || Math.round((dayKeyDate(todayKey()) - dayKeyDate(last)) / 86400000) >= DIARY_QUIET_DAYS;
@@ -276,7 +279,7 @@ function projectPaneHtml(r) {
     const rows = r.measurements.map(m => `<tr class="conversation-row${m.status === 'INVOICED' ? ' is-paid' : m.status === 'DRAFT' ? ' is-draft' : ''}" data-record-open="measurement:${escapeHTML(m.id)}">
       <td class="id">${escapeHTML(bt('measurementN', { n: m.number }))}</td><td class="mono nowrap">${escapeHTML(fmtDay(m.periodEnd))}</td>
       <td class="num nowrap">${fmtEUR(m.grossEur)}</td><td class="num nowrap">${fmtEUR(m.netEur)}</td><td>${measurementStatusPill(m.status)}</td></tr>`).join('');
-    return `<div class="record__stack">${facts}${recordTable([[BLD.thMeasurement], [BLD.thPeriodEnd], [BLD.thThisPeriod, 'right'], [BLD.thNet, 'right'], [BLD.thStatus]], rows)}</div>`;
+    return `<div class="record__stack">${facts}${recordTable([[BLD.thMeasurement], [BLD.thPeriodEnd], [BLD.thThisPeriod, 'right'], [BLD.thNet, 'right'], [BLD.thStatus]], rows)}${projectRetentionHtml(p)}</div>`;
   }
   // Contract
   const locked = p.contractLocked ? `<p class="hint">${escapeHTML(BLD.contractLocked)}</p>` : '';
@@ -292,6 +295,52 @@ function projectPaneHtml(r) {
     [BLD.currentContract, fmtEUR(p.currentContractEur)],
   ]);
   return `<div class="record__stack">${from}${recordTable(head, rows)}${totals}${locked}</div>`;
+}
+
+// The retention the invoiced measurements kept back, invoiced to the client once the project is finished.
+function projectRetentionHtml(p) {
+  if (!p.retentionHeldEur && !p.retentionReleases.length) return '';
+  const held = p.retentionHeldEur > 0;
+  const canInvoice = held && p.status === 'COMPLETED' && hasModule('invoices') && !!p.clientId;
+  const hint = !held ? '' : p.status !== 'COMPLETED' ? BLD.retentionWaitHint : !p.clientId ? BLD.measurementNoClient : '';
+  const rows = p.retentionReleases.map(rl => {
+    const open = rl.invoiceId && hasModule('invoices') ? ` data-record-open="invoice:${escapeHTML(rl.invoiceId)}"` : '';
+    return `<tr class="conversation-row"${open}><td class="id">${escapeHTML(rl.invoiceNumber || '—')}</td><td class="mono nowrap">${escapeHTML(fmtDay(rl.releasedAt))}</td><td class="num nowrap">${fmtEUR(rl.amountEur)}</td></tr>`;
+  }).join('');
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.retentionTitle)}</h2>
+      ${canInvoice ? `<div class="panel__tools"><button class="btn btn--sm btn--accent" type="button" data-project-act="retention">${escapeHTML(bt('retentionInvoice', { amount: fmtEUR(p.retentionHeldEur) }))}</button></div>` : ''}</header>
+    <div class="panel__body">${dashFacts([[BLD.retentionHeld, fmtEUR(p.retentionHeldEur)], [BLD.retentionReleased, fmtEUR(p.retentionReleasedEur)]], true)}${hint ? `<p class="hint">${escapeHTML(hint)}</p>` : ''}</div>
+    ${rows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(STR.detailInvoice)}</th><th>${escapeHTML(BLD.retentionReleasedOn)}</th><th class="right">${escapeHTML(BLD.thValue)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+  </section>`;
+}
+
+// One invoice to the client of the retention the finished project still holds.
+function openRetentionInvoiceForm(p) {
+  const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(bt('retentionInvoiceIntro', { amount: fmtEUR(p.retentionHeldEur), client: p.clientName || '' }))}</p>
+    <div class="form__row"><label class="lbl" for="rt-due">${escapeHTML(STR.quoteConvertDue)}</label><input class="inp inp--mono" id="rt-due" type="date" required value="${due}" /></div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(bt('retentionInvoice', { amount: fmtEUR(p.retentionHeldEur) }))}</button></div>`;
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const dueDate = $('#rt-due', form).value;
+    if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const done = await api(`/app/api/building/projects/${encodeURIComponent(p.id)}/retention/invoice`, { method: 'POST', body: JSON.stringify({ dueDate }) });
+      state.fetched.invoices = false;
+      toast(bt('retentionInvoiced', { number: done.invoiceNumber }));
+      closeDrawer();
+      refreshBuildingPage();
+    } catch (err) {
+      btn.disabled = false;
+      toast(buildingErrorText(err, BLD.saveFailed));
+    }
+  });
+  openDrawer(BLD.retentionTitle, form, false, { eyebrow: projectLabel(p) });
 }
 
 function projectContactButtons(p) {
@@ -370,6 +419,7 @@ function openProjectItem(ref) {
   if (kind === 'issue') return openFromProject(() => openIssueDetail(id));
   if (kind === 'change') return openFromProject(() => openChangeDetail(id));
   if (kind === 'measurement') return openFromProject(() => openMeasurementDetail(id));
+  if (kind === 'invoice') return openFromProject(() => openInvoiceDetail(id));
 }
 
 async function projectAct(kind) {
@@ -380,6 +430,7 @@ async function projectAct(kind) {
   if (kind === 'phases') return openFromProject(() => openPhasesEditor(p));
   if (kind === 'progress') return openFromProject(() => openManualProgressForm(p));
   if (kind === 'share') return openFromProject(() => openProjectShare(p));
+  if (kind === 'retention') return openFromProject(() => openRetentionInvoiceForm(p));
   if (kind === 'client') return openFromProject(() => openClientDrawer(p.clientId));
   if (kind === 'quote') return openFromProject(() => openQuoteDetail(p.quoteId));
   if (kind === 'diary') {

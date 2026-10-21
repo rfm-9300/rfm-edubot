@@ -1348,6 +1348,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         latePhase: 'Atrasada: {name}', latePhaseDetail: '{done}% feito, {plan}% previsto até agora',
         overdueIssue: 'Em atraso: {title}', changeWaiting: 'À espera do cliente: {title}', measurementToInvoice: 'Auto n.º {n} por faturar',
         noDiary: 'Sem diário de obra nos últimos dias', lastDiary: 'O último foi {when}', noDiaryYet: 'Ainda sem registos',
+        retention: 'Retenção por devolver', retentionDetail: 'A obra está concluída: fature-a ao cliente',
       },
       tab: { schedule: 'Cronograma', photos: 'Fotos', contract: 'Contrato' },
       scheduleTitle: 'Cronograma',
@@ -1458,6 +1459,10 @@ window.__I18N_CATALOGS['pt-PT'] = {
       measurementReopen: 'Voltar a rascunho', measurementReopened: 'De volta a rascunho', measurementApprovedBy: 'Aprovado',
       measurementInvoice: 'Faturar {amount}', measurementInvoiced: 'Fatura {number} emitida',
       measurementNoClient: 'A obra ainda não tem cliente: indique um para faturar.',
+      retentionTitle: 'Retenção de garantia', retentionHeld: 'Ainda retida', retentionReleased: 'Devolvida', retentionReleasedOn: 'Faturada',
+      retentionWaitHint: 'Quando a obra estiver concluída, fature ao cliente a retenção que ainda guarda.',
+      retentionInvoice: 'Faturar a retenção ({amount})', retentionInvoiced: 'Fatura {number} emitida', retentionReleaseLabel: 'Devolução da retenção',
+      retentionInvoiceIntro: '{client} recebe uma fatura com a retenção ainda retida: {amount}. Se cancelar ou eliminar essa fatura, a retenção volta a ficar retida.',
       measurementDeleteTitle: 'Apagar o auto n.º {n}?', measurementDeleteBody: 'É removido de vez. Só o último auto pode ser apagado.', measurementDeleted: 'Auto apagado',
       share: {
         title: 'Link do cliente', onIntro: 'Quem tiver este link vê o progresso da obra. Envie-o ao cliente.',
@@ -1503,6 +1508,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         above_contract_line: p => `${p.line}: mais do que o contratado. Registe uma alteração.`,
         below_previous_line: p => `${p.line}: menos do que o auto anterior.`,
         unknown_line: 'Um artigo já não existe', invalid_range: 'As datas não são válidas',
+        project_not_completed: 'Dê primeiro a obra como concluída', measurement_pending: 'Fature ou elimine primeiro o último auto da obra', nothing_held: 'A obra não tem retenção por devolver',
       },
     },
     time: {

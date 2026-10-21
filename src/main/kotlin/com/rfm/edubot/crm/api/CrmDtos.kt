@@ -78,11 +78,15 @@ internal data class InvoiceDto(
     val outstandingEur: Double,
     val taxOfficeCode: String? = null,
     val installments: List<InvoiceInstallmentDto> = emptyList(),
-    /** The project and measurement the invoice bills, when a measurement made it; the label and number only on its own record. */
+    /**
+     * The project and measurement the invoice bills, when a measurement made it, or the project whose retention it
+     * gives back ([retentionRelease]); the label, number and flag only on its own record.
+     */
     val projectId: String? = null,
     val projectLabel: String? = null,
     val measurementId: String? = null,
     val measurementNumber: Int? = null,
+    val retentionRelease: Boolean = false,
 )
 
 @Serializable
@@ -219,7 +223,13 @@ internal fun ClientService.dto(client: Client?) = ClientServiceDto(
     quoteId = quoteId?.toHexString(),
 )
 
-internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLabel: String? = null, measurementNumber: Int? = null) = InvoiceDto(
+internal fun Invoice.dto(
+    client: Client?,
+    quoteNumber: String? = null,
+    projectLabel: String? = null,
+    measurementNumber: Int? = null,
+    retentionRelease: Boolean = false,
+) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -241,6 +251,7 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLa
     projectLabel = projectLabel,
     measurementId = measurementId?.toHexString(),
     measurementNumber = measurementNumber,
+    retentionRelease = retentionRelease,
 )
 
 internal fun Employee.dto() = EmployeeDto(

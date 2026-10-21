@@ -75,6 +75,11 @@ internal data class ProjectDto(
     /** Approved measurements still to invoice, net of retention. */
     val toInvoiceEur: Double,
     val retainedEur: Double,
+    /** What the invoiced measurements kept back and wasn't given back yet: invoiced to the client once the project is finished. */
+    val retentionHeldEur: Double,
+    val retentionReleasedEur: Double,
+    /** Only on one project's record. */
+    val retentionReleases: List<RetentionReleaseDto>,
     val phaseCount: Int,
     val latePhases: Int,
     val openIssues: Int,
@@ -91,6 +96,9 @@ internal data class ProjectDto(
     val createdAt: String,
     val updatedAt: String,
 )
+
+@Serializable
+internal data class RetentionReleaseDto(val invoiceId: String?, val invoiceNumber: String?, val amountEur: Double, val releasedBy: String, val releasedAt: String)
 
 @Serializable
 internal data class PhotoDto(
@@ -252,6 +260,9 @@ internal data class MeasurementDto(
 
 @Serializable
 internal data class MeasurementInvoicedDto(val measurement: MeasurementDto, val invoiceId: String, val invoiceNumber: String)
+
+@Serializable
+internal data class RetentionInvoicedDto(val project: ProjectDto, val invoiceId: String, val invoiceNumber: String)
 
 /** What the client's page shows: progress, the plan and what the team chose to share. No money, issues or people. */
 @Serializable

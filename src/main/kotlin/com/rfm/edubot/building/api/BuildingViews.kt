@@ -38,6 +38,7 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
     val measurementsByProject = measurements.forProjects(ids).groupBy { it.projectId }
     val lastDays = logs.lastDays(ids)
     val photoCounts = photos.counts(ids)
+    val releaseInvoices = if (detail) invoices.findByIds(list.flatMap { p -> p.retentionReleases.mapNotNull { it.invoiceId } }) else emptyMap()
     return list.map { project ->
         val projectChanges = changesByProject[project.id].orEmpty()
         val effect = approvedEffect(projectChanges)
@@ -81,6 +82,11 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
             measuredEur = eur(latestBilled?.toDateCents ?: 0),
             toInvoiceEur = eur(projectMeasurements.filter { it.status == MeasurementStatus.APPROVED }.sumOf { it.netCents }),
             retainedEur = eur(billed.sumOf { it.retentionCents }),
+            retentionHeldEur = eur(MeasurementMath.retentionHeldCents(project, projectMeasurements)),
+            retentionReleasedEur = eur(project.retentionReleases.sumOf { it.amountCents }),
+            retentionReleases = if (!detail) emptyList() else project.retentionReleases.map {
+                RetentionReleaseDto(it.invoiceId?.toHexString(), it.invoiceId?.let { id -> releaseInvoices[id]?.number }, eur(it.amountCents), it.releasedBy, it.releasedAt.toString())
+            },
             phaseCount = project.phases.size,
             latePhases = phaseStates.count { it.second == PhaseState.LATE },
             openIssues = issuesOpen.size,
