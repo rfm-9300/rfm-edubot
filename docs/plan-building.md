@@ -1,7 +1,7 @@
 # Implementation Plan — Building (construction projects and their progress)
 
-Status: **Phase 1 implemented** (server, `/app` pages, Home, the client's progress page), **Phase 2 in
-progress** ([§10](#10-phase-2-design)) · Owner: Rodrigo · Last updated: 2026-10-21
+Status: **Phase 1 implemented** (server, `/app` pages, Home, the client's progress page; PR #88),
+**Phase 2 implemented** ([§10](#10-phase-2-design); PR #89) · Owner: Rodrigo · Last updated: 2026-10-21
 
 A new nav category, **Building**, for construction and renovation companies: the projects (obras) a
 company runs and how far along each one is. The schedule and its phases, the site diary, photos,
@@ -264,7 +264,7 @@ Public: `GET /app/share/{token}` (the page), `/data`, `/photos/{id}`, `/logo`, a
 ## 7. Phases
 
 1. **Phase 1 (PR #88)** — everything above.
-2. **Phase 2** — a foreman's **My sites** page on an employee's sign-in (diary, photos, issues on their
+2. **Phase 2 (PR #89)** — a foreman's **My sites** page on an employee's sign-in (diary, photos, issues on their
    projects only); **job costing**: supplier bills and time-clock hours by project, budget vs actual
    and margin (Obra Sys, Empreitek, JobTread); **client approval of a change** from the link, with its
    own signed token and a typed name; a **weekly client update** drafted by the AI from the diary
@@ -383,4 +383,6 @@ three catalogs, HTTP tests per area. Built in this order, one commit each.
 HTTP tests per area: events appended with their related records and loaded by the agents' context;
 the change link (decide once, editing ends it, isolation, headers); the retention invoice and its release;
 both PDFs parse and carry the figures; costs from linked bills and hours; the draft with `FakeModel` and
-the budget refusal; My sites only for the manager's projects, refused to the team.
+the budget refusal; My sites only for the manager's projects, refused to the team. As built:
+`BuildingEventsTest`, `ChangeApprovalTest`, `RetentionReleaseTest`, `BuildingPdfTest`,
+`ProjectCostsTest`, `ProjectReportsTest`, `MySitesTest`.

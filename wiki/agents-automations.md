@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-10-21
 ---
 
 # Agents (automations) and Gmail
@@ -19,6 +19,8 @@ section the ops. Rodrigo asked to merge it the same day. What matters later:
   after their own write, best effort (a failure is logged, never fails the write). The dispatcher
   claims and marks every event done even when no agent listens; record drawers read it as a timeline.
   TTLs: events 365 days, finished runs 180, notifications 90, `outbound_log` 30, email text 90.
+  Building's services append theirs too (2026-10-21, [building-projects.md](building-projects.md) →
+  Events), and a client deciding a change from its link is the `CLIENT` actor, named as they typed.
 - **Background work**: the agents scheduler (30 s tick), the email clean-up and the Gmail sync each
   take a Mongo lease (`scheduler_leases`) first. On `ApplicationStopping` the pipeline scope is now
   cancelled; unfinished messages and runs resume at the next boot.

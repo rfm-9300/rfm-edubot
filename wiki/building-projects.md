@@ -1,12 +1,14 @@
 ---
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Building: projects and their progress
 
 The opt-in category for construction and renovation companies: **Projects**, **Site diary**,
-**Issues**, **Change orders** and **Measurements**, a Projects card on Home, and a read-only page the
-client opens from a link. Built in PR #88 (2026-10-20). The plan, with the market research behind it
+**Issues**, **Change orders** and **Measurements**, a Projects card on Home, a read-only page the
+client opens from a link, and **My sites** on a site manager's own sign-in. Phase 1 is PR #88
+(2026-10-20); phase 2 (events for agents, change approval by link, the retention, PDFs, job costing,
+client updates, My sites) is PR #89 (2026-10-21). The plan, with the market research behind it
 (Procore, Buildertrend, Fieldwire, JobTread, CompanyCam, Raken, and the Portuguese and Spanish tools
 built around autos de medição and certificaciones), is [`docs/plan-building.md`](../docs/plan-building.md);
 the structure and diagrams are in [`docs/architecture.md` → Building](../docs/architecture.md#building).
@@ -29,19 +31,22 @@ the structure and diagrams are in [`docs/architecture.md` → Building](../docs/
 - Backend, as [dashboard-api.md](dashboard-api.md) lays out: `building/` holds the models,
   repositories, the progress and measurement math, the drafts and the services (`ProjectService`,
   `SitePhotoService`, `SiteDiaryService`, `SiteIssueService`, `ChangeOrderService`,
-  `MeasurementService`), and imports nothing from Ktor's server (`ArchitectureBoundariesTest`).
-  `building/api/` has the requests, DTOs and views; `dashboard/building/` the five features and the
-  client's page; Home's card is `dashboard/overview/ProjectsOverview.kt`.
+  `MeasurementService`, `ProjectCostsService`, `ProjectReportService`, `BuildingDocuments` over
+  `BuildingPdf`), the events (`BuildingEvents`, `ProjectHealthWatch`), and imports nothing from Ktor's
+  server (`ArchitectureBoundariesTest`). `building/api/` has the requests, DTOs and views;
+  `dashboard/building/` the six features (`ProjectReportRoutes` is the sixth), the client's pages
+  (`ProjectShareRoutes`, `ChangeApprovalRoutes`) and My sites (`MySitesRoutes`); Home's card is
+  `dashboard/overview/ProjectsOverview.kt`.
 - Frontend: `building.js` (what the pages share: labels and pills, the progress bar and the timeline,
   the project picker, shrinking, uploading and viewing photos, the nav counts), `projects.js`,
-  `site-diary.js`, `site-issues.js`, `change-orders.js`,
-  `measurements.js` ([dashboard-frontend.md](dashboard-frontend.md)); the client's page is
-  `share/index.html` + `share/share.js`. The components are in
+  `site-diary.js`, `site-issues.js`, `change-orders.js`, `measurements.js`, `my-sites.js`
+  ([dashboard-frontend.md](dashboard-frontend.md)); the client's pages are `share/index.html` +
+  `share/share.js` and `share/change.html` + `share/change.js`. The components are in
   [`design-system/components.md`](../design-system/components.md) → Building.
 - Collections, all in the data database with `tenantId`: `building.projects`, `building.site_logs`,
-  `building.photos`, `building.issues`, `building.change_orders`, `building.measurements`. Numbers come
-  from `crm.sequences`: projects `OB-001`, issues `OC-001`, change orders `TM-001`; measurements are
-  numbered per project.
+  `building.photos`, `building.issues`, `building.change_orders`, `building.measurements`,
+  `building.reports`. Numbers come from `crm.sequences`: projects `OB-001`, issues `OC-001`, change
+  orders `TM-001`; measurements are numbered per project.
 
 ## Progress against the plan (`ProjectProgress`)
 
@@ -129,9 +134,9 @@ the structure and diagrams are in [`docs/architecture.md` → Building](../docs/
 - `/app/share/{token}`, under `/app` because the production proxy forwards `/app*` as it is. The token
   is 32 random bytes (base64url) on the project, enabled or not; rotating it makes a new one and the
   old link stops working at once.
-- It shows the company's name and logo, the project's progress, the plan moved by approved changes,
-  and only the diary days and photos marked shared. Never money, issues, notes or people. A phase shows
-  as late only on the team's side.
+- It shows the company's name and logo, the project's progress, the updates the team posted, the plan
+  moved by approved changes, and only the diary days and photos marked shared. Never money, issues,
+  notes or people. A phase shows as late only on the team's side.
 - Answers `404` for an unknown or disabled token and for a company that isn't active; sends
   `X-Robots-Tag: noindex, nofollow` and `Referrer-Policy: no-referrer`, and the data `no-store`.
 - The page is plain scripts over the shared stylesheet and catalogs, in the company's language.
@@ -145,6 +150,85 @@ projects, overdue issues (both ranked after pending bookings), measurements to i
 waiting (after due-soon payments). Issues and changes count on a finished project too: snags after the
 handover, an extra still to sign.
 
+## Events, for the agents
+
+- The services append domain events after their writes (`BuildingEvents`): `project.created`,
+  `project.status_changed`, `site_log.created`, `site_issue.created` and `.status_changed`,
+  `change_order.sent` and `.decided` (`via` the team or the client's link), `measurement.approved` and
+  `.invoiced`. Each names the project and its client as related records, so the client's timeline shows
+  it and an agent's WhatsApp, task or notice has the client.
+- Health is computed, not stored, so `ProjectHealthWatch` (hourly, on a lease, like the agents'
+  scheduler) keeps each running project's last-seen health in `watchedHealth`, written without a new
+  version so it can't overwrite an edit, and appends `project.at_risk` or `project.delayed` when it
+  turns so. Its first look only stores. Two events rather than one `health_changed`: the Agents page's
+  status filter offers a subject's statuses, and a project's statuses aren't its health.
+- `AgentContextBuilder` loads each Building subject (`BuildingSubjects`) with its project's figures and
+  its client; the Agents catalog offers the events, statuses and variables per subject.
+
+## The client approves a change from a link
+
+- Sending a change gives it its own link, `/app/share/change/{token}` (32 random bytes, a partial
+  unique index on `approval.token`). The client reads the change as sent and approves or rejects it in
+  the name they type, with an optional note. JSON-only, `noindex`, `no-referrer`, `no-store`, only while
+  the company is active.
+- One answer, while the change is sent: the decision replaces the change only over the status and
+  `updatedAt` it read, so a second answer, or one racing the team's, is `409 already_decided`. Editing a
+  sent change takes it back to draft and drops the link, so the client never approves what they didn't
+  read; any decision keeps the link so the client can see it.
+- The decision records `decidedVia = CLIENT_LINK` and the typed name, appends `change_order.decided`
+  with a `CLIENT` actor (a new `ActorType`), and rings every user's bell (`change_order_decided`).
+
+## Releasing the retention
+
+- Once a project is finished and all its measurements are invoiced, the Measurements tab offers one
+  invoice to the client of the retention still held: the retention of its invoiced measurements less
+  what was released (`MeasurementMath.retentionHeldCents`). Refused while a measurement is a draft or
+  to invoice (`measurement_pending`): its retention would be held after the release.
+- The project keeps the releases (`retentionReleases`), claimed through the versioned project write
+  before the invoice exists, so a second click finds nothing held. Cancelling or deleting that invoice
+  pulls the release (and bumps the version) through a second `InvoicedWork` hook.
+
+## PDFs
+
+- `BuildingPdf` writes the measurement (lines, totals, retention, net, signature boxes) and the diary of
+  a period (at most 92 days, the six first photos of each day as thumbnails) over PDFBox, flowing from
+  page to page with a running head, repeated column headings and page numbers. It is separate from the
+  CRM's `PdfGenerator`, whose page the company designs block by block and which is Portuguese-only.
+- Text, numbers and dates follow the company's language through `BuildingCopy` (`1 234,56 €`,
+  `€1,234.56`, `1.234,56 €`). Photos and logos PDFBox can't read (a WebP) are left out, not fatal.
+
+## Job costing
+
+- A payment can name the project it was for (`crm.payments.projectId`, like `clientId`); a project has
+  an optional cost budget, a labour cost per hour and the time clock's work sites of the job
+  (`siteIds`, one project per site, `site_in_use` otherwise). The link sits on the project, not on the
+  site, so Building reads the time clock and the time clock knows nothing of Building.
+- `ProjectCostsService`: the bills (not cancelled) by payee, the hours clocked at its sites by employee
+  (an open shift counts to now) at the project's rate, the budget used, and two margins. **Expected** is
+  the current contract less the budget, or less the costs once they pass it; without a budget, less the
+  costs so far. **To date** is what was measured less the costs.
+- An employee's pay linked to the project and their clocked hours would count twice; the tab says so.
+
+## Client updates
+
+- The Client updates tab drafts an update for a period (the last 7 days by default) with the company's
+  model, in its language, from what the client may read: the diary days shared with them, the phases
+  and how they moved, the changes they approved. Never money, the site's problems or anyone's name.
+  Within the monthly token budget (`409 token_budget`), counted as `building` usage; `502
+  ai_unavailable` when the model doesn't answer; `nothing_to_report` when the period has nothing.
+- The team edits and posts it; the client's page shows the posted updates, newest first. The code
+  calls them reports (`building.reports`, `/reports`), because the client's page already calls the
+  shared diary days updates.
+
+## My sites
+
+- An employee page, `my-sites`, when the company has employees and the diary or the issues: the running
+  projects whose site manager the employee is. They write and edit the diary, add photos, and log and
+  move issues through `/app/api/portal/sites…` and the team's services, stamped with their name. A
+  project someone else runs isn't found; a write the company's modules lack is `page_unavailable`.
+- The dashboard reuses the team's diary form (given the site, it posts to the portal), and the shared
+  photo helpers read and upload through the portal on an employee's sign-in.
+
 ## Gotchas
 
 - **Writes stamp time to the millisecond** (`Stamp`). MongoDB stores dates in milliseconds, and
@@ -154,14 +238,19 @@ handover, an extra still to sign.
   diary entry moving a phase and someone editing the project at once don't lose either change.
 - `InvoicedWork`: `crm/` can't import `building/` (the domains would form a cycle, see
   [`docs/plan-gradle-modules.md`](../docs/plan-gradle-modules.md)), so `InvoiceService` takes the work
-  an invoice bills as a list of release hooks, and the dashboard's `TenantCrm` passes the measurements'.
-  Only the dashboard's Invoices routes cancel or delete invoices today; a new caller that does must
-  pass the same hook.
+  an invoice bills as a list of release hooks, and the dashboard's `TenantCrm` passes two: the
+  measurements' and the retention releases'. Only the dashboard's Invoices routes cancel or delete
+  invoices today; a new caller that does must pass the same hooks.
+- **The PDF fonts are git-ignored** (`src/main/resources/pdf/*`, [gotchas.md](gotchas.md)). Without
+  them both generators fall back to Helvetica, which covers Portuguese and Spanish text, `€`, `º` and
+  `°`; a PDF test can't tell the two apart.
+- **Building depends on the time clock, never the reverse:** costs read `timesheets` repositories, so
+  nothing in `timesheets/` may import `building/` (hence the sites on the project).
+- `dashboardApiTest` hands its `FakeModel` to tests (`model.answer`, `model.last()`), for a feature
+  that calls the AI from a route.
 
 ## Not done yet
 
-From the plan's phase 2: a foreman's "My sites" in the employee portal, job costing (payments and
-hours against the project), the client approving a change order from the link, an AI weekly update
-from the diary, releasing the retention at handover, PDFs of a measurement and of the diary, domain
-events for the agents, and the mobile app. Phase 3: drawings with pins, checklists, offline capture,
-BC3 import.
+The mobile app's Building screens; costs by cost code and per-employee labour rates; the measurement
+PDF's look under the company's document template. Phase 3: drawings with pins, checklists, offline
+capture, BC3 import.

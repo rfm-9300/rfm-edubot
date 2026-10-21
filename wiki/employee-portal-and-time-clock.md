@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-21
 ---
 
 # Employee portal and time clock
@@ -63,8 +63,9 @@ Trabalho art. 202.º, Lei 58/2019 art. 28.º, CNPD on geolocation; Connecteam, J
 - **Opt-in module `timesheets`,** like `agents`: a null module list doesn't include it, and turning it
   on also turns on `employees` (`DashboardModules`). A company gets it from the backoffice.
 - **An employee's own sign-in now has pages.** `EmployeePortal.pages` lists `my-hours` (with
-  `timesheets`) before `my-services` (with `services`), both need `employees`, and the session lands
-  on the first. Employee routes are `/app/api/portal/time…` (status, punches, forgotten clock-out,
+  `timesheets`) before `my-services` (with `services`) and `my-sites` (with the site diary or issues,
+  added 2026-10-21: [building-projects.md](building-projects.md) → My sites), all need `employees`,
+  and the session lands on the first. Employee routes are `/app/api/portal/time…` (status, punches, forgotten clock-out,
   notes, phone enrolment); team routes are `/app/api/timesheets…` (working now, shifts with totals and
   overtime, corrections, manual shifts, approvals, CSV, rules, work sites, phones).
 - **Company rules,** with the defaults a new company gets: location `OPTIONAL` (off, optional,
