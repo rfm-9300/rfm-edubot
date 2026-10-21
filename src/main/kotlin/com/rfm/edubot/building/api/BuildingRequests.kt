@@ -40,6 +40,9 @@ internal data class ProjectRequest(
     val retentionPct: Double? = null,
     val manualProgressPct: Int? = null,
     val contract: List<ContractLineRequest>? = null,
+    val costBudgetEur: Double? = null,
+    val laborRateEur: Double? = null,
+    val siteIds: List<String>? = null,
 ) {
     fun toDraft() = ProjectDraft(
         name = name,
@@ -55,6 +58,9 @@ internal data class ProjectRequest(
         retentionPct = retentionPct,
         manualProgressPct = manualProgressPct,
         contract = contract?.map { ContractLineDraft(it.id, it.description, it.quantity, it.unit, it.unitPriceEur) },
+        costBudgetEur = costBudgetEur,
+        laborRateEur = laborRateEur,
+        siteIds = siteIds,
     )
 }
 

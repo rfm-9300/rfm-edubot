@@ -446,6 +446,10 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     suspend fun findByNumber(number: String): Invoice? =
         collection.find(scoped(Filters.regex("number", "^${Regex.escape(number.trim())}$", "i"))).firstOrNull()?.toInvoice()
 
+    /** Every invoice of construction project [projectId] (its measurements' and its retention's), cancelled ones included. */
+    suspend fun forProject(projectId: ObjectId): List<Invoice> =
+        collection.find(scoped(Filters.eq("projectId", projectId))).sort(Document("createdAt", 1)).toList().map { it.toInvoice() }
+
     suspend fun list(clientId: ObjectId? = null, status: InvoiceStatus? = null): List<Invoice> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }

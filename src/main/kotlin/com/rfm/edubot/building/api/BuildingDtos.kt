@@ -80,6 +80,10 @@ internal data class ProjectDto(
     val retentionReleasedEur: Double,
     /** Only on one project's record. */
     val retentionReleases: List<RetentionReleaseDto>,
+    val costBudgetEur: Double?,
+    val laborRateEur: Double?,
+    /** The time clock's work sites of the project. */
+    val siteIds: List<String>,
     val phaseCount: Int,
     val latePhases: Int,
     val openIssues: Int,
@@ -96,6 +100,45 @@ internal data class ProjectDto(
     val createdAt: String,
     val updatedAt: String,
 )
+
+/** A project's costs tab: [bills] without payments and [labour] without the time clock are null. */
+@Serializable
+internal data class ProjectCostsDto(
+    val currentContractEur: Double,
+    val measuredEur: Double,
+    val invoicedEur: Double,
+    val receivedEur: Double,
+    val bills: CostBillsDto?,
+    val labour: CostLabourDto?,
+    val costBudgetEur: Double?,
+    val totalCostEur: Double,
+    /** The costs as a share of the budget, past 100 when over it. */
+    val budgetUsedPct: Double?,
+    val expectedMarginEur: Double,
+    val expectedMarginPct: Double?,
+    val marginToDateEur: Double,
+    val marginToDatePct: Double?,
+)
+
+@Serializable
+internal data class CostBillsDto(val totalEur: Double, val paidEur: Double, val toPayEur: Double, val byPayee: List<CostPayeeDto>, val payments: List<CostPaymentDto>)
+
+/** [kind] is `supplier` or `employee`. */
+@Serializable
+internal data class CostPayeeDto(val kind: String, val id: String?, val name: String, val totalEur: Double, val paidEur: Double, val count: Int)
+
+@Serializable
+internal data class CostPaymentDto(val id: String, val number: String, val payeeName: String, val dueDate: String, val status: String, val totalEur: Double)
+
+/** [costEur] is null without a labour rate. */
+@Serializable
+internal data class CostLabourDto(val hours: Double, val rateEur: Double?, val costEur: Double?, val byEmployee: List<CostHoursDto>, val sites: List<CostSiteDto>)
+
+@Serializable
+internal data class CostHoursDto(val employeeId: String, val name: String, val hours: Double, val costEur: Double?)
+
+@Serializable
+internal data class CostSiteDto(val id: String, val name: String)
 
 @Serializable
 internal data class RetentionReleaseDto(val invoiceId: String?, val invoiceNumber: String?, val amountEur: Double, val releasedBy: String, val releasedAt: String)

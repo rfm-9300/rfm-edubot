@@ -7,6 +7,7 @@ import com.rfm.edubot.building.ChangeOrderService
 import com.rfm.edubot.building.MeasurementService
 import com.rfm.edubot.building.Outcome
 import com.rfm.edubot.building.PhotoStore
+import com.rfm.edubot.building.ProjectCostsService
 import com.rfm.edubot.building.ProjectService
 import com.rfm.edubot.building.SiteDiaryService
 import com.rfm.edubot.building.SiteIssueService
@@ -48,6 +49,7 @@ internal class TenantBuilding(mongo: MongoModule, val ctx: DashboardContext, sto
     val changes: ChangeOrderService get() = ChangeOrderService(records)
     val measurements: MeasurementService get() = MeasurementService(records)
     val documents: BuildingDocuments get() = BuildingDocuments(records, store)
+    val costs: ProjectCostsService get() = ProjectCostsService(records)
     val template: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)
 
     private companion object {

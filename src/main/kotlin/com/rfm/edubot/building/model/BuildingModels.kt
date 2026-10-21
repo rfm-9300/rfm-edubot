@@ -77,6 +77,12 @@ data class Project(
     /** Held back from each measurement until the end of the job (5 = 5%). */
     val retentionPct: Double = 0.0,
     val retentionReleases: List<RetentionRelease> = emptyList(),
+    /** What the job is expected to cost the company, which its costs are measured against. */
+    val costBudgetCents: Long? = null,
+    /** What an hour of the team's work costs on this job; hours clocked at [siteIds] cost this much each. */
+    val laborRateCents: Long? = null,
+    /** The time clock's work sites of this job: shifts clocked at them are its hours. A site is one project's. */
+    val siteIds: List<ObjectId> = emptyList(),
     val manualProgressPct: Int = 0,
     val phases: List<ProjectPhase> = emptyList(),
     val share: ProjectShare? = null,

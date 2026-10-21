@@ -34,6 +34,13 @@ function paymentClientSelect(clients, selectedId = '') {
     ${list.map(c => `<option value="${escapeHTML(c.id)}"${c.id === selectedId ? ' selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
 }
 
+// The construction project an expense was for, from the projects still running first.
+function paymentProjectSelect(selectedId = '') {
+  const t = CRM.payments;
+  return `<div class="form__row"><label class="lbl" for="p-project">${escapeHTML(t.project)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="p-project"><option value="">${escapeHTML(t.projectNone)}</option>${projectChoices(selectedId)}</select></div>`;
+}
+
 function payeeName(payment) {
   return payment.employeeName || payment.supplierName || '';
 }

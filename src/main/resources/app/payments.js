@@ -1,18 +1,21 @@
 /* Payments (/app → Payments): what the company pays its suppliers and employees. The list, the payment
-   form, and a payment's detail: marking it paid, the client an expense was for, cancelling and deleting. */
+   form, and a payment's detail: marking it paid, the client and project an expense was for, cancelling and
+   deleting. */
 
-// `opts.items`, `opts.dueDate` and `opts.notes` start it from a bill someone received; `opts.onSaved(payment)`
-// runs after it is created instead of showing the payments list.
+// `opts.items`, `opts.dueDate` and `opts.notes` start it from a bill someone received, `opts.projectId` for a
+// project; `opts.onSaved(payment)` runs after it is created instead of showing the payments list.
 async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient = null, opts = {}) {
   const t = CRM.payments;
   const employeesOn = hasModule('employees');
   const clientsOn = hasModule('clients');
+  const projectsOn = hasModule('projects');
   let suppliers, employees, catalog, clients;
   try {
     suppliers = await api('/app/api/crm/suppliers');
     employees = employeesOn ? await api('/app/api/crm/employees').catch(() => state.employees || []) : [];
     catalog = hasModule('catalog') ? await api('/app/api/crm/standard-items').catch(() => state.catalog || []) : (state.catalog || []);
     clients = clientsOn ? withClient(await api('/app/api/crm/clients').catch(() => state.clients || []), presetClient) : [];
+    if (projectsOn) await ensureBuildingProjects().catch(() => {});
   } catch { return toast(t.saveFailed); }
   state.suppliers = suppliers;
   if (employeesOn) state.employees = employees;
@@ -41,6 +44,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
       ${clientsOn ? paymentClientSelect(clients, presetClient?.id || '') : ''}
+      ${projectsOn ? paymentProjectSelect(opts.projectId || '') : ''}
       <div class="form__row form__row--full" id="payee-services" hidden></div>
     </div>
     <div id="payment-lines">${li.html}</div>
@@ -138,9 +142,10 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     const clientId = $('#p-client', form)?.value || null;
+    const projectId = $('#p-project', form)?.value || null;
     const body = payee === 'employee'
-      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId }
-      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId };
+      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId, projectId }
+      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId, projectId };
     try {
       const saved = await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
       closeDrawer();
@@ -289,6 +294,8 @@ async function openPaymentDetail(id) {
   const payeeLink = !!kind && hasModule(PAYEE_KINDS[kind].module) && !linksBackTo(payeeKey);
   const clientsOn = hasModule('clients');
   const clientLink = clientsOn && !!pay.clientId && !linksBackTo(`client:${pay.clientId}`);
+  const projectsOn = hasModule('projects');
+  const projectLink = projectsOn && !!pay.projectId && !linksBackTo(`project:${pay.projectId}`);
   const here = { key: `payment:${pay.id}`, label: pay.number, open: () => openPaymentDetail(pay.id) };
   const form = document.createElement('div');
   form.className = 'form';
@@ -299,6 +306,7 @@ async function openPaymentDetail(id) {
       { label: t.thDueDate, value: canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate) },
       pay.status === 'PAID' && pay.paidAt ? { label: STR.paidOnLabel, value: fmtDay(pay.paidAt) } : null,
       clientsOn ? { label: t.client, value: pay.clientName || t.noClient } : null,
+      projectsOn ? { label: t.project, value: pay.projectLabel || t.noProject } : null,
     ])}
     ${itemsTable(pay.items)}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
@@ -306,12 +314,19 @@ async function openPaymentDetail(id) {
       ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
       ${clientLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-client>${escapeHTML(STR.detailOpenRecordAria({ name: pay.clientName || '' }))}</button>` : ''}
       ${clientsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-client>${escapeHTML(pay.clientId ? t.changeClient : t.linkClient)}</button>` : ''}
+      ${projectLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(BLD.openProject)}</button>` : ''}
+      ${projectsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-project>${escapeHTML(pay.projectId ? t.changeProject : t.linkProject)}</button>` : ''}
       ${canMarkPaid ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-cancel>${escapeHTML(t.cancel)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-pay-delete>${escapeHTML(t.delete)}</button>
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer(kind, payeeId(pay))));
   $('[data-open-client]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(pay.clientId)));
   $('[data-pay-client]', form)?.addEventListener('click', () => openFrom(here, () => openPaymentClientForm(pay)));
+  $('[data-open-project]', form)?.addEventListener('click', async () => {
+    await ensureBuildingProjects().catch(() => {});
+    openFrom(here, () => openProjectDrawer(pay.projectId, 'costs'));
+  });
+  $('[data-pay-project]', form)?.addEventListener('click', () => openFrom(here, () => openPaymentProjectForm(pay)));
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
   $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
@@ -346,4 +361,32 @@ async function openPaymentClientForm(pay) {
     } catch { btn.disabled = false; toast(t.clientSaveFailed); }
   });
   openDrawer(t.clientFormTitle, form, true);
+}
+
+// Links a payment to the construction project it was for, or unlinks it.
+async function openPaymentProjectForm(pay) {
+  const t = CRM.payments;
+  try { await ensureBuildingProjects(); } catch { return toast(t.projectSaveFailed); }
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <p class="hint">${escapeHTML(t.projectHint)}</p>
+    ${paymentProjectSelect(pay.projectId || '')}
+    <button class="btn btn--primary" type="submit">${escapeHTML(t.clientSave)}</button>`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api(`/app/api/crm/payments/${encodeURIComponent(pay.id)}/project`, {
+        method: 'PATCH',
+        body: JSON.stringify({ projectId: $('#p-project', form).value || null }),
+      });
+      closeDrawer();
+      if (state.fetched.payments) state.payments = await api('/app/api/crm/payments').catch(() => state.payments);
+      if (state.active === 'payments') render();
+      toast(t.projectSaved);
+    } catch { btn.disabled = false; toast(t.projectSaveFailed); }
+  });
+  openDrawer(t.projectFormTitle, form, true);
 }

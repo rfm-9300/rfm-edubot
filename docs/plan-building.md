@@ -352,8 +352,9 @@ three catalogs, HTTP tests per area. Built in this order, one commit each.
 
 - A payment can name the project it was for (`crm.payments.projectId`), like the client it was for; the
   Payments form offers the projects with the projects module.
-- A work site can belong to a project (`timesheets.sites.projectId`): shifts clocked at it are the
-  project's hours.
+- A project names the time clock's work sites of the job (`building.projects.siteIds`, one project per
+  site): shifts clocked at them are its hours. The link sits on the project, not on the site, so Building
+  reads the time clock and the time clock knows nothing of Building.
 - A project can have a cost budget and a labour cost per hour (both optional).
 - A **Costs** tab: revenue (current contract, measured, invoiced), costs (bills by supplier, paid and to
   pay; hours by employee at the project's rate), the budget against the costs, and the margin, expected

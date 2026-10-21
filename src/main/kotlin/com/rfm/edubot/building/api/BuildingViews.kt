@@ -3,6 +3,7 @@ package com.rfm.edubot.building.api
 import com.rfm.edubot.building.BuildingRecords
 import com.rfm.edubot.building.MeasurementMath
 import com.rfm.edubot.building.PhaseState
+import com.rfm.edubot.building.ProjectCosts
 import com.rfm.edubot.building.ProjectProgress
 import com.rfm.edubot.building.approvedEffect
 import com.rfm.edubot.building.measuredLines
@@ -18,6 +19,7 @@ import com.rfm.edubot.building.model.SitePhoto
 import com.rfm.edubot.crm.api.LineItemDto
 import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.datetime.LocalDate
+import org.bson.types.ObjectId
 import kotlin.math.roundToInt
 
 // These records as the dashboard shows them. A list reads the names and figures it shows with one query per kind.
@@ -87,6 +89,9 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
             retentionReleases = if (!detail) emptyList() else project.retentionReleases.map {
                 RetentionReleaseDto(it.invoiceId?.toHexString(), it.invoiceId?.let { id -> releaseInvoices[id]?.number }, eur(it.amountCents), it.releasedBy, it.releasedAt.toString())
             },
+            costBudgetEur = project.costBudgetCents?.let(::eur),
+            laborRateEur = project.laborRateCents?.let(::eur),
+            siteIds = project.siteIds.map { it.toHexString() },
             phaseCount = project.phases.size,
             latePhases = phaseStates.count { it.second == PhaseState.LATE },
             openIssues = issuesOpen.size,
@@ -349,6 +354,61 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
     )
 }
 
+/** A project's costs as its Costs tab shows them, with the payees' and employees' names. */
+internal suspend fun BuildingRecords.costsDto(costs: ProjectCosts): ProjectCostsDto {
+    val bills = costs.bills
+    val labour = costs.labour
+    val supplierNames = suppliers.findByIds(bills?.payments.orEmpty().mapNotNull { it.supplierId }).mapValues { it.value.name }
+    val employeeNames = employees.findByIds(bills?.payments.orEmpty().mapNotNull { it.employeeId } + labour?.byEmployee.orEmpty().map { it.employeeId })
+        .mapValues { it.value.name }
+    fun payeeName(supplierId: ObjectId?, employeeId: ObjectId?) = supplierId?.let { supplierNames[it] } ?: employeeId?.let { employeeNames[it] }.orEmpty()
+    fun share(part: Long, whole: Long?) = whole?.takeIf { it > 0 }?.let { (part * 1000 / it) / 10.0 }
+    return ProjectCostsDto(
+        currentContractEur = eur(costs.currentContractCents),
+        measuredEur = eur(costs.measuredCents),
+        invoicedEur = eur(costs.invoicedCents),
+        receivedEur = eur(costs.receivedCents),
+        bills = bills?.let { b ->
+            CostBillsDto(
+                totalEur = eur(b.totalCents),
+                paidEur = eur(b.paidCents),
+                toPayEur = eur(b.totalCents - b.paidCents),
+                byPayee = b.byPayee.map {
+                    CostPayeeDto(
+                        kind = if (it.supplierId != null) "supplier" else "employee",
+                        id = (it.supplierId ?: it.employeeId)?.toHexString(),
+                        name = payeeName(it.supplierId, it.employeeId),
+                        totalEur = eur(it.totalCents),
+                        paidEur = eur(it.paidCents),
+                        count = it.count,
+                    )
+                },
+                payments = b.payments.sortedByDescending { it.dueDate }.take(COST_PAYMENTS).map {
+                    CostPaymentDto(it.id.toHexString(), it.number, payeeName(it.supplierId, it.employeeId), it.dueDate.toString(), it.status.name, eur(it.totalCents))
+                },
+            )
+        },
+        labour = labour?.let { l ->
+            CostLabourDto(
+                hours = hours(l.minutes),
+                rateEur = l.rateCents?.let(::eur),
+                costEur = l.costCents?.let(::eur),
+                byEmployee = l.byEmployee.map { CostHoursDto(it.employeeId.toHexString(), employeeNames[it.employeeId].orEmpty(), hours(it.minutes), it.costCents?.let(::eur)) },
+                sites = l.sites.map { CostSiteDto(it.id.toHexString(), it.name) },
+            )
+        },
+        costBudgetEur = costs.costBudgetCents?.let(::eur),
+        totalCostEur = eur(costs.totalCostCents),
+        budgetUsedPct = share(costs.totalCostCents, costs.costBudgetCents),
+        expectedMarginEur = eur(costs.expectedMarginCents),
+        expectedMarginPct = share(costs.expectedMarginCents, costs.currentContractCents),
+        marginToDateEur = eur(costs.marginToDateCents),
+        marginToDatePct = share(costs.marginToDateCents, costs.measuredCents),
+    )
+}
+
+private fun hours(minutes: Int): Double = (minutes * 100 / 60) / 100.0
+
 /** The change as its client's approval page shows it. */
 internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean) = SharedChangeDto(
     company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
@@ -374,3 +434,4 @@ internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Bo
 
 private const val SHARED_PHOTOS = 60
 private const val SHARED_UPDATES = 30
+private const val COST_PAYMENTS = 200

@@ -26,7 +26,7 @@ import kotlinx.datetime.LocalDate
 import kotlinx.serialization.Serializable
 import org.bson.types.ObjectId
 
-/** `/crm/payments`: bills the company pays to suppliers and employees, optionally for one of its clients. */
+/** `/crm/payments`: bills the company pays to suppliers and employees, optionally for one of its clients and projects. */
 internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
@@ -36,7 +36,8 @@ internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
                 val employeeId = call.request.queryParameters["employeeId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
                 val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { PaymentStatus.valueOf(it.uppercase()) }.getOrNull() }
                 val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
-                call.respond(crm.payments.list(supplierId, employeeId, status, clientId).dtos(crm.suppliers, crm.employees, crm.clients))
+                val payments = crm.payments.list(supplierId, employeeId, status, clientId)
+                call.respond(payments.dtos(crm.suppliers, crm.employees, crm.clients, crm.projectLabels(payments.mapNotNull { it.projectId })))
             }
             post("/payments") {
                 val ctx = call.moduleContext()
@@ -51,16 +52,17 @@ internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
                 val dueDate = runCatching { LocalDate.parse(request.dueDate) }.getOrNull()
                     ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "due date required"))
                 val clientId = request.clientId?.takeIf { it.isNotBlank() }?.let { call.paymentClient(ctx, crm, it) ?: return@post }
+                val projectId = request.projectId?.takeIf { it.isNotBlank() }?.let { call.paymentProject(ctx, crm, it) ?: return@post }
                 val items = request.items.map { it.toLineItem() }
                 val payment = if (employeeRaw != null) {
                     if (!ctx.requireModule(DashboardModules.EMPLOYEES)) return@post call.respond(HttpStatusCode.Forbidden)
                     val employeeId = runCatching { ObjectId(employeeRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee required"))
                     if (crm.employees.findById(employeeId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee not found"))
-                    crm.payments.create(supplierId = null, employeeId = employeeId, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId)
+                    crm.payments.create(supplierId = null, employeeId = employeeId, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId, projectId = projectId)
                 } else {
                     val supplierId = runCatching { ObjectId(supplierRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier required"))
                     if (crm.suppliers.findById(supplierId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier not found"))
-                    crm.payments.create(supplierId = supplierId, employeeId = null, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId)
+                    crm.payments.create(supplierId = supplierId, employeeId = null, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId, projectId = projectId)
                 }
                 call.respond(HttpStatusCode.Created, crm.paymentDto(payment))
             }
@@ -83,6 +85,15 @@ internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
                 val request = call.receive<PaymentClientRequest>()
                 val clientId = request.clientId?.takeIf { it.isNotBlank() }?.let { call.paymentClient(ctx, crm, it) ?: return@patch }
                 val payment = crm.payments.setClient(id, clientId) ?: return@patch call.respond(HttpStatusCode.NotFound)
+                call.respond(crm.paymentDto(payment))
+            }
+            patch("/payments/{id}/project") {
+                val ctx = call.moduleContext()
+                val crm = deps.crm(call)
+                val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
+                val request = call.receive<PaymentProjectRequest>()
+                val projectId = request.projectId?.takeIf { it.isNotBlank() }?.let { call.paymentProject(ctx, crm, it) ?: return@patch }
+                val payment = crm.payments.setProject(id, projectId) ?: return@patch call.respond(HttpStatusCode.NotFound)
                 call.respond(crm.paymentDto(payment))
             }
             post("/payments/{id}/cancel") {
@@ -118,12 +129,34 @@ private suspend fun ApplicationCall.paymentClient(ctx: DashboardContext, crm: Te
     return id
 }
 
+/**
+ * The tenant's construction project [raw] names, for a payment that was for it. Answers 403 without the projects
+ * module and 400 for an unknown project, returning null after responding.
+ */
+private suspend fun ApplicationCall.paymentProject(ctx: DashboardContext, crm: TenantCrm, raw: String): ObjectId? {
+    if (!ctx.requireModule(DashboardModules.PROJECTS)) {
+        respond(HttpStatusCode.Forbidden)
+        return null
+    }
+    val id = runCatching { ObjectId(raw) }.getOrNull()?.takeIf { crm.projects.findById(it) != null }
+    if (id == null) respond(HttpStatusCode.BadRequest, mapOf("error" to "project not found"))
+    return id
+}
+
+private suspend fun TenantCrm.projectLabels(ids: List<ObjectId>): Map<ObjectId, String> =
+    projects.byIds(ids).associate { it.id to "${it.number} · ${it.name}" }
+
 private suspend fun TenantCrm.paymentDto(payment: Payment) = payment.dto(
     supplier = payment.supplierId?.let { suppliers.findById(it) },
     employee = payment.employeeId?.let { employees.findById(it) },
     client = payment.clientId?.let { clients.findById(it) },
+    projectLabel = payment.projectId?.let { projects.findById(it) }?.let { "${it.number} · ${it.name}" },
 )
 
 /** A blank or missing `clientId` unlinks the payment from its client. */
 @Serializable
 private data class PaymentClientRequest(val clientId: String? = null)
+
+/** A blank or missing `projectId` unlinks the payment from its project. */
+@Serializable
+private data class PaymentProjectRequest(val projectId: String? = null)

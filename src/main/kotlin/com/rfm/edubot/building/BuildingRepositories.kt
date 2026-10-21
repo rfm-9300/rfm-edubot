@@ -72,6 +72,10 @@ class ProjectRepository(mongo: MongoModule, private val tenantId: ObjectId) {
 
     suspend fun forQuote(quoteId: ObjectId): List<Project> = collection.find(scoped(Filters.eq("quoteId", quoteId))).toList().map { it.toProject() }
 
+    /** The projects that have any of the time clock's [siteIds]. */
+    suspend fun forSites(siteIds: Collection<ObjectId>): List<Project> =
+        if (siteIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("siteIds", siteIds.distinct()))).toList().map { it.toProject() }
+
     suspend fun count(): Long = collection.countDocuments(Filters.eq("tenantId", tenantId))
 
     suspend fun insert(project: Project) {
@@ -482,6 +486,9 @@ private fun Project.toDocument(): Document = Document("_id", id)
                 .append("releasedBy", it.releasedBy).append("releasedAt", it.releasedAt.toDate())
         },
     )
+    .append("costBudgetCents", costBudgetCents)
+    .append("laborRateCents", laborRateCents)
+    .append("siteIds", siteIds)
     .append("manualProgressPct", manualProgressPct)
     .append(
         "phases",
@@ -535,6 +542,9 @@ private fun Document.toProject(): Project {
                 releasedAt = it.getInstant("releasedAt"),
             )
         },
+        costBudgetCents = (get("costBudgetCents") as? Number)?.toLong(),
+        laborRateCents = (get("laborRateCents") as? Number)?.toLong(),
+        siteIds = getList("siteIds", ObjectId::class.java).orEmpty(),
         manualProgressPct = int("manualProgressPct") ?: 0,
         phases = docs("phases").map {
             ProjectPhase(

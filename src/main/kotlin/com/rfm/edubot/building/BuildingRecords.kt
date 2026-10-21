@@ -5,19 +5,25 @@ import com.rfm.edubot.crm.ClientServiceRepository
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.InvoiceService
+import com.rfm.edubot.crm.PaymentRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.QuoteService
 import com.rfm.edubot.crm.SupplierRepository
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.timesheets.ShiftRepository
+import com.rfm.edubot.timesheets.WorkSiteRepository
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.bson.types.ObjectId
 
-/** One company's Building records and the CRM records they point at, which its services write and its views read. */
+/**
+ * One company's Building records and the CRM and time clock records they point at, which its services write and
+ * its views read.
+ */
 class BuildingRecords(mongo: MongoModule, val tenantId: ObjectId) {
     val projects by lazy { ProjectRepository(mongo, tenantId) }
     val logs by lazy { SiteLogRepository(mongo, tenantId) }
@@ -31,6 +37,9 @@ class BuildingRecords(mongo: MongoModule, val tenantId: ObjectId) {
     val clientServices by lazy { ClientServiceRepository(mongo, tenantId) }
     val employees by lazy { EmployeeRepository(mongo, tenantId) }
     val suppliers by lazy { SupplierRepository(mongo, tenantId) }
+    val payments by lazy { PaymentRepository(mongo, tenantId) }
+    val sites by lazy { WorkSiteRepository(mongo, tenantId) }
+    val shifts by lazy { ShiftRepository(mongo, tenantId) }
     val events by lazy { BuildingEvents(DomainEventLog(mongo), tenantId) }
     val notifications by lazy { NotificationRepository(mongo) }
 

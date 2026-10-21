@@ -6,6 +6,7 @@ import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.model.QuoteStatus
 import org.bson.types.ObjectId
+import kotlin.math.roundToLong
 
 /**
  * Writes to a company's projects: the record, its phases, the link its client follows it from, and removing it
@@ -88,6 +89,7 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         records.changes.deleteForProject(project.id)
         records.photos.deleteForProject(project.id)
         store.deleteProject(companySlug, project.id)
+        records.payments.clearProject(project.id)
         records.projects.delete(project.id)
         return Outcome.Done(Unit)
     }
@@ -119,6 +121,9 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         if (!retention.isFinite() || retention < 0 || retention > BuildingLimits.RETENTION_PCT) return bad("invalid_retention")
         val manual = draft.manualProgressPct ?: base.manualProgressPct
         if (manual !in 0..100) return bad("invalid_progress")
+        val budget = optionalCents(draft.costBudgetEur, base.costBudgetCents, BuildingLimits.PRICE_EUR, "invalid_budget").orElse { return bad(it.error) }
+        val rate = optionalCents(draft.laborRateEur, base.laborRateCents, BuildingLimits.LABOR_RATE_EUR, "invalid_rate").orElse { return bad(it.error) }
+        val siteIds = draft.siteIds?.let { raw -> sitesFrom(raw, base.id).orElse { return bad(it.error) } } ?: base.siteIds
         val contract = draft.contract?.let { lines -> contractFrom(lines, base.contract).orElse { return bad(it.error) } } ?: base.contract
         if (locked && contract.map { it.copy(description = "") } != base.contract.map { it.copy(description = "") }) return bad("contract_locked")
         if (status != base.status) {
@@ -141,9 +146,31 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
                 retentionPct = retention,
                 manualProgressPct = manual,
                 contract = contract,
+                costBudgetCents = budget,
+                laborRateCents = rate,
+                siteIds = siteIds,
             ),
         )
     }
+
+    /** The time clock's sites [raw] names, each a site of the company that no other project has. */
+    private suspend fun sitesFrom(raw: List<String>, projectId: ObjectId): Parsed<List<ObjectId>> {
+        val ids = raw.map { it.trim() }.filter { it.isNotEmpty() }.distinct().map { objectIdOrNull(it) ?: return Parsed.Bad("site_not_found") }
+        if (ids.size > BuildingLimits.SITES) return Parsed.Bad("too_many_sites")
+        if (ids.isEmpty()) return Parsed.Good(ids)
+        val known = records.sites.list().map { it.id }.toSet()
+        if (ids.any { it !in known }) return Parsed.Bad("site_not_found")
+        if (records.projects.forSites(ids).any { it.id != projectId }) return Parsed.Bad("site_in_use")
+        return Parsed.Good(ids)
+    }
+}
+
+/** [value] euros as cents: null keeps [current], zero clears it, and a negative, non-finite or above-[max] value is [error]. */
+private fun optionalCents(value: Double?, current: Long?, max: Double, error: String): Parsed<Long?> = when {
+    value == null -> Parsed.Good(current)
+    !value.isFinite() || value < 0 || value > max -> Parsed.Bad(error)
+    value == 0.0 -> Parsed.Good(null)
+    else -> Parsed.Good((value * 100).roundToLong())
 }
 
 /** A project write as a service answers it: a conflict when someone else wrote first or the contract is locked. */

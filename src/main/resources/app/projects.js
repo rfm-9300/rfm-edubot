@@ -101,18 +101,22 @@ function renderProjects(root) {
 
 let projectRecord = null;
 
+// A project's costs are its bills (payments) and its hours (the time clock).
+const projectCostsOn = () => hasModule('payments') || hasModule('timesheets');
+
 async function loadProjectRecord(id) {
   const base = '/app/api/building';
   const q = `projectId=${encodeURIComponent(id)}`;
-  const [project, diary, photos, issues, changes, measurements] = await Promise.all([
+  const [project, diary, photos, issues, changes, measurements, costs] = await Promise.all([
     api(`${base}/projects/${encodeURIComponent(id)}`),
     hasModule('site-diary') ? api(`${base}/diary?${q}`).catch(() => []) : [],
     api(`${base}/projects/${encodeURIComponent(id)}/photos`).catch(() => []),
     hasModule('site-issues') ? api(`${base}/issues?${q}`).catch(() => []) : [],
     hasModule('change-orders') ? api(`${base}/changes?${q}`).catch(() => []) : [],
     hasModule('measurements') ? api(`${base}/measurements?${q}`).catch(() => []) : [],
+    projectCostsOn() ? api(`${base}/projects/${encodeURIComponent(id)}/costs`).catch(() => null) : null,
   ]);
-  return { project, diary, photos, issues, changes, measurements };
+  return { project, diary, photos, issues, changes, measurements, costs };
 }
 
 async function openProjectDrawer(id, tab) {
@@ -203,6 +207,7 @@ function projectTabs(r) {
   if (hasModule('site-issues')) tabs.push(['issues', labels['site-issues'], r.issues.filter(i => i.status === 'OPEN' || i.status === 'IN_PROGRESS').length]);
   if (hasModule('change-orders')) tabs.push(['changes', labels['change-orders'], r.changes.length]);
   if (hasModule('measurements')) tabs.push(['measurements', labels.measurements, r.measurements.length]);
+  if (projectCostsOn()) tabs.push(['costs', bt('tab.costs'), 0]);
   tabs.push(['contract', bt('tab.contract'), r.project.contract.length]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'schedule';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
@@ -238,9 +243,67 @@ function projectSchedulePane(r) {
   </div>`;
 }
 
+const marginText = (eur, pct) => (pct == null ? fmtEUR(eur) : `${fmtEUR(eur)} · ${fmtPct(pct)}%`);
+
+// What the project earns, costs and leaves: the bills linked to it and the hours clocked at its sites.
+function projectCostsPane(r) {
+  const c = r.costs;
+  if (!c) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.loadFailed)}</p></div></div>`;
+  const used = c.budgetUsedPct;
+  const budget = c.costBudgetEur != null
+    ? `<div class="progress-cell">${progressBarHtml(Math.min(100, used ?? 0), null, used > 100 ? 'bad' : used > 90 ? 'warn' : 'accent')}<span class="progress-cell__label">${escapeHTML(bt('costs.ofBudget', { pct: fmtPct(used ?? 0), budget: fmtEUR(c.costBudgetEur) }))}</span></div>`
+    : `<p class="hint">${escapeHTML(bt('costs.noBudget'))}</p>`;
+  const summary = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.marginTitle'))}</h2>
+      <div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-project-act="edit">${escapeHTML(bt('costs.setUp'))}</button></div></header>
+    <div class="panel__body">
+      ${dashFacts([
+        [bt('costs.contract'), fmtEUR(c.currentContractEur)],
+        [bt('costs.total'), fmtEUR(c.totalCostEur)],
+        [bt('costs.expected'), marginText(c.expectedMarginEur, c.expectedMarginPct)],
+        [bt('costs.toDate'), marginText(c.marginToDateEur, c.marginToDatePct)],
+      ], true)}
+      ${budget}
+      ${dashFacts([[bt('costs.measured'), fmtEUR(c.measuredEur)], [bt('costs.invoiced'), fmtEUR(c.invoicedEur)], [bt('costs.received'), fmtEUR(c.receivedEur)]], true)}
+    </div></section>`;
+  return `<div class="record__stack">${summary}${projectBillsHtml(c.bills)}${projectHoursHtml(c.labour)}<p class="hint">${escapeHTML(bt('costs.hint'))}</p></div>`;
+}
+
+function projectBillsHtml(bills) {
+  if (!bills) return '';
+  const add = `<button class="btn btn--sm" type="button" data-project-act="bill"><span class="btn__plus">+</span> ${escapeHTML(bt('costs.billNew'))}</button>`;
+  if (!bills.payments.length) {
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.billsTitle'))}</h2></header>
+      <div class="empty"><p class="empty__title">${escapeHTML(bt('costs.billsEmpty'))}</p><p class="empty__desc">${escapeHTML(bt('costs.billsEmptyDesc'))}</p><div class="empty__actions">${add}</div></div></section>`;
+  }
+  const payees = bills.byPayee.map(x => `<tr><td class="name long">${escapeHTML(x.name || '—')}</td><td class="num">${x.count}</td>
+    <td class="num nowrap">${fmtEUR(x.paidEur)}</td><td class="num nowrap">${fmtEUR(x.totalEur - x.paidEur)}</td><td class="num nowrap">${fmtEUR(x.totalEur)}</td></tr>`).join('');
+  const rows = bills.payments.map(pay => `<tr class="conversation-row${pay.status === 'PAID' ? ' is-paid' : pay.status === 'OVERDUE' ? ' is-overdue' : ''}" data-record-open="payment:${escapeHTML(pay.id)}">
+    <td class="id">${escapeHTML(pay.number)}</td><td class="long">${escapeHTML(pay.payeeName || '—')}</td><td class="mono nowrap">${escapeHTML(fmtDay(pay.dueDate))}</td>
+    <td>${paymentPill(pay.status)}</td><td class="num nowrap">${fmtEUR(pay.totalEur)}</td></tr>`).join('');
+  return recordTable([[bt('costs.thPayee')], [bt('costs.thBills'), 'right'], [bt('costs.thPaid'), 'right'], [bt('costs.thToPay'), 'right'], [bt('costs.thTotal'), 'right']], payees, { title: bt('costs.billsTitle'), count: bills.byPayee.length })
+    + recordTable([[CRM.payments.thNumber], [CRM.payments.thPayee], [CRM.payments.thDueDate], [CRM.payments.thStatus], [CRM.payments.thTotal, 'right']], rows, { title: bt('costs.billsList'), count: bills.payments.length })
+    + `<div class="record__pane-foot">${add}</div>`;
+}
+
+function projectHoursHtml(labour) {
+  if (!labour) return '';
+  const head = `<header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.hoursTitle'))}${labour.hours ? ` <span class="tag">${escapeHTML(bt('costs.hoursN', { n: fmtQty(labour.hours) }))}</span>` : ''}</h2></header>`;
+  if (!labour.sites.length) {
+    return `<section class="panel">${head}<div class="empty"><p class="empty__title">${escapeHTML(bt('costs.noSites'))}</p><p class="empty__desc">${escapeHTML(bt('costs.noSitesDesc'))}</p>
+      <div class="empty__actions"><button class="btn btn--sm" type="button" data-project-act="edit">${escapeHTML(bt('costs.chooseSites'))}</button></div></div></section>`;
+  }
+  const facts = [bt('costs.sitesLine', { names: labour.sites.map(s => s.name).join(', ') }), labour.rateEur != null ? bt('costs.rateLine', { rate: fmtEUR(labour.rateEur) }) : bt('costs.noRate')].join(' · ');
+  const rows = labour.byEmployee.map(e => `<tr><td class="name long">${escapeHTML(e.name || '—')}</td><td class="num">${escapeHTML(bt('costs.hoursN', { n: fmtQty(e.hours) }))}</td>
+    <td class="num nowrap">${e.costEur != null ? fmtEUR(e.costEur) : '—'}</td></tr>`).join('');
+  return `<section class="panel">${head}<div class="panel__body"><p class="hint">${escapeHTML(facts)}</p></div>
+    ${rows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(bt('costs.thEmployee'))}</th><th class="right">${escapeHTML(bt('costs.thHours'))}</th><th class="right">${escapeHTML(bt('costs.thCost'))}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty"><p class="empty__title">${escapeHTML(bt('costs.hoursEmpty'))}</p></div>`}</section>`;
+}
+
 function projectPaneHtml(r) {
   const p = r.project;
   if (r.tab === 'schedule') return projectSchedulePane(r);
+  if (r.tab === 'costs') return projectCostsPane(r);
   if (r.tab === 'diary') {
     if (!r.diary.length) return recordEmpty(BLD.diaryEmpty, 'diary', BLD.diaryNew);
     const rows = r.diary.map(e => `<tr class="conversation-row" data-record-open="diary:${escapeHTML(e.id)}">
@@ -421,6 +484,7 @@ function openProjectItem(ref) {
   if (kind === 'change') return openFromProject(() => openChangeDetail(id));
   if (kind === 'measurement') return openFromProject(() => openMeasurementDetail(id));
   if (kind === 'invoice') return openFromProject(() => openInvoiceDetail(id));
+  if (kind === 'payment') return openFromProject(() => openPaymentDetail(id));
 }
 
 async function projectAct(kind) {
@@ -433,6 +497,10 @@ async function projectAct(kind) {
   if (kind === 'share') return openFromProject(() => openProjectShare(p));
   if (kind === 'retention') return openFromProject(() => openRetentionInvoiceForm(p));
   if (kind === 'diary-pdf') return openFromProject(() => openDiaryPdfForm(p));
+  if (kind === 'bill') {
+    const client = p.clientId && hasModule('clients') ? { id: p.clientId, name: p.clientName || '' } : null;
+    return openFromProject(() => openPaymentForm(null, null, client, { projectId: p.id }));
+  }
   if (kind === 'client') return openFromProject(() => openClientDrawer(p.clientId));
   if (kind === 'quote') return openFromProject(() => openQuoteDetail(p.quoteId));
   if (kind === 'diary') {
@@ -503,12 +571,28 @@ function contractRows(form) {
 // `opts.quote` starts a project from that quote: its client and its lines as the contract.
 async function openProjectForm(project = null, opts = {}) {
   const quote = opts.quote || null;
-  const [clients, employees, catalog] = await Promise.all([
+  const [clients, employees, catalog, sites] = await Promise.all([
     hasModule('clients') ? api('/app/api/crm/clients').catch(() => state.clients) : Promise.resolve([]),
     hasModule('employees') ? api('/app/api/crm/employees').catch(() => state.employees) : Promise.resolve([]),
     hasModule('catalog') ? api('/app/api/crm/standard-items').catch(() => []) : Promise.resolve([]),
+    hasModule('timesheets') ? api('/app/api/timesheets/sites').catch(() => []) : Promise.resolve([]),
+    ensureBuildingProjects().catch(() => []),
   ]);
   const p = project || {};
+  // A time clock site counts for one project: the ones another project has can't be ticked here.
+  const siteOwner = new Map(state.projects.filter(x => x.id !== p.id).flatMap(x => (x.siteIds || []).map(id => [id, x.number])));
+  const costFields = [
+    hasModule('payments') || hasModule('timesheets') ? `<div class="form__row"><label class="lbl" for="pj-budget">${escapeHTML(bt('costs.budget'))} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-budget" type="number" min="0" step="0.01" value="${p.costBudgetEur ?? ''}" /><span class="inp-unit__label">€</span></div><p class="hint">${escapeHTML(bt('costs.budgetHint'))}</p></div>` : '',
+    hasModule('timesheets') ? `<div class="form__row"><label class="lbl" for="pj-rate">${escapeHTML(bt('costs.rateLabel'))} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-rate" type="number" min="0" max="10000" step="0.01" value="${p.laborRateEur ?? ''}" /><span class="inp-unit__label">€/h</span></div><p class="hint">${escapeHTML(bt('costs.rateHint'))}</p></div>` : '',
+    hasModule('timesheets') && sites.length ? `<div class="form__row form__row--full"><span class="lbl" id="pj-sites-label">${escapeHTML(bt('costs.sitesLabel'))}</span>
+      <div class="form__checks form__checks--wide" role="group" aria-labelledby="pj-sites-label">${sites.map(s => {
+        const owner = siteOwner.get(s.id);
+        return `<label class="form__check"><input type="checkbox" data-site="${escapeHTML(s.id)}"${(p.siteIds || []).includes(s.id) ? ' checked' : ''}${owner ? ' disabled' : ''} />
+          <span>${escapeHTML(s.name)}${owner ? ` <span class="muted">${escapeHTML(bt('costs.siteOf', { project: owner }))}</span>` : ''}</span></label>`;
+      }).join('')}</div><p class="hint">${escapeHTML(bt('costs.sitesHint'))}</p></div>` : '',
+  ].join('');
   const locked = !!p.contractLocked;
   const fromQuote = !!quote;
   const li = lineItemsField(catalog);
@@ -539,6 +623,7 @@ async function openProjectForm(project = null, opts = {}) {
       <div class="form__row" data-actual="end"><label class="lbl" for="pj-actual-end">${escapeHTML(BLD.formActualEnd)}</label><input class="inp inp--mono" id="pj-actual-end" type="date" max="${todayKey()}" value="${escapeHTML(p.actualEnd || '')}" /></div>
       ${hasModule('measurements') ? `<div class="form__row"><label class="lbl" for="pj-retention">${escapeHTML(BLD.formRetention)}</label>
         <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-retention" type="number" min="0" max="20" step="0.5" value="${p.retentionPct ?? 0}" /><span class="inp-unit__label">%</span></div><p class="hint">${escapeHTML(BLD.formRetentionHint)}</p></div>` : ''}
+      ${costFields}
       <div class="form__row form__row--full"><label class="lbl" for="pj-desc">${escapeHTML(BLD.formDescription)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <textarea class="txt" id="pj-desc" maxlength="4000">${escapeHTML(p.description || '')}</textarea></div>
     </div>
@@ -576,6 +661,9 @@ async function openProjectForm(project = null, opts = {}) {
     if ($('#pj-client', form) && !fromQuote) payload.clientId = $('#pj-client', form).value;
     if ($('#pj-manager', form)) payload.managerId = $('#pj-manager', form).value;
     if ($('#pj-retention', form)) payload.retentionPct = Number($('#pj-retention', form).value || 0);
+    if ($('#pj-budget', form)) payload.costBudgetEur = Number($('#pj-budget', form).value || 0);
+    if ($('#pj-rate', form)) payload.laborRateEur = Number($('#pj-rate', form).value || 0);
+    if ($('[data-site]', form)) payload.siteIds = $$('[data-site]', form).filter(box => box.checked).map(box => box.dataset.site);
     if (fromQuote) payload.quoteId = quote.id;
     else if (!locked) payload.contract = contractRows(form);
     const btn = $('button[type=submit]', form);
