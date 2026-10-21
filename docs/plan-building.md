@@ -363,10 +363,11 @@ three catalogs, HTTP tests per area. Built in this order, one commit each.
 
 ### 10.6 A weekly update for the client
 
-- `POST /building/projects/{id}/updates/draft {from?, to?}` (the last 7 days by default): the AI writes a
+- `POST /building/projects/{id}/reports/draft {from?, to?}` (the last 7 days by default): the AI writes a
   short update from the shared diary days, the phases' progress and approved changes, in the company's
   language, inside its monthly token budget (`409 token_budget` past it), recorded as `building` usage.
-- The team edits and posts it (`building.updates`); the client's page shows the posted updates, newest
+  Called reports in the code, since the client's page already calls its diary days updates.
+- The team edits and posts it (`building.reports`); the client's page shows the posted updates, newest
   first. Copy and WhatsApp buttons send it too.
 
 ### 10.7 My sites, for the site manager

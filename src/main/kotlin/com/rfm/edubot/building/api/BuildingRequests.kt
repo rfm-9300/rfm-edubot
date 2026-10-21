@@ -169,6 +169,13 @@ internal data class ChangeStatusRequest(val status: String = "", val decidedBy: 
 @Serializable
 internal data class ChangeDecisionRequest(val decision: String = "", val name: String = "", val note: String? = null)
 
+/** A client update's period, `yyyy-MM-dd`; the 7 days to today when both are left out. */
+@Serializable
+internal data class ReportDraftRequest(val from: String? = null, val to: String? = null)
+
+@Serializable
+internal data class ReportRequest(val from: String? = null, val to: String? = null, val text: String? = null)
+
 @Serializable
 internal data class MeasurementRequest(val projectId: String = "", val periodEnd: String? = null, val notes: String? = null)
 

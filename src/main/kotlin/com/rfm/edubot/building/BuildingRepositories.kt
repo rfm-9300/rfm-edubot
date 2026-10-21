@@ -22,6 +22,7 @@ import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.PhaseProgressChange
 import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.ProjectPhase
+import com.rfm.edubot.building.model.ProjectReport
 import com.rfm.edubot.building.model.ProjectShare
 import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.building.model.RetentionRelease
@@ -436,6 +437,58 @@ class MeasurementRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     companion object {
         const val COLLECTION = "building.measurements"
         const val MAX_LIST = 1000
+    }
+}
+
+class ProjectReportRepository(mongo: MongoModule, private val tenantId: ObjectId) {
+    private val collection = mongo.database.getCollection<Document>(COLLECTION)
+
+    /** Newest first. */
+    suspend fun list(projectId: ObjectId, limit: Int = MAX_LIST): List<ProjectReport> =
+        collection.find(scoped(Filters.eq("projectId", projectId))).sort(Document("postedAt", -1)).limit(limit).toList().map { it.toReport() }
+
+    suspend fun findById(id: ObjectId): ProjectReport? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toReport()
+
+    suspend fun insert(report: ProjectReport) {
+        collection.insertOne(report.toDocument())
+    }
+
+    suspend fun replace(report: ProjectReport): ProjectReport? =
+        report.takeIf { collection.replaceOne(scoped(Filters.eq("_id", report.id)), report.toDocument()).matchedCount > 0 }
+
+    suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
+
+    suspend fun deleteForProject(projectId: ObjectId) {
+        collection.deleteMany(scoped(Filters.eq("projectId", projectId)))
+    }
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    private fun ProjectReport.toDocument(): Document = Document("_id", id)
+        .append("tenantId", tenantId)
+        .append("projectId", projectId)
+        .append("from", from.toString())
+        .append("to", to.toString())
+        .append("text", text)
+        .append("postedBy", postedBy)
+        .append("postedAt", postedAt.toDate())
+        .append("updatedAt", updatedAt.toDate())
+
+    private fun Document.toReport() = ProjectReport(
+        id = getObjectId("_id"),
+        tenantId = getObjectId("tenantId"),
+        projectId = getObjectId("projectId"),
+        from = day("from") ?: LocalDate.fromEpochDays(0),
+        to = day("to") ?: LocalDate.fromEpochDays(0),
+        text = getString("text").orEmpty(),
+        postedBy = getString("postedBy").orEmpty(),
+        postedAt = getInstant("postedAt"),
+        updatedAt = getInstant("updatedAt"),
+    )
+
+    companion object {
+        const val COLLECTION = "building.reports"
+        const val MAX_LIST = 200
     }
 }
 

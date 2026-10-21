@@ -249,6 +249,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 Document("approval.token", 1),
                 IndexOptions().unique(true).partialFilterExpression(Document("approval.token", Document("\$type", "string"))),
             )
+            db.getCollection<Document>("building.reports").createIndex(Document("tenantId", 1).append("projectId", 1).append("postedAt", -1))
             val measurements = db.getCollection<Document>("building.measurements")
             measurements.createIndex(Document("tenantId", 1).append("projectId", 1).append("number", 1), IndexOptions().unique(true))
             measurements.createIndex(Document("tenantId", 1).append("status", 1))

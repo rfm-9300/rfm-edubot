@@ -10,8 +10,8 @@ import kotlin.math.roundToLong
 
 /**
  * Writes to a company's projects: the record, its phases, the link its client follows it from, and removing it
- * with its diary, issues, changes and photos. A project made from a quote takes its client, name and lines as
- * its contract, and the quote turns accepted.
+ * with its diary, issues, changes, client updates and photos. A project made from a quote takes its client, name
+ * and lines as its contract, and the quote turns accepted.
  */
 class ProjectService(private val records: BuildingRecords, private val store: PhotoStore) {
     suspend fun create(draft: ProjectDraft, quoteId: ObjectId?, stamp: Stamp): Outcome<Project> {
@@ -87,6 +87,7 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         records.logs.deleteForProject(project.id)
         records.issues.deleteForProject(project.id)
         records.changes.deleteForProject(project.id)
+        records.reports.deleteForProject(project.id)
         records.photos.deleteForProject(project.id)
         store.deleteProject(companySlug, project.id)
         records.payments.clearProject(project.id)

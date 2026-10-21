@@ -22,6 +22,8 @@ object UsageSources {
     const val PERSONA = "persona"
     /** Reading received emails for the Email page's suggestions. */
     const val EMAIL = "email"
+    /** Drafting a construction project's update for its client. */
+    const val BUILDING = "building"
 }
 
 /**

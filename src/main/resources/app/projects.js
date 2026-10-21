@@ -107,7 +107,7 @@ const projectCostsOn = () => hasModule('payments') || hasModule('timesheets');
 async function loadProjectRecord(id) {
   const base = '/app/api/building';
   const q = `projectId=${encodeURIComponent(id)}`;
-  const [project, diary, photos, issues, changes, measurements, costs] = await Promise.all([
+  const [project, diary, photos, issues, changes, measurements, costs, reports] = await Promise.all([
     api(`${base}/projects/${encodeURIComponent(id)}`),
     hasModule('site-diary') ? api(`${base}/diary?${q}`).catch(() => []) : [],
     api(`${base}/projects/${encodeURIComponent(id)}/photos`).catch(() => []),
@@ -115,8 +115,9 @@ async function loadProjectRecord(id) {
     hasModule('change-orders') ? api(`${base}/changes?${q}`).catch(() => []) : [],
     hasModule('measurements') ? api(`${base}/measurements?${q}`).catch(() => []) : [],
     projectCostsOn() ? api(`${base}/projects/${encodeURIComponent(id)}/costs`).catch(() => null) : null,
+    api(`${base}/projects/${encodeURIComponent(id)}/reports`).catch(() => []),
   ]);
-  return { project, diary, photos, issues, changes, measurements, costs };
+  return { project, diary, photos, issues, changes, measurements, costs, reports };
 }
 
 async function openProjectDrawer(id, tab) {
@@ -204,6 +205,7 @@ function projectTabs(r) {
   const tabs = [['schedule', bt('tab.schedule'), r.project.phaseCount]];
   if (hasModule('site-diary')) tabs.push(['diary', labels['site-diary'], r.diary.length]);
   tabs.push(['photos', bt('tab.photos'), r.photos.length]);
+  tabs.push(['reports', bt('tab.reports'), r.reports.length]);
   if (hasModule('site-issues')) tabs.push(['issues', labels['site-issues'], r.issues.filter(i => i.status === 'OPEN' || i.status === 'IN_PROGRESS').length]);
   if (hasModule('change-orders')) tabs.push(['changes', labels['change-orders'], r.changes.length]);
   if (hasModule('measurements')) tabs.push(['measurements', labels.measurements, r.measurements.length]);
@@ -300,10 +302,124 @@ function projectHoursHtml(labour) {
       : `<div class="empty"><p class="empty__title">${escapeHTML(bt('costs.hoursEmpty'))}</p></div>`}</section>`;
 }
 
+const reportPeriod = rep => bt('reports.period', { from: fmtDay(rep.from), to: fmtDay(rep.to) });
+
+// The updates posted to the client's page, newest first.
+function projectReportsPane(r) {
+  const add = `<button class="btn btn--sm btn--primary" type="button" data-project-act="report"><span class="btn__plus">+</span> ${escapeHTML(bt('reports.new'))}</button>`;
+  if (!r.reports.length) {
+    return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(bt('reports.empty'))}</p><p class="empty__desc">${escapeHTML(bt('reports.emptyDesc'))}</p><div class="empty__actions">${add}</div></div></div>`;
+  }
+  const rows = r.reports.map(rep => {
+    const first = rep.text.split(/\n\s*\n/)[0].replace(/\s+/g, ' ');
+    return recordRowHtml({ tone: 'info', title: reportPeriod(rep), detail: first.length > 140 ? `${first.slice(0, 139)}…` : first, when: relDay(rep.postedAt.slice(0, 10)), open: `report:${rep.id}` });
+  }).join('');
+  return `<div class="record__stack"><section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('reports.title'))} <span class="tag">${r.reports.length}</span></h2></header>
+    <ul class="worklist worklist--wrap">${rows}</ul></section>
+    ${r.project.shareEnabled ? '' : `<p class="hint">${escapeHTML(bt('reports.shareOff'))}</p>`}
+    <div class="record__pane-foot">${add}</div></div>`;
+}
+
+// Writes an update for the client, the AI's draft of a period or the team's own words, and posts it to their page.
+function openReportForm(project, report = null) {
+  const to = todayKey();
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${report ? `<p class="hint">${escapeHTML(reportPeriod(report))}</p>` : `<div class="form__grid">
+      <div class="form__row"><label class="lbl" for="rp-from">${escapeHTML(bt('reports.from'))}</label><input class="inp inp--mono" id="rp-from" type="date" value="${addDayKey(to, -6)}" max="${to}" /></div>
+      <div class="form__row"><label class="lbl" for="rp-to">${escapeHTML(bt('reports.to'))}</label><input class="inp inp--mono" id="rp-to" type="date" value="${to}" max="${to}" /></div>
+    </div>
+    <div class="actions"><button class="btn btn--sm" type="button" data-report-draft>${escapeHTML(bt('reports.draft'))}</button></div>
+    <p class="hint" data-report-drafted hidden></p>`}
+    <div class="form__row form__row--full"><label class="lbl" for="rp-text">${escapeHTML(bt('reports.text'))} <span class="req">●</span></label>
+      <textarea class="txt" id="rp-text" rows="10" maxlength="4000" placeholder="${escapeHTML(bt('reports.textPh'))}">${escapeHTML(report?.text || '')}</textarea></div>
+    <p class="hint">${escapeHTML(project.shareEnabled ? bt('reports.hint') : bt('reports.shareOff'))}</p>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(report ? BLD.save : bt('reports.post'))}</button></div>`;
+  const period = () => ({ from: $('#rp-from', form)?.value || '', to: $('#rp-to', form)?.value || '' });
+  $('[data-report-draft]', form)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const { from, to: until } = period();
+    if (!from || !until || until < from) return toast(bt('errors.invalid_range'));
+    btn.disabled = true;
+    btn.textContent = bt('reports.drafting');
+    try {
+      const draft = await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports/draft`, { method: 'POST', body: JSON.stringify({ from, to: until }) });
+      $('#rp-text', form).value = draft.text;
+      const note = $('[data-report-drafted]', form);
+      note.textContent = bt('reports.drafted', { n: draft.sharedDays });
+      note.hidden = false;
+    } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
+    btn.disabled = false;
+    btn.textContent = bt('reports.draft');
+  });
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('#rp-text', form).value.trim();
+    if (!text) return toast(bt('reports.needText'));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      if (report) await api(`/app/api/building/reports/${encodeURIComponent(report.id)}`, { method: 'PATCH', body: JSON.stringify({ text }) });
+      else await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports`, { method: 'POST', body: JSON.stringify({ ...period(), text }) });
+      toast(report ? bt('reports.saved') : bt('reports.posted'));
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      toast(buildingErrorText(err, BLD.saveFailed));
+    }
+  });
+  openDrawer(report ? bt('reports.editTitle') : bt('reports.formTitle'), form, true, { eyebrow: projectLabel(project) });
+}
+
+// The update as stored now, after an edit, or the project's updates when it's gone.
+async function reopenReport(project, id) {
+  const fresh = (await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports`).catch(() => [])).find(rep => rep.id === id);
+  if (fresh) openReportDetail(project, fresh);
+  else openProjectDrawer(project.id, 'reports');
+}
+
+// A posted update: its text as the client reads it, to copy or send by WhatsApp, edit or remove.
+function openReportDetail(project, report) {
+  const here = { key: `report:${report.id}`, label: reportPeriod(report), open: () => reopenReport(project, report.id) };
+  const link = project.shareEnabled && project.shareToken ? projectShareUrl(project.shareToken) : '';
+  const message = `${report.text}${link ? bt('reports.pageLink', { url: link }) : ''}`;
+  const wa = project.clientPhone ? `${waHref(project.clientPhone)}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `
+    ${detailMeta([
+      { label: bt('reports.periodLabel'), value: reportPeriod(report) },
+      { label: bt('reports.postedOn'), value: fmtDay(report.postedAt) },
+    ])}
+    ${report.text.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean).map(part => `<p class="panel__text">${part.split('\n').map(escapeHTML).join('<br />')}</p>`).join('')}
+    <div class="detail__foot">
+      <button class="btn btn--sm btn--primary" type="button" data-report-copy>${escapeHTML(bt('reports.copy'))}</button>
+      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(project.clientName ? bt('share.whatsappTo', { name: project.clientName }) : bt('share.whatsapp'))}</a>
+      <button class="btn btn--sm btn--ghost" type="button" data-report-edit>${escapeHTML(BLD.edit)}</button>
+      <button class="btn btn--sm btn--ghost" type="button" data-report-delete>${escapeHTML(BLD.delete)}</button>
+    </div>`;
+  $('[data-report-copy]', body).addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(message); toast(bt('reports.copied')); } catch { toast(BLD.saveFailed); }
+  });
+  $('[data-report-edit]', body).addEventListener('click', () => openFrom(here, () => openReportForm(project, report)));
+  $('[data-report-delete]', body).addEventListener('click', async () => {
+    if (!await confirmDialog({ title: bt('reports.deleteTitle'), body: bt('reports.deleteBody'), okLabel: BLD.delete })) return;
+    try {
+      await api(`/app/api/building/reports/${encodeURIComponent(report.id)}`, { method: 'DELETE' });
+      toast(bt('reports.deleted'));
+      closeDrawer();
+    } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
+  });
+  openDrawer(bt('reports.formTitle'), body, false, { eyebrow: projectLabel(project) });
+}
+
 function projectPaneHtml(r) {
   const p = r.project;
   if (r.tab === 'schedule') return projectSchedulePane(r);
   if (r.tab === 'costs') return projectCostsPane(r);
+  if (r.tab === 'reports') return projectReportsPane(r);
   if (r.tab === 'diary') {
     if (!r.diary.length) return recordEmpty(BLD.diaryEmpty, 'diary', BLD.diaryNew);
     const rows = r.diary.map(e => `<tr class="conversation-row" data-record-open="diary:${escapeHTML(e.id)}">
@@ -485,6 +601,10 @@ function openProjectItem(ref) {
   if (kind === 'measurement') return openFromProject(() => openMeasurementDetail(id));
   if (kind === 'invoice') return openFromProject(() => openInvoiceDetail(id));
   if (kind === 'payment') return openFromProject(() => openPaymentDetail(id));
+  if (kind === 'report') {
+    const report = r.reports.find(rep => rep.id === id);
+    return report && openFromProject(() => openReportDetail(r.project, report));
+  }
 }
 
 async function projectAct(kind) {
@@ -497,6 +617,7 @@ async function projectAct(kind) {
   if (kind === 'share') return openFromProject(() => openProjectShare(p));
   if (kind === 'retention') return openFromProject(() => openRetentionInvoiceForm(p));
   if (kind === 'diary-pdf') return openFromProject(() => openDiaryPdfForm(p));
+  if (kind === 'report') return openFromProject(() => openReportForm(p));
   if (kind === 'bill') {
     const client = p.clientId && hasModule('clients') ? { id: p.clientId, name: p.clientName || '' } : null;
     return openFromProject(() => openPaymentForm(null, null, client, { projectId: p.id }));

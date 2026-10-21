@@ -31,6 +31,7 @@ class BuildingRecords(mongo: MongoModule, val tenantId: ObjectId) {
     val issues by lazy { SiteIssueRepository(mongo, tenantId) }
     val changes by lazy { ChangeOrderRepository(mongo, tenantId) }
     val measurements by lazy { MeasurementRepository(mongo, tenantId) }
+    val reports by lazy { ProjectReportRepository(mongo, tenantId) }
     val clients by lazy { ClientRepository(mongo, tenantId) }
     val quotes by lazy { QuoteRepository(mongo, tenantId) }
     val invoices by lazy { InvoiceRepository(mongo, tenantId) }

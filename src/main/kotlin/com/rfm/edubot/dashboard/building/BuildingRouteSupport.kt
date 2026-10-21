@@ -1,5 +1,7 @@
 package com.rfm.edubot.dashboard.building
 
+import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.building.BuildingDocument
 import com.rfm.edubot.building.BuildingDocuments
 import com.rfm.edubot.building.BuildingRecords
@@ -8,6 +10,7 @@ import com.rfm.edubot.building.MeasurementService
 import com.rfm.edubot.building.Outcome
 import com.rfm.edubot.building.PhotoStore
 import com.rfm.edubot.building.ProjectCostsService
+import com.rfm.edubot.building.ProjectReportService
 import com.rfm.edubot.building.ProjectService
 import com.rfm.edubot.building.SiteDiaryService
 import com.rfm.edubot.building.SiteIssueService
@@ -36,7 +39,7 @@ import kotlinx.serialization.Serializable
 import org.bson.types.ObjectId
 
 /** One company's Building records and services for one request, stamped with who is asking and when. */
-internal class TenantBuilding(mongo: MongoModule, val ctx: DashboardContext, storagePath: () -> String) {
+internal class TenantBuilding(private val mongo: MongoModule, val ctx: DashboardContext, storagePath: () -> String) {
     val tenant: Tenant = ctx.tenant
     val records = BuildingRecords(mongo, tenant.id)
     val stamp = Stamp(ctx.user?.email ?: OPERATOR, SystemClock.now(), tenant.zone())
@@ -50,6 +53,8 @@ internal class TenantBuilding(mongo: MongoModule, val ctx: DashboardContext, sto
     val measurements: MeasurementService get() = MeasurementService(records)
     val documents: BuildingDocuments get() = BuildingDocuments(records, store)
     val costs: ProjectCostsService get() = ProjectCostsService(records)
+
+    fun reports(ai: AiClient): ProjectReportService = ProjectReportService(records, ai, TenantUsageRepository(mongo, tenant.id))
     val template: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)
 
     private companion object {

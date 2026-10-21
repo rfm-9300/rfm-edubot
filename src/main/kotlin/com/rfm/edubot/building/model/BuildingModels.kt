@@ -238,6 +238,22 @@ data class ChangeOrder(
     val signedCents: Long get() = if (kind == ChangeOrderKind.OMISSION) -totalCents else totalCents
 }
 
+/**
+ * A short update for the client about the work from [from] to [to], written by the team, the AI's draft or their
+ * own; the client's page shows it once posted.
+ */
+data class ProjectReport(
+    val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val projectId: ObjectId,
+    val from: LocalDate,
+    val to: LocalDate,
+    val text: String,
+    val postedBy: String,
+    val postedAt: Instant,
+    val updatedAt: Instant,
+)
+
 enum class MeasurementStatus { DRAFT, APPROVED, INVOICED }
 
 /**

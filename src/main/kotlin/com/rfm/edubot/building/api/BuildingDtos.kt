@@ -141,6 +141,15 @@ internal data class CostHoursDto(val employeeId: String, val name: String, val h
 internal data class CostSiteDto(val id: String, val name: String)
 
 @Serializable
+internal data class ReportDraftDto(val from: String, val to: String, val text: String, val sharedDays: Int)
+
+@Serializable
+internal data class ReportDto(val id: String, val projectId: String, val from: String, val to: String, val text: String, val postedBy: String, val postedAt: String, val updatedAt: String)
+
+@Serializable
+internal data class SharedReportDto(val from: String, val to: String, val text: String, val postedAt: String)
+
+@Serializable
 internal data class RetentionReleaseDto(val invoiceId: String?, val invoiceNumber: String?, val amountEur: Double, val releasedBy: String, val releasedAt: String)
 
 @Serializable
@@ -323,6 +332,8 @@ internal data class SharedProjectDto(
     val actualStart: String?,
     val actualEnd: String?,
     val phases: List<SharedPhaseDto>,
+    /** The updates the team posted, newest first. */
+    val reports: List<SharedReportDto>,
     val updates: List<SharedUpdateDto>,
     val photos: List<SharedPhotoDto>,
     val updatedAt: String,

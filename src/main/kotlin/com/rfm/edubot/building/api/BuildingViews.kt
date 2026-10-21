@@ -13,6 +13,7 @@ import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.Project
+import com.rfm.edubot.building.model.ProjectReport
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
@@ -318,12 +319,14 @@ internal suspend fun BuildingRecords.measurementDtos(list: List<Measurement>): L
 }
 
 /**
- * The project as its client's page shows it: progress, the plan (moved by approved changes) and the diary days and
- * photos the team shared. No money, issues, notes or people. A phase is late only on the team's side.
+ * The project as its client's page shows it: progress, the plan (moved by approved changes), the updates the team
+ * posted, and the diary days and photos the team shared. No money, issues, notes or people. A phase is late only
+ * on the team's side.
  */
 internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: Tenant, today: LocalDate, hasLogo: Boolean): SharedProjectDto {
     val shared = photos.list(project.id, sharedOnly = true, limit = SHARED_PHOTOS)
     val updates = logs.list(project.id, null, null, limit = SHARED_UPDATES * 3).filter { it.shared }.take(SHARED_UPDATES)
+    val posted = reports.list(project.id, limit = SHARED_REPORTS)
     val byLog = shared.filter { it.logId != null }.groupBy { it.logId }
     val days = approvedEffect(changes.list(project.id)).days
     fun SitePhoto.shown() = SharedPhotoDto(id.toHexString(), caption, day.toString())
@@ -348,11 +351,23 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
             }
             SharedPhaseDto(phase.name, phase.plannedStart?.toString(), phase.plannedEnd?.toString(), phase.progressPct.coerceIn(0, 100), state.name)
         },
+        reports = posted.map { SharedReportDto(it.from.toString(), it.to.toString(), it.text, it.postedAt.toString()) },
         updates = updates.map { entry -> SharedUpdateDto(entry.day.toString(), entry.weather?.name, entry.workDone, byLog[entry.id].orEmpty().map { it.shown() }) },
         photos = shared.map { it.shown() },
-        updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt }).max().toString(),
+        updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt } + posted.map { it.updatedAt }).max().toString(),
     )
 }
+
+internal fun ProjectReport.dto() = ReportDto(
+    id = id.toHexString(),
+    projectId = projectId.toHexString(),
+    from = from.toString(),
+    to = to.toString(),
+    text = text,
+    postedBy = postedBy,
+    postedAt = postedAt.toString(),
+    updatedAt = updatedAt.toString(),
+)
 
 /** A project's costs as its Costs tab shows them, with the payees' and employees' names. */
 internal suspend fun BuildingRecords.costsDto(costs: ProjectCosts): ProjectCostsDto {
@@ -434,4 +449,5 @@ internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Bo
 
 private const val SHARED_PHOTOS = 60
 private const val SHARED_UPDATES = 30
+private const val SHARED_REPORTS = 20
 private const val COST_PAYMENTS = 200
