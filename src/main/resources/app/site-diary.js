@@ -46,7 +46,8 @@ function renderSiteDiary(root) {
     }
     rows += diaryRowHtml(e);
   });
-  const tools = projectFilterHtml(state.diaryProject, 'data-diary-project');
+  const tools = projectFilterHtml(state.diaryProject, 'data-diary-project')
+    + (state.diaryProject ? `<button class="btn btn--sm btn--ghost" type="button" data-diary-pdf>${escapeHTML(BLD.diaryPdf)}</button>` : '');
   root.innerHTML = hero(labels['site-diary'], BLD.diaryDesc, statCards(stats)) + board + bldPanel({
     title: state.diaryProject ? BLD.diaryAllEntries : BLD.diaryRecent,
     tag: shown.length,
@@ -66,10 +67,47 @@ function renderSiteDiary(root) {
     try { await loadModule('site-diary'); } catch { toast(STR.loadFailed); }
     render();
   });
+  $('[data-diary-pdf]', root)?.addEventListener('click', () => {
+    const project = state.projects.find(p => p.id === state.diaryProject);
+    if (project) openDiaryPdfForm(project);
+  });
   $$('[data-diary]', root).forEach(row => {
     row.addEventListener('click', () => openDiaryEntry(row.dataset.diary));
     row.addEventListener('keydown', e => { if (e.key === 'Enter') openDiaryEntry(row.dataset.diary); });
   });
+}
+
+const DIARY_PDF_MAX_DAYS = 92;
+
+// A project's diary for a period, as a PDF: up to three months, with some of each day's photos.
+function openDiaryPdfForm(project) {
+  const to = todayKey();
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(BLD.diaryPdfIntro)}</p>
+    <div class="form__grid">
+      <div class="form__row"><label class="lbl" for="dp-from">${escapeHTML(BLD.diaryPdfFrom)}</label><input class="inp inp--mono" id="dp-from" type="date" required value="${addDayKey(to, -29)}" max="${to}" /></div>
+      <div class="form__row"><label class="lbl" for="dp-to">${escapeHTML(BLD.diaryPdfTo)}</label><input class="inp inp--mono" id="dp-to" type="date" required value="${to}" max="${to}" /></div>
+    </div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(BLD.diaryPdfDownload)}</button></div>`;
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const from = $('#dp-from', form).value;
+    const until = $('#dp-to', form).value;
+    if (!from || !until || until < from) return toast(bt('errors.invalid_range'));
+    if (dayNumber(until) - dayNumber(from) >= DIARY_PDF_MAX_DAYS) return toast(bt('errors.range_too_long'));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await openPdf(`/app/api/building/diary/pdf?projectId=${encodeURIComponent(project.id)}&from=${from}&to=${until}`, `${project.number} ${labels['site-diary']} ${from} ${until}`);
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      toast(STR.errorPdf({ msg: err.message }));
+    }
+  });
+  openDrawer(BLD.diaryPdfTitle, form, false, { eyebrow: projectLabel(project) });
 }
 
 // The phases a diary entry can move, each with the progress it has now.

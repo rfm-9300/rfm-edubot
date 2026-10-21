@@ -247,7 +247,8 @@ function projectPaneHtml(r) {
       <td class="mono nowrap">${escapeHTML(fmtDay(e.day))}</td><td>${escapeHTML(weatherLabel(e.weather) || '—')}</td>
       <td class="num">${e.workers ?? '—'}</td><td class="long">${escapeHTML(e.workDone.length > 90 ? `${e.workDone.slice(0, 89)}…` : e.workDone)}</td>
       <td class="num">${e.photos.length || ''}</td></tr>`).join('');
-    return recordTable([[BLD.thDay], [BLD.thWeather], [BLD.thWorkers, 'right'], [BLD.thWorkDone], [BLD.thPhotos, 'right']], rows);
+    return `<div class="record__stack">${recordTable([[BLD.thDay], [BLD.thWeather], [BLD.thWorkers, 'right'], [BLD.thWorkDone], [BLD.thPhotos, 'right']], rows)}
+      <div class="record__pane-foot"><button class="btn btn--sm" type="button" data-project-act="diary-pdf">${escapeHTML(BLD.diaryPdf)}</button></div></div>`;
   }
   if (r.tab === 'photos') {
     const add = `<button class="btn btn--sm" type="button" data-project-act="photos"><span class="btn__plus">+</span> ${escapeHTML(BLD.photosAdd)}</button>`;
@@ -431,6 +432,7 @@ async function projectAct(kind) {
   if (kind === 'progress') return openFromProject(() => openManualProgressForm(p));
   if (kind === 'share') return openFromProject(() => openProjectShare(p));
   if (kind === 'retention') return openFromProject(() => openRetentionInvoiceForm(p));
+  if (kind === 'diary-pdf') return openFromProject(() => openDiaryPdfForm(p));
   if (kind === 'client') return openFromProject(() => openClientDrawer(p.clientId));
   if (kind === 'quote') return openFromProject(() => openQuoteDetail(p.quoteId));
   if (kind === 'diary') {

@@ -1399,6 +1399,8 @@ window.__I18N_CATALOGS['es'] = {
       diaryShareCheck: 'Mostrar este día al cliente', diaryShareHint: 'En la página del cliente: los trabajos realizados y las fotos compartidas de este día. Nada más.',
       diaryPhotosHint: 'Las fotos se añaden al guardar el parte.', diaryNoPhotos: 'Sin fotos de este día',
       diaryWrittenBy: 'Escrito por', diaryDeleteTitle: '¿Eliminar este parte?', diaryDeleteBody: 'Sus fotos se quedan en las fotos de la obra.', diaryDeleted: 'Parte eliminado',
+      diaryPdf: 'PDF del diario', diaryPdfTitle: 'Imprimir el diario', diaryPdfFrom: 'Desde', diaryPdfTo: 'Hasta', diaryPdfDownload: 'Descargar PDF',
+      diaryPdfIntro: 'Los días de la obra en el periodo: tiempo, personas, trabajos, notas, avance y hasta seis fotos por día. Tres meses como máximo cada vez.',
       photos: {
         openAria: 'Foto del {day}', uploading: 'Subiendo la foto {n} de {total}…',
         added: p => (p.n === 1 ? 'Foto añadida' : `${p.n} fotos añadidas`),
@@ -1508,6 +1510,7 @@ window.__I18N_CATALOGS['es'] = {
         below_previous_line: p => `${p.line}: menos que la certificación anterior.`,
         unknown_line: 'Una partida ya no existe', invalid_range: 'Las fechas no son válidas',
         project_not_completed: 'Da primero la obra por terminada', measurement_pending: 'Factura o elimina primero la última certificación de la obra', nothing_held: 'La obra no tiene retención por devolver',
+        range_too_long: 'Elige tres meses como máximo',
       },
     },
     time: {

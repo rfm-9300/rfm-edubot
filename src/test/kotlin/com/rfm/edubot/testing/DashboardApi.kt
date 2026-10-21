@@ -59,6 +59,7 @@ import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
@@ -101,6 +102,9 @@ internal class Reply(val status: HttpStatusCode, val body: String) {
     fun ids(): List<String> = array.map { it.jsonObject["id"]!!.jsonPrimitive.content }
     override fun toString() = "$status $body"
 }
+
+/** A file the API sends (a PDF, a photo): its status, its type and its bytes as they came. */
+internal class Download(val status: HttpStatusCode, val contentType: ContentType?, val bytes: ByteArray, val headers: Headers)
 
 /** A company with an admin and a member signed in, plus a token an operator would open it with. */
 internal class TestCompany(val tenant: Tenant, val admin: DashboardUser, val token: String, val memberToken: String, val operatorToken: String)
@@ -153,6 +157,11 @@ internal class DashboardApi(val mongo: MongoModule, private val http: HttpClient
         }
         val response = http.submitFormWithBinaryData(path, form) { bearerAuth(token) }
         return Reply(response.status, response.bodyAsText())
+    }
+
+    suspend fun TestCompany.download(path: String, token: String = this.token): Download {
+        val response = http.request(path) { bearerAuth(token) }
+        return Download(response.status, response.contentType(), response.readRawBytes(), response.headers)
     }
 
     suspend fun TestCompany.get(path: String, token: String = this.token) = call("GET", path, token)

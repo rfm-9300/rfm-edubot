@@ -1400,6 +1400,8 @@ window.__I18N_CATALOGS['pt-PT'] = {
       diaryShareCheck: 'Mostrar este dia ao cliente', diaryShareHint: 'Na página do cliente: os trabalhos executados e as fotos partilhadas deste dia. Mais nada.',
       diaryPhotosHint: 'As fotos juntam-se depois de guardar o registo.', diaryNoPhotos: 'Sem fotos deste dia',
       diaryWrittenBy: 'Registado por', diaryDeleteTitle: 'Apagar este registo?', diaryDeleteBody: 'As fotos ficam nas fotos da obra.', diaryDeleted: 'Registo apagado',
+      diaryPdf: 'PDF do diário', diaryPdfTitle: 'Imprimir o diário', diaryPdfFrom: 'De', diaryPdfTo: 'Até', diaryPdfDownload: 'Descarregar PDF',
+      diaryPdfIntro: 'Os dias da obra no período: tempo, pessoas, trabalhos, notas, avanço e até seis fotografias por dia. No máximo três meses de cada vez.',
       photos: {
         openAria: 'Foto de {day}', uploading: 'A enviar a foto {n} de {total}…',
         added: p => (p.n === 1 ? 'Foto adicionada' : `${p.n} fotos adicionadas`),
@@ -1509,6 +1511,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
         below_previous_line: p => `${p.line}: menos do que o auto anterior.`,
         unknown_line: 'Um artigo já não existe', invalid_range: 'As datas não são válidas',
         project_not_completed: 'Dê primeiro a obra como concluída', measurement_pending: 'Fature ou elimine primeiro o último auto da obra', nothing_held: 'A obra não tem retenção por devolver',
+        range_too_long: 'Escolha no máximo três meses',
       },
     },
     time: {

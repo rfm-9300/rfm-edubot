@@ -1400,6 +1400,8 @@ window.__I18N_CATALOGS['en'] = {
       diaryShareCheck: 'Show this day to the client', diaryShareHint: 'On the client\'s page: the work done and this day\'s shared photos. Nothing else.',
       diaryPhotosHint: 'Photos are added once the entry is saved.', diaryNoPhotos: 'No photos of this day',
       diaryWrittenBy: 'Written by', diaryDeleteTitle: 'Delete this entry?', diaryDeleteBody: 'Its photos stay in the project\'s photos.', diaryDeleted: 'Diary entry deleted',
+      diaryPdf: 'Diary PDF', diaryPdfTitle: 'Print the diary', diaryPdfFrom: 'From', diaryPdfTo: 'To', diaryPdfDownload: 'Download PDF',
+      diaryPdfIntro: 'The project’s days in the period: weather, people, work done, notes, progress and up to six photos a day. Up to three months at a time.',
       photos: {
         openAria: 'Photo of {day}', uploading: 'Uploading photo {n} of {total}…',
         added: p => (p.n === 1 ? 'Photo added' : `${p.n} photos added`),
@@ -1509,6 +1511,7 @@ window.__I18N_CATALOGS['en'] = {
         below_previous_line: p => `${p.line}: less than the previous measurement.`,
         unknown_line: 'A line no longer exists', invalid_range: 'The dates aren\'t valid',
         project_not_completed: 'Mark the project finished first', measurement_pending: 'Invoice or delete the project’s last measurement first', nothing_held: 'The project holds no retention',
+        range_too_long: 'Choose three months at most',
       },
     },
     time: {

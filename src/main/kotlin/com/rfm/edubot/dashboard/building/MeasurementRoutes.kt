@@ -56,6 +56,11 @@ internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMEN
                 val toDate = request.lines.orEmpty().associate { it.key to it.toDateQty }
                 call.respondOutcome(b.measurements.update(id, periodEnd, request.notes, toDate, b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
             }
+            get("/measurements/{id}/pdf") {
+                val b = deps.building(call)
+                val document = b.documents.measurement(call.idParam("id"), b.template, b.tenant.locale, b.stamp) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respondPdf(document)
+            }
             post("/measurements/{id}/approve") {
                 val b = deps.building(call)
                 call.respondOutcome(b.measurements.approve(call.idParam("id"), b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
