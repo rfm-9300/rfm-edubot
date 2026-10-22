@@ -231,6 +231,7 @@ function boardCardHtml(board, column, card) {
   return `<article class="board-card" data-card="${escapeHTML(card.id)}" tabindex="0" aria-label="${escapeHTML(`${cardKey(board, card)} · ${card.title}`)}">
       <div class="board-card__top"><span class="board-card__key">${escapeHTML(cardKey(board, card))}</span>${tone ? `<span class="pill ${tone}">${escapeHTML(B.priority[card.priority])}</span>` : ''}</div>
       <p class="board-card__title">${escapeHTML(card.title)}</p>
+      ${card.description ? `<p class="board-card__desc">${escapeHTML(card.description)}</p>` : ''}
       ${card.labels.length ? `<div class="board-card__labels">${card.labels.map(l => `<span class="board-card__label">${escapeHTML(l)}</span>`).join('')}</div>` : ''}
       ${facts || avatar ? `<div class="board-card__meta">${facts}${avatar}</div>` : ''}
     </article>`;

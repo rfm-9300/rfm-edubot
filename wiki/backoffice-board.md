@@ -23,10 +23,15 @@ page: [password-vault.md](password-vault.md).
   first column left, so restoring one finds a column. A `done` column's cards no longer show their due
   date as late. New boards get To do, In progress and Done (done) in the creating admin's language:
   the browser sends the names, so the server stays language-free.
-- **Limits** (raised on 2026-10-22 from card TES-2, "the characters are limited"): a title and a
-  checklist item take 500 characters, a description 20,000, a comment 5,000. A title is one line, but the
-  drawers write it in a wrapping field (line breaks become spaces on save); the inline quick add stays a
-  single-line input, since Enter adds the card.
+- **Limits:** a title and a checklist item take 500 characters, a description 20,000, a comment 5,000.
+  Card TES-2 said "the characters are limited", and a first reading raised the title and item limits
+  (from 200 and 300) on 2026-10-22; Rodrigo then explained the real wish was to *see the description on
+  the card* without opening it, which is the next point. The bigger limits stayed. A title is one line,
+  but the drawers write it in a wrapping field (line breaks become spaces on save, the header shows
+  its first 90 characters); the inline quick add stays a single-line input, since Enter adds the card.
+- **The card shows its description** under the title (`.board-card__desc`): plain text, line breaks kept,
+  cut after four lines, in a quieter ink. Cards without one are as before. The search box already
+  matched the key, title, description and labels.
 - **Cards**: title, description, assignee (an admin's email), due date, priority (Low, Medium, High,
   Urgent; Medium shows no pill), labels (free text, up to 10, repeats dropped regardless of case),
   a checklist, comments, and an optional tenant. Archiving hides a card from the board; it waits under
