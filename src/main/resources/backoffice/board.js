@@ -479,7 +479,7 @@ function boardQuickAdd(board, columnId) {
   if (!foot) return;
   foot.innerHTML = `
     <form class="board-col__new" novalidate>
-      <input class="inp" type="text" maxlength="200" placeholder="${escapeHTML(B.newCardPlaceholder)}" aria-label="${escapeHTML(B.newCardPlaceholder)}" autocomplete="off" />
+      <input class="inp" type="text" maxlength="500" placeholder="${escapeHTML(B.newCardPlaceholder)}" aria-label="${escapeHTML(B.newCardPlaceholder)}" autocomplete="off" />
       <div class="actions"><button class="btn btn--sm btn--primary" type="submit">${escapeHTML(B.add)}</button><button class="btn btn--sm btn--ghost" type="button" data-new-cancel>${escapeHTML(T.cancel)}</button></div>
     </form>`;
   const form = $('form', foot);

@@ -261,7 +261,8 @@ async function openInvoiceDetail(id) {
   const received = invoicePaidEur(inv);
   const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
   const clientLink = hasModule('clients') && !!inv.clientId && !linksBackTo(`client:${inv.clientId}`);
-  const quoteLink = hasModule('quotes') && !!inv.quoteId && !linksBackTo(`quote:${inv.quoteId}`);
+  // quoteNumber is empty once the quote was deleted (a cancelled invoice can outlive it): nothing to open then.
+  const quoteLink = hasModule('quotes') && !!inv.quoteNumber && !linksBackTo(`quote:${inv.quoteId}`);
   const projectLink = hasModule('projects') && !!inv.projectId && !linksBackTo(`project:${inv.projectId}`);
   const form = document.createElement('div');
   form.className = 'form';

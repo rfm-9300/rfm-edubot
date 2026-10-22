@@ -459,6 +459,7 @@ body.nav-open .nav-scrim {
 .topbar #btn-nav[hidden],
 .topbar #btn-new[hidden],
 .topbar #btn-logout[hidden],
+.topbar #btn-backoffice[hidden],
 .topbar #btn-notifications[hidden],
 .topbar #btn-account[hidden] { display: none; }
 
@@ -1255,8 +1256,11 @@ html[data-theme="dark"] .auth__eyebrow { color: var(--accent); }
 }
 
 @media (max-width: 620px) {
-  .topbar__actions a.btn--ghost,
+  .topbar__actions a.btn--ghost:not(#btn-backoffice),
   .topbar__actions #btn-export { display: none; }
+  /* The way back to the backoffice keeps just its arrow; the text stays as its accessible name. */
+  .topbar__actions #btn-backoffice { padding: 0 12px; }
+  .topbar__actions #btn-backoffice .btn__text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .topbar__actions #btn-logout { padding: 0 12px; }
   /* The "New …" button keeps just its plus; the label stays as its accessible name. */
   .topbar__actions #btn-new:has(.btn__label) { width: 36px; padding: 0; justify-content: center; }

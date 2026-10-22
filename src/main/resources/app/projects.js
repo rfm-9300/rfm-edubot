@@ -536,7 +536,7 @@ function projectContactButtons(p) {
     status,
     `<button class="btn btn--sm" type="button" data-project-act="share">${escapeHTML(p.shareEnabled ? BLD.shareOpen : BLD.shareStart)}</button>`,
     p.clientId && hasModule('clients') && !linksBackTo(`client:${p.clientId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-project-act="client">${escapeHTML(BLD.openClient)}</button>` : '',
-    p.quoteId && hasModule('quotes') && !linksBackTo(`quote:${p.quoteId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-project-act="quote">${escapeHTML(STR.detailOpenDoc({ number: p.quoteNumber || '' }))}</button>` : '',
+    p.quoteNumber && hasModule('quotes') && !linksBackTo(`quote:${p.quoteId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-project-act="quote">${escapeHTML(STR.detailOpenDoc({ number: p.quoteNumber || '' }))}</button>` : '',
   ].join('');
 }
 

@@ -220,6 +220,29 @@ class BoardRoutesTest {
         send("POST", "/admin/api/board/boards/${board.id()}/cards", buildJsonObject { put("columnId", board.columnId(column)); put("title", title) }, email).obj()
 
     @Test
+    fun `a card's title and checklist items take up to 500 characters`() = boardTest { http ->
+        val board = http.board()
+        val long = "x".repeat(500)
+        val card = http.card(board, 0, long)
+        assertEquals(long, card.text("title"))
+        val tooLong = http.send("POST", "/admin/api/board/boards/${board.id()}/cards", buildJsonObject { put("columnId", board.columnId(0)); put("title", long + "x") })
+        assertEquals(HttpStatusCode.BadRequest, tooLong.status)
+        assertEquals("too_long", tooLong.error())
+
+        val edit: suspend (String) -> HttpResponse = { title -> http.send("PATCH", "/admin/api/board/cards/${card.id()}", buildJsonObject { put("title", title) }) }
+        assertEquals("y".repeat(500), edit("y".repeat(500)).obj().text("title"))
+        assertEquals("too_long", edit("y".repeat(501)).error())
+
+        val checklist: suspend (String) -> HttpResponse = { text ->
+            http.send("PATCH", "/admin/api/board/cards/${card.id()}", buildJsonObject {
+                putJsonArray("checklist") { addJsonObject { put("id", "a"); put("text", text); put("done", false) } }
+            })
+        }
+        assertEquals("z".repeat(500), checklist("z".repeat(500)).obj()["checklist"]!!.jsonArray.single().text("text"))
+        assertEquals("too_long", checklist("z".repeat(501)).error())
+    }
+
+    @Test
     fun `cards move between and within columns and keep their order`() = boardTest { http ->
         val board = http.board()
         val a = http.card(board, 0, "A")

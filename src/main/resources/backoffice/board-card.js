@@ -2,6 +2,16 @@
    record, a new board, a board's settings and columns, and its archived cards. Also the tenant record's list of
    the cards linked to that tenant. */
 
+// A card's title is written in a wrapping field, but it is one line: line breaks become spaces.
+function boardOneLine(value) {
+  return String(value).replace(/\s*\n\s*/g, ' ').trim();
+}
+
+// A long title would fill the drawer's header; its field below holds the whole text.
+function boardShortTitle(title, max = 90) {
+  return title.length > max ? `${title.slice(0, max - 1).trimEnd()}…` : title;
+}
+
 // The people a card can be assigned to and the boards, when a drawer opens outside the Board view.
 async function boardEnsureLoaded() {
   if (!boardState.loaded) await boardLoad();
@@ -99,7 +109,7 @@ async function openCardDrawer(cardId, back = null) {
   body.innerHTML = `
     ${card.archived ? `<p class="hint hint--warn">${escapeHTML(B.archivedNotice)}</p>` : ''}
     <form class="form" novalidate data-card-form>
-      <div class="form__row"><label class="lbl" for="card-title">${escapeHTML(B.titleLabel)} <span class="req">*</span></label><input class="inp" id="card-title" maxlength="200" value="${escapeHTML(card.title)}" /></div>
+      <div class="form__row"><label class="lbl" for="card-title">${escapeHTML(B.titleLabel)} <span class="req">*</span></label><textarea class="txt" id="card-title" rows="3" maxlength="500">${escapeHTML(card.title)}</textarea></div>
       <div class="form__grid">
         <div class="form__row"><label class="lbl" for="card-column">${escapeHTML(B.columnLabel)}</label><select class="sel" id="card-column">${boardOptions(board.columns.map(c => [c.id, c.name]), card.columnId)}</select></div>
         <div class="form__row"><label class="lbl" for="card-assignee">${escapeHTML(B.assigneeLabel)}</label><select class="sel" id="card-assignee">${boardPeopleOptions(card.assignee)}</select></div>
@@ -146,7 +156,7 @@ async function openCardDrawer(cardId, back = null) {
       <header class="board-detail__head"><h3 class="board-detail__title">${escapeHTML(B.checklist)}${items.length ? ` <span class="tag">${ticked}/${items.length}</span>` : ''}</h3></header>
       ${items.length ? `<div class="meter board-detail__meter" aria-hidden="true"><div class="meter__fill" style="width:${pct}%"></div></div>` : ''}
       ${items.length ? `<ul class="checklist">${items.map(i => `<li class="checklist__item"><label class="form__check"><input type="checkbox" data-check="${escapeHTML(i.id)}"${i.done ? ' checked' : ''} /><span class="checklist__text${i.done ? ' is-done' : ''}">${escapeHTML(i.text)}</span></label><button class="checklist__rm" type="button" data-check-rm="${escapeHTML(i.id)}" aria-label="${escapeHTML(B.removeItem({ item: i.text }))}">×</button></li>`).join('')}</ul>` : ''}
-      <form class="checklist__add" novalidate><input class="inp" maxlength="300" placeholder="${escapeHTML(B.addItemPlaceholder)}" aria-label="${escapeHTML(B.addItemPlaceholder)}" autocomplete="off" /><button class="btn btn--sm" type="submit">${escapeHTML(B.addItem)}</button></form>`;
+      <form class="checklist__add" novalidate><input class="inp" maxlength="500" placeholder="${escapeHTML(B.addItemPlaceholder)}" aria-label="${escapeHTML(B.addItemPlaceholder)}" autocomplete="off" /><button class="btn btn--sm" type="submit">${escapeHTML(B.addItem)}</button></form>`;
     $$('[data-check]', host).forEach(box => box.addEventListener('change', () => {
       saveChecklist(card.checklist.map(i => (i.id === box.dataset.check ? { ...i, done: box.checked } : i)));
     }));
@@ -222,7 +232,7 @@ async function openCardDrawer(cardId, back = null) {
     }
   });
   $('[data-card-delete]', body).addEventListener('click', async () => {
-    if (!await confirmDialog({ title: B.deleteCardTitle, body: B.deleteCardBody({ key, title: card.title }), okLabel: B.deleteCard })) return;
+    if (!await confirmDialog({ title: B.deleteCardTitle, body: B.deleteCardBody({ key, title: boardShortTitle(card.title, 120) }), okLabel: B.deleteCard })) return;
     try {
       await api(`/admin/api/board/cards/${encodeURIComponent(card.id)}`, { method: 'DELETE' });
       toast(B.cardDeleted({ key }));
@@ -234,14 +244,14 @@ async function openCardDrawer(cardId, back = null) {
   });
 
   openDrawer({
-    title: card.title,
+    title: boardShortTitle(card.title),
     eyebrow: `${board.name} · ${key}`,
     body,
     back,
     saveLabel: B.saveCard,
     autofocus: false,
     onSave: async () => {
-      const title = $('#card-title', body).value.trim();
+      const title = boardOneLine($('#card-title', body).value);
       if (!title) {
         $('#card-title', body).setAttribute('aria-invalid', 'true');
         $('#card-title', body).focus();
@@ -292,7 +302,7 @@ async function newCardDrawer({ tenantId = null, back = null } = {}) {
       <div class="form__grid">
         <div class="form__row"><label class="lbl" for="new-card-board">${escapeHTML(B.boardLabel)}</label><select class="sel" id="new-card-board">${boardOptions(boardState.boards.map(b => [b.id, b.name]), first.id)}</select></div>
         <div class="form__row"><label class="lbl" for="new-card-column">${escapeHTML(B.columnLabel)}</label><select class="sel" id="new-card-column"></select></div>
-        <div class="form__row form__row--full"><label class="lbl" for="new-card-title">${escapeHTML(B.titleLabel)} <span class="req">*</span></label><input class="inp" id="new-card-title" maxlength="200" /></div>
+        <div class="form__row form__row--full"><label class="lbl" for="new-card-title">${escapeHTML(B.titleLabel)} <span class="req">*</span></label><textarea class="txt" id="new-card-title" rows="3" maxlength="500"></textarea></div>
         <div class="form__row"><label class="lbl" for="new-card-assignee">${escapeHTML(B.assigneeLabel)}</label><select class="sel" id="new-card-assignee">${boardPeopleOptions(boardState.me)}</select></div>
         <div class="form__row"><label class="lbl" for="new-card-priority">${escapeHTML(B.priorityLabel)}</label><select class="sel" id="new-card-priority">${boardPriorityOptions('MEDIUM')}</select></div>
         <div class="form__row"><label class="lbl" for="new-card-due">${escapeHTML(B.dueLabel)} <span class="opt">${escapeHTML(B.optional)}</span></label><input class="inp" id="new-card-due" type="date" /></div>
@@ -313,7 +323,7 @@ async function newCardDrawer({ tenantId = null, back = null } = {}) {
     back,
     saveLabel: B.createCard,
     onSave: async () => {
-      const title = $('#new-card-title', body).value.trim();
+      const title = boardOneLine($('#new-card-title', body).value);
       if (!title) {
         $('#new-card-title', body).setAttribute('aria-invalid', 'true');
         $('#new-card-title', body).focus();

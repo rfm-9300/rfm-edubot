@@ -296,12 +296,12 @@ class BoardService(
         private const val MAX_BOARD_DESCRIPTION = 2_000
         private const val MAX_COLUMNS = 12
         private const val MAX_COLUMN_NAME = 40
-        private const val MAX_TITLE = 200
+        private const val MAX_TITLE = 500
         private const val MAX_DESCRIPTION = 20_000
         private const val MAX_LABELS = 10
         private const val MAX_LABEL = 30
         private const val MAX_CHECKLIST = 100
-        private const val MAX_CHECKLIST_ITEM = 300
+        private const val MAX_CHECKLIST_ITEM = 500
         private const val MAX_ITEM_ID = 40
         private const val MAX_COMMENT = 5_000
 

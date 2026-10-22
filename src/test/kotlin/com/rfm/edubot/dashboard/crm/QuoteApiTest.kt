@@ -19,6 +19,7 @@ import org.junit.jupiter.api.BeforeAll
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNotEquals
 
 /** `/app/api/crm/quotes` over HTTP: its gates (invoicing one needs invoices too), isolation, and the error contract. */
 class QuoteApiTest {
@@ -81,6 +82,55 @@ class QuoteApiTest {
         assertFalse(id in b.get("$base?clientId=$clientId").ids())
         assertEquals("client not found", b.post(base) { quote(clientId) }.error, "a's client isn't b's to quote")
         assertEquals("PENDENTE", a.get("$base/$id").text("status"))
+    }
+
+    @Test
+    fun `deleting a quote needs the quotes module, and another company's quote is never found`() = dashboardApiTest(mongo) {
+        val a = company()
+        val b = company()
+        val off = company(listOf(DashboardModules.CLIENTS))
+        val clientId = client(a)
+        val id = a.post(base) { quote(clientId) }.text("id")!!
+        assertEquals(HttpStatusCode.Forbidden, off.delete("$base/$id").status)
+        assertEquals(HttpStatusCode.NotFound, b.delete("$base/$id").status)
+        assertEquals(HttpStatusCode.OK, a.get("$base/$id").status, "b's attempt left a's quote alone")
+        assertEquals("invalid_id", a.delete("$base/nope").error)
+        assertEquals(HttpStatusCode.NotFound, a.delete("$base/${ObjectId()}").status)
+    }
+
+    @Test
+    fun `a quote is deleted for good, and its number is not reused`() = dashboardApiTest(mongo) {
+        val a = company()
+        val clientId = client(a)
+        val first = a.post(base) { quote(clientId) }
+        val id = first.text("id")!!
+        val number = first.text("number")!!
+        val deleted = a.delete("$base/$id")
+        assertEquals(HttpStatusCode.OK, deleted.status)
+        assertEquals("true", deleted.text("deleted"))
+        assertEquals(HttpStatusCode.NotFound, a.get("$base/$id").status)
+        assertFalse(id in a.get(base).ids())
+        assertEquals(HttpStatusCode.NotFound, a.delete("$base/$id").status, "a second delete finds nothing")
+        assertNotEquals(number, a.post(base) { quote(clientId) }.text("number"))
+    }
+
+    @Test
+    fun `a quote that is invoiced or a service can't be deleted until that is cancelled`() = dashboardApiTest(mongo) {
+        val a = company()
+        val clientId = client(a)
+
+        val invoiced = a.post(base) { quote(clientId) }.text("id")!!
+        val invoice = a.post("$base/$invoiced/invoice") { put("dueDate", "2026-12-01") }.text("id")!!
+        a.delete("$base/$invoiced").let { assertEquals(HttpStatusCode.Conflict, it.status); assertEquals("already_invoiced", it.error) }
+        assertEquals(HttpStatusCode.OK, a.get("$base/$invoiced").status)
+        assertEquals(HttpStatusCode.OK, a.post("/app/api/crm/invoices/$invoice/cancel") {}.status)
+        assertEquals(HttpStatusCode.OK, a.delete("$base/$invoiced").status, "a cancelled invoice frees the quote")
+        assertEquals(HttpStatusCode.OK, a.get("/app/api/crm/invoices/$invoice").status, "the cancelled invoice stays, without its quote")
+        assertEquals(null, a.get("/app/api/crm/invoices/$invoice").text("quoteNumber"))
+
+        val serviced = a.post(base) { quote(clientId) }.text("id")!!
+        assertEquals(HttpStatusCode.Created, a.post("$base/$serviced/service") {}.status)
+        a.delete("$base/$serviced").let { assertEquals(HttpStatusCode.Conflict, it.status); assertEquals("already_serviced", it.error) }
     }
 
     @Test

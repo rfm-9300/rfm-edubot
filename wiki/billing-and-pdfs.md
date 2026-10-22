@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-10-22
 ---
 
 # Quotes, invoices, payments and PDFs
@@ -41,6 +41,15 @@ Rodrigo asked that a quote can also be converted to a service, besides an invoic
   agents' step), and the quote detail says the project bills it. A quote invoiced or serviced first
   can't be measured (`quote_billed`). Measurement invoices carry `projectId` and `measurementId`
   (the invoice record links back to the project) and no `quoteId`.
+- **A quote can be deleted** (`DELETE /app/api/crm/quotes/{id}`, `QuoteService.delete`, 2026-10-22, from the
+  board card TES-3): for good, with no event, and its number (`ORC-…`) isn't reused. It is refused while
+  the quote is billed, by the same `billedBy` as a conversion, so the answers are the same
+  `409 already_invoiced` / `already_serviced` / `already_measured`; cancelling or deleting the invoice or
+  the Serviços row frees it. The quote detail only offers Delete when it finds none of them. What is left
+  pointing at a deleted quote: a cancelled invoice or Serviços row (`quoteId`) and a project made from it
+  (a project copies the quote's lines as its own contract). Every reader already treats a missing quote as
+  "no number", and the invoice and project drawers show their "open the quote" button only when
+  `quoteNumber` is set.
 - The invoice that bills the row carries no `quoteId` (it bills services), so the quote detail finds it
   through the row's `invoiceId` and shows both, and the row shows "From quote …" or opens the quote.
 - API: `POST /app/api/crm/quotes/{id}/service` (`performedAt`, `name`, both optional; needs the Quotes

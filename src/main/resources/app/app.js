@@ -22,6 +22,8 @@ async function bootAuthed() {
   const accountBtn = $('#btn-account');
   accountBtn.hidden = !(state.me.user && state.me.principalType === 'tenant');
   accountBtn.textContent = accountInitials(state.me.user?.email);
+  // An operator who opened this company from the backoffice gets a way back, one click away.
+  $('#btn-backoffice').hidden = state.me.principalType !== 'operator-imp';
   // An employee's session reaches only its own pages: no bell, no Home figures.
   if (!isPortal()) startNotifications();
   if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';

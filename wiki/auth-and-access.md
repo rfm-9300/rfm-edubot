@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-19
+updated: 2026-10-22
 ---
 
 # Sign-in and access
@@ -11,6 +11,7 @@ Who can sign in where, and what a session may open: Google sign-in for the backo
 - Dashboard access is decided once per request, in the `jwt("dashboard")` validator, by `DashboardAccessPolicy`; the design and its reasons are in [architecture-review.md](architecture-review.md).
 - What a signed-in company may open is decided by module gates around the routes (`requireModules`), and a test fails for an `/app/api` route without one: [dashboard-api.md](dashboard-api.md).
 - An employee's own sign-in (`TENANT_EMPLOYEE`) reaches only `/app/api/me`, `/app/api/account/*` and `/app/api/portal/*`: [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md).
+- An operator who opens a company from the backoffice (`POST /admin/api/tenants/{slug}/impersonate`, an `operator-imp` token kept in `localStorage.dashboardToken`) sees a "← Backoffice" link in `/app`'s top bar (`#btn-backoffice`, only for that principal type, 2026-10-22, card TES-1). It is a plain link to `/backoffice/`: the operator's own `adminToken` is a separate `localStorage` key, so they come back signed in, for as long as that token lasts. On phones it keeps only its arrow (the top bar hides other ghost links there).
 - Switching company re-issues the token with the same expiry: [tenants-and-companies.md](tenants-and-companies.md).
 
 ## Google sign-in (Firebase project `thebotslab`, since 2026-09-28)

@@ -1,5 +1,6 @@
 package com.rfm.edubot.dashboard.crm
 
+import com.rfm.edubot.crm.QuoteDeletion
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.api.CreateQuoteRequest
@@ -22,6 +23,7 @@ import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
@@ -31,7 +33,7 @@ import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.Serializable
 
 /**
- * `/crm/quotes`: quotes, their status and PDF, and billing one, by invoicing it (which needs invoices too) or by turning
+ * `/crm/quotes`: quotes, their status and PDF, deleting one that isn't billed, and billing one, by invoicing it (which needs invoices too) or by turning
  * it into a Serviços row (which needs services too).
  */
 internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
@@ -68,6 +70,14 @@ internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
                     ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid status"))
                 val quote = crm.quoteService.setStatus(call.idParam("id"), status) ?: return@patch call.respond(HttpStatusCode.NotFound)
                 call.respond(quote.dto(crm.clients.findById(quote.clientId)))
+            }
+            delete("/quotes/{id}") {
+                val crm = deps.crm(call)
+                when (val outcome = crm.quoteService.delete(call.idParam("id"))) {
+                    is QuoteDeletion.Deleted -> call.respond(mapOf("deleted" to true))
+                    QuoteDeletion.NotFound -> call.respond(HttpStatusCode.NotFound)
+                    is QuoteDeletion.Refused -> call.respondQuoteRefused(outcome.reason)
+                }
             }
             requireModules(DashboardModules.INVOICES) {
                 post("/quotes/{id}/invoice") {

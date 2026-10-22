@@ -128,6 +128,8 @@ async function openQuoteDetail(id) {
   // A project's measurements bill its quote as the work gets done.
   const billable = quote.status !== 'CANCELLED' && !invoice && !service && !quote.projectId;
   const canProject = hasModule('projects') && quote.status !== 'CANCELLED' && !project;
+  // A quote that bills something stays: cancel or delete its invoice or service first, which frees it.
+  const canDelete = !invoice && !service && !quote.projectId;
   const canConvert = hasModule('invoices') && billable;
   const canService = hasModule('services') && billable;
   const clientLink = hasModule('clients') && !!quote.clientId && !linksBackTo(`client:${quote.clientId}`);
@@ -156,6 +158,7 @@ async function openQuoteDetail(id) {
       ${service && !linksBackTo(`service:${service.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-service>${escapeHTML(STR.bookingsOpenService)}</button>` : ''}
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
       ${project && !linksBackTo(`project:${project.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(STR.detailOpenDoc({ number: project.number }))}</button>` : ''}
+      ${canDelete ? `<button class="btn btn--sm btn--ghost" type="button" data-q-delete>${escapeHTML(STR.quoteDelete)}</button>` : ''}
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
   $('[data-q-service]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteServiceForm(quote)));
@@ -191,9 +194,25 @@ async function openQuoteDetail(id) {
       toast(quoteBilledText(err) || STR.quoteConvertFailed);
     }
   });
+  $('[data-q-delete]', form)?.addEventListener('click', () => deleteQuote(quote));
   wirePdfButtons(form);
   openDrawer(quote.number, form);
   mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
+}
+
+async function deleteQuote(quote) {
+  const ok = await confirmDialog({ title: STR.quoteDeleteTitle({ number: quote.number }), body: STR.quoteDeleteBody, okLabel: STR.quoteDelete });
+  if (!ok) return;
+  try {
+    await api(`/app/api/crm/quotes/${encodeURIComponent(quote.id)}`, { method: 'DELETE' });
+    closeDrawer();
+    await loadModule('quotes').catch(() => {});
+    render();
+    toast(STR.quoteDeleted({ number: quote.number }));
+  } catch (err) {
+    // Another tab may have billed the quote since this detail opened.
+    if (err?.message !== 'unauthorized') toast(quoteBilledText(err) || STR.quoteDeleteFailed);
+  }
 }
 
 // Another tab may have billed the quote since this detail opened.

@@ -363,6 +363,9 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("projectId", projectId))
     }
 
+    /** Removes the quote for good, returning it; null when there was none. Its number isn't reused. */
+    suspend fun delete(id: ObjectId): Quote? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toQuote()
+
     data class ClientQuoteTotal(val clientId: ObjectId, val clientName: String, val clientNumber: String, val totalCents: Long, val quoteCount: Int)
 
     suspend fun sumByClient(): List<ClientQuoteTotal> {
