@@ -51,6 +51,7 @@ data class SubjectContext(val variables: JsonObject, val label: String?, val cli
  * guards see live data (the invoice may have been paid meanwhile).
  */
 class AgentContextBuilder(private val mongo: MongoModule, private val clock: () -> Instant) {
+    private val buildingSubjects = BuildingSubjects(mongo)
 
     suspend fun build(
         tenant: Tenant,
@@ -265,6 +266,11 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
                 }
                 Loaded(withClient("email", variables, tenant, client, today, formatter), email.subject.ifBlank { email.from }, client?.id, client?.automationPaused ?: false)
             }
+            SubjectTypes.PROJECT, SubjectTypes.SITE_LOG, SubjectTypes.SITE_ISSUE, SubjectTypes.CHANGE_ORDER, SubjectTypes.MEASUREMENT ->
+                id?.let { buildingSubjects.load(tenant, subject.type, it, today, formatter) }?.let { found ->
+                    val client = found.client?.let { "client" to clientVariables(tenant, it, today, formatter, withActivity = false) }
+                    Loaded(found.variables + listOfNotNull(client), found.label, found.client?.id, found.client?.automationPaused ?: false)
+                }
             else -> null
         } ?: Loaded(emptyMap(), null, null, false, exists = false)
     }

@@ -6,10 +6,12 @@ import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
+import com.rfm.edubot.building.model.ChangeApproval
 import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.building.model.ChangeOrderKind
 import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.ContractLine
+import com.rfm.edubot.building.model.DecidedVia
 import com.rfm.edubot.building.model.IssueEvent
 import com.rfm.edubot.building.model.IssueKind
 import com.rfm.edubot.building.model.IssuePriority
@@ -20,8 +22,10 @@ import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.PhaseProgressChange
 import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.ProjectPhase
+import com.rfm.edubot.building.model.ProjectReport
 import com.rfm.edubot.building.model.ProjectShare
 import com.rfm.edubot.building.model.ProjectStatus
+import com.rfm.edubot.building.model.RetentionRelease
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
@@ -69,6 +73,10 @@ class ProjectRepository(mongo: MongoModule, private val tenantId: ObjectId) {
 
     suspend fun forQuote(quoteId: ObjectId): List<Project> = collection.find(scoped(Filters.eq("quoteId", quoteId))).toList().map { it.toProject() }
 
+    /** The projects that have any of the time clock's [siteIds]. */
+    suspend fun forSites(siteIds: Collection<ObjectId>): List<Project> =
+        if (siteIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("siteIds", siteIds.distinct()))).toList().map { it.toProject() }
+
     suspend fun count(): Long = collection.countDocuments(Filters.eq("tenantId", tenantId))
 
     suspend fun insert(project: Project) {
@@ -96,6 +104,21 @@ class ProjectRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     }
 
     suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
+
+    /** Only the watch writes it, and without a new version: nobody edits it, so it can't overwrite someone's edit. */
+    suspend fun setWatchedHealth(id: ObjectId, health: String) {
+        collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("watchedHealth", health))
+    }
+
+    /**
+     * A cancelled or deleted invoice gives back the retention release it billed, so the amount is held again. A new
+     * version, so an edit read before can't write the release back.
+     */
+    suspend fun releaseRetentionInvoice(invoiceId: ObjectId): Int =
+        collection.updateMany(
+            scoped(Filters.eq("retentionReleases.invoiceId", invoiceId)),
+            Updates.combine(Updates.pull("retentionReleases", Document("invoiceId", invoiceId)), Updates.inc("version", 1)),
+        ).modifiedCount.toInt()
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 
@@ -320,6 +343,12 @@ class ChangeOrderRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     suspend fun replace(change: ChangeOrder): ChangeOrder? =
         change.takeIf { collection.replaceOne(scoped(Filters.eq("_id", change.id)), change.toDocument()).matchedCount > 0 }
 
+    /** Stores [next] only while the stored change still has [expected]'s status and update time. */
+    suspend fun replace(expected: ChangeOrder, next: ChangeOrder): ChangeOrder? {
+        val guard = Filters.and(Filters.eq("_id", expected.id), Filters.eq("status", expected.status.name), Filters.eq("updatedAt", expected.updatedAt.toDate()))
+        return next.takeIf { collection.replaceOne(scoped(guard), next.toDocument()).matchedCount > 0 }
+    }
+
     suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
 
     suspend fun deleteForProject(projectId: ObjectId) {
@@ -331,6 +360,12 @@ class ChangeOrderRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     companion object {
         const val COLLECTION = "building.change_orders"
         const val MAX_LIST = 1000
+
+        /** The change a client's approval link opens, whatever its company. */
+        suspend fun byApprovalToken(mongo: MongoModule, token: String): ChangeOrder? {
+            if (token.isBlank() || token.length > 100) return null
+            return mongo.database.getCollection<Document>(COLLECTION).find(Filters.eq("approval.token", token)).firstOrNull()?.toChange()
+        }
     }
 }
 
@@ -405,6 +440,58 @@ class MeasurementRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     }
 }
 
+class ProjectReportRepository(mongo: MongoModule, private val tenantId: ObjectId) {
+    private val collection = mongo.database.getCollection<Document>(COLLECTION)
+
+    /** Newest first. */
+    suspend fun list(projectId: ObjectId, limit: Int = MAX_LIST): List<ProjectReport> =
+        collection.find(scoped(Filters.eq("projectId", projectId))).sort(Document("postedAt", -1)).limit(limit).toList().map { it.toReport() }
+
+    suspend fun findById(id: ObjectId): ProjectReport? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toReport()
+
+    suspend fun insert(report: ProjectReport) {
+        collection.insertOne(report.toDocument())
+    }
+
+    suspend fun replace(report: ProjectReport): ProjectReport? =
+        report.takeIf { collection.replaceOne(scoped(Filters.eq("_id", report.id)), report.toDocument()).matchedCount > 0 }
+
+    suspend fun delete(id: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
+
+    suspend fun deleteForProject(projectId: ObjectId) {
+        collection.deleteMany(scoped(Filters.eq("projectId", projectId)))
+    }
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    private fun ProjectReport.toDocument(): Document = Document("_id", id)
+        .append("tenantId", tenantId)
+        .append("projectId", projectId)
+        .append("from", from.toString())
+        .append("to", to.toString())
+        .append("text", text)
+        .append("postedBy", postedBy)
+        .append("postedAt", postedAt.toDate())
+        .append("updatedAt", updatedAt.toDate())
+
+    private fun Document.toReport() = ProjectReport(
+        id = getObjectId("_id"),
+        tenantId = getObjectId("tenantId"),
+        projectId = getObjectId("projectId"),
+        from = day("from") ?: LocalDate.fromEpochDays(0),
+        to = day("to") ?: LocalDate.fromEpochDays(0),
+        text = getString("text").orEmpty(),
+        postedBy = getString("postedBy").orEmpty(),
+        postedAt = getInstant("postedAt"),
+        updatedAt = getInstant("updatedAt"),
+    )
+
+    companion object {
+        const val COLLECTION = "building.reports"
+        const val MAX_LIST = 200
+    }
+}
+
 private inline fun <reified E : Enum<E>> enumOr(value: String?, default: E): E =
     value?.let { raw -> enumValues<E>().firstOrNull { it.name == raw } } ?: default
 
@@ -445,6 +532,16 @@ private fun Project.toDocument(): Document = Document("_id", id)
         },
     )
     .append("retentionPct", retentionPct)
+    .append(
+        "retentionReleases",
+        retentionReleases.map {
+            Document("id", it.id).append("invoiceId", it.invoiceId).append("amountCents", it.amountCents)
+                .append("releasedBy", it.releasedBy).append("releasedAt", it.releasedAt.toDate())
+        },
+    )
+    .append("costBudgetCents", costBudgetCents)
+    .append("laborRateCents", laborRateCents)
+    .append("siteIds", siteIds)
     .append("manualProgressPct", manualProgressPct)
     .append(
         "phases",
@@ -456,6 +553,7 @@ private fun Project.toDocument(): Document = Document("_id", id)
         },
     )
     .append("share", share?.let { Document("token", it.token).append("enabled", it.enabled).append("createdAt", it.createdAt.toDate()) })
+    .append("watchedHealth", watchedHealth)
     .append("version", version)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -488,6 +586,18 @@ private fun Document.toProject(): Project {
             )
         },
         retentionPct = double("retentionPct") ?: 0.0,
+        retentionReleases = docs("retentionReleases").map {
+            RetentionRelease(
+                id = it.getString("id").orEmpty(),
+                invoiceId = it.objectId("invoiceId"),
+                amountCents = it.getLongValue("amountCents"),
+                releasedBy = it.getString("releasedBy").orEmpty(),
+                releasedAt = it.getInstant("releasedAt"),
+            )
+        },
+        costBudgetCents = (get("costBudgetCents") as? Number)?.toLong(),
+        laborRateCents = (get("laborRateCents") as? Number)?.toLong(),
+        siteIds = getList("siteIds", ObjectId::class.java).orEmpty(),
         manualProgressPct = int("manualProgressPct") ?: 0,
         phases = docs("phases").map {
             ProjectPhase(
@@ -502,6 +612,7 @@ private fun Document.toProject(): Project {
             )
         },
         share = share?.let { ProjectShare(it.getString("token").orEmpty(), it.getBoolean("enabled") ?: false, it.getInstant("createdAt")) },
+        watchedHealth = getString("watchedHealth"),
         version = (get("version") as? Number)?.toLong() ?: 0,
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
@@ -647,6 +758,8 @@ private fun ChangeOrder.toDocument(): Document = Document("_id", id)
     .append("decidedAt", decidedAt?.toDate())
     .append("decidedBy", decidedBy)
     .append("decisionNote", decisionNote)
+    .append("decidedVia", decidedVia?.name)
+    .append("approval", approval?.let { Document("token", it.token).append("createdAt", it.createdAt.toDate()) })
     .append("createdBy", createdBy)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -667,6 +780,8 @@ private fun Document.toChange() = ChangeOrder(
     decidedAt = instantOrNull("decidedAt"),
     decidedBy = getString("decidedBy"),
     decisionNote = getString("decisionNote"),
+    decidedVia = enumOrNull<DecidedVia>(getString("decidedVia")),
+    approval = get("approval", Document::class.java)?.let { ChangeApproval(it.getString("token").orEmpty(), it.getInstant("createdAt")) },
     createdBy = getString("createdBy").orEmpty(),
     createdAt = getInstant("createdAt"),
     updatedAt = getInstant("updatedAt"),

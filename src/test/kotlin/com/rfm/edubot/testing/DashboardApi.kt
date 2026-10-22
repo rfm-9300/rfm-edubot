@@ -59,6 +59,7 @@ import io.ktor.client.request.forms.submitFormWithBinaryData
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.Headers
 import io.ktor.http.HttpHeaders
@@ -102,11 +103,23 @@ internal class Reply(val status: HttpStatusCode, val body: String) {
     override fun toString() = "$status $body"
 }
 
+/** A file the API sends (a PDF, a photo): its status, its type and its bytes as they came. */
+internal class Download(val status: HttpStatusCode, val contentType: ContentType?, val bytes: ByteArray, val headers: Headers)
+
 /** A company with an admin and a member signed in, plus a token an operator would open it with. */
 internal class TestCompany(val tenant: Tenant, val admin: DashboardUser, val token: String, val memberToken: String, val operatorToken: String)
 
-/** The server's routes as the application mounts them, with doubles for the outside world, over MongoDB. */
-internal class DashboardApi(val mongo: MongoModule, private val http: HttpClient, private val config: AppConfig.AdminConfig, val routes: RoutingRoot) {
+/**
+ * The server's routes as the application mounts them, with doubles for the outside world, over MongoDB; [model]
+ * answers every AI call.
+ */
+internal class DashboardApi(
+    val mongo: MongoModule,
+    private val http: HttpClient,
+    private val config: AppConfig.AdminConfig,
+    val routes: RoutingRoot,
+    val model: FakeModel,
+) {
     val tenants = TenantRepository(mongo)
     val users = DashboardUserRepository(mongo)
 
@@ -146,13 +159,18 @@ internal class DashboardApi(val mongo: MongoModule, private val http: HttpClient
     }
 
     /** [bytes] posted as a file named [fileName], the way a browser's file input sends it, with the form's [fields]. */
-    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap()): Reply {
+    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap(), token: String = this.token): Reply {
         val form = formData {
             append("file", bytes, Headers.build { append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"") })
             fields.forEach { (name, value) -> append(name, value) }
         }
         val response = http.submitFormWithBinaryData(path, form) { bearerAuth(token) }
         return Reply(response.status, response.bodyAsText())
+    }
+
+    suspend fun TestCompany.download(path: String, token: String = this.token): Download {
+        val response = http.request(path) { bearerAuth(token) }
+        return Download(response.status, response.contentType(), response.readRawBytes(), response.headers)
     }
 
     suspend fun TestCompany.get(path: String, token: String = this.token) = call("GET", path, token)
@@ -183,22 +201,29 @@ internal fun dashboardApiTest(mongo: MongoModule, block: suspend DashboardApi.()
     val tenants = TenantRepository(mongo)
     val users = DashboardUserRepository(mongo)
     val lookup: EmployeeLookup = { tenantId, id -> EmployeeRepository(mongo, tenantId).findById(id) }
+    val model = FakeModel()
     lateinit var root: RoutingRoot
     application {
         configureSerialization()
         configureStatusPages()
         configureWebSockets()
         configureAdminAuth(runtime, tenants, users, lookup)
-        root = routing { installRoutes(testServices(mongo, runtime, tenants, users, lookup)) }
+        root = routing { installRoutes(testServices(mongo, runtime, tenants, users, lookup, model)) }
     }
     startApplication()
-    DashboardApi(mongo, client, config, root).block()
+    DashboardApi(mongo, client, config, root, model).block()
 }
 
 /** The application's services, with nothing reaching Meta, Google or OpenRouter. */
-private fun testServices(mongo: MongoModule, runtime: RuntimeConfig, tenants: TenantRepository, users: DashboardUserRepository, lookup: EmployeeLookup): AppServices {
+private fun testServices(
+    mongo: MongoModule,
+    runtime: RuntimeConfig,
+    tenants: TenantRepository,
+    users: DashboardUserRepository,
+    lookup: EmployeeLookup,
+    model: FakeModel,
+): AppServices {
     val offline = HttpClient(MockEngine) { engine { addHandler { respond("{}", HttpStatusCode.ServiceUnavailable) } } }
-    val model = FakeModel()
     val deduplication = DeduplicationService(mongo)
     val webChannels = WebChannelRegistry()
     val pipelines = TenantPipelineFactory(mongo, model.client, deduplication, offline, runtime, webChannels)

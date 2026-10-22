@@ -2538,6 +2538,10 @@ body.share-page { display: block; }
 .share__none { margin: 0; padding: 14px 16px; color: var(--ink-mute); font-size: 13px; }
 .share__none--flush { padding: 0; }
 .share__foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 16px; color: var(--ink-mute); font-size: 12px; }
+/* The client's answer to a change: two buttons side by side, then the decision once given. */
+.share__decide { display: flex; flex-wrap: wrap; gap: 8px; }
+.share__decided { display: grid; justify-items: start; gap: 8px; }
+.share__decided-by { margin: 0; color: var(--ink-2); font-size: 13.5px; }
 .share-viewer { width: min(960px, calc(100vw - 32px)); max-height: calc(100vh - 32px); padding: 12px; border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-lg); color: var(--ink); }
 /* The drawer's and the confirm's scrim, darker: a photo is looked at on its own. */
 .share-viewer::backdrop { background: rgba(8, 9, 11, 0.72); backdrop-filter: blur(3px); }
@@ -2578,6 +2582,7 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 .notice { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); color: var(--ink-2); font-size: 13px; }
 .notice--warn { border-color: transparent; background: var(--warn-soft); color: var(--ink); }
 .notice--info { border-color: transparent; background: var(--info-soft); color: var(--ink); }
+.notice[hidden] { display: none; }
 .notice__text { display: grid; flex: 1; gap: 3px; min-width: 0; }
 .notice__text strong { font-size: 13.5px; }
 .notice__list { margin: 2px 0 0; padding-left: 18px; }
@@ -2669,7 +2674,9 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 .agents-settings { display: grid; gap: 16px; }
 .agents-settings .form { display: grid; gap: 12px; }
 .panel__body > .dash-facts { margin-top: 0; }
-.panel__body > .dash-facts > div:first-child { padding-top: 0; border-top: 0; }
+/* A stacked list loses its first rule; a row's cells sit side by side, so they keep theirs unless the row opens the body. */
+.panel__body > .dash-facts:not(.dash-facts--row) > div:first-child,
+.panel__body > .dash-facts--row:first-child > div { padding-top: 0; border-top: 0; }
 
 @media (max-width: 620px) {
   .cond-row { grid-template-columns: 1fr 1fr; }
@@ -3234,7 +3241,7 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash-facts dt { color: var(--ink-mute); font-size: 13px; }
 .dash-facts dd { min-width: 0; margin: 0; color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .dash-facts--row { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 0 16px; }
-.dash-facts--row > div { flex-direction: column; align-items: flex-start; gap: 2px; padding: 12px 0 0; }
+.dash-facts--row > div { flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; padding: 12px 0 0; }
 .dash-facts--row dd { font-size: 14px; text-align: left; }
 /* Long values (a channel's name and id): on phones each label sits above its value. */
 @media (max-width: 560px) {

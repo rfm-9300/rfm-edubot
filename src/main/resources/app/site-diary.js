@@ -46,7 +46,8 @@ function renderSiteDiary(root) {
     }
     rows += diaryRowHtml(e);
   });
-  const tools = projectFilterHtml(state.diaryProject, 'data-diary-project');
+  const tools = projectFilterHtml(state.diaryProject, 'data-diary-project')
+    + (state.diaryProject ? `<button class="btn btn--sm btn--ghost" type="button" data-diary-pdf>${escapeHTML(BLD.diaryPdf)}</button>` : '');
   root.innerHTML = hero(labels['site-diary'], BLD.diaryDesc, statCards(stats)) + board + bldPanel({
     title: state.diaryProject ? BLD.diaryAllEntries : BLD.diaryRecent,
     tag: shown.length,
@@ -66,10 +67,47 @@ function renderSiteDiary(root) {
     try { await loadModule('site-diary'); } catch { toast(STR.loadFailed); }
     render();
   });
+  $('[data-diary-pdf]', root)?.addEventListener('click', () => {
+    const project = state.projects.find(p => p.id === state.diaryProject);
+    if (project) openDiaryPdfForm(project);
+  });
   $$('[data-diary]', root).forEach(row => {
     row.addEventListener('click', () => openDiaryEntry(row.dataset.diary));
     row.addEventListener('keydown', e => { if (e.key === 'Enter') openDiaryEntry(row.dataset.diary); });
   });
+}
+
+const DIARY_PDF_MAX_DAYS = 92;
+
+// A project's diary for a period, as a PDF: up to three months, with some of each day's photos.
+function openDiaryPdfForm(project) {
+  const to = todayKey();
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(BLD.diaryPdfIntro)}</p>
+    <div class="form__grid">
+      <div class="form__row"><label class="lbl" for="dp-from">${escapeHTML(BLD.diaryPdfFrom)}</label><input class="inp inp--mono" id="dp-from" type="date" required value="${addDayKey(to, -29)}" max="${to}" /></div>
+      <div class="form__row"><label class="lbl" for="dp-to">${escapeHTML(BLD.diaryPdfTo)}</label><input class="inp inp--mono" id="dp-to" type="date" required value="${to}" max="${to}" /></div>
+    </div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(BLD.diaryPdfDownload)}</button></div>`;
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const from = $('#dp-from', form).value;
+    const until = $('#dp-to', form).value;
+    if (!from || !until || until < from) return toast(bt('errors.invalid_range'));
+    if (dayNumber(until) - dayNumber(from) >= DIARY_PDF_MAX_DAYS) return toast(bt('errors.range_too_long'));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await openPdf(`/app/api/building/diary/pdf?projectId=${encodeURIComponent(project.id)}&from=${from}&to=${until}`, `${project.number} ${labels['site-diary']} ${from} ${until}`);
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      toast(STR.errorPdf({ msg: err.message }));
+    }
+  });
+  openDrawer(BLD.diaryPdfTitle, form, false, { eyebrow: projectLabel(project) });
 }
 
 // The phases a diary entry can move, each with the progress it has now.
@@ -84,11 +122,14 @@ function diaryPhasesHtml(project) {
     </div></section>`;
 }
 
-// `opts.projectId` and `opts.day` start a new entry on that project and day (today by default).
+// `opts.projectId` and `opts.day` start a new entry on that project and day (today by default). `opts.site` is the
+// site manager's own project on My sites, with its `opts.phases`, written through their portal; `opts.onSaved` runs
+// after a save there.
 async function openDiaryForm(entry = null, opts = {}) {
-  await ensureBuildingProjects().catch(() => {});
+  const site = opts.site || null;
+  if (!site) await ensureBuildingProjects().catch(() => {});
   const e = entry || {};
-  const projectId = entry ? entry.projectId : opts.projectId || state.diaryProject || '';
+  const projectId = site ? site.id : entry ? entry.projectId : opts.projectId || state.diaryProject || '';
   const form = document.createElement('form');
   form.className = 'form';
   let weather = e.weather || '';
@@ -97,7 +138,7 @@ async function openDiaryForm(entry = null, opts = {}) {
     <textarea class="txt" id="${id}" maxlength="4000"${rows}>${escapeHTML(value || '')}</textarea></div>`;
   form.innerHTML = `
     <div class="form__grid">
-      ${entry ? '' : projectSelectHtml('dy-project', projectId)}
+      ${entry || site ? '' : projectSelectHtml('dy-project', projectId)}
       <div class="form__row"><label class="lbl" for="dy-day">${escapeHTML(BLD.thDay)}</label><input class="inp inp--mono" id="dy-day" type="date" max="${todayKey()}" value="${escapeHTML(e.day || opts.day || todayKey())}" /></div>
     </div>
     <div class="form__row"><span class="lbl" id="dy-weather-label">${escapeHTML(BLD.thWeather)}</span>
@@ -127,7 +168,8 @@ async function openDiaryForm(entry = null, opts = {}) {
     phasesBox.innerHTML = '';
     project = null;
     if (!id) return;
-    try { project = await api(`/app/api/building/projects/${encodeURIComponent(id)}`); } catch { return; }
+    if (site) project = { phases: opts.phases || [] };
+    else try { project = await api(`/app/api/building/projects/${encodeURIComponent(id)}`); } catch { return; }
     phasesBox.innerHTML = diaryPhasesHtml(project);
   };
   loadPhases(projectId);
@@ -143,7 +185,7 @@ async function openDiaryForm(entry = null, opts = {}) {
   bindDrawerClose(form);
   form.addEventListener('submit', async ev => {
     ev.preventDefault();
-    const target = entry ? entry.projectId : $('#dy-project', form).value;
+    const target = site ? site.id : entry ? entry.projectId : $('#dy-project', form).value;
     if (!target) return toast(BLD.chooseProject);
     const workDone = $('#dy-work', form).value.trim();
     if (!workDone) return toast(bt('errors.work_required'));
@@ -166,27 +208,28 @@ async function openDiaryForm(entry = null, opts = {}) {
     };
     if (entry) payload.clear = ['temperatureC', 'workers', 'lostHours'].filter(k => payload[k] == null);
     else payload.projectId = target;
+    const siteBase = site ? `/app/api/portal/sites/${encodeURIComponent(site.id)}/diary` : '';
+    const url = site ? (entry ? `${siteBase}/${encodeURIComponent(entry.id)}` : siteBase) : (entry ? `/app/api/building/diary/${encodeURIComponent(entry.id)}` : '/app/api/building/diary');
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
-      const saved = await api(entry ? `/app/api/building/diary/${encodeURIComponent(entry.id)}` : '/app/api/building/diary', {
-        method: entry ? 'PATCH' : 'POST',
-        body: JSON.stringify(payload),
-      });
+      const saved = await api(url, { method: entry ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
       if (queued.length) await uploadProjectPhotos(target, queued, { logId: saved.id, shared: payload.shared ? 'true' : 'false' });
       toast(entry ? BLD.diaryUpdated : BLD.diarySaved);
       closeDrawer();
-      refreshBuildingPage();
+      if (opts.onSaved) opts.onSaved(saved);
+      else refreshBuildingPage();
     } catch (err) {
       btn.disabled = false;
-      if (err?.code === 'day_taken' && err.detail) {
+      if (err?.code === 'day_taken' && err.detail && !site) {
         toast(bt('errors.day_taken'));
         return openDiaryEntry(err.detail);
       }
       toast(buildingErrorText(err, BLD.saveFailed));
     }
   });
-  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { eyebrow: entry ? projectLabel({ number: entry.projectNumber, name: entry.projectName }) : labels['site-diary'] });
+  const eyebrow = site ? projectLabel(site) : entry ? projectLabel({ number: entry.projectNumber, name: entry.projectName }) : labels['site-diary'];
+  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { eyebrow });
 }
 
 async function openDiaryEntry(id) {

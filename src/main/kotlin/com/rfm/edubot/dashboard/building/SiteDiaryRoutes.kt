@@ -1,5 +1,6 @@
 package com.rfm.edubot.dashboard.building
 
+import com.rfm.edubot.building.Outcome
 import com.rfm.edubot.building.api.SiteLogRequest
 import com.rfm.edubot.building.api.logDtos
 import com.rfm.edubot.dashboard.DashboardDeps
@@ -22,7 +23,7 @@ import kotlinx.datetime.minus
 
 /**
  * `/building/diary`: the site diary, one entry per project and day. Without a project or dates the list is the
- * company's last [DEFAULT_DAYS] days.
+ * company's last [DEFAULT_DAYS] days. `/building/diary/pdf` prints a project's diary for a period.
  */
 internal object SiteDiaryRoutes : DashboardFeature(DashboardModules.SITE_DIARY) {
     private const val DEFAULT_DAYS = 30
@@ -38,6 +39,17 @@ internal object SiteDiaryRoutes : DashboardFeature(DashboardModules.SITE_DIARY) 
                 val to = params["to"]?.takeIf { it.isNotBlank() }?.let { dateValue(it, "to") }
                 if (from != null && to != null && to < from) return@get call.respond(HttpStatusCode.BadRequest, ErrorBody("invalid_range"))
                 call.respond(b.records.logDtos(b.records.logs.list(projectId, from, to)))
+            }
+            get("/diary/pdf") {
+                val b = deps.building(call)
+                val params = call.request.queryParameters
+                val from = params["from"]?.takeIf { it.isNotBlank() }?.let { dateValue(it, "from") }
+                val to = params["to"]?.takeIf { it.isNotBlank() }?.let { dateValue(it, "to") }
+                when (val outcome = b.documents.diary(call.projectFilter(), from, to, b.template, b.tenant.locale, b.stamp)) {
+                    is Outcome.Done -> call.respondPdf(outcome.value)
+                    is Outcome.Refused -> call.respondRefused(outcome)
+                    Outcome.NotFound -> call.respond(HttpStatusCode.NotFound)
+                }
             }
             post("/diary") {
                 val b = deps.building(call)

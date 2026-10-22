@@ -103,6 +103,8 @@ data class Payment(
     val employeeId: ObjectId? = null,
     /** Client the expense was for, if any; the client record and Financeiro count it as spent on that client. */
     val clientId: ObjectId? = null,
+    /** Construction project the expense was for, if any; its costs count it. */
+    val projectId: ObjectId? = null,
     val items: List<LineItem>,
     val notes: String? = null,
     val status: PaymentStatus = PaymentStatus.PENDING,

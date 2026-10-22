@@ -4,7 +4,9 @@ import com.rfm.edubot.building.api.MeasurementInvoiceRequest
 import com.rfm.edubot.building.api.MeasurementInvoicedDto
 import com.rfm.edubot.building.api.MeasurementRequest
 import com.rfm.edubot.building.api.MeasurementUpdateRequest
+import com.rfm.edubot.building.api.RetentionInvoicedDto
 import com.rfm.edubot.building.api.measurementDtos
+import com.rfm.edubot.building.api.projectDtos
 import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
@@ -24,7 +26,7 @@ import io.ktor.server.routing.route
 
 /**
  * `/building/measurements`: a project's measurements, from draft to approved to invoiced. Invoicing one needs
- * invoices too.
+ * invoices too, as does invoicing a finished project's retention (`/building/projects/{id}/retention/invoice`).
  */
 internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMENTS) {
     override fun Route.routes(deps: DashboardDeps) {
@@ -54,6 +56,11 @@ internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMEN
                 val toDate = request.lines.orEmpty().associate { it.key to it.toDateQty }
                 call.respondOutcome(b.measurements.update(id, periodEnd, request.notes, toDate, b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
             }
+            get("/measurements/{id}/pdf") {
+                val b = deps.building(call)
+                val document = b.documents.measurement(call.idParam("id"), b.template, b.tenant.locale, b.stamp) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respondPdf(document)
+            }
             post("/measurements/{id}/approve") {
                 val b = deps.building(call)
                 call.respondOutcome(b.measurements.approve(call.idParam("id"), b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
@@ -69,6 +76,14 @@ internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMEN
                     val dueDate = dateValue(call.receive<MeasurementInvoiceRequest>().dueDate.trim(), "dueDate")
                     call.respondOutcome(b.measurements.invoice(id, dueDate, b.tenant.locale, b.stamp), HttpStatusCode.Created) { done ->
                         MeasurementInvoicedDto(b.records.measurementDtos(listOf(done.measurement)).single(), done.invoice.id.toHexString(), done.invoice.number)
+                    }
+                }
+                post("/projects/{id}/retention/invoice") {
+                    val b = deps.building(call)
+                    val id = call.idParam("id")
+                    val dueDate = dateValue(call.receive<MeasurementInvoiceRequest>().dueDate.trim(), "dueDate")
+                    call.respondOutcome(b.measurements.invoiceRetention(id, dueDate, b.tenant.locale, b.stamp), HttpStatusCode.Created) { done ->
+                        RetentionInvoicedDto(b.records.projectDtos(listOf(done.project), b.stamp.today, detail = true).single(), done.invoice.id.toHexString(), done.invoice.number)
                     }
                 }
             }

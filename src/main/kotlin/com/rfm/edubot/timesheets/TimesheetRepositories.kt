@@ -67,6 +67,11 @@ class ShiftRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     suspend fun byIds(ids: Collection<ObjectId>): List<Shift> =
         if (ids.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("_id", ids))).toList().map { it.toShift() }
 
+    /** Shifts clocked at any of [siteIds], however long ago, in start order. */
+    suspend fun atSites(siteIds: Collection<ObjectId>): List<Shift> =
+        if (siteIds.isEmpty()) emptyList()
+        else collection.find(scoped(Filters.`in`("siteId", siteIds.distinct()))).sort(Document("startAt", 1)).limit(MAX_LIST).toList().map { it.toShift() }
+
     suspend fun pendingCount(): Long =
         collection.countDocuments(scoped(Filters.and(Filters.eq("status", ShiftStatus.CLOSED.name), Filters.eq("review.status", ReviewStatus.PENDING.name))))
 

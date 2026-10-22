@@ -51,6 +51,8 @@ object NotificationKinds {
     const val TIME_MISSED_CLOCK_OUT = "time_missed_clock_out"
     /** The bot handed a conversation to the team; its subject is the conversation. */
     const val CONVERSATION_HANDOFF = "conversation_handoff"
+    /** A client approved or rejected a change order from its link; its subject is the change. */
+    const val CHANGE_ORDER_DECIDED = "change_order_decided"
 }
 
 class NotificationRepository(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {

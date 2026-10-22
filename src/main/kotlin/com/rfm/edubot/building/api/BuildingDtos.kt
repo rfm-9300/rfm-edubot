@@ -75,6 +75,15 @@ internal data class ProjectDto(
     /** Approved measurements still to invoice, net of retention. */
     val toInvoiceEur: Double,
     val retainedEur: Double,
+    /** What the invoiced measurements kept back and wasn't given back yet: invoiced to the client once the project is finished. */
+    val retentionHeldEur: Double,
+    val retentionReleasedEur: Double,
+    /** Only on one project's record. */
+    val retentionReleases: List<RetentionReleaseDto>,
+    val costBudgetEur: Double?,
+    val laborRateEur: Double?,
+    /** The time clock's work sites of the project. */
+    val siteIds: List<String>,
     val phaseCount: Int,
     val latePhases: Int,
     val openIssues: Int,
@@ -91,6 +100,88 @@ internal data class ProjectDto(
     val createdAt: String,
     val updatedAt: String,
 )
+
+/** A project's costs tab: [bills] without payments and [labour] without the time clock are null. */
+@Serializable
+internal data class ProjectCostsDto(
+    val currentContractEur: Double,
+    val measuredEur: Double,
+    val invoicedEur: Double,
+    val receivedEur: Double,
+    val bills: CostBillsDto?,
+    val labour: CostLabourDto?,
+    val costBudgetEur: Double?,
+    val totalCostEur: Double,
+    /** The costs as a share of the budget, past 100 when over it. */
+    val budgetUsedPct: Double?,
+    val expectedMarginEur: Double,
+    val expectedMarginPct: Double?,
+    val marginToDateEur: Double,
+    val marginToDatePct: Double?,
+)
+
+@Serializable
+internal data class CostBillsDto(val totalEur: Double, val paidEur: Double, val toPayEur: Double, val byPayee: List<CostPayeeDto>, val payments: List<CostPaymentDto>)
+
+/** [kind] is `supplier` or `employee`. */
+@Serializable
+internal data class CostPayeeDto(val kind: String, val id: String?, val name: String, val totalEur: Double, val paidEur: Double, val count: Int)
+
+@Serializable
+internal data class CostPaymentDto(val id: String, val number: String, val payeeName: String, val dueDate: String, val status: String, val totalEur: Double)
+
+/** [costEur] is null without a labour rate. */
+@Serializable
+internal data class CostLabourDto(val hours: Double, val rateEur: Double?, val costEur: Double?, val byEmployee: List<CostHoursDto>, val sites: List<CostSiteDto>)
+
+@Serializable
+internal data class CostHoursDto(val employeeId: String, val name: String, val hours: Double, val costEur: Double?)
+
+@Serializable
+internal data class CostSiteDto(val id: String, val name: String)
+
+/** A project on its site manager's My sites page: no money anywhere. */
+@Serializable
+internal data class MySiteDto(
+    val id: String,
+    val number: String,
+    val name: String,
+    val address: String?,
+    val status: String,
+    val progressPct: Int,
+    val plannedEnd: String?,
+    /** Today's diary entry, once written. */
+    val todayEntryId: String?,
+    val openIssues: Int,
+)
+
+@Serializable
+internal data class MySitePhaseDto(val id: String, val name: String, val progressPct: Int, val state: String)
+
+/** [canDiary] and [canIssues] follow the company's modules; the diary is its last two weeks. */
+@Serializable
+internal data class MySiteDetailDto(
+    val site: MySiteDto,
+    val today: String,
+    val phases: List<MySitePhaseDto>,
+    val diary: List<SiteLogDto>,
+    val issues: List<IssueDto>,
+    val photos: List<PhotoDto>,
+    val canDiary: Boolean,
+    val canIssues: Boolean,
+)
+
+@Serializable
+internal data class ReportDraftDto(val from: String, val to: String, val text: String, val sharedDays: Int)
+
+@Serializable
+internal data class ReportDto(val id: String, val projectId: String, val from: String, val to: String, val text: String, val postedBy: String, val postedAt: String, val updatedAt: String)
+
+@Serializable
+internal data class SharedReportDto(val from: String, val to: String, val text: String, val postedAt: String)
+
+@Serializable
+internal data class RetentionReleaseDto(val invoiceId: String?, val invoiceNumber: String?, val amountEur: Double, val releasedBy: String, val releasedAt: String)
 
 @Serializable
 internal data class PhotoDto(
@@ -188,6 +279,10 @@ internal data class ChangeOrderDto(
     val decidedAt: String?,
     val decidedBy: String?,
     val decisionNote: String?,
+    /** `TEAM` or `CLIENT_LINK`, once decided. */
+    val decidedVia: String?,
+    /** The client's approval link (`/app/share/change/{token}`), from when it was sent until it goes back to draft. */
+    val approvalToken: String?,
     /** A measurement measured some of its lines: it can't go back to draft. */
     val measured: Boolean,
     val createdBy: String,
@@ -249,6 +344,9 @@ internal data class MeasurementDto(
 @Serializable
 internal data class MeasurementInvoicedDto(val measurement: MeasurementDto, val invoiceId: String, val invoiceNumber: String)
 
+@Serializable
+internal data class RetentionInvoicedDto(val project: ProjectDto, val invoiceId: String, val invoiceNumber: String)
+
 /** What the client's page shows: progress, the plan and what the team chose to share. No money, issues or people. */
 @Serializable
 internal data class SharedProjectDto(
@@ -265,6 +363,8 @@ internal data class SharedProjectDto(
     val actualStart: String?,
     val actualEnd: String?,
     val phases: List<SharedPhaseDto>,
+    /** The updates the team posted, newest first. */
+    val reports: List<SharedReportDto>,
     val updates: List<SharedUpdateDto>,
     val photos: List<SharedPhotoDto>,
     val updatedAt: String,
@@ -278,3 +378,28 @@ internal data class SharedUpdateDto(val day: String, val weather: String?, val w
 
 @Serializable
 internal data class SharedPhotoDto(val id: String, val caption: String?, val day: String)
+
+/** What the client's approval page shows: the change as sent, and the decision once there is one. */
+@Serializable
+internal data class SharedChangeDto(
+    val company: String,
+    val hasLogo: Boolean,
+    val locale: String,
+    val projectNumber: String,
+    val projectName: String,
+    val address: String?,
+    val number: String,
+    val title: String,
+    val description: String?,
+    val kind: String,
+    val items: List<LineItemDto>,
+    /** Negative for work taken out. */
+    val totalEur: Double,
+    val daysImpact: Int,
+    val status: String,
+    val sentAt: String?,
+    val decidedAt: String?,
+    val decidedBy: String?,
+    val decidedVia: String?,
+    val decisionNote: String?,
+)

@@ -1,10 +1,23 @@
 ---
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Quotes, invoices, payments and PDFs
 
 Documents and money: quotes and invoices, installments and cancelling, payments to suppliers and employees, and the generated PDFs. The Serviços rows that invoices bill are in [catalog-services-bookings.md](catalog-services-bookings.md).
+
+## Construction projects (2026-10-21)
+
+What Building ([building-projects.md](building-projects.md)) adds to the CRM's documents:
+
+- **A payment can name the project it was for** (`projectId`, like `clientId`: on create, or `PATCH
+  /crm/payments/{id}/project`), with the projects module; the project's costs count it, and deleting
+  the project leaves the payment for no project.
+- **Invoices carry a `projectId`** when Building made them: a measurement's (with its
+  `measurementId`) and the retention's release. Cancelling or deleting either frees the work through an
+  `InvoicedWork` hook, so `crm/` never imports `building/`.
+- **Building writes its own PDFs** (`building/BuildingPdf`, measurements and the diary) in the
+  company's language; `PdfGenerator` below stays the quotes' and invoices', Portuguese-only.
 
 ## A quote becomes an invoice or a service, once (2026-10-20)
 

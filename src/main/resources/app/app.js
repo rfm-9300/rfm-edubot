@@ -70,6 +70,7 @@ function renderNav() {
     bookings: pendingBookings || (state.fetched.bookings ? weekBookings().filter(b => b.status !== 'CANCELLED').length : o.calendar?.thisWeek) || 0,
     instagram: pendingIg || (state.instagram?.media || []).length,
     [PORTAL_TAB]: state.portal.submissions.filter(s => s.status === 'PENDING').length,
+    [SITES_TAB]: state.mySites.filter(s => !s.todayEntryId).length,
   };
   const agentsWaiting = window.AgentsUI?.badge() || (o.agents ? { count: (o.agents.pendingApprovals || 0) + (o.agents.openTasks || 0), alert: (o.agents.pendingApprovals || 0) > 0 } : null);
   if (agentsWaiting?.count) counts.agents = agentsWaiting.count;
@@ -82,7 +83,7 @@ function renderNav() {
   Object.assign(counts, building.counts);
   Object.assign(alerts, building.alerts);
   const groups = [
-    { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB] },
+    { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB, SITES_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
@@ -166,6 +167,7 @@ async function loadModule(tab) {
     state.portal = { submissions, clients, catalog };
   }
   if (tab === HOURS_TAB) await window.TimesheetsUI.loadMine();
+  if (tab === SITES_TAB) state.mySites = await api('/app/api/portal/sites');
   if (tab === 'timesheets') await window.TimesheetsUI.loadTeam();
   if (tab === 'payments') {
     const [payments, suppliers, employees] = await Promise.all([
@@ -301,6 +303,7 @@ function render() {
   if (state.active === 'email') return window.EmailUI.render(root);
   if (state.active === PORTAL_TAB) return renderMyServices(root);
   if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
+  if (state.active === SITES_TAB) return renderMySites(root);
   if (state.active === 'timesheets') return window.TimesheetsUI.renderTeam(root);
   if (state.active === 'projects') return renderProjects(root);
   if (state.active === 'site-diary') return renderSiteDiary(root);
@@ -364,9 +367,16 @@ function recordStatusLabel(entity, status) {
   if (entity === 'invoice') return invoiceStatusLabel(status);
   if (entity === 'payment') return paymentStatusLabel(status);
   if (entity === 'booking') return bookingStatusLabel(status);
+  if (entity === 'project') return projectStatusLabel(status);
+  if (entity === 'site_issue' || entity === 'issue') return issueStatusLabel(status);
+  if (entity === 'change_order' || entity === 'change') return changeStatusLabel(status);
+  if (entity === 'measurement') return measurementStatusLabel(status);
   return status;
 }
-const AGENT_SUBJECT_MODULES = { client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations', email: 'email' };
+const AGENT_SUBJECT_MODULES = {
+  client: 'clients', quote: 'quotes', invoice: 'invoices', payment: 'payments', booking: 'bookings', service: 'services', conversation: 'conversations', email: 'email',
+  project: 'projects', site_log: 'site-diary', site_issue: 'site-issues', change_order: 'change-orders', measurement: 'measurements',
+};
 const AGENT_SUBJECT_OPENERS = {
   client: id => openClientDrawer(id),
   quote: id => openQuoteDetail(id),
@@ -374,9 +384,17 @@ const AGENT_SUBJECT_OPENERS = {
   payment: id => openPaymentDetail(id),
   booking: id => openBookingById(id),
   service: id => openServiceDetail(id),
+  project: id => openProjectDrawer(id),
+  site_log: id => openDiaryEntry(id),
+  site_issue: id => openIssueDetail(id),
+  change_order: id => openChangeDetail(id),
+  measurement: id => openMeasurementDetail(id),
 };
-// Trail keys are `${type}:${id}` like subjects, so a run opened from its own record doesn't link back to it.
-const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) && !linksBackTo(`${subject.type}:${subject.id}`);
+// Trail keys are `${type}:${id}` like subjects (Building's drawers use shorter types), so a run opened from its own
+// record doesn't link back to it.
+const AGENT_SUBJECT_TRAIL = { site_log: 'diary', site_issue: 'issue', change_order: 'change' };
+const canOpenAgentSubject = subject => !!subject && hasModule(AGENT_SUBJECT_MODULES[subject.type]) &&
+  !linksBackTo(`${AGENT_SUBJECT_TRAIL[subject.type] || subject.type}:${subject.id}`);
 async function openAgentSubject(subject, back) {
   if (!canOpenAgentSubject(subject)) return;
   if (subject.type === 'conversation') {

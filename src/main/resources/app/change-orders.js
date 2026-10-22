@@ -78,6 +78,7 @@ async function openChangeForm(change = null, opts = {}) {
     </div>
     ${li.html}
     <p class="hint" data-change-kind-hint>${escapeHTML(kind === 'OMISSION' ? BLD.changeOmissionHint : BLD.changeAdditionHint)}</p>
+    ${c.status === 'SENT' ? `<p class="hint">${escapeHTML(BLD.changeEditSentHint)}</p>` : ''}
     <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(change ? BLD.save : BLD.changeSave)}</button></div>`;
   li.wire(form, { initial: (c.items || []).map(it => ({ description: it.description, quantity: it.quantity, unit: it.unit, unitPriceEur: it.unitPriceEur })) });
   $$('[data-change-kind]', form).forEach(b => b.addEventListener('click', () => {
@@ -100,7 +101,7 @@ async function openChangeForm(change = null, opts = {}) {
     btn.disabled = true;
     try {
       await api(change ? `/app/api/building/changes/${encodeURIComponent(change.id)}` : '/app/api/building/changes', { method: change ? 'PATCH' : 'POST', body: JSON.stringify(payload) });
-      toast(change ? BLD.changeUpdated : BLD.changeSaved);
+      toast(!change ? BLD.changeSaved : change.status === 'SENT' ? BLD.changeUpdatedDraft : BLD.changeUpdated);
       closeDrawer();
       refreshBuildingPage();
     } catch (err) {
@@ -138,6 +139,22 @@ function openChangeDecision(change, status, back) {
   openFrom(back, () => openDrawer(status === 'APPROVED' ? BLD.changeRecordApproval : BLD.changeRecordRejection, form, false, { eyebrow: `${change.number} · ${change.title}` }));
 }
 
+const changeApprovalUrl = token => `${location.origin}/app/share/change/${encodeURIComponent(token)}`;
+
+// While a change is sent, the link its client approves or rejects it from, to copy or send by WhatsApp.
+function changeLinkPanel(c, url) {
+  const text = bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: fmtEUR(c.signedEur), days: c.daysImpact, url });
+  const wa = c.clientPhone ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.changeLinkTitle)}</h2></header><div class="panel__body">
+    <p class="hint">${escapeHTML(BLD.changeLinkIntro)}</p>
+    <div class="form__row"><label class="lbl" for="co-link">${escapeHTML(BLD.changeLinkLabel)}</label><input class="inp inp--mono" id="co-link" readonly value="${escapeHTML(url)}" /></div>
+    <div class="actions">
+      <button class="btn btn--sm btn--primary" type="button" data-change-copy>${escapeHTML(bt('share.copy'))}</button>
+      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(c.clientName ? bt('share.whatsappTo', { name: c.clientName }) : bt('share.whatsapp'))}</a>
+      <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
+    </div></div></section>`;
+}
+
 async function openChangeDetail(id) {
   let change;
   try { change = await api(`/app/api/building/changes/${encodeURIComponent(id)}`); } catch { return toast(STR.loadFailed); }
@@ -145,8 +162,11 @@ async function openChangeDetail(id) {
   const c = change;
   const open = c.status === 'DRAFT' || c.status === 'SENT';
   const projectLink = !linksBackTo(`project:${c.projectId}`);
+  const link = c.status === 'SENT' && c.approvalToken ? changeApprovalUrl(c.approvalToken) : '';
+  // A change sent before the links existed has none: the message asks the client to confirm by reply.
   const message = bt('changeMessage', { number: c.number, title: c.title, project: c.projectName, amount: fmtEUR(c.signedEur), days: c.daysImpact });
-  const wa = c.clientPhone ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(message)}` : '';
+  const wa = c.clientPhone && !link ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(message)}` : '';
+  const decided = c.decidedAt ? [fmtDay(c.decidedAt), c.decidedBy, c.decidedVia === 'CLIENT_LINK' ? BLD.changeViaLink : ''].filter(Boolean).join(' · ') : '';
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
@@ -159,8 +179,9 @@ async function openChangeDetail(id) {
       { label: BLD.changeDays, value: c.daysImpact ? bt('changeDaysN', { n: c.daysImpact }) : '—' },
       { label: STR.detailCreated, value: fmtDay(c.createdAt) },
       c.sentAt ? { label: BLD.changeSentOn, value: fmtDay(c.sentAt) } : null,
-      c.decidedAt ? { label: c.status === 'REJECTED' ? BLD.changeRejectedOn : BLD.changeApprovedOn, value: `${fmtDay(c.decidedAt)}${c.decidedBy ? ` · ${c.decidedBy}` : ''}` } : null,
+      decided ? { label: c.status === 'REJECTED' ? BLD.changeRejectedOn : BLD.changeApprovedOn, value: decided } : null,
     ])}
+    ${link ? changeLinkPanel(c, link) : ''}
     ${c.description ? `<p class="panel__text">${escapeHTML(c.description)}</p>` : ''}
     ${itemsTable(c.items)}
     ${c.decisionNote ? `<p class="hint">${escapeHTML(c.decisionNote)}</p>` : ''}
@@ -186,6 +207,9 @@ async function openChangeDetail(id) {
   $('[data-change-project]', body)?.addEventListener('click', async () => {
     await ensureBuildingProjects().catch(() => {});
     openFrom(here, () => openProjectDrawer(c.projectId, 'changes'));
+  });
+  $('[data-change-copy]', body)?.addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(link); toast(bt('share.copied')); } catch { $('#co-link', body).select(); }
   });
   $('[data-change-send]', body)?.addEventListener('click', () => setStatus('SENT', BLD.changeSent));
   $('[data-change-draft]', body)?.addEventListener('click', () => setStatus('DRAFT', BLD.changeReopened));

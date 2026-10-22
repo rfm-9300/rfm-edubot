@@ -1,10 +1,16 @@
 package com.rfm.edubot.dashboard.building
 
+import com.rfm.edubot.ai.AiClient
+import com.rfm.edubot.ai.TenantUsageRepository
+import com.rfm.edubot.building.BuildingDocument
+import com.rfm.edubot.building.BuildingDocuments
 import com.rfm.edubot.building.BuildingRecords
 import com.rfm.edubot.building.ChangeOrderService
 import com.rfm.edubot.building.MeasurementService
 import com.rfm.edubot.building.Outcome
 import com.rfm.edubot.building.PhotoStore
+import com.rfm.edubot.building.ProjectCostsService
+import com.rfm.edubot.building.ProjectReportService
 import com.rfm.edubot.building.ProjectService
 import com.rfm.edubot.building.SiteDiaryService
 import com.rfm.edubot.building.SiteIssueService
@@ -18,16 +24,22 @@ import com.rfm.edubot.http.enumValue
 import com.rfm.edubot.http.idValue
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.tenant.model.DocumentTemplate
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.timesheets.zone
+import io.ktor.http.ContentDisposition
+import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.response.header
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import kotlinx.serialization.Serializable
 import org.bson.types.ObjectId
 
 /** One company's Building records and services for one request, stamped with who is asking and when. */
-internal class TenantBuilding(mongo: MongoModule, val ctx: DashboardContext, storagePath: () -> String) {
+internal class TenantBuilding(private val mongo: MongoModule, val ctx: DashboardContext, storagePath: () -> String) {
     val tenant: Tenant = ctx.tenant
     val records = BuildingRecords(mongo, tenant.id)
     val stamp = Stamp(ctx.user?.email ?: OPERATOR, SystemClock.now(), tenant.zone())
@@ -39,6 +51,11 @@ internal class TenantBuilding(mongo: MongoModule, val ctx: DashboardContext, sto
     val issues: SiteIssueService get() = SiteIssueService(records)
     val changes: ChangeOrderService get() = ChangeOrderService(records)
     val measurements: MeasurementService get() = MeasurementService(records)
+    val documents: BuildingDocuments get() = BuildingDocuments(records, store)
+    val costs: ProjectCostsService get() = ProjectCostsService(records)
+
+    fun reports(ai: AiClient): ProjectReportService = ProjectReportService(records, ai, TenantUsageRepository(mongo, tenant.id))
+    val template: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)
 
     private companion object {
         /** Who a write is stamped with when the platform's operator opened the company. */
@@ -67,6 +84,12 @@ internal suspend inline fun <T, reified R : Any> ApplicationCall.respondOutcome(
 
 internal suspend fun ApplicationCall.respondRefused(refused: Outcome.Refused) =
     respond(if (refused.conflict) HttpStatusCode.Conflict else HttpStatusCode.BadRequest, ErrorBody(refused.error, refused.detail))
+
+/** [document] to open in the browser, under its file name. */
+internal suspend fun ApplicationCall.respondPdf(document: BuildingDocument) {
+    response.header(HttpHeaders.ContentDisposition, ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, document.fileName).toString())
+    respondBytes(document.bytes, ContentType.Application.Pdf)
+}
 
 /** `?projectId=`: the records of one project. */
 internal fun ApplicationCall.projectFilter(): ObjectId? =

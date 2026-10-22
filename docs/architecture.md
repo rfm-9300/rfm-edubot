@@ -478,9 +478,10 @@ Optional `employees` module (`crm.employees`, numbers `COL-nnn`): people on the 
 ### Employee sign-in and registered services
 
 With the `employees` module on, an employee can sign in to `/app` to their own pages
-(`EmployeePortal.pages`): **My hours** with `timesheets` (the [time clock](#time-clock)), and **My
+(`EmployeePortal.pages`): **My hours** with `timesheets` (the [time clock](#time-clock)), **My
 services** with `services`, where they register the work they did and the team approves it into an
-ordinary Serviços row (`dashboard/EmployeeWorkRoutes.kt`). Without either page, employees can't sign in.
+ordinary Serviços row (`dashboard/EmployeeWorkRoutes.kt`), and **My sites** with the site diary or
+issues, for the projects they manage ([Building](#building)). Without any page, employees can't sign in.
 
 - **Sign-in.** Admins (and operators opening the dashboard) give an employee a sign-in from the
   employee's record: `POST`/`PATCH`/`DELETE /app/api/crm/employees/{id}/access` (email and password;
@@ -632,12 +633,48 @@ each a dashboard feature under `/app/api/building`:
   decided by the client; approved ones change the contract, the revised end and what measurements bill.
 - **Measurements** (`measurements`): autos de medição against the contract and approved additions,
   quantities to date, retention held, invoiced as CRM invoices.
-- **The client's page** `/app/share/{token}` shows progress, the plan and the shared diary days and
-  photos, no money or issues, while the link is on and the company active.
+- **The client's page** `/app/share/{token}` shows progress, the updates the team posted, the plan and
+  the shared diary days and photos, no money or issues, while the link is on and the company active.
+
+Phase 2 (PR #89) adds:
+
+- **Events for agents**: the services append `project.*`, `site_log.*`, `site_issue.*`,
+  `change_order.*` and `measurement.*` events relating the project and its client; the hourly
+  `ProjectHealthWatch` (lease `building-health-watch`) appends `project.at_risk` / `project.delayed`;
+  the agents' context builder loads each Building subject with its project and client.
+- **The client approves a change** at `/app/share/change/{token}` (`ChangeApprovalRoutes`): once, while
+  sent, as the `CLIENT` actor; the bell rings.
+- **The retention** is invoiced back from a finished project (`/building/projects/{id}/retention/invoice`).
+- **PDFs** of a measurement and of a project's diary (`BuildingPdf`), in the company's language.
+- **Job costing** (`/building/projects/{id}/costs`): payments that name the project, hours clocked at
+  the project's work sites at its labour rate, the budget and the margins. Building reads the time
+  clock; the time clock never imports Building.
+- **Client updates** (`ProjectReportRoutes`): the AI drafts one from what the client may read, within
+  the monthly token budget (usage source `building`), and the team posts it to the client's page.
+- **My sites** (`MySitesRoutes`, `/app/api/portal/sites`): an employee page for the projects they
+  manage, writing the diary, photos and issues through the same services.
 
 Photos are shrunk in the browser and stored on the PDF volume (`<PDF_STORAGE_PATH>/<slug>/building/`),
 outside the Mongo backups. Home shows a Projects card and Needs-you rows for delayed projects, overdue
 issues, changes waiting for the client and measurements to invoice.
+
+```mermaid
+sequenceDiagram
+    participant D as Dashboard
+    participant C as Client (no account)
+    participant CS as ChangeOrderService
+    participant M as MongoDB (wabot)
+    participant E as domain_events
+    participant N as notifications
+    D->>CS: POST /building/changes/{id}/status SENT
+    CS->>M: status SENT, approval.token (32 random bytes)
+    D-->>C: the link, copied or sent by WhatsApp
+    C->>CS: POST /app/share/change/{token}/decision (name, APPROVED)
+    CS->>M: replace only over the SENT status and updatedAt it read
+    CS->>E: change_order.decided (via CLIENT_LINK, actor CLIENT)
+    CS->>N: change_order_decided, to every user
+    C->>CS: a second answer → 409 already_decided
+```
 
 ```mermaid
 sequenceDiagram
@@ -866,13 +903,13 @@ flowchart LR
 | `messages` | Full message history (user + assistant turns, text, templates and customer media by Meta media id); outbound rows carry `author`, `waMessageId`, delivery `status`/`statusAt` and Meta's error | `conversationId`, `createdAt`; unique partial `(tenantId, waMessageId)` |
 | `crm.clients` | Client records created from WhatsApp/admin workflows; `customFields` holds the values of the company's own fields by key ([Client fields](#client-fields)) | unique on `phone` |
 | `crm.quotes` | Quote records, line items, totals, PDF path; `projectId` once a project's measurements bill it | unique on `number` |
-| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments; `projectId` and `measurementId` when a measurement made it | unique on `number` |
+| `crm.invoices` | Invoice records, status/due dates, PDF path, tax office code and installments; `projectId` and `measurementId` when a measurement made it, `projectId` alone for a retention release | unique on `number`; `tenantId+projectId` |
 | `crm.client_services` | Client-attached work, optionally several `items` lines summed into its total; open rows can be billed together; `bookingId` when made by completing a booking; `employeeId` when approved from an employee's registered service | `tenantId+clientId+status`; partial `tenantId+bookingId`; partial `tenantId+employeeId` |
 | `crm.service_submissions` | Services employees registered from their own sign-in: client, day, lines, status (PENDING/APPROVED/REJECTED), the approved Serviços row (`serviceId`) or the rejection reason | `tenantId+employeeId+createdAt`; `tenantId+status+createdAt` |
 | `crm.standard_items` | Catalog services and materials: internal `id`, tenant-facing `code`, `title`, `description`, unit, price, booking flags | unique `(tenantId, id)`; unique partial `(tenantId, code)`; `tenantId+type+category` |
 | `crm.suppliers` | Vendor directory the tenant pays, with an optional free-text `type` and usual `services` | unique `(tenantId, phone)` and `(tenantId, number)` |
 | `crm.employees` | Team directory (colaboradores): payments payees, and with a sign-in, the people registering their services | unique `(tenantId, phone)` and `(tenantId, number)` |
-| `crm.payments` | Outgoing bills attached to a supplier or an employee | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `status+dueDate` |
+| `crm.payments` | Outgoing bills attached to a supplier or an employee, optionally for a client and a construction project (`projectId`) | unique `(tenantId, number)`; `tenantId+supplierId`; `tenantId+employeeId`; `tenantId+clientId`; `tenantId+projectId`; `status+dueDate` |
 | `crm.sequences` | Atomic quote/invoice/supplier/employee/payment numbering and catalog code counters | unique `(tenantId, name)` |
 | `dashboard_assistant_threads` | Persistent AI Assistant conversations scoped to tenant and dashboard user; `renamed` once the person names one | `tenantId`, `ownerKey`, `updatedAt` |
 | `dashboard_assistant_messages` | User/assistant turns, proposed changes with their arguments, preview, status and result, failed turns' `error`, and the modules an answer read (`sources`) | `tenantId`, `ownerKey`, `threadId`, `createdAt`; unique sparse `action.id` |
@@ -880,19 +917,20 @@ flowchart LR
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
 | `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
-| `timesheets.shifts` | One per shift: employee, local `day`, start/end, punches (time, channel, location and site verdict, verification, flags), breaks, worked minutes, flags, review, edit history, `version` | unique partial `(tenantId, employeeId)` where `OPEN` (`one_open_shift`); `tenantId+day`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` |
+| `timesheets.shifts` | One per shift: employee, local `day`, start/end, punches (time, channel, location and site verdict, verification, flags), breaks, worked minutes, flags, review, edit history, `version` | unique partial `(tenantId, employeeId)` where `OPEN` (`one_open_shift`); `tenantId+day`; `tenantId+siteId`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` |
 | `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
 | `timesheets.devices` | Employees' phone keys for the time clock: key id, public key, platform, name, active or revoked (by whom) | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
 | `timesheets.settings` | A company's time clock rules | `_id` = tenant id |
-| `building.projects` | Projects: status, client, quote, manager, address, planned and actual dates, `contract[]` lines, retention, `phases[]` (dates, progress, weight), the client's link (`share.token`, enabled), `version` | unique `(tenantId, number)`; `tenantId+status+updatedAt`; `tenantId+clientId`; `tenantId+quoteId`; unique partial `share.token` |
+| `building.projects` | Projects: status, client, quote, manager, address, planned and actual dates, `contract[]` lines, retention and its `retentionReleases[]`, cost budget, labour rate, the time clock's `siteIds`, `phases[]` (dates, progress, weight), the client's link (`share.token`, enabled), `watchedHealth`, `version` | unique `(tenantId, number)`; `tenantId+status+updatedAt`; `tenantId+clientId`; `tenantId+quoteId`; unique partial `share.token` |
 | `building.site_logs` | Site diary entries, one per project and company-local `day`: weather, workers, work done, other notes, lost hours, `shared`, `progress[]` (phase from → to) | unique `(tenantId, projectId, day)`; `tenantId+day` |
 | `building.photos` | Photo metadata (the files are on the PDF volume): project, diary day, issue or phase, caption, day, `shared`, paths, size | `tenantId+projectId+day`; `tenantId+logId`; `tenantId+issueId` |
 | `building.issues` | Issues: kind, priority, status, phase, employee or supplier, due date, `history[]` | unique `(tenantId, number)`; `tenantId+projectId+status`; `tenantId+status+dueDate` |
-| `building.change_orders` | Change orders: kind (addition, omission), `items[]`, total, days, status, who decided and when | unique `(tenantId, number)`; `tenantId+projectId+status` |
+| `building.change_orders` | Change orders: kind (addition, omission), `items[]`, total, days, status, who decided, when and how (`decidedVia`), the client's approval link (`approval.token`) | unique `(tenantId, number)`; `tenantId+projectId+status`; unique partial `approval.token` |
+| `building.reports` | Updates for a project's client: period, text, who posted it and when | `tenantId+projectId+postedAt` |
 | `building.measurements` | Measurements: number per project, period end, `lines[]` (quantity contracted, previous and to date), retention, totals, status, the invoice | unique `(tenantId, projectId, number)`; `tenantId+status`; `tenantId+invoiceId` |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
-| `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |
+| `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system, a client through a link), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |
 | `agents` | Agent definitions (triggers, steps, policy), status, run stats, next schedule | `tenantId+status+updatedAt`; `tenantId+eventTypes`; `status+nextFireAt` |
 | `agent_runs` | One run per trigger firing: a copy of the definition, step results, status, `resumeAt` | unique `(tenantId, agentId, dedupeKey)`; `status+resumeAt`; `tenantId+clientId+createdAt`; TTL 180 days on `finishedAt` |
 | `agent_approvals` | Actions waiting for a person, with the preview they approve | unique `(runId, stepId, seq)`; `status+expiresAt` |

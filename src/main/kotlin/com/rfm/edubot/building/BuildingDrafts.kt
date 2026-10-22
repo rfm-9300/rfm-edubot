@@ -13,6 +13,8 @@ import com.rfm.edubot.crm.model.LineItem
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
+import java.security.SecureRandom
+import java.util.Base64
 import kotlin.math.abs
 import kotlin.math.roundToLong
 
@@ -42,6 +44,11 @@ data class ProjectDraft(
     val retentionPct: Double? = null,
     val manualProgressPct: Int? = null,
     val contract: List<ContractLineDraft>? = null,
+    /** Zero clears the budget, like the rate; null keeps either. */
+    val costBudgetEur: Double? = null,
+    val laborRateEur: Double? = null,
+    /** The time clock's work sites of the project, all of them; null keeps them. */
+    val siteIds: List<String>? = null,
 )
 
 data class PhaseDraft(
@@ -129,12 +136,19 @@ internal object BuildingLimits {
     const val QUANTITY = 1_000_000_000.0
     const val PRICE_EUR = 100_000_000.0
     const val DAYS_IMPACT = 730
+    const val LABOR_RATE_EUR = 10_000.0
+    const val SITES = 20
 }
 
 internal inline fun <reified E : Enum<E>> enumOf(value: String?): E? =
     value?.trim()?.uppercase()?.let { raw -> enumValues<E>().firstOrNull { it.name == raw } }
 
 internal fun newLineId(): String = ObjectId().toHexString()
+
+private val random = SecureRandom()
+
+/** A link only its holder can open: 32 random bytes, base64url. */
+internal fun secretToken(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
 
 internal fun objectIdOrNull(raw: String): ObjectId? = raw.takeIf(ObjectId::isValid)?.let(::ObjectId)
 

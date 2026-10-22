@@ -1,6 +1,6 @@
-/* The page a client follows their project from (/app/share/{token}), with no account: progress, the plan,
-   and the diary days and photos the company shared. It reads only /app/share/{token}/data and the photos
-   under it, and speaks the company's language. */
+/* The page a client follows their project from (/app/share/{token}), with no account: progress, the updates the
+   company posted, the plan, and the diary days and photos it shared. It reads only /app/share/{token}/data and the
+   photos under it, and speaks the company's language. */
 (function () {
   const root = document.getElementById('share');
   const viewer = document.getElementById('share-viewer');
@@ -31,6 +31,12 @@
     return `<div class="progress" role="img" aria-label="${esc(`${clamp(pct)}% ${t('done')}`)}"><span class="progress__fill" data-tone="${tone}" style="width:${clamp(pct)}%"></span></div>`;
   }
 
+  // The team's update as it wrote it: a paragraph per blank line, its line breaks kept.
+  function paragraphs(text) {
+    return String(text || '').split(/\n\s*\n/).map(p => p.trim()).filter(Boolean)
+      .map(p => `<p class="panel__text">${p.split('\n').map(esc).join('<br />')}</p>`).join('');
+  }
+
   function photos(list) {
     return `<div class="photo-grid">${list.map(p => `<figure class="photo">
       <button class="photo__open" type="button" data-photo="${esc(p.id)}" aria-label="${esc(p.caption || t('photoAlt', { day: day(p.day) }))}"><img class="photo__img" src="${esc(photoUrl(p.id, true))}" alt="" loading="lazy" /></button>
@@ -51,6 +57,11 @@
       ${bar(p.progressPct, p.state === 'DONE' ? 'ok' : 'accent')}
       <span class="pill${p.state === 'DONE' ? ' pill--ok' : p.state === 'IN_PROGRESS' ? ' pill--info' : ''}">${esc(t(`phase.${p.state}`))}</span>
     </div>`).join('');
+    const short = { day: 'numeric', month: 'long' };
+    const reports = (d.reports || []).map(r => `<article class="share__update">
+      <header class="share__update-head"><strong>${esc(t('reportPeriod', { from: day(r.from, short), to: day(r.to, short) }))}</strong></header>
+      ${paragraphs(r.text)}
+    </article>`).join('');
     const updates = d.updates.map(u => `<article class="share__update">
       <header class="share__update-head"><strong>${esc(capFirst(day(u.day, { weekday: 'long', day: 'numeric', month: 'long' })))}</strong>${u.weather ? `<span class="pill">${esc(t(`weather.${u.weather}`))}</span>` : ''}</header>
       <p class="panel__text">${esc(u.workDone)}</p>
@@ -71,6 +82,7 @@
         ${bar(d.progressPct, tone)}
         ${facts.length ? `<dl class="dash-facts dash-facts--row">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
       </div></section>
+      ${reports ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('reports'))}</h2></header>${reports}</section>` : ''}
       ${phases ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('phases'))} <span class="tag">${d.phases.length}</span></h2></header>${phases}</section>` : ''}
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('updates'))}</h2></header>${updates || `<p class="share__none">${esc(t('noUpdates'))}</p>`}</section>
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('photos'))}${gallery.length ? ` <span class="tag">${gallery.length}</span>` : ''}</h2></header>

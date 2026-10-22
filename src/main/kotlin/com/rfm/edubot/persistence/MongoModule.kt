@@ -170,6 +170,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmInvoices.createIndex(Document("tenantId", 1).append("clientId", 1))
             crmInvoices.createIndex(Document("tenantId", 1).append("status", 1))
             crmInvoices.createIndex(Document("tenantId", 1).append("dueDate", 1))
+            crmInvoices.createIndex(Document("tenantId", 1).append("projectId", 1))
             crmInvoices.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 
             val crmSequences = db.getCollection<Document>("crm.sequences")
@@ -211,6 +212,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 IndexOptions().unique(true).name("one_open_shift").partialFilterExpression(Document("status", "OPEN")),
             )
             shifts.createIndex(Document("tenantId", 1).append("day", -1))
+            shifts.createIndex(Document("tenantId", 1).append("siteId", 1))
             shifts.createIndex(Document("tenantId", 1).append("employeeId", 1).append("day", -1))
             shifts.createIndex(Document("tenantId", 1).append("status", 1).append("review.status", 1))
             shifts.createIndex(Document("punches.at", 1))
@@ -243,6 +245,11 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val changeOrders = db.getCollection<Document>("building.change_orders")
             changeOrders.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
             changeOrders.createIndex(Document("tenantId", 1).append("projectId", 1).append("status", 1))
+            changeOrders.createIndex(
+                Document("approval.token", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("approval.token", Document("\$type", "string"))),
+            )
+            db.getCollection<Document>("building.reports").createIndex(Document("tenantId", 1).append("projectId", 1).append("postedAt", -1))
             val measurements = db.getCollection<Document>("building.measurements")
             measurements.createIndex(Document("tenantId", 1).append("projectId", 1).append("number", 1), IndexOptions().unique(true))
             measurements.createIndex(Document("tenantId", 1).append("status", 1))
@@ -252,6 +259,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("employeeId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("clientId", 1))
+            crmPayments.createIndex(Document("tenantId", 1).append("projectId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("status", 1).append("dueDate", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
 

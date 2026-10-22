@@ -33,6 +33,18 @@ data class ProjectPhase(
     val weight: Int? = null,
 )
 
+/**
+ * Retention given back at the end of the job: one invoice to the client of what was still held. [invoiceId] is null
+ * only while that invoice is being written; cancelling or deleting it removes the release, and the amount is held again.
+ */
+data class RetentionRelease(
+    val id: String,
+    val invoiceId: ObjectId?,
+    val amountCents: Long,
+    val releasedBy: String,
+    val releasedAt: Instant,
+)
+
 /** The link the client follows the project from. A new [token] replaces the old one, which stops working. */
 data class ProjectShare(
     val token: String,
@@ -64,9 +76,18 @@ data class Project(
     val contract: List<ContractLine> = emptyList(),
     /** Held back from each measurement until the end of the job (5 = 5%). */
     val retentionPct: Double = 0.0,
+    val retentionReleases: List<RetentionRelease> = emptyList(),
+    /** What the job is expected to cost the company, which its costs are measured against. */
+    val costBudgetCents: Long? = null,
+    /** What an hour of the team's work costs on this job; hours clocked at [siteIds] cost this much each. */
+    val laborRateCents: Long? = null,
+    /** The time clock's work sites of this job: shifts clocked at them are its hours. A site is one project's. */
+    val siteIds: List<ObjectId> = emptyList(),
     val manualProgressPct: Int = 0,
     val phases: List<ProjectPhase> = emptyList(),
     val share: ProjectShare? = null,
+    /** The health (a `ProjectHealth` name) the hourly watch last saw while the project ran, to tell when it moves. */
+    val watchedHealth: String? = null,
     val version: Long = 0,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -177,6 +198,15 @@ enum class ChangeOrderKind { ADDITION, OMISSION }
 
 enum class ChangeOrderStatus { DRAFT, SENT, APPROVED, REJECTED }
 
+/** How a change order was decided: by someone on the team, or by the client from the change's link. */
+enum class DecidedVia { TEAM, CLIENT_LINK }
+
+/**
+ * The link a sent change gives its client to approve or reject it (`/app/share/change/{token}`). It keeps
+ * showing the decision afterwards, and ends when the change goes back to draft, edited or not.
+ */
+data class ChangeApproval(val token: String, val createdAt: Instant)
+
 /**
  * A change to a project's contract. Approved, an addition's lines are measured and billed like the contract's,
  * an omission lowers the contract's value, and [daysImpact] moves the planned end.
@@ -198,6 +228,8 @@ data class ChangeOrder(
     /** Who said yes or no: the client's name, or the team member who recorded it. */
     val decidedBy: String? = null,
     val decisionNote: String? = null,
+    val decidedVia: DecidedVia? = null,
+    val approval: ChangeApproval? = null,
     val createdBy: String,
     val createdAt: Instant,
     val updatedAt: Instant,
@@ -205,6 +237,22 @@ data class ChangeOrder(
     /** What it does to the contract's value. */
     val signedCents: Long get() = if (kind == ChangeOrderKind.OMISSION) -totalCents else totalCents
 }
+
+/**
+ * A short update for the client about the work from [from] to [to], written by the team, the AI's draft or their
+ * own; the client's page shows it once posted.
+ */
+data class ProjectReport(
+    val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val projectId: ObjectId,
+    val from: LocalDate,
+    val to: LocalDate,
+    val text: String,
+    val postedBy: String,
+    val postedAt: Instant,
+    val updatedAt: Instant,
+)
 
 enum class MeasurementStatus { DRAFT, APPROVED, INVOICED }
 

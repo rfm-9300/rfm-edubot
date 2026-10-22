@@ -6,6 +6,7 @@ import com.rfm.edubot.building.api.PhaseProgressRequest
 import com.rfm.edubot.building.api.PhasesRequest
 import com.rfm.edubot.building.api.PhotoUpdateRequest
 import com.rfm.edubot.building.api.ProjectRequest
+import com.rfm.edubot.building.api.costsDto
 import com.rfm.edubot.building.api.dto
 import com.rfm.edubot.building.api.projectDtos
 import com.rfm.edubot.building.model.Project
@@ -14,6 +15,7 @@ import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.isAdmin
+import com.rfm.edubot.dashboard.requireModule
 import com.rfm.edubot.http.ApiErrors
 import com.rfm.edubot.http.ErrorBody
 import com.rfm.edubot.http.idParam
@@ -40,8 +42,9 @@ import io.ktor.utils.io.readRemaining
 import kotlinx.io.readByteArray
 
 /**
- * `/building/projects`: projects with their phases and the link their client follows them from, and their photos
- * (`/building/photos`), which the diary and issues pages upload too. Only an admin deletes a project.
+ * `/building/projects`: projects with their phases and the link their client follows them from, their costs (the
+ * bills with payments, the hours with the time clock), and their photos (`/building/photos`), which the diary and
+ * issues pages upload too. Only an admin deletes a project.
  */
 internal object ProjectRoutes : DashboardFeature(DashboardModules.PROJECTS) {
     override fun Route.routes(deps: DashboardDeps) {
@@ -67,6 +70,13 @@ internal object ProjectRoutes : DashboardFeature(DashboardModules.PROJECTS) {
                 val b = deps.building(call)
                 val id = call.idParam("id")
                 call.respondOutcome(b.projects.update(id, call.receive<ProjectRequest>().toDraft(), b.stamp)) { b.detail(it) }
+            }
+            get("/projects/{id}/costs") {
+                val b = deps.building(call)
+                val withBills = b.ctx.requireModule(DashboardModules.PAYMENTS)
+                val withHours = b.ctx.requireModule(DashboardModules.TIMESHEETS)
+                val costs = b.costs.costs(call.idParam("id"), withBills, withHours) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respond(b.records.costsDto(costs))
             }
             delete("/projects/{id}") {
                 val b = deps.building(call)
@@ -138,7 +148,7 @@ private suspend fun TenantBuilding.detail(project: Project) = records.projectDto
  * The photo the browser uploads, shrunk, as the `file` part with its `thumb`, and the photo's fields; or null
  * after answering why not: too large (413), missing (400) or not JPEG (415). The server never decodes an image.
  */
-private suspend fun ApplicationCall.receivePhoto(): SitePhotoService.Upload? {
+internal suspend fun ApplicationCall.receivePhoto(): SitePhotoService.Upload? {
     var full: ByteArray? = null
     var thumb: ByteArray? = null
     var tooLarge = false

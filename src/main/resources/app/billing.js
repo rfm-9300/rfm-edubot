@@ -34,6 +34,13 @@ function paymentClientSelect(clients, selectedId = '') {
     ${list.map(c => `<option value="${escapeHTML(c.id)}"${c.id === selectedId ? ' selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select></div>`;
 }
 
+// The construction project an expense was for, from the projects still running first.
+function paymentProjectSelect(selectedId = '') {
+  const t = CRM.payments;
+  return `<div class="form__row"><label class="lbl" for="p-project">${escapeHTML(t.project)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="p-project"><option value="">${escapeHTML(t.projectNone)}</option>${projectChoices(selectedId)}</select></div>`;
+}
+
 function payeeName(payment) {
   return payment.employeeName || payment.supplierName || '';
 }
@@ -240,8 +247,13 @@ async function openPdf(url, downloadName) {
 }
 
 function pdfButton(id, type, hasPdf, label, downloadName) {
+  return pdfUrlButton(`/app/api/crm/${type}/${encodeURIComponent(id)}/pdf`, label, downloadName);
+}
+
+// The PDF button for any PDF the API writes (wire it with wirePdfButtons).
+function pdfUrlButton(url, label, downloadName) {
   const downloadAttr = downloadName ? ` data-pdf-download="${escapeHTML(downloadName)}"` : '';
-  return `<button class="pdf" type="button" data-pdf-url="/app/api/crm/${type}/${encodeURIComponent(id)}/pdf"${downloadAttr} title="${escapeHTML(STR.viewPdf)}">
+  return `<button class="pdf" type="button" data-pdf-url="${escapeHTML(url)}"${downloadAttr} title="${escapeHTML(STR.viewPdf)}">
     <svg width="11" height="13" viewBox="0 0 11 13"><path d="M1 1 H7 L10 4 V12 H1 Z" fill="none" stroke="currentColor" stroke-width="1.2"/><text x="5.5" y="10" font-family="monospace" font-size="3.6" text-anchor="middle" fill="currentColor">PDF</text></svg>
     ${escapeHTML(label || STR.viewPdf)}</button>`;
 }

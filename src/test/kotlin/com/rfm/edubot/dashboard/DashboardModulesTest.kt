@@ -138,6 +138,13 @@ class DashboardModulesTest {
             EmployeePortal.pages(tenant(listOf(DashboardModules.CLIENTS, DashboardModules.EMPLOYEES, DashboardModules.TIMESHEETS))),
         )
         assertEquals(false, EmployeePortal.isAvailable(tenant(listOf(DashboardModules.SERVICES))))
+        assertEquals(listOf(EmployeePortal.MY_SITES), EmployeePortal.pages(tenant(listOf(DashboardModules.EMPLOYEES, DashboardModules.SITE_DIARY))))
+        assertEquals(
+            listOf(EmployeePortal.MY_HOURS, EmployeePortal.MY_SITES),
+            EmployeePortal.pages(tenant(listOf(DashboardModules.TIMESHEETS, DashboardModules.SITE_ISSUES))),
+            "a site manager with the time clock lands on their hours",
+        )
+        assertEquals(emptyList(), EmployeePortal.pages(tenant(listOf(DashboardModules.SITE_DIARY))), "My sites is an employee's page: it needs employees")
     }
 
     @Test

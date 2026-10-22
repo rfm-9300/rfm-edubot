@@ -6,13 +6,12 @@ import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.crm.QuoteServicing
 import com.rfm.edubot.crm.model.QuoteStatus
 import org.bson.types.ObjectId
-import java.security.SecureRandom
-import java.util.Base64
+import kotlin.math.roundToLong
 
 /**
  * Writes to a company's projects: the record, its phases, the link its client follows it from, and removing it
- * with its diary, issues, changes and photos. A project made from a quote takes its client, name and lines as
- * its contract, and the quote turns accepted.
+ * with its diary, issues, changes, client updates and photos. A project made from a quote takes its client, name
+ * and lines as its contract, and the quote turns accepted.
  */
 class ProjectService(private val records: BuildingRecords, private val store: PhotoStore) {
     suspend fun create(draft: ProjectDraft, quoteId: ObjectId?, stamp: Stamp): Outcome<Project> {
@@ -36,13 +35,20 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         val stored = project.copy(number = records.projects.nextNumber())
         records.projects.insert(stored)
         if (quote != null && quote.status != QuoteStatus.ACEITO) records.quoteService.setStatus(quote.id, QuoteStatus.ACEITO)
+        records.events.projectCreated(stored)
         return Outcome.Done(stored)
     }
 
     /** The contract can't change once a measurement exists, except its lines' descriptions. */
     suspend fun update(id: ObjectId, draft: ProjectDraft, stamp: Stamp): Outcome<Project> {
         val locked = records.measurements.count(id) > 0
-        return records.projects.update(id) { current -> projectFrom(draft, current.copy(updatedAt = stamp.now), stamp, locked) }.outcome()
+        var before: ProjectStatus? = null
+        val outcome = records.projects.update(id) { current ->
+            before = current.status
+            projectFrom(draft, current.copy(updatedAt = stamp.now), stamp, locked)
+        }
+        if (outcome is ProjectChange.Ok) before?.takeIf { it != outcome.project.status }?.let { records.events.projectStatusChanged(outcome.project, it) }
+        return outcome.outcome()
     }
 
     suspend fun setPhases(id: ObjectId, phases: List<PhaseDraft>, stamp: Stamp): Outcome<Project> =
@@ -64,12 +70,12 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
     /** Turns the client's link on, with the token it had before, or a new one. */
     suspend fun share(id: ObjectId, stamp: Stamp): Outcome<Project> =
         records.projects.update(id) { current ->
-            ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = true) ?: ProjectShare(shareToken(), true, stamp.now), updatedAt = stamp.now))
+            ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = true) ?: ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now))
         }.outcome()
 
     /** A new link; the old one stops working. */
     suspend fun rotateShare(id: ObjectId, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = ProjectShare(shareToken(), true, stamp.now), updatedAt = stamp.now)) }.outcome()
+        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now)) }.outcome()
 
     suspend fun stopSharing(id: ObjectId, stamp: Stamp): Outcome<Project> =
         records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = false), updatedAt = stamp.now)) }.outcome()
@@ -81,8 +87,10 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         records.logs.deleteForProject(project.id)
         records.issues.deleteForProject(project.id)
         records.changes.deleteForProject(project.id)
+        records.reports.deleteForProject(project.id)
         records.photos.deleteForProject(project.id)
         store.deleteProject(companySlug, project.id)
+        records.payments.clearProject(project.id)
         records.projects.delete(project.id)
         return Outcome.Done(Unit)
     }
@@ -114,6 +122,9 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         if (!retention.isFinite() || retention < 0 || retention > BuildingLimits.RETENTION_PCT) return bad("invalid_retention")
         val manual = draft.manualProgressPct ?: base.manualProgressPct
         if (manual !in 0..100) return bad("invalid_progress")
+        val budget = optionalCents(draft.costBudgetEur, base.costBudgetCents, BuildingLimits.PRICE_EUR, "invalid_budget").orElse { return bad(it.error) }
+        val rate = optionalCents(draft.laborRateEur, base.laborRateCents, BuildingLimits.LABOR_RATE_EUR, "invalid_rate").orElse { return bad(it.error) }
+        val siteIds = draft.siteIds?.let { raw -> sitesFrom(raw, base.id).orElse { return bad(it.error) } } ?: base.siteIds
         val contract = draft.contract?.let { lines -> contractFrom(lines, base.contract).orElse { return bad(it.error) } } ?: base.contract
         if (locked && contract.map { it.copy(description = "") } != base.contract.map { it.copy(description = "") }) return bad("contract_locked")
         if (status != base.status) {
@@ -136,15 +147,31 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
                 retentionPct = retention,
                 manualProgressPct = manual,
                 contract = contract,
+                costBudgetCents = budget,
+                laborRateCents = rate,
+                siteIds = siteIds,
             ),
         )
     }
 
-    private companion object {
-        val random = SecureRandom()
-
-        fun shareToken(): String = Base64.getUrlEncoder().withoutPadding().encodeToString(ByteArray(32).also(random::nextBytes))
+    /** The time clock's sites [raw] names, each a site of the company that no other project has. */
+    private suspend fun sitesFrom(raw: List<String>, projectId: ObjectId): Parsed<List<ObjectId>> {
+        val ids = raw.map { it.trim() }.filter { it.isNotEmpty() }.distinct().map { objectIdOrNull(it) ?: return Parsed.Bad("site_not_found") }
+        if (ids.size > BuildingLimits.SITES) return Parsed.Bad("too_many_sites")
+        if (ids.isEmpty()) return Parsed.Good(ids)
+        val known = records.sites.list().map { it.id }.toSet()
+        if (ids.any { it !in known }) return Parsed.Bad("site_not_found")
+        if (records.projects.forSites(ids).any { it.id != projectId }) return Parsed.Bad("site_in_use")
+        return Parsed.Good(ids)
     }
+}
+
+/** [value] euros as cents: null keeps [current], zero clears it, and a negative, non-finite or above-[max] value is [error]. */
+private fun optionalCents(value: Double?, current: Long?, max: Double, error: String): Parsed<Long?> = when {
+    value == null -> Parsed.Good(current)
+    !value.isFinite() || value < 0 || value > max -> Parsed.Bad(error)
+    value == 0.0 -> Parsed.Good(null)
+    else -> Parsed.Good((value * 100).roundToLong())
 }
 
 /** A project write as a service answers it: a conflict when someone else wrote first or the contract is locked. */

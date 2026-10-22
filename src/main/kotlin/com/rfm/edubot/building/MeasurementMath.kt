@@ -5,6 +5,7 @@ import com.rfm.edubot.building.model.ChangeOrderKind
 import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.MeasurementLine
+import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.crm.model.LineItem
 import kotlin.math.abs
@@ -80,6 +81,12 @@ object MeasurementMath {
 
     fun retentionCents(grossCents: Long, retentionPct: Double): Long =
         if (grossCents <= 0 || retentionPct <= 0) 0 else (grossCents * retentionPct / 100).roundToLong()
+
+    /** What [project] still holds back: the retention its invoiced measurements kept, less what it released. */
+    fun retentionHeldCents(project: Project, measurements: List<Measurement>): Long {
+        val kept = measurements.filter { it.projectId == project.id && it.status == MeasurementStatus.INVOICED }.sumOf { it.retentionCents }
+        return (kept - project.retentionReleases.sumOf { it.amountCents }).coerceAtLeast(0)
+    }
 
     fun totals(lines: List<MeasurementLine>, retentionPct: Double): Totals {
         val gross = lines.sumOf { periodCents(it) }

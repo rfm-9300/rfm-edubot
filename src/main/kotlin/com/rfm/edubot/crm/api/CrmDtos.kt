@@ -3,6 +3,7 @@ package com.rfm.edubot.crm.api
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.SupplierRepository
+import org.bson.types.ObjectId
 import com.rfm.edubot.crm.lines
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.ClientService
@@ -78,11 +79,15 @@ internal data class InvoiceDto(
     val outstandingEur: Double,
     val taxOfficeCode: String? = null,
     val installments: List<InvoiceInstallmentDto> = emptyList(),
-    /** The project and measurement the invoice bills, when a measurement made it; the label and number only on its own record. */
+    /**
+     * The project and measurement the invoice bills, when a measurement made it, or the project whose retention it
+     * gives back ([retentionRelease]); the label, number and flag only on its own record.
+     */
     val projectId: String? = null,
     val projectLabel: String? = null,
     val measurementId: String? = null,
     val measurementNumber: Int? = null,
+    val retentionRelease: Boolean = false,
 )
 
 @Serializable
@@ -128,6 +133,8 @@ internal data class PaymentDto(
     val employeeName: String = "",
     val clientId: String? = null,
     val clientName: String = "",
+    val projectId: String? = null,
+    val projectLabel: String = "",
     val status: String,
     val dueDate: String,
     val totalEur: Double,
@@ -219,7 +226,13 @@ internal fun ClientService.dto(client: Client?) = ClientServiceDto(
     quoteId = quoteId?.toHexString(),
 )
 
-internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLabel: String? = null, measurementNumber: Int? = null) = InvoiceDto(
+internal fun Invoice.dto(
+    client: Client?,
+    quoteNumber: String? = null,
+    projectLabel: String? = null,
+    measurementNumber: Int? = null,
+    retentionRelease: Boolean = false,
+) = InvoiceDto(
     id = id.toHexString(),
     number = number,
     clientId = clientId.toHexString(),
@@ -241,6 +254,7 @@ internal fun Invoice.dto(client: Client?, quoteNumber: String? = null, projectLa
     projectLabel = projectLabel,
     measurementId = measurementId?.toHexString(),
     measurementNumber = measurementNumber,
+    retentionRelease = retentionRelease,
 )
 
 internal fun Employee.dto() = EmployeeDto(
@@ -289,9 +303,17 @@ internal suspend fun List<ClientService>.dtos(clients: ClientRepository): List<C
     return map { it.dto(byId[it.clientId]) }
 }
 
-/** These payments as lists show them, with one query per kind of payee and one for the clients. */
+/**
+ * These payments as lists show them, with one query per kind of payee and one for the clients; [projectLabels]
+ * names the projects they were for.
+ */
 @JvmName("paymentDtos")
-internal suspend fun List<Payment>.dtos(suppliers: SupplierRepository, employees: EmployeeRepository, clients: ClientRepository): List<PaymentDto> {
+internal suspend fun List<Payment>.dtos(
+    suppliers: SupplierRepository,
+    employees: EmployeeRepository,
+    clients: ClientRepository,
+    projectLabels: Map<ObjectId, String> = emptyMap(),
+): List<PaymentDto> {
     val supplierById = suppliers.findByIds(mapNotNull { it.supplierId })
     val employeeById = employees.findByIds(mapNotNull { it.employeeId })
     val clientById = clients.findByIds(mapNotNull { it.clientId })
@@ -300,11 +322,12 @@ internal suspend fun List<Payment>.dtos(suppliers: SupplierRepository, employees
             supplier = payment.supplierId?.let { supplierById[it] },
             employee = payment.employeeId?.let { employeeById[it] },
             client = payment.clientId?.let { clientById[it] },
+            projectLabel = payment.projectId?.let { projectLabels[it] },
         )
     }
 }
 
-internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client: Client? = null) = PaymentDto(
+internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client: Client? = null, projectLabel: String? = null) = PaymentDto(
     id = id.toHexString(),
     number = number,
     supplierId = supplierId?.toHexString(),
@@ -313,6 +336,8 @@ internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client
     employeeName = employee?.name ?: "",
     clientId = clientId?.toHexString(),
     clientName = client?.name ?: "",
+    projectId = projectId?.toHexString(),
+    projectLabel = projectLabel.orEmpty(),
     status = status.name,
     dueDate = dueDate.toString(),
     totalEur = totalCents / 100.0,

@@ -12,7 +12,10 @@
 
   const TABS = ['agents', 'templates', 'inbox', 'activity', 'settings'];
   const RUN_GROUPS = { open: ['QUEUED', 'RUNNING', 'WAITING', 'AWAITING_APPROVAL'], attention: ['FAILED', 'NEEDS_REVIEW'], done: ['SUCCEEDED', 'CANCELLED', 'SKIPPED'] };
-  const STATUS_EVENTS = new Set(['quote.created', 'quote.status_changed', 'booking.created', 'booking.status_changed']);
+  const STATUS_EVENTS = new Set([
+    'quote.created', 'quote.status_changed', 'booking.created', 'booking.status_changed',
+    'project.status_changed', 'site_issue.status_changed', 'change_order.decided',
+  ]);
   const CHANNEL_EVENTS = new Set(['message.received', 'contact.created', 'conversation.handoff']);
   const LONG_TEXT = new Set(['text', 'message', 'detail', 'notes', 'instructions', 'body', 'brief']);
   const MAX_TRIGGERS = 5;

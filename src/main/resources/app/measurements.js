@@ -164,8 +164,10 @@ async function openMeasurementDetail(id) {
       ${canInvoice && m.clientId ? `<button class="btn btn--sm btn--accent" type="button" data-ms-invoice>${escapeHTML(bt('measurementInvoice', { amount: fmtEUR(m.netEur) }))}</button>` : ''}
       ${m.status === 'INVOICED' && m.invoiceId && hasModule('invoices') && !linksBackTo(`invoice:${m.invoiceId}`) ? `<button class="btn btn--sm" type="button" data-ms-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: m.invoiceNumber || '' }))}</button>` : ''}
       ${m.status === 'APPROVED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-reopen>${escapeHTML(BLD.measurementReopen)}</button>` : ''}
+      ${pdfUrlButton(`/app/api/building/measurements/${encodeURIComponent(m.id)}/pdf`, '', `${m.projectNumber} ${bt('measurementN', { n: m.number })}`)}
       ${m.status !== 'INVOICED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-delete>${escapeHTML(BLD.delete)}</button>` : ''}
     </div>`;
+  wirePdfButtons(body);
   const problem = $('[data-ms-problem]', body);
   // The quantities typed, the problems with them, and the totals they make, drawn as they change.
   const typed = () => m.lines.map(l => ({ line: l, qty: Number($(`[data-ml-qty="${CSS.escape(l.key)}"]`, body)?.value ?? l.toDateQty) }));

@@ -23,6 +23,7 @@ class SiteIssueService(private val records: BuildingRecords) {
             history = listOf(IssueEvent(stamp.now, stamp.who, null, issue.status, note(draft))),
         ).stamped(issue.status, stamp.now)
         records.issues.insert(stored)
+        records.events.issueCreated(stored, project)
         return Outcome.Done(stored)
     }
 
@@ -36,7 +37,9 @@ class SiteIssueService(private val records: BuildingRecords) {
         } else {
             edited
         }
-        return records.issues.replace(next)?.let { Outcome.Done(it) } ?: Outcome.NotFound
+        val stored = records.issues.replace(next) ?: return Outcome.NotFound
+        if (stored.status != issue.status) records.events.issueStatusChanged(stored, issue.status, project)
+        return Outcome.Done(stored)
     }
 
     /** The issue's photos stay in the project's gallery. */

@@ -15,7 +15,7 @@ let state = {
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterSupplierType: '',
   // pendingSubmissions: services employees registered that wait for the team (Employees page, nav count).
   // portal: an employee's own session — their submissions and what they pick from.
-  pendingSubmissions: [], portal: { submissions: [], clients: [], catalog: [] }, filterSubmissionStatus: '',
+  pendingSubmissions: [], portal: { submissions: [], clients: [], catalog: [] }, filterSubmissionStatus: '', mySites: [],
   bookings: [], bookingUpcoming: [], bookingServices: [], bookingAvailability: [], bookingView: 'week', bookingWeekStart: '', bookingStatusFilter: '',
   instagram: { connected: false, commentsEnabled: false, needsReconnect: false, username: null, unrepliedCount: 0, comments: [], media: [] },
   instagramFilter: 'needs',
@@ -54,9 +54,11 @@ const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const GOOGLE = I18N.section('app.integrations.google');
 // An employee's own sign-in (EmployeePortal on the server) has only their own pages: the services they
-// register and, with the time clock, their hours. `/me` lists the ones the company has.
+// register, with the time clock their hours, and with the site diary or issues the sites they run. `/me`
+// lists the ones the company has.
 const PORTAL_TAB = 'my-services';
 const HOURS_TAB = 'my-hours';
+const SITES_TAB = 'my-sites';
 const PORTAL = I18N.section('app.portal');
 const TIME = I18N.section('app.time');
 const SUB = I18N.section('admin.submissions');
@@ -65,8 +67,8 @@ const COLUMNS = I18N.section('app.columns');
 const isPortal = () => !!state.me?.employee;
 // Registered services become Serviços rows, so the team reviews them with both modules on.
 const submissionsOn = () => hasModule('employees') && hasModule('services');
-// Employees sign in for their services or for the time clock.
-const employeePortalOn = () => submissionsOn() || hasModule('timesheets');
+// Employees sign in for their services, the time clock, or the sites they run.
+const employeePortalOn = () => submissionsOn() || hasModule('timesheets') || (hasModule('employees') && (hasModule('site-diary') || hasModule('site-issues')));
 const googleText = (key, params) => I18N.t(`app.integrations.google.${key}`, params);
 // Server error keys the catalog doesn't know read as the fallback.
 const googleTextOr = (key, fallback) => {

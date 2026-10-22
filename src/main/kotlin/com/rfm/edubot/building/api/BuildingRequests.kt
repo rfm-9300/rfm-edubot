@@ -40,6 +40,9 @@ internal data class ProjectRequest(
     val retentionPct: Double? = null,
     val manualProgressPct: Int? = null,
     val contract: List<ContractLineRequest>? = null,
+    val costBudgetEur: Double? = null,
+    val laborRateEur: Double? = null,
+    val siteIds: List<String>? = null,
 ) {
     fun toDraft() = ProjectDraft(
         name = name,
@@ -55,6 +58,9 @@ internal data class ProjectRequest(
         retentionPct = retentionPct,
         manualProgressPct = manualProgressPct,
         contract = contract?.map { ContractLineDraft(it.id, it.description, it.quantity, it.unit, it.unitPriceEur) },
+        costBudgetEur = costBudgetEur,
+        laborRateEur = laborRateEur,
+        siteIds = siteIds,
     )
 }
 
@@ -158,6 +164,17 @@ internal data class ChangeOrderRequest(
 
 @Serializable
 internal data class ChangeStatusRequest(val status: String = "", val decidedBy: String? = null, val note: String? = null)
+
+/** The client's answer on the change's link: `APPROVED` or `REJECTED`, in their own name. */
+@Serializable
+internal data class ChangeDecisionRequest(val decision: String = "", val name: String = "", val note: String? = null)
+
+/** A client update's period, `yyyy-MM-dd`; the 7 days to today when both are left out. */
+@Serializable
+internal data class ReportDraftRequest(val from: String? = null, val to: String? = null)
+
+@Serializable
+internal data class ReportRequest(val from: String? = null, val to: String? = null, val text: String? = null)
 
 @Serializable
 internal data class MeasurementRequest(val projectId: String = "", val periodEnd: String? = null, val notes: String? = null)

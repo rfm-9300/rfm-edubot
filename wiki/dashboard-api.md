@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-20
+updated: 2026-10-21
 ---
 
 # Dashboard API structure
@@ -82,8 +82,12 @@ feature.
   `MessagePipeline` matches.
 - `ClientDirectory`, not `ClientService`: `crm.model.ClientService` is already a Serviços row.
 - **Work an invoice bills outside the CRM** is an `InvoicedWork` hook given to `InvoiceService`, which
-  cancel and delete call with the invoice's id. The dashboard's `TenantCrm` passes the one that frees a
-  project's measurement, so `crm/` never imports `building/` (that would be one more domain cycle).
+  cancel and delete call with the invoice's id. The dashboard's `TenantCrm` passes Building's two (a
+  project's measurement, a project's retention release), so `crm/` never imports `building/` (that
+  would be one more domain cycle).
+- **A route that calls the AI** gets the client from `DashboardDeps.aiClient` and hands it to a service
+  in its domain (`ProjectReportService`), which checks the company's monthly token budget and records
+  the usage under its own `UsageSources` entry; the route maps the model not answering to `502`.
 - **Building follows the same layering** (PR #88): services in `building/` (`ProjectService`,
   `MeasurementService`…) take drafts and return an `Outcome` (done, refused with a code, not found),
   `building/api/` has the requests, DTOs and views, and the routes in `dashboard/building/` map outcomes

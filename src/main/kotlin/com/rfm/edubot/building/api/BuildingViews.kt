@@ -3,6 +3,7 @@ package com.rfm.edubot.building.api
 import com.rfm.edubot.building.BuildingRecords
 import com.rfm.edubot.building.MeasurementMath
 import com.rfm.edubot.building.PhaseState
+import com.rfm.edubot.building.ProjectCosts
 import com.rfm.edubot.building.ProjectProgress
 import com.rfm.edubot.building.approvedEffect
 import com.rfm.edubot.building.measuredLines
@@ -12,12 +13,14 @@ import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.Project
+import com.rfm.edubot.building.model.ProjectReport
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
 import com.rfm.edubot.crm.api.LineItemDto
 import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.datetime.LocalDate
+import org.bson.types.ObjectId
 import kotlin.math.roundToInt
 
 // These records as the dashboard shows them. A list reads the names and figures it shows with one query per kind.
@@ -38,6 +41,7 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
     val measurementsByProject = measurements.forProjects(ids).groupBy { it.projectId }
     val lastDays = logs.lastDays(ids)
     val photoCounts = photos.counts(ids)
+    val releaseInvoices = if (detail) invoices.findByIds(list.flatMap { p -> p.retentionReleases.mapNotNull { it.invoiceId } }) else emptyMap()
     return list.map { project ->
         val projectChanges = changesByProject[project.id].orEmpty()
         val effect = approvedEffect(projectChanges)
@@ -81,6 +85,14 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
             measuredEur = eur(latestBilled?.toDateCents ?: 0),
             toInvoiceEur = eur(projectMeasurements.filter { it.status == MeasurementStatus.APPROVED }.sumOf { it.netCents }),
             retainedEur = eur(billed.sumOf { it.retentionCents }),
+            retentionHeldEur = eur(MeasurementMath.retentionHeldCents(project, projectMeasurements)),
+            retentionReleasedEur = eur(project.retentionReleases.sumOf { it.amountCents }),
+            retentionReleases = if (!detail) emptyList() else project.retentionReleases.map {
+                RetentionReleaseDto(it.invoiceId?.toHexString(), it.invoiceId?.let { id -> releaseInvoices[id]?.number }, eur(it.amountCents), it.releasedBy, it.releasedAt.toString())
+            },
+            costBudgetEur = project.costBudgetCents?.let(::eur),
+            laborRateEur = project.laborRateCents?.let(::eur),
+            siteIds = project.siteIds.map { it.toHexString() },
             phaseCount = project.phases.size,
             latePhases = phaseStates.count { it.second == PhaseState.LATE },
             openIssues = issuesOpen.size,
@@ -236,6 +248,8 @@ internal suspend fun BuildingRecords.changeDtos(list: List<ChangeOrder>): List<C
             decidedAt = change.decidedAt?.toString(),
             decidedBy = change.decidedBy,
             decisionNote = change.decisionNote,
+            decidedVia = change.decidedVia?.name,
+            approvalToken = change.approval?.token,
             measured = measuredLines(change, measured[change.projectId].orEmpty()),
             createdBy = change.createdBy,
             createdAt = change.createdAt.toString(),
@@ -305,12 +319,14 @@ internal suspend fun BuildingRecords.measurementDtos(list: List<Measurement>): L
 }
 
 /**
- * The project as its client's page shows it: progress, the plan (moved by approved changes) and the diary days and
- * photos the team shared. No money, issues, notes or people. A phase is late only on the team's side.
+ * The project as its client's page shows it: progress, the plan (moved by approved changes), the updates the team
+ * posted, and the diary days and photos the team shared. No money, issues, notes or people. A phase is late only
+ * on the team's side.
  */
 internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: Tenant, today: LocalDate, hasLogo: Boolean): SharedProjectDto {
     val shared = photos.list(project.id, sharedOnly = true, limit = SHARED_PHOTOS)
     val updates = logs.list(project.id, null, null, limit = SHARED_UPDATES * 3).filter { it.shared }.take(SHARED_UPDATES)
+    val posted = reports.list(project.id, limit = SHARED_REPORTS)
     val byLog = shared.filter { it.logId != null }.groupBy { it.logId }
     val days = approvedEffect(changes.list(project.id)).days
     fun SitePhoto.shown() = SharedPhotoDto(id.toHexString(), caption, day.toString())
@@ -335,11 +351,116 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
             }
             SharedPhaseDto(phase.name, phase.plannedStart?.toString(), phase.plannedEnd?.toString(), phase.progressPct.coerceIn(0, 100), state.name)
         },
+        reports = posted.map { SharedReportDto(it.from.toString(), it.to.toString(), it.text, it.postedAt.toString()) },
         updates = updates.map { entry -> SharedUpdateDto(entry.day.toString(), entry.weather?.name, entry.workDone, byLog[entry.id].orEmpty().map { it.shown() }) },
         photos = shared.map { it.shown() },
-        updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt }).max().toString(),
+        updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt } + posted.map { it.updatedAt }).max().toString(),
     )
 }
 
+/** The project as its site manager's My sites page lists it. */
+internal fun Project.mySiteDto(todayEntryId: ObjectId?, openIssues: Int) = MySiteDto(
+    id = id.toHexString(),
+    number = number,
+    name = name,
+    address = address,
+    status = status.name,
+    progressPct = ProjectProgress.actualPct(this).roundToInt().coerceIn(0, 100),
+    plannedEnd = ProjectProgress.plannedEnd(this)?.toString(),
+    todayEntryId = todayEntryId?.toHexString(),
+    openIssues = openIssues,
+)
+
+internal fun ProjectReport.dto() = ReportDto(
+    id = id.toHexString(),
+    projectId = projectId.toHexString(),
+    from = from.toString(),
+    to = to.toString(),
+    text = text,
+    postedBy = postedBy,
+    postedAt = postedAt.toString(),
+    updatedAt = updatedAt.toString(),
+)
+
+/** A project's costs as its Costs tab shows them, with the payees' and employees' names. */
+internal suspend fun BuildingRecords.costsDto(costs: ProjectCosts): ProjectCostsDto {
+    val bills = costs.bills
+    val labour = costs.labour
+    val supplierNames = suppliers.findByIds(bills?.payments.orEmpty().mapNotNull { it.supplierId }).mapValues { it.value.name }
+    val employeeNames = employees.findByIds(bills?.payments.orEmpty().mapNotNull { it.employeeId } + labour?.byEmployee.orEmpty().map { it.employeeId })
+        .mapValues { it.value.name }
+    fun payeeName(supplierId: ObjectId?, employeeId: ObjectId?) = supplierId?.let { supplierNames[it] } ?: employeeId?.let { employeeNames[it] }.orEmpty()
+    fun share(part: Long, whole: Long?) = whole?.takeIf { it > 0 }?.let { (part * 1000 / it) / 10.0 }
+    return ProjectCostsDto(
+        currentContractEur = eur(costs.currentContractCents),
+        measuredEur = eur(costs.measuredCents),
+        invoicedEur = eur(costs.invoicedCents),
+        receivedEur = eur(costs.receivedCents),
+        bills = bills?.let { b ->
+            CostBillsDto(
+                totalEur = eur(b.totalCents),
+                paidEur = eur(b.paidCents),
+                toPayEur = eur(b.totalCents - b.paidCents),
+                byPayee = b.byPayee.map {
+                    CostPayeeDto(
+                        kind = if (it.supplierId != null) "supplier" else "employee",
+                        id = (it.supplierId ?: it.employeeId)?.toHexString(),
+                        name = payeeName(it.supplierId, it.employeeId),
+                        totalEur = eur(it.totalCents),
+                        paidEur = eur(it.paidCents),
+                        count = it.count,
+                    )
+                },
+                payments = b.payments.sortedByDescending { it.dueDate }.take(COST_PAYMENTS).map {
+                    CostPaymentDto(it.id.toHexString(), it.number, payeeName(it.supplierId, it.employeeId), it.dueDate.toString(), it.status.name, eur(it.totalCents))
+                },
+            )
+        },
+        labour = labour?.let { l ->
+            CostLabourDto(
+                hours = hours(l.minutes),
+                rateEur = l.rateCents?.let(::eur),
+                costEur = l.costCents?.let(::eur),
+                byEmployee = l.byEmployee.map { CostHoursDto(it.employeeId.toHexString(), employeeNames[it.employeeId].orEmpty(), hours(it.minutes), it.costCents?.let(::eur)) },
+                sites = l.sites.map { CostSiteDto(it.id.toHexString(), it.name) },
+            )
+        },
+        costBudgetEur = costs.costBudgetCents?.let(::eur),
+        totalCostEur = eur(costs.totalCostCents),
+        budgetUsedPct = share(costs.totalCostCents, costs.costBudgetCents),
+        expectedMarginEur = eur(costs.expectedMarginCents),
+        expectedMarginPct = share(costs.expectedMarginCents, costs.currentContractCents),
+        marginToDateEur = eur(costs.marginToDateCents),
+        marginToDatePct = share(costs.marginToDateCents, costs.measuredCents),
+    )
+}
+
+private fun hours(minutes: Int): Double = (minutes * 100 / 60) / 100.0
+
+/** The change as its client's approval page shows it. */
+internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean) = SharedChangeDto(
+    company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
+    hasLogo = hasLogo,
+    locale = tenant.locale,
+    projectNumber = project.number,
+    projectName = project.name,
+    address = project.address,
+    number = number,
+    title = title,
+    description = description,
+    kind = kind.name,
+    items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
+    totalEur = eur(signedCents),
+    daysImpact = daysImpact,
+    status = status.name,
+    sentAt = sentAt?.toString(),
+    decidedAt = decidedAt?.toString(),
+    decidedBy = decidedBy,
+    decidedVia = decidedVia?.name,
+    decisionNote = decisionNote,
+)
+
 private const val SHARED_PHOTOS = 60
 private const val SHARED_UPDATES = 30
+private const val SHARED_REPORTS = 20
+private const val COST_PAYMENTS = 200

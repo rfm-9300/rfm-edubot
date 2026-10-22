@@ -5,6 +5,7 @@ import com.rfm.edubot.bookings.BookingRoutes
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.building.ChangeOrderRoutes
 import com.rfm.edubot.dashboard.building.MeasurementRoutes
+import com.rfm.edubot.dashboard.building.ProjectReportRoutes
 import com.rfm.edubot.dashboard.building.ProjectRoutes
 import com.rfm.edubot.dashboard.building.SiteDiaryRoutes
 import com.rfm.edubot.dashboard.building.SiteIssueRoutes
@@ -77,6 +78,7 @@ internal object DashboardFeatures {
         EmployeeRoutes,
         PaymentRoutes,
         ProjectRoutes,
+        ProjectReportRoutes,
         SiteDiaryRoutes,
         SiteIssueRoutes,
         ChangeOrderRoutes,

@@ -49,6 +49,10 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             .map { it.toPayment() }
     }
 
+    /** Every payment for construction project [projectId], however many, cancelled ones included. */
+    suspend fun forProject(projectId: ObjectId): List<Payment> =
+        collection.find(scoped(Filters.eq("projectId", projectId))).sort(Document("dueDate", 1)).toList().map { it.toPayment() }
+
     suspend fun create(
         supplierId: ObjectId?,
         employeeId: ObjectId?,
@@ -56,6 +60,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         dueDate: LocalDate,
         notes: String?,
         clientId: ObjectId? = null,
+        projectId: ObjectId? = null,
     ): Payment {
         val now = SystemClock.now()
         val payment = Payment(
@@ -64,6 +69,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             supplierId = supplierId,
             employeeId = employeeId,
             clientId = clientId,
+            projectId = projectId,
             items = items,
             notes = notes?.trim()?.takeIf { it.isNotBlank() },
             dueDate = dueDate,
@@ -118,20 +124,26 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         clientId?.let { SubjectRef.of(SubjectTypes.CLIENT, it) },
         supplierId?.let { SubjectRef.of(SubjectTypes.SUPPLIER, it) },
         employeeId?.let { SubjectRef.of(SubjectTypes.EMPLOYEE, it) },
+        projectId?.let { SubjectRef.of(SubjectTypes.PROJECT, it) },
     )
 
     /** Links the payment to [clientId], or unlinks it when null. */
-    suspend fun setClient(id: ObjectId, clientId: ObjectId?): Payment? {
-        val doc = collection.findOneAndUpdate(
-            scoped(Filters.eq("_id", id)),
-            Updates.combine(
-                Updates.set("clientId", clientId),
-                Updates.set("updatedAt", SystemClock.now().toDate()),
-            ),
-            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
-        )
-        return doc?.toPayment()
+    suspend fun setClient(id: ObjectId, clientId: ObjectId?): Payment? = set(id, "clientId", clientId)
+
+    /** Links the payment to construction project [projectId], or unlinks it when null. */
+    suspend fun setProject(id: ObjectId, projectId: ObjectId?): Payment? = set(id, "projectId", projectId)
+
+    /** A removed project's payments stay, for no project. */
+    suspend fun clearProject(projectId: ObjectId) {
+        collection.updateMany(scoped(Filters.eq("projectId", projectId)), Updates.combine(Updates.set("projectId", null), Updates.set("updatedAt", SystemClock.now().toDate())))
     }
+
+    private suspend fun set(id: ObjectId, field: String, value: ObjectId?): Payment? =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(Updates.set(field, value), Updates.set("updatedAt", SystemClock.now().toDate())),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toPayment()
 
     private fun Document.toPayment() = Payment(
         id = getObjectId("_id"),
@@ -140,6 +152,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         supplierId = get("supplierId", ObjectId::class.java),
         employeeId = get("employeeId", ObjectId::class.java),
         clientId = get("clientId", ObjectId::class.java),
+        projectId = get("projectId", ObjectId::class.java),
         items = getList("items", Document::class.java).orEmpty().map { it.toLineItem() },
         notes = getString("notes"),
         status = parsePaymentStatus(getString("status")),
@@ -156,6 +169,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("supplierId", supplierId)
         .append("employeeId", employeeId)
         .append("clientId", clientId)
+        .append("projectId", projectId)
         .append("items", items.map { it.toDocument() })
         .append("notes", notes)
         .append("status", status.name)

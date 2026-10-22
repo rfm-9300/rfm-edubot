@@ -3,25 +3,12 @@ package com.rfm.edubot.dashboard.building
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.persistence.MongoModule
-import com.rfm.edubot.testing.DashboardApi
-import com.rfm.edubot.testing.Reply
-import com.rfm.edubot.testing.TestCompany
 import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
-import com.rfm.edubot.timesheets.zone
 import io.ktor.http.HttpStatusCode
-import kotlinx.datetime.Clock
-import kotlinx.datetime.DateTimeUnit
-import kotlinx.datetime.plus
-import kotlinx.datetime.toLocalDateTime
-import kotlinx.serialization.json.JsonObject
-import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.double
-import kotlinx.serialization.json.int
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
@@ -59,50 +46,11 @@ class BuildingApiTest {
             mongo.shutdown()
         }
 
-        private val JPEG = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + ByteArray(600) { 7 }
-        private val PNG = byteArrayOf(0x89.toByte(), 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A) + ByteArray(600) { 7 }
+        private val JPEG = JPEG_BYTES
+        private val PNG = PNG_BYTES
     }
 
-    private val api = "/app/api/building"
-
-    /** The company's day [offset] days from today, in its timezone, as the server reads it. */
-    private fun TestCompany.day(offset: Int = 0): String =
-        Clock.System.now().toLocalDateTime(tenant.zone()).date.plus(offset, DateTimeUnit.DAY).toString()
-
-    private suspend fun DashboardApi.client(company: TestCompany, name: String = "Casa Silva"): String =
-        company.post("/app/api/crm/clients") {
-            put("name", name); put("phone", "+351 91${(1..7).map { (0..9).random() }.joinToString("")}"); put("taxId", "1"); put("address", "Rua 1")
-        }.text("id")!!
-
-    private suspend fun DashboardApi.project(company: TestCompany, body: JsonObjectBuilder.() -> Unit = {}): Reply =
-        company.post("$api/projects") { put("name", "Moradia Silva"); body() }
-
-    /** Two phases: ten days that ended ten days ago, finished, and twenty days around today at [second]%. */
-    private suspend fun DashboardApi.twoPhases(company: TestCompany, projectId: String, second: Int = 20): Reply =
-        company.put("$api/projects/$projectId/phases") {
-            putJsonArray("phases") {
-                addJsonObject { put("name", "Fundações"); put("plannedStart", company.day(-20)); put("plannedEnd", company.day(-11)); put("progressPct", 100) }
-                addJsonObject { put("name", "Estrutura"); put("plannedStart", company.day(-10)); put("plannedEnd", company.day(9)); put("progressPct", second) }
-            }
-        }
-
-    /** A quote of 100 m² of walls at 25 € and a roof at 8 000 €: 10 500 €. */
-    private suspend fun DashboardApi.quote(company: TestCompany, clientId: String): String =
-        company.post("/app/api/crm/quotes") {
-            put("clientId", clientId)
-            putJsonArray("items") {
-                addJsonObject { put("description", "Paredes"); put("quantity", 100.0); put("unit", "m2"); put("unitPriceEur", 25.0) }
-                addJsonObject { put("description", "Cobertura"); put("quantity", 1.0); put("unit", "vg"); put("unitPriceEur", 8000.0) }
-            }
-        }.also { assertEquals(HttpStatusCode.Created, it.status, it.toString()) }.text("id")!!
-
-    private fun JsonObject.str(name: String): String? = this[name]?.jsonPrimitive?.contentOrNull
-    private fun JsonObject.int(name: String): Int = this[name]!!.jsonPrimitive.int
-    private fun JsonObject.eur(name: String): Double = this[name]!!.jsonPrimitive.double
-    private fun JsonObject.list(name: String): List<JsonObject> = this[name]!!.jsonArray.map { it.jsonObject }
-    private fun Reply.int(name: String): Int = obj.int(name)
-    private fun Reply.eur(name: String): Double = obj.eur(name)
-    private fun Reply.list(name: String): List<JsonObject> = obj.list(name)
+    private val api = BUILDING_API
 
     @Test
     fun `each Building page answers 403 without its module, and every one brings projects`() = dashboardApiTest(mongo) {

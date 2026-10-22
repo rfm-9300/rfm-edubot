@@ -212,6 +212,7 @@ internal data class CreatePaymentRequest(
     val dueDate: String,
     val notes: String? = null,
     val clientId: String? = null,
+    val projectId: String? = null,
 )
 
 /** Without [items] the row is the one line [name], [quantity], [unit] and [unitPriceEur] describe. */

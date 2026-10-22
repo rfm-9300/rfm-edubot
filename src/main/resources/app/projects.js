@@ -101,18 +101,23 @@ function renderProjects(root) {
 
 let projectRecord = null;
 
+// A project's costs are its bills (payments) and its hours (the time clock).
+const projectCostsOn = () => hasModule('payments') || hasModule('timesheets');
+
 async function loadProjectRecord(id) {
   const base = '/app/api/building';
   const q = `projectId=${encodeURIComponent(id)}`;
-  const [project, diary, photos, issues, changes, measurements] = await Promise.all([
+  const [project, diary, photos, issues, changes, measurements, costs, reports] = await Promise.all([
     api(`${base}/projects/${encodeURIComponent(id)}`),
     hasModule('site-diary') ? api(`${base}/diary?${q}`).catch(() => []) : [],
     api(`${base}/projects/${encodeURIComponent(id)}/photos`).catch(() => []),
     hasModule('site-issues') ? api(`${base}/issues?${q}`).catch(() => []) : [],
     hasModule('change-orders') ? api(`${base}/changes?${q}`).catch(() => []) : [],
     hasModule('measurements') ? api(`${base}/measurements?${q}`).catch(() => []) : [],
+    projectCostsOn() ? api(`${base}/projects/${encodeURIComponent(id)}/costs`).catch(() => null) : null,
+    api(`${base}/projects/${encodeURIComponent(id)}/reports`).catch(() => []),
   ]);
-  return { project, diary, photos, issues, changes, measurements };
+  return { project, diary, photos, issues, changes, measurements, costs, reports };
 }
 
 async function openProjectDrawer(id, tab) {
@@ -185,6 +190,9 @@ function projectAttention(r) {
   r.issues.filter(i => i.overdue).forEach(i => items.push({ tone: 'bad', title: bt('attn.overdueIssue', { title: i.title }), detail: [i.number, i.assigneeName].filter(Boolean).join(' · '), when: relDay(i.dueDate), open: `issue:${i.id}` }));
   r.changes.filter(c => c.status === 'SENT').forEach(c => items.push({ tone: 'warn', title: bt('attn.changeWaiting', { title: c.title }), detail: c.number, amount: c.signedEur, open: `change:${c.id}` }));
   r.measurements.filter(m => m.status === 'APPROVED').forEach(m => items.push({ tone: 'info', title: bt('attn.measurementToInvoice', { n: m.number }), detail: fmtDay(m.periodEnd), amount: m.netEur, open: `measurement:${m.id}` }));
+  if (p.status === 'COMPLETED' && p.retentionHeldEur > 0 && hasModule('invoices') && p.clientId) {
+    items.push({ tone: 'info', title: bt('attn.retention'), detail: bt('attn.retentionDetail'), amount: p.retentionHeldEur, open: 'act:retention' });
+  }
   if (hasModule('site-diary') && p.status === 'ACTIVE') {
     const last = p.lastDiaryDay;
     const quiet = !last || Math.round((dayKeyDate(todayKey()) - dayKeyDate(last)) / 86400000) >= DIARY_QUIET_DAYS;
@@ -197,9 +205,11 @@ function projectTabs(r) {
   const tabs = [['schedule', bt('tab.schedule'), r.project.phaseCount]];
   if (hasModule('site-diary')) tabs.push(['diary', labels['site-diary'], r.diary.length]);
   tabs.push(['photos', bt('tab.photos'), r.photos.length]);
+  tabs.push(['reports', bt('tab.reports'), r.reports.length]);
   if (hasModule('site-issues')) tabs.push(['issues', labels['site-issues'], r.issues.filter(i => i.status === 'OPEN' || i.status === 'IN_PROGRESS').length]);
   if (hasModule('change-orders')) tabs.push(['changes', labels['change-orders'], r.changes.length]);
   if (hasModule('measurements')) tabs.push(['measurements', labels.measurements, r.measurements.length]);
+  if (projectCostsOn()) tabs.push(['costs', bt('tab.costs'), 0]);
   tabs.push(['contract', bt('tab.contract'), r.project.contract.length]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'schedule';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
@@ -235,16 +245,189 @@ function projectSchedulePane(r) {
   </div>`;
 }
 
+const marginText = (eur, pct) => (pct == null ? fmtEUR(eur) : `${fmtEUR(eur)} · ${fmtPct(pct)}%`);
+
+// What the project earns, costs and leaves: the bills linked to it and the hours clocked at its sites.
+function projectCostsPane(r) {
+  const c = r.costs;
+  if (!c) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.loadFailed)}</p></div></div>`;
+  const used = c.budgetUsedPct;
+  const budget = c.costBudgetEur != null
+    ? `<div class="progress-cell">${progressBarHtml(Math.min(100, used ?? 0), null, used > 100 ? 'bad' : used > 90 ? 'warn' : 'accent')}<span class="progress-cell__label">${escapeHTML(bt('costs.ofBudget', { pct: fmtPct(used ?? 0), budget: fmtEUR(c.costBudgetEur) }))}</span></div>`
+    : `<p class="hint">${escapeHTML(bt('costs.noBudget'))}</p>`;
+  const summary = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.marginTitle'))}</h2>
+      <div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-project-act="edit">${escapeHTML(bt('costs.setUp'))}</button></div></header>
+    <div class="panel__body record__stack">
+      ${dashFacts([
+        [bt('costs.contract'), fmtEUR(c.currentContractEur)],
+        [bt('costs.total'), fmtEUR(c.totalCostEur)],
+        [bt('costs.expected'), marginText(c.expectedMarginEur, c.expectedMarginPct)],
+        [bt('costs.toDate'), marginText(c.marginToDateEur, c.marginToDatePct)],
+      ], true)}
+      ${budget}
+      ${dashFacts([[bt('costs.measured'), fmtEUR(c.measuredEur)], [bt('costs.invoiced'), fmtEUR(c.invoicedEur)], [bt('costs.received'), fmtEUR(c.receivedEur)]], true)}
+    </div></section>`;
+  return `<div class="record__stack">${summary}${projectBillsHtml(c.bills)}${projectHoursHtml(c.labour)}<p class="hint">${escapeHTML(bt('costs.hint'))}</p></div>`;
+}
+
+function projectBillsHtml(bills) {
+  if (!bills) return '';
+  const add = `<button class="btn btn--sm" type="button" data-project-act="bill"><span class="btn__plus">+</span> ${escapeHTML(bt('costs.billNew'))}</button>`;
+  if (!bills.payments.length) {
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.billsTitle'))}</h2></header>
+      <div class="empty"><p class="empty__title">${escapeHTML(bt('costs.billsEmpty'))}</p><p class="empty__desc">${escapeHTML(bt('costs.billsEmptyDesc'))}</p><div class="empty__actions">${add}</div></div></section>`;
+  }
+  const payees = bills.byPayee.map(x => `<tr><td class="name long">${escapeHTML(x.name || '—')}</td><td class="num">${x.count}</td>
+    <td class="num nowrap">${fmtEUR(x.paidEur)}</td><td class="num nowrap">${fmtEUR(x.totalEur - x.paidEur)}</td><td class="num nowrap">${fmtEUR(x.totalEur)}</td></tr>`).join('');
+  const rows = bills.payments.map(pay => `<tr class="conversation-row${pay.status === 'PAID' ? ' is-paid' : pay.status === 'OVERDUE' ? ' is-overdue' : ''}" data-record-open="payment:${escapeHTML(pay.id)}">
+    <td class="id">${escapeHTML(pay.number)}</td><td class="long">${escapeHTML(pay.payeeName || '—')}</td><td class="mono nowrap">${escapeHTML(fmtDay(pay.dueDate))}</td>
+    <td>${paymentPill(pay.status)}</td><td class="num nowrap">${fmtEUR(pay.totalEur)}</td></tr>`).join('');
+  return recordTable([[bt('costs.thPayee')], [bt('costs.thBills'), 'right'], [bt('costs.thPaid'), 'right'], [bt('costs.thToPay'), 'right'], [bt('costs.thTotal'), 'right']], payees, { title: bt('costs.billsTitle'), count: bills.byPayee.length })
+    + recordTable([[CRM.payments.thNumber], [CRM.payments.thPayee], [CRM.payments.thDueDate], [CRM.payments.thStatus], [CRM.payments.thTotal, 'right']], rows, { title: bt('costs.billsList'), count: bills.payments.length })
+    + `<div class="record__pane-foot">${add}</div>`;
+}
+
+function projectHoursHtml(labour) {
+  if (!labour) return '';
+  const head = `<header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('costs.hoursTitle'))}${labour.hours ? ` <span class="tag">${escapeHTML(bt('costs.hoursN', { n: fmtQty(labour.hours) }))}</span>` : ''}</h2></header>`;
+  if (!labour.sites.length) {
+    return `<section class="panel">${head}<div class="empty"><p class="empty__title">${escapeHTML(bt('costs.noSites'))}</p><p class="empty__desc">${escapeHTML(bt('costs.noSitesDesc'))}</p>
+      <div class="empty__actions"><button class="btn btn--sm" type="button" data-project-act="edit">${escapeHTML(bt('costs.chooseSites'))}</button></div></div></section>`;
+  }
+  const facts = [bt('costs.sitesLine', { names: labour.sites.map(s => s.name).join(', ') }), labour.rateEur != null ? bt('costs.rateLine', { rate: fmtEUR(labour.rateEur) }) : bt('costs.noRate')].join(' · ');
+  const rows = labour.byEmployee.map(e => `<tr><td class="name long">${escapeHTML(e.name || '—')}</td><td class="num">${escapeHTML(bt('costs.hoursN', { n: fmtQty(e.hours) }))}</td>
+    <td class="num nowrap">${e.costEur != null ? fmtEUR(e.costEur) : '—'}</td></tr>`).join('');
+  return `<section class="panel">${head}<div class="panel__body"><p class="hint">${escapeHTML(facts)}</p></div>
+    ${rows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(bt('costs.thEmployee'))}</th><th class="right">${escapeHTML(bt('costs.thHours'))}</th><th class="right">${escapeHTML(bt('costs.thCost'))}</th></tr></thead><tbody>${rows}</tbody></table></div>`
+      : `<div class="empty"><p class="empty__title">${escapeHTML(bt('costs.hoursEmpty'))}</p></div>`}</section>`;
+}
+
+const reportPeriod = rep => bt('reports.period', { from: fmtDay(rep.from), to: fmtDay(rep.to) });
+
+// The updates posted to the client's page, newest first.
+function projectReportsPane(r) {
+  const add = `<button class="btn btn--sm btn--primary" type="button" data-project-act="report"><span class="btn__plus">+</span> ${escapeHTML(bt('reports.new'))}</button>`;
+  if (!r.reports.length) {
+    return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(bt('reports.empty'))}</p><p class="empty__desc">${escapeHTML(bt('reports.emptyDesc'))}</p><div class="empty__actions">${add}</div></div></div>`;
+  }
+  const rows = r.reports.map(rep => {
+    const text = rep.text.replace(/\s+/g, ' ');
+    return recordRowHtml({ tone: 'info', title: reportPeriod(rep), detail: text.length > 160 ? `${text.slice(0, 159)}…` : text, when: relDay(rep.postedAt.slice(0, 10)), open: `report:${rep.id}` });
+  }).join('');
+  return `<div class="record__stack"><section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('reports.title'))} <span class="tag">${r.reports.length}</span></h2></header>
+    <ul class="worklist worklist--wrap">${rows}</ul></section>
+    ${r.project.shareEnabled ? '' : `<p class="hint">${escapeHTML(bt('reports.shareOff'))}</p>`}
+    <div class="record__pane-foot">${add}</div></div>`;
+}
+
+// Writes an update for the client, the AI's draft of a period or the team's own words, and posts it to their page.
+function openReportForm(project, report = null) {
+  const to = todayKey();
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${report ? `<p class="hint">${escapeHTML(reportPeriod(report))}</p>` : `<div class="form__grid">
+      <div class="form__row"><label class="lbl" for="rp-from">${escapeHTML(bt('reports.from'))}</label><input class="inp inp--mono" id="rp-from" type="date" value="${addDayKey(to, -6)}" max="${to}" /></div>
+      <div class="form__row"><label class="lbl" for="rp-to">${escapeHTML(bt('reports.to'))}</label><input class="inp inp--mono" id="rp-to" type="date" value="${to}" max="${to}" /></div>
+    </div>
+    <div class="actions"><button class="btn btn--sm" type="button" data-report-draft>${escapeHTML(bt('reports.draft'))}</button></div>
+    <p class="hint" data-report-drafted hidden></p>`}
+    <div class="form__row form__row--full"><label class="lbl" for="rp-text">${escapeHTML(bt('reports.text'))} <span class="req">●</span></label>
+      <textarea class="txt" id="rp-text" rows="10" maxlength="4000" placeholder="${escapeHTML(bt('reports.textPh'))}">${escapeHTML(report?.text || '')}</textarea></div>
+    <p class="hint">${escapeHTML(project.shareEnabled ? bt('reports.hint') : bt('reports.shareOff'))}</p>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(report ? BLD.save : bt('reports.post'))}</button></div>`;
+  const period = () => ({ from: $('#rp-from', form)?.value || '', to: $('#rp-to', form)?.value || '' });
+  $('[data-report-draft]', form)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    const { from, to: until } = period();
+    if (!from || !until || until < from) return toast(bt('errors.invalid_range'));
+    btn.disabled = true;
+    btn.textContent = bt('reports.drafting');
+    try {
+      const draft = await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports/draft`, { method: 'POST', body: JSON.stringify({ from, to: until }) });
+      $('#rp-text', form).value = draft.text;
+      const note = $('[data-report-drafted]', form);
+      note.textContent = bt('reports.drafted', { n: draft.sharedDays });
+      note.hidden = false;
+    } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
+    btn.disabled = false;
+    btn.textContent = bt('reports.draft');
+  });
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const text = $('#rp-text', form).value.trim();
+    if (!text) return toast(bt('reports.needText'));
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      if (report) await api(`/app/api/building/reports/${encodeURIComponent(report.id)}`, { method: 'PATCH', body: JSON.stringify({ text }) });
+      else await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports`, { method: 'POST', body: JSON.stringify({ ...period(), text }) });
+      toast(report ? bt('reports.saved') : bt('reports.posted'));
+      closeDrawer();
+    } catch (err) {
+      btn.disabled = false;
+      toast(buildingErrorText(err, BLD.saveFailed));
+    }
+  });
+  openDrawer(report ? bt('reports.editTitle') : bt('reports.formTitle'), form, true, { eyebrow: projectLabel(project) });
+}
+
+// The update as stored now, after an edit, or the project's updates when it's gone.
+async function reopenReport(project, id) {
+  const fresh = (await api(`/app/api/building/projects/${encodeURIComponent(project.id)}/reports`).catch(() => [])).find(rep => rep.id === id);
+  if (fresh) openReportDetail(project, fresh);
+  else openProjectDrawer(project.id, 'reports');
+}
+
+// A posted update: its text as the client reads it, to copy or send by WhatsApp, edit or remove.
+function openReportDetail(project, report) {
+  const here = { key: `report:${report.id}`, label: reportPeriod(report), open: () => reopenReport(project, report.id) };
+  const link = project.shareEnabled && project.shareToken ? projectShareUrl(project.shareToken) : '';
+  const message = `${report.text}${link ? bt('reports.pageLink', { url: link }) : ''}`;
+  const wa = project.clientPhone ? `${waHref(project.clientPhone)}?text=${encodeURIComponent(message)}` : `https://wa.me/?text=${encodeURIComponent(message)}`;
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `
+    ${detailMeta([
+      { label: bt('reports.periodLabel'), value: reportPeriod(report) },
+      { label: bt('reports.postedOn'), value: fmtDay(report.postedAt) },
+    ])}
+    ${report.text.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean).map(part => `<p class="panel__text">${part.split('\n').map(escapeHTML).join('<br />')}</p>`).join('')}
+    <div class="detail__foot">
+      <button class="btn btn--sm btn--primary" type="button" data-report-copy>${escapeHTML(bt('reports.copy'))}</button>
+      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(project.clientName ? bt('share.whatsappTo', { name: project.clientName }) : bt('share.whatsapp'))}</a>
+      <button class="btn btn--sm btn--ghost" type="button" data-report-edit>${escapeHTML(BLD.edit)}</button>
+      <button class="btn btn--sm btn--ghost" type="button" data-report-delete>${escapeHTML(BLD.delete)}</button>
+    </div>`;
+  $('[data-report-copy]', body).addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(message); toast(bt('reports.copied')); } catch { toast(BLD.saveFailed); }
+  });
+  $('[data-report-edit]', body).addEventListener('click', () => openFrom(here, () => openReportForm(project, report)));
+  $('[data-report-delete]', body).addEventListener('click', async () => {
+    if (!await confirmDialog({ title: bt('reports.deleteTitle'), body: bt('reports.deleteBody'), okLabel: BLD.delete })) return;
+    try {
+      await api(`/app/api/building/reports/${encodeURIComponent(report.id)}`, { method: 'DELETE' });
+      toast(bt('reports.deleted'));
+      closeDrawer();
+    } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
+  });
+  openDrawer(bt('reports.formTitle'), body, false, { eyebrow: projectLabel(project) });
+}
+
 function projectPaneHtml(r) {
   const p = r.project;
   if (r.tab === 'schedule') return projectSchedulePane(r);
+  if (r.tab === 'costs') return projectCostsPane(r);
+  if (r.tab === 'reports') return projectReportsPane(r);
   if (r.tab === 'diary') {
     if (!r.diary.length) return recordEmpty(BLD.diaryEmpty, 'diary', BLD.diaryNew);
     const rows = r.diary.map(e => `<tr class="conversation-row" data-record-open="diary:${escapeHTML(e.id)}">
       <td class="mono nowrap">${escapeHTML(fmtDay(e.day))}</td><td>${escapeHTML(weatherLabel(e.weather) || '—')}</td>
       <td class="num">${e.workers ?? '—'}</td><td class="long">${escapeHTML(e.workDone.length > 90 ? `${e.workDone.slice(0, 89)}…` : e.workDone)}</td>
       <td class="num">${e.photos.length || ''}</td></tr>`).join('');
-    return recordTable([[BLD.thDay], [BLD.thWeather], [BLD.thWorkers, 'right'], [BLD.thWorkDone], [BLD.thPhotos, 'right']], rows);
+    return `<div class="record__stack">${recordTable([[BLD.thDay], [BLD.thWeather], [BLD.thWorkers, 'right'], [BLD.thWorkDone], [BLD.thPhotos, 'right']], rows)}
+      <div class="record__pane-foot"><button class="btn btn--sm" type="button" data-project-act="diary-pdf">${escapeHTML(BLD.diaryPdf)}</button></div></div>`;
   }
   if (r.tab === 'photos') {
     const add = `<button class="btn btn--sm" type="button" data-project-act="photos"><span class="btn__plus">+</span> ${escapeHTML(BLD.photosAdd)}</button>`;
@@ -276,7 +459,7 @@ function projectPaneHtml(r) {
     const rows = r.measurements.map(m => `<tr class="conversation-row${m.status === 'INVOICED' ? ' is-paid' : m.status === 'DRAFT' ? ' is-draft' : ''}" data-record-open="measurement:${escapeHTML(m.id)}">
       <td class="id">${escapeHTML(bt('measurementN', { n: m.number }))}</td><td class="mono nowrap">${escapeHTML(fmtDay(m.periodEnd))}</td>
       <td class="num nowrap">${fmtEUR(m.grossEur)}</td><td class="num nowrap">${fmtEUR(m.netEur)}</td><td>${measurementStatusPill(m.status)}</td></tr>`).join('');
-    return `<div class="record__stack">${facts}${recordTable([[BLD.thMeasurement], [BLD.thPeriodEnd], [BLD.thThisPeriod, 'right'], [BLD.thNet, 'right'], [BLD.thStatus]], rows)}</div>`;
+    return `<div class="record__stack">${facts}${recordTable([[BLD.thMeasurement], [BLD.thPeriodEnd], [BLD.thThisPeriod, 'right'], [BLD.thNet, 'right'], [BLD.thStatus]], rows)}${projectRetentionHtml(p)}</div>`;
   }
   // Contract
   const locked = p.contractLocked ? `<p class="hint">${escapeHTML(BLD.contractLocked)}</p>` : '';
@@ -292,6 +475,52 @@ function projectPaneHtml(r) {
     [BLD.currentContract, fmtEUR(p.currentContractEur)],
   ]);
   return `<div class="record__stack">${from}${recordTable(head, rows)}${totals}${locked}</div>`;
+}
+
+// The retention the invoiced measurements kept back, invoiced to the client once the project is finished.
+function projectRetentionHtml(p) {
+  if (!p.retentionHeldEur && !p.retentionReleases.length) return '';
+  const held = p.retentionHeldEur > 0;
+  const canInvoice = held && p.status === 'COMPLETED' && hasModule('invoices') && !!p.clientId;
+  const hint = !held ? '' : p.status !== 'COMPLETED' ? BLD.retentionWaitHint : !p.clientId ? BLD.measurementNoClient : '';
+  const rows = p.retentionReleases.map(rl => {
+    const open = rl.invoiceId && hasModule('invoices') ? ` data-record-open="invoice:${escapeHTML(rl.invoiceId)}"` : '';
+    return `<tr class="conversation-row"${open}><td class="id">${escapeHTML(rl.invoiceNumber || '—')}</td><td class="mono nowrap">${escapeHTML(fmtDay(rl.releasedAt))}</td><td class="num nowrap">${fmtEUR(rl.amountEur)}</td></tr>`;
+  }).join('');
+  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.retentionTitle)}</h2>
+      ${canInvoice ? `<div class="panel__tools"><button class="btn btn--sm btn--accent" type="button" data-project-act="retention">${escapeHTML(bt('retentionInvoice', { amount: fmtEUR(p.retentionHeldEur) }))}</button></div>` : ''}</header>
+    <div class="panel__body">${dashFacts([[BLD.retentionHeld, fmtEUR(p.retentionHeldEur)], [BLD.retentionReleased, fmtEUR(p.retentionReleasedEur)]], true)}${hint ? `<p class="hint">${escapeHTML(hint)}</p>` : ''}</div>
+    ${rows ? `<div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(STR.detailInvoice)}</th><th>${escapeHTML(BLD.retentionReleasedOn)}</th><th class="right">${escapeHTML(BLD.thValue)}</th></tr></thead><tbody>${rows}</tbody></table></div>` : ''}
+  </section>`;
+}
+
+// One invoice to the client of the retention the finished project still holds.
+function openRetentionInvoiceForm(p) {
+  const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(bt('retentionInvoiceIntro', { amount: fmtEUR(p.retentionHeldEur), client: p.clientName || '' }))}</p>
+    <div class="form__row"><label class="lbl" for="rt-due">${escapeHTML(STR.quoteConvertDue)}</label><input class="inp inp--mono" id="rt-due" type="date" required value="${due}" /></div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(BLD.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(bt('retentionInvoice', { amount: fmtEUR(p.retentionHeldEur) }))}</button></div>`;
+  bindDrawerClose(form);
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const dueDate = $('#rt-due', form).value;
+    if (!dueDate) return toast(STR.invoiceEnterDueDate);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const done = await api(`/app/api/building/projects/${encodeURIComponent(p.id)}/retention/invoice`, { method: 'POST', body: JSON.stringify({ dueDate }) });
+      state.fetched.invoices = false;
+      toast(bt('retentionInvoiced', { number: done.invoiceNumber }));
+      closeDrawer();
+      refreshBuildingPage();
+    } catch (err) {
+      btn.disabled = false;
+      toast(buildingErrorText(err, BLD.saveFailed));
+    }
+  });
+  openDrawer(BLD.retentionTitle, form, false, { eyebrow: projectLabel(p) });
 }
 
 function projectContactButtons(p) {
@@ -370,6 +599,12 @@ function openProjectItem(ref) {
   if (kind === 'issue') return openFromProject(() => openIssueDetail(id));
   if (kind === 'change') return openFromProject(() => openChangeDetail(id));
   if (kind === 'measurement') return openFromProject(() => openMeasurementDetail(id));
+  if (kind === 'invoice') return openFromProject(() => openInvoiceDetail(id));
+  if (kind === 'payment') return openFromProject(() => openPaymentDetail(id));
+  if (kind === 'report') {
+    const report = r.reports.find(rep => rep.id === id);
+    return report && openFromProject(() => openReportDetail(r.project, report));
+  }
 }
 
 async function projectAct(kind) {
@@ -380,6 +615,13 @@ async function projectAct(kind) {
   if (kind === 'phases') return openFromProject(() => openPhasesEditor(p));
   if (kind === 'progress') return openFromProject(() => openManualProgressForm(p));
   if (kind === 'share') return openFromProject(() => openProjectShare(p));
+  if (kind === 'retention') return openFromProject(() => openRetentionInvoiceForm(p));
+  if (kind === 'diary-pdf') return openFromProject(() => openDiaryPdfForm(p));
+  if (kind === 'report') return openFromProject(() => openReportForm(p));
+  if (kind === 'bill') {
+    const client = p.clientId && hasModule('clients') ? { id: p.clientId, name: p.clientName || '' } : null;
+    return openFromProject(() => openPaymentForm(null, null, client, { projectId: p.id }));
+  }
   if (kind === 'client') return openFromProject(() => openClientDrawer(p.clientId));
   if (kind === 'quote') return openFromProject(() => openQuoteDetail(p.quoteId));
   if (kind === 'diary') {
@@ -450,12 +692,28 @@ function contractRows(form) {
 // `opts.quote` starts a project from that quote: its client and its lines as the contract.
 async function openProjectForm(project = null, opts = {}) {
   const quote = opts.quote || null;
-  const [clients, employees, catalog] = await Promise.all([
+  const [clients, employees, catalog, sites] = await Promise.all([
     hasModule('clients') ? api('/app/api/crm/clients').catch(() => state.clients) : Promise.resolve([]),
     hasModule('employees') ? api('/app/api/crm/employees').catch(() => state.employees) : Promise.resolve([]),
     hasModule('catalog') ? api('/app/api/crm/standard-items').catch(() => []) : Promise.resolve([]),
+    hasModule('timesheets') ? api('/app/api/timesheets/sites').catch(() => []) : Promise.resolve([]),
+    ensureBuildingProjects().catch(() => []),
   ]);
   const p = project || {};
+  // A time clock site counts for one project: the ones another project has can't be ticked here.
+  const siteOwner = new Map(state.projects.filter(x => x.id !== p.id).flatMap(x => (x.siteIds || []).map(id => [id, x.number])));
+  const costFields = [
+    hasModule('payments') || hasModule('timesheets') ? `<div class="form__row"><label class="lbl" for="pj-budget">${escapeHTML(bt('costs.budget'))} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-budget" type="number" min="0" step="0.01" value="${p.costBudgetEur ?? ''}" /><span class="inp-unit__label">€</span></div><p class="hint">${escapeHTML(bt('costs.budgetHint'))}</p></div>` : '',
+    hasModule('timesheets') ? `<div class="form__row"><label class="lbl" for="pj-rate">${escapeHTML(bt('costs.rateLabel'))} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+      <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-rate" type="number" min="0" max="10000" step="0.01" value="${p.laborRateEur ?? ''}" /><span class="inp-unit__label">€/h</span></div><p class="hint">${escapeHTML(bt('costs.rateHint'))}</p></div>` : '',
+    hasModule('timesheets') && sites.length ? `<div class="form__row form__row--full"><span class="lbl" id="pj-sites-label">${escapeHTML(bt('costs.sitesLabel'))}</span>
+      <div class="form__checks form__checks--wide" role="group" aria-labelledby="pj-sites-label">${sites.map(s => {
+        const owner = siteOwner.get(s.id);
+        return `<label class="form__check"><input type="checkbox" data-site="${escapeHTML(s.id)}"${(p.siteIds || []).includes(s.id) ? ' checked' : ''}${owner ? ' disabled' : ''} />
+          <span>${escapeHTML(s.name)}${owner ? ` <span class="muted">${escapeHTML(bt('costs.siteOf', { project: owner }))}</span>` : ''}</span></label>`;
+      }).join('')}</div><p class="hint">${escapeHTML(bt('costs.sitesHint'))}</p></div>` : '',
+  ].join('');
   const locked = !!p.contractLocked;
   const fromQuote = !!quote;
   const li = lineItemsField(catalog);
@@ -486,6 +744,7 @@ async function openProjectForm(project = null, opts = {}) {
       <div class="form__row" data-actual="end"><label class="lbl" for="pj-actual-end">${escapeHTML(BLD.formActualEnd)}</label><input class="inp inp--mono" id="pj-actual-end" type="date" max="${todayKey()}" value="${escapeHTML(p.actualEnd || '')}" /></div>
       ${hasModule('measurements') ? `<div class="form__row"><label class="lbl" for="pj-retention">${escapeHTML(BLD.formRetention)}</label>
         <div class="inp-unit"><input class="inp inp--mono inp--right" id="pj-retention" type="number" min="0" max="20" step="0.5" value="${p.retentionPct ?? 0}" /><span class="inp-unit__label">%</span></div><p class="hint">${escapeHTML(BLD.formRetentionHint)}</p></div>` : ''}
+      ${costFields}
       <div class="form__row form__row--full"><label class="lbl" for="pj-desc">${escapeHTML(BLD.formDescription)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <textarea class="txt" id="pj-desc" maxlength="4000">${escapeHTML(p.description || '')}</textarea></div>
     </div>
@@ -523,6 +782,9 @@ async function openProjectForm(project = null, opts = {}) {
     if ($('#pj-client', form) && !fromQuote) payload.clientId = $('#pj-client', form).value;
     if ($('#pj-manager', form)) payload.managerId = $('#pj-manager', form).value;
     if ($('#pj-retention', form)) payload.retentionPct = Number($('#pj-retention', form).value || 0);
+    if ($('#pj-budget', form)) payload.costBudgetEur = Number($('#pj-budget', form).value || 0);
+    if ($('#pj-rate', form)) payload.laborRateEur = Number($('#pj-rate', form).value || 0);
+    if ($('[data-site]', form)) payload.siteIds = $$('[data-site]', form).filter(box => box.checked).map(box => box.dataset.site);
     if (fromQuote) payload.quoteId = quote.id;
     else if (!locked) payload.contract = contractRows(form);
     const btn = $('button[type=submit]', form);
