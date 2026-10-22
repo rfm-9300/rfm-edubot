@@ -80,7 +80,7 @@ internal object InvoiceRoutes : DashboardFeature(DashboardModules.INVOICES) {
                 val index = call.parameters["index"]?.toIntOrNull() ?: return@patch call.respond(HttpStatusCode.BadRequest)
                 call.respondInvoiceChange(crm, crm.invoiceService.receiveInstallment(id, index))
             }
-            // Cancelling and deleting both free the Serviços rows the invoice billed, to be invoiced again.
+            // Cancelling and deleting both free the Serviços rows or the measurement the invoice billed, to be invoiced again.
             post("/invoices/{id}/cancel") {
                 val crm = deps.crm(call)
                 val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest)
@@ -107,8 +107,12 @@ internal object InvoiceRoutes : DashboardFeature(DashboardModules.INVOICES) {
     }
 }
 
-private suspend fun TenantCrm.invoiceDto(invoice: Invoice) =
-    invoice.dto(clients.findById(invoice.clientId), invoice.quoteId?.let { quotes.findById(it)?.number })
+private suspend fun TenantCrm.invoiceDto(invoice: Invoice) = invoice.dto(
+    clients.findById(invoice.clientId),
+    invoice.quoteId?.let { quotes.findById(it)?.number },
+    projectLabel = invoice.projectId?.let { projects.findById(it) }?.let { "${it.number} · ${it.name}" },
+    measurementNumber = invoice.measurementId?.let { measurements.findById(it)?.number },
+)
 
 /** The invoice after a change, or why it was refused: 409 when its state doesn't allow it, 400 for a bad request. */
 private suspend fun ApplicationCall.respondInvoiceChange(crm: TenantCrm, change: InvoiceChange) = when (change) {

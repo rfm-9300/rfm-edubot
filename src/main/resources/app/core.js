@@ -37,7 +37,14 @@ let state = {
   whatsAppSignup: { enabled: false },
   // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
   integrations: null, email: null,
-  fetched: { conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false },
+  // Building: the projects, and each page's list with its filters.
+  projects: [], projectsView: 'list', projectsFilter: 'active',
+  diary: [], diaryProject: '', issues: [], issuesFilter: 'open', issuesProject: '',
+  changeOrders: [], changesFilter: 'all', changesProject: '', measurements: [], measurementsFilter: 'all', measurementsProject: '',
+  fetched: {
+    conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false,
+    projects: false, issues: false, changeOrders: false, measurements: false,
+  },
 };
 
 // Module nav labels + user-facing copy come from the shared i18n catalogs (admin/catalog.*.js).

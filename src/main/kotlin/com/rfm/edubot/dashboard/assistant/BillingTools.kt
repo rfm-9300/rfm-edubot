@@ -113,6 +113,7 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
     private suspend fun quoteToInvoice(args: JsonObject): Pair<Quote, LocalDate> {
         val quote = s.resolveQuote(args.text("quote_id") ?: throw missing("quote_id"))
         val dueDate = args.date("due_date") ?: throw ToolProblem("due_date_required", "Ask when the invoice is due (YYYY-MM-DD).")
+        if (quote.projectId != null) throw ToolProblem(QuoteInvoicing.ALREADY_MEASURED, MEASURED_QUOTE)
         invoicedQuotes(listOf(quote.id))[quote.id]?.let { throw ToolProblem(QuoteInvoicing.ALREADY_INVOICED, "${quote.number} is already on invoice $it.") }
         s.clientServices.findByQuoteId(quote.id).firstOrNull { it.status != ClientServiceStatus.CANCELLED }?.let {
             throw ToolProblem(QuoteInvoicing.ALREADY_SERVICED, "${quote.number} already became the service \"${it.name}\"; invoice that service instead.")
@@ -138,6 +139,7 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
                 when (outcome.reason) {
                     QuoteInvoicing.ALREADY_INVOICED -> "This quote already has an invoice that isn't cancelled."
                     QuoteInvoicing.ALREADY_SERVICED -> "This quote already became a service; invoice that service instead."
+                    QuoteInvoicing.ALREADY_MEASURED -> MEASURED_QUOTE
                     else -> "That quote or its client no longer exists."
                 },
             )
@@ -185,6 +187,8 @@ internal class BillingTools(private val s: AssistantToolSession) : AssistantTool
         const val LIST_INVOICES = "list_invoices"
         const val CONVERT_QUOTE = "convert_quote_to_invoice"
         const val LIST_SERVICES = "list_services"
+
+        private const val MEASURED_QUOTE = "This quote is a project's contract and is billed by that project's measurements; invoice the next measurement instead."
 
         override val definitions = listOf(
             tool(

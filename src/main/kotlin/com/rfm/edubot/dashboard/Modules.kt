@@ -23,6 +23,16 @@ object DashboardModules {
     const val TIMESHEETS = "timesheets"
     const val EMAIL = "email"
 
+    // The Building category: construction projects and their progress.
+    const val PROJECTS = "projects"
+    const val SITE_DIARY = "site-diary"
+    const val SITE_ISSUES = "site-issues"
+    const val CHANGE_ORDERS = "change-orders"
+    const val MEASUREMENTS = "measurements"
+
+    /** The pages that work on a project's records, so they bring [PROJECTS] with them. */
+    val building = listOf(PROJECTS, SITE_DIARY, SITE_ISSUES, CHANGE_ORDERS, MEASUREMENTS)
+
     /**
      * Only the dashboard landing page is mandatory — it is the fallback view every tenant needs.
      * Everything else (messaging, contacts, settings, CRM) is opt-in: the product is no longer
@@ -32,7 +42,7 @@ object DashboardModules {
     val optional = listOf(
         CONVERSATIONS, CONTACTS, SETTINGS, PERSONA, CLIENTS, SERVICES, QUOTES, INVOICES, SUPPLIERS, EMPLOYEES, PAYMENTS, CATALOG,
         AI_ASSISTANT, BOOKINGS, INSTAGRAM, AGENTS, TIMESHEETS, EMAIL,
-    )
+    ) + building
     val catalog = alwaysOn + optional
 
     /**
@@ -40,9 +50,10 @@ object DashboardModules {
      * before module selection existed) means "the whole catalog" and must not pick these up. The time
      * clock records where employees punch, which a company has to decide on and tell its workers about.
      * The Email page shows a company's Gmail inbox to its whole team, and reading it needs Google's
-     * restricted scopes, so the platform turns it on deliberately.
+     * restricted scopes, so the platform turns it on deliberately. Building is for construction companies
+     * only: a clinic or a cleaning company must not find projects and site diaries in its menu.
      */
-    val optIn = listOf(AGENTS, TIMESHEETS, EMAIL)
+    val optIn = listOf(AGENTS, TIMESHEETS, EMAIL) + building
 
     fun availableFor(): List<String> = catalog
 
@@ -53,6 +64,7 @@ object DashboardModules {
         if (PAYMENTS in resolved && SUPPLIERS in catalog) resolved += SUPPLIERS
         // The people clocking in are employee records.
         if (TIMESHEETS in resolved && EMPLOYEES in catalog) resolved += EMPLOYEES
+        if (resolved.any { it in building } && PROJECTS !in resolved) resolved += PROJECTS
         return resolved.distinct()
     }
 

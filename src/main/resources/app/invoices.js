@@ -262,6 +262,7 @@ async function openInvoiceDetail(id) {
   const here = { key: `invoice:${inv.id}`, label: inv.number, open: () => openInvoiceDetail(inv.id) };
   const clientLink = hasModule('clients') && !!inv.clientId && !linksBackTo(`client:${inv.clientId}`);
   const quoteLink = hasModule('quotes') && !!inv.quoteId && !linksBackTo(`quote:${inv.quoteId}`);
+  const projectLink = hasModule('projects') && !!inv.projectId && !linksBackTo(`project:${inv.projectId}`);
   const form = document.createElement('div');
   form.className = 'form';
   form.innerHTML = `
@@ -276,6 +277,7 @@ async function openInvoiceDetail(id) {
       unpaid && received > 0 ? { label: STR.invoiceReceived, value: fmtEUR(received) } : null,
       unpaid && received > 0 ? { label: STR.invoiceStillOwed, value: fmtEUR(invoiceOutstandingEur(inv)) } : null,
       inv.taxOfficeCode ? { label: STR.invoiceTaxCode, value: inv.taxOfficeCode } : null,
+      inv.projectLabel ? { label: BLD.project, value: inv.measurementNumber ? `${inv.projectLabel} · ${bt('measurementN', { n: inv.measurementNumber })}` : inv.projectLabel } : null,
     ])}
     ${inv.quoteNumber && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
     ${itemsTable(inv.items)}
@@ -286,12 +288,14 @@ async function openInvoiceDetail(id) {
       ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
+      ${projectLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(BLD.openProject)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-inv-taxcode>${escapeHTML(inv.taxOfficeCode ? STR.invoiceTaxCodeChange : STR.invoiceTaxCodeAdd)}</button>
       ${unpaid && received === 0 ? `<button class="btn btn--sm btn--ghost" type="button" data-inv-cancel>${escapeHTML(STR.invoiceCancel)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-inv-delete>${escapeHTML(STR.invoiceDelete)}</button>
     </div>`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
   $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
+  $('[data-open-project]', form)?.addEventListener('click', () => openFrom(here, () => openProjectDrawer(inv.projectId, 'measurements')));
   $('#inv-paid', form)?.addEventListener('click', () => markInvoicePaid(inv.id, inv.number, parts.length ? invoiceOutstandingEur(inv) : null));
   $('[data-inv-parts]', form)?.addEventListener('click', () => openFrom(here, () => openInvoiceInstallmentsForm(inv)));
   $$('[data-receive-part]', form).forEach(b => b.addEventListener('click', () => receiveInvoiceInstallment(inv, Number(b.dataset.receivePart), true)));

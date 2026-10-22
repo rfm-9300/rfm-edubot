@@ -43,8 +43,9 @@ internal class AttentionOverview(mongo: MongoModule) : OverviewQueries(mongo) {
         waiting: List<WaitingConversation>,
         reconnects: List<IntegrationConnection>,
         employees: OverviewEmployeesDto?,
+        projects: List<OverviewAttentionItemDto>,
     ): List<OverviewAttentionItemDto> {
-        val items = mutableListOf<OverviewAttentionItemDto>()
+        val items = projects.toMutableList()
         if ((employees?.pendingSubmissions ?: 0) > 0) {
             // The ones waiting longest first.
             val pending = coll(ServiceSubmissionRepository.COLLECTION).find(
@@ -251,11 +252,15 @@ internal class AttentionOverview(mongo: MongoModule) : OverviewQueries(mongo) {
             OverviewMath.KIND_AGENT_APPROVAL,
             OverviewMath.KIND_SERVICE_SUBMISSION,
             OverviewMath.KIND_PENDING_BOOKING,
+            OverviewMath.KIND_SITE_ISSUE_OVERDUE,
+            OverviewMath.KIND_PROJECT_DELAYED,
             OverviewMath.KIND_INSTAGRAM_COMMENT,
             OverviewMath.KIND_AGENT_TASK_DUE,
             OverviewMath.KIND_AGENT_FAILED,
             OverviewMath.KIND_DUE_SOON_INVOICE,
             OverviewMath.KIND_DUE_SOON_PAYMENT,
+            OverviewMath.KIND_MEASUREMENT_TO_INVOICE,
+            OverviewMath.KIND_CHANGE_ORDER_PENDING,
             OverviewMath.KIND_QUOTE_EXPIRING,
             OverviewMath.KIND_ASSISTANT_ACTION,
         )

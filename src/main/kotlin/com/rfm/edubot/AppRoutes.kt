@@ -24,6 +24,7 @@ import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.EmployeeLookup
+import com.rfm.edubot.dashboard.building.projectShareRoutes
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
@@ -133,6 +134,7 @@ internal fun Routing.installRoutes(s: AppServices) {
     vaultRoutes(VaultService.of(s.mongo))
     backofficeRoutes()
     dashboardStaticRoutes()
+    projectShareRoutes(s.mongo, s.tenants) { s.runtimeConfig.get().pdfStoragePath }
     dashboardRoutes(
         mongo = s.mongo,
         tenantRepository = s.tenants,

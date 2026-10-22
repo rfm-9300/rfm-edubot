@@ -78,10 +78,14 @@ function renderNav() {
   const unreadEmail = window.EmailUI?.badge()?.count ?? o.email?.unread ?? 0;
   if (unreadEmail) counts.email = unreadEmail;
   const alerts = { conversations: waiting > 0, invoices: overdue > 0, payments: overduePay > 0, employees: toApprove > 0, bookings: pendingBookings > 0, instagram: pendingIg > 0, agents: !!agentsWaiting?.alert, email: unreadEmail > 0 };
+  const building = buildingNavCounts(o);
+  Object.assign(counts, building.counts);
+  Object.assign(alerts, building.alerts);
   const groups = [
     { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
+    { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
     { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
@@ -232,6 +236,24 @@ async function loadModule(tab) {
     state.bookingAvailability = availability;
     state.fetched.bookings = true;
   }
+  if (tab === 'projects') await ensureBuildingProjects(true);
+  if (tab === 'site-diary') {
+    const today = todayKey();
+    const range = state.diaryProject ? `projectId=${encodeURIComponent(state.diaryProject)}` : `from=${addDayKey(today, -30)}&to=${today}`;
+    [state.diary] = await Promise.all([api(`/app/api/building/diary?${range}`), ensureBuildingProjects(true)]);
+  }
+  if (tab === 'site-issues') {
+    [state.issues] = await Promise.all([api('/app/api/building/issues'), ensureBuildingProjects(true)]);
+    state.fetched.issues = true;
+  }
+  if (tab === 'change-orders') {
+    [state.changeOrders] = await Promise.all([api('/app/api/building/changes'), ensureBuildingProjects(true)]);
+    state.fetched.changeOrders = true;
+  }
+  if (tab === 'measurements') {
+    [state.measurements] = await Promise.all([api('/app/api/building/measurements'), ensureBuildingProjects(true)]);
+    state.fetched.measurements = true;
+  }
   if (tab === 'agents') await window.AgentsUI.load();
   if (tab === 'email') await window.EmailUI.load();
   if (tab === 'instagram') {
@@ -248,12 +270,14 @@ function render() {
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
-  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB].includes(state.active)
+  $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB,
+    'projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'].includes(state.active)
     || (state.active === 'agents' && !window.AgentsUI?.canManage());
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
     agents: I18N.t('app.agents.newAgent'), [PORTAL_TAB]: PORTAL.newTitle, timesheets: TIME.addShift,
+    projects: BLD.formNewTitle, 'site-diary': BLD.diaryNew, 'site-issues': BLD.issueNew, 'change-orders': BLD.changeNew, measurements: BLD.measurementNew,
   };
   $('#btn-new .btn__label').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
   const root = $('#view');
@@ -278,6 +302,11 @@ function render() {
   if (state.active === PORTAL_TAB) return renderMyServices(root);
   if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
   if (state.active === 'timesheets') return window.TimesheetsUI.renderTeam(root);
+  if (state.active === 'projects') return renderProjects(root);
+  if (state.active === 'site-diary') return renderSiteDiary(root);
+  if (state.active === 'site-issues') return renderSiteIssues(root);
+  if (state.active === 'change-orders') return renderChangeOrders(root);
+  if (state.active === 'measurements') return renderMeasurements(root);
   renderSettings(root);
 }
 
@@ -472,6 +501,11 @@ async function init(relayed = false) {
     if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
     if (state.active === 'agents') return window.AgentsUI.newAgent();
+    if (state.active === 'projects') return openProjectForm();
+    if (state.active === 'site-diary') return openDiaryForm(null, { projectId: state.diaryProject });
+    if (state.active === 'site-issues') return openIssueForm(null, { projectId: state.issuesProject });
+    if (state.active === 'change-orders') return openChangeForm(null, { projectId: state.changesProject });
+    if (state.active === 'measurements') return startMeasurement(state.measurementsProject);
     toast(STR.quickCreateSoon);
   });
   document.addEventListener('keydown', e => { if (e.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement.tagName)) { e.preventDefault(); $('#search').focus(); } });

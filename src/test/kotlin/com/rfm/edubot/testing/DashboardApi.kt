@@ -145,10 +145,11 @@ internal class DashboardApi(val mongo: MongoModule, private val http: HttpClient
         return Reply(response.status, response.bodyAsText())
     }
 
-    /** [bytes] posted as a file named [fileName], the way a browser's file input sends it. */
-    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray): Reply {
+    /** [bytes] posted as a file named [fileName], the way a browser's file input sends it, with the form's [fields]. */
+    suspend fun TestCompany.upload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap()): Reply {
         val form = formData {
             append("file", bytes, Headers.build { append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"") })
+            fields.forEach { (name, value) -> append(name, value) }
         }
         val response = http.submitFormWithBinaryData(path, form) { bearerAuth(token) }
         return Reply(response.status, response.bodyAsText())

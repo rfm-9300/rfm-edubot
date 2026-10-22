@@ -189,6 +189,8 @@ data class Quote(
     /** When the quote was first marked sent / accepted; follow-up agents count days from these. */
     val sentAt: Instant? = null,
     val acceptedAt: Instant? = null,
+    /** The project whose measurements bill this quote, from its first measurement; it is then billed only through them. */
+    val projectId: ObjectId? = null,
 )
 
 data class Invoice(
@@ -213,6 +215,9 @@ data class Invoice(
     val taxOfficeCode: String? = null,
     /** Empty when the invoice is paid in one go; otherwise parts adding up to [totalCents], paid ones first. */
     val installments: List<InvoiceInstallment> = emptyList(),
+    /** The project and measurement this invoice bills, when a measurement made it. */
+    val projectId: ObjectId? = null,
+    val measurementId: ObjectId? = null,
 ) {
     /** Received so far: the whole total once paid, otherwise the installments already paid. */
     val paidCents: Long

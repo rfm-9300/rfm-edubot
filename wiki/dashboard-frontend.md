@@ -86,7 +86,11 @@ Signup (`loadFacebookSdk()`, `waitForWhatsAppSignupMessage()`, `facebookLoginFor
 | `clients.js`, `payees.js`, `submissions.js` | Clients (list, record, form, own fields); Suppliers and Employees; registered services and an employee's sign-in |
 | `services.js`, `billing.js`, `quotes.js`, `invoices.js`, `financeiro.js`, `payments.js`, `catalog.js` | Serviços; what the document forms share (pickers, line items, PDF, sending by email); the billing pages |
 | `bookings.js`, `persona.js`, `settings.js`, `integrations.js` | Bookings; Persona; Settings; connecting Instagram, Gmail and WhatsApp, and the OAuth popup |
+| `building.js`, `projects.js`, `site-diary.js`, `site-issues.js`, `change-orders.js`, `measurements.js` | The Building pages ([building-projects.md](building-projects.md)): what they share (labels, progress bar, timeline, project picker, photos); Projects (list, timeline, record, phases editor, share link); Site diary; Issues; Change orders; Measurements |
 | `app.js` | The shell: `bootAuthed()`, the nav, `setActive()` / `loadModule()` / `render()`, the modules' deps, `init()` |
+
+The client's project page (`/app/share/{token}`) is apart from the dashboard: `share/index.html` and
+`share/share.js`, with the shared stylesheet, catalogs and `i18n.js` but no session.
 
 `/backoffice`:
 

@@ -112,7 +112,7 @@ internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
 
 /** A quote that is gone, whose client is gone, or that is already billed ([QuoteInvoicing.billedBy]). */
 private suspend fun ApplicationCall.respondQuoteRefused(reason: String) = when (reason) {
-    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
+    QuoteInvoicing.ALREADY_INVOICED, QuoteInvoicing.ALREADY_SERVICED, QuoteInvoicing.ALREADY_MEASURED -> respond(HttpStatusCode.Conflict, mapOf("error" to reason))
     QuoteInvoicing.CLIENT_NOT_FOUND -> respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
     else -> respond(HttpStatusCode.NotFound)
 }

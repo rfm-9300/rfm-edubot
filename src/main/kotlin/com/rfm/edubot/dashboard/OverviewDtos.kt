@@ -32,6 +32,7 @@ data class OverviewDto(
     val payments: OverviewPaymentsDto? = null,
     val assistant: OverviewAssistantDto? = null,
     val agents: OverviewAgentsDto? = null,
+    val projects: OverviewProjectsDto? = null,
     val setup: List<OverviewSetupItemDto> = emptyList(),
     val hiddenCards: List<String> = emptyList(),
     /** Filled only for `GET /overview?extended=1` (the minimal Home layout); empty otherwise. */
@@ -249,6 +250,39 @@ data class OverviewAgentsDto(
     val tasksDue: Long,
     val failedThisWeek: Long,
     val paused: Boolean,
+)
+
+/**
+ * The Building category: projects by health, issues, today's diaries, changes waiting for the client and
+ * measurements to invoice. [behind] holds the active projects furthest behind their plan. No defaults: the
+ * JSON config would leave out the zeros the card reads.
+ */
+@Serializable
+data class OverviewProjectsDto(
+    val active: Int,
+    val planning: Int,
+    val atRisk: Int,
+    val delayed: Int,
+    val openIssues: Int,
+    val overdueIssues: Int,
+    val diariesToday: Int,
+    val activeWithoutDiary: Int,
+    val pendingChanges: Int,
+    val pendingChangesCents: Long,
+    val toInvoiceCount: Int,
+    val toInvoiceCents: Long,
+    val behind: List<OverviewProjectRowDto>,
+)
+
+@Serializable
+data class OverviewProjectRowDto(
+    val id: String,
+    val number: String,
+    val name: String,
+    val health: String,
+    val progressPct: Int,
+    val plannedPct: Int?,
+    val scheduleDays: Int?,
 )
 
 @Serializable

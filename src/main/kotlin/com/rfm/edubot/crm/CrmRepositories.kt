@@ -267,6 +267,12 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
 
     suspend fun findById(id: ObjectId): Quote? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toQuote()
 
+    /** The quotes among [ids], read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Quote> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toQuote() }.associateBy { it.id }
+    }
+
     suspend fun list(clientId: ObjectId? = null, status: QuoteStatus? = null): List<Quote> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
@@ -352,6 +358,11 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("pdfPath", pdfPath))
     }
 
+    /** Marks the quote as billed by [projectId]'s measurements, or clears the mark (null). */
+    suspend fun setProject(id: ObjectId, projectId: ObjectId?) {
+        collection.updateOne(scoped(Filters.eq("_id", id)), Updates.set("projectId", projectId))
+    }
+
     data class ClientQuoteTotal(val clientId: ObjectId, val clientName: String, val clientNumber: String, val totalCents: Long, val quoteCount: Int)
 
     suspend fun sumByClient(): List<ClientQuoteTotal> {
@@ -397,6 +408,7 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         updatedAt = getInstant("updatedAt"),
         sentAt = getDate("sentAt")?.toInstantValue(),
         acceptedAt = getDate("acceptedAt")?.toInstantValue(),
+        projectId = get("projectId", ObjectId::class.java),
     )
 
     private fun Quote.toDocument() = Document("_id", id)
@@ -413,6 +425,7 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
         .append("updatedAt", updatedAt.toDate())
         .append("sentAt", sentAt?.toDate())
         .append("acceptedAt", acceptedAt?.toDate())
+        .append("projectId", projectId)
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 }
@@ -423,6 +436,12 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Invoice? = collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toInvoice()
+
+    /** The invoices among [ids], read in one query. */
+    suspend fun findByIds(ids: Collection<ObjectId>): Map<ObjectId, Invoice> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toInvoice() }.associateBy { it.id }
+    }
 
     suspend fun findByNumber(number: String): Invoice? =
         collection.find(scoped(Filters.regex("number", "^${Regex.escape(number.trim())}$", "i"))).firstOrNull()?.toInvoice()
@@ -459,7 +478,16 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit).toList().map { it.toInvoice() }
     }
 
-    suspend fun create(clientId: ObjectId, quoteId: ObjectId?, items: List<LineItem>, dueDate: LocalDate, taxOfficeCode: String? = null): Invoice {
+    /** [projectId] and [measurementId] mark an invoice a project's measurement made. */
+    suspend fun create(
+        clientId: ObjectId,
+        quoteId: ObjectId?,
+        items: List<LineItem>,
+        dueDate: LocalDate,
+        taxOfficeCode: String? = null,
+        projectId: ObjectId? = null,
+        measurementId: ObjectId? = null,
+    ): Invoice {
         val now = SystemClock.now()
         val invoice = Invoice(
             tenantId = tenantId,
@@ -472,6 +500,8 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             createdAt = now,
             updatedAt = now,
             taxOfficeCode = taxOfficeCode?.trim()?.takeIf { it.isNotBlank() },
+            projectId = projectId,
+            measurementId = measurementId,
         )
         collection.insertOne(invoice.toDocument())
         events.append(
@@ -655,6 +685,8 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         updatedAt = getInstant("updatedAt"),
         taxOfficeCode = getString("taxOfficeCode"),
         installments = getList("installments", Document::class.java).orEmpty().map { it.toInstallment() },
+        projectId = get("projectId", ObjectId::class.java),
+        measurementId = get("measurementId", ObjectId::class.java),
     )
 
     private fun Invoice.toDocument() = Document("_id", id)
@@ -672,6 +704,8 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("updatedAt", updatedAt.toDate())
         .append("taxOfficeCode", taxOfficeCode)
         .append("installments", installments.map { it.toDocument() })
+        .append("projectId", projectId)
+        .append("measurementId", measurementId)
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
 

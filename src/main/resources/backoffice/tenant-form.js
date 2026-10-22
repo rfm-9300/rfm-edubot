@@ -27,6 +27,12 @@ const MODULES = [
   { id: 'agents', optIn: true },
   { id: 'timesheets', optIn: true },
   { id: 'email', optIn: true },
+  // Building, for construction companies; the four pages after Projects bring it along.
+  { id: 'projects', optIn: true },
+  { id: 'site-diary', optIn: true },
+  { id: 'site-issues', optIn: true },
+  { id: 'change-orders', optIn: true },
+  { id: 'measurements', optIn: true },
 ];
 
 function tenantForm(editing, back = null) {

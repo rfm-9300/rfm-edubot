@@ -22,6 +22,12 @@ Rodrigo asked that a quote can also be converted to a service, besides an invoic
   its confirmation card) and the agents' invoice-from-quote step (which skips with `quote_serviced`)
   all apply it. Cancelling or deleting the row frees the quote, and reopening a cancelled row whose
   quote has been billed since answers `409 quote_billed`.
+- **Or by a project's measurements** (Building, 2026-10-20, [building-projects.md](building-projects.md)).
+  The first measurement of a project made from the quote sets `crm.quotes.projectId`; `billedBy` then
+  answers `already_measured` (409 on the routes, a message in the assistant, `quote_measured` in the
+  agents' step), and the quote detail says the project bills it. A quote invoiced or serviced first
+  can't be measured (`quote_billed`). Measurement invoices carry `projectId` and `measurementId`
+  (the invoice record links back to the project) and no `quoteId`.
 - The invoice that bills the row carries no `quoteId` (it bills services), so the quote detail finds it
   through the row's `invoiceId` and shows both, and the row shows "From quote …" or opens the quote.
 - API: `POST /app/api/crm/quotes/{id}/service` (`performedAt`, `name`, both optional; needs the Quotes

@@ -30,6 +30,14 @@ class ArchitectureBoundariesTest {
     }
 
     @Test
+    fun `Building services and repositories don't know about HTTP`() {
+        val domain = sources("building").filterNot { it.path().startsWith("building/api/") }
+        assertTrue(domain.size > 10)
+        val offenders = domain.filter { file -> file.imports().any { it.startsWith("io.ktor.server.") } }
+        assertEquals(emptyList(), offenders.map { it.path() }, "requests, DTOs and views belong in building/api, routes in dashboard/building")
+    }
+
+    @Test
     fun `the HTTP error contract depends on no feature`() {
         val offenders = sources("http").filter { file -> file.imports().any { it.startsWith("com.rfm.edubot.") } }
         assertEquals(emptyList(), offenders.map { it.path() })

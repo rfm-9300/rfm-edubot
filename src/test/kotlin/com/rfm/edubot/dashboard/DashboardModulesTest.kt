@@ -154,6 +154,21 @@ class DashboardModulesTest {
         )
     }
 
+    @Test
+    fun `the Building pages are opt-in, and each one brings the projects it works on`() {
+        assertEquals(true, DashboardModules.optIn.containsAll(DashboardModules.building))
+        assertEquals(emptyList(), DashboardModules.building.filter { it in DashboardModules.effectiveFor(tenant(enabledModules = null)) })
+        assertEquals(
+            listOf(DashboardModules.OVERVIEW, DashboardModules.SITE_DIARY, DashboardModules.PROJECTS),
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.SITE_DIARY))),
+        )
+        assertEquals(
+            listOf(DashboardModules.OVERVIEW, DashboardModules.MEASUREMENTS, DashboardModules.INVOICES, DashboardModules.PROJECTS),
+            DashboardModules.effectiveFor(tenant(listOf(DashboardModules.MEASUREMENTS, DashboardModules.INVOICES))),
+            "measurements don't bring invoices: a company may bill elsewhere",
+        )
+    }
+
     private fun tenant(enabledModules: List<String>?) = Tenant(
         slug = "test",
         name = "Test",

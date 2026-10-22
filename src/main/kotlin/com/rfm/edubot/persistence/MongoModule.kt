@@ -219,6 +219,35 @@ class MongoModule(config: AppConfig.MongoConfig) {
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("keyId", 1), IndexOptions().unique(true))
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("active", 1))
 
+            val projects = db.getCollection<Document>("building.projects")
+            projects.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+            projects.createIndex(Document("tenantId", 1).append("status", 1).append("updatedAt", -1))
+            projects.createIndex(Document("tenantId", 1).append("clientId", 1))
+            projects.createIndex(Document("tenantId", 1).append("quoteId", 1))
+            projects.createIndex(
+                Document("share.token", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("share.token", Document("\$type", "string"))),
+            )
+            val siteLogs = db.getCollection<Document>("building.site_logs")
+            // One diary entry per project per day: two people writing it at once leave one.
+            siteLogs.createIndex(Document("tenantId", 1).append("projectId", 1).append("day", 1), IndexOptions().unique(true))
+            siteLogs.createIndex(Document("tenantId", 1).append("day", -1))
+            val sitePhotos = db.getCollection<Document>("building.photos")
+            sitePhotos.createIndex(Document("tenantId", 1).append("projectId", 1).append("day", -1))
+            sitePhotos.createIndex(Document("tenantId", 1).append("logId", 1))
+            sitePhotos.createIndex(Document("tenantId", 1).append("issueId", 1))
+            val siteIssues = db.getCollection<Document>("building.issues")
+            siteIssues.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+            siteIssues.createIndex(Document("tenantId", 1).append("projectId", 1).append("status", 1))
+            siteIssues.createIndex(Document("tenantId", 1).append("status", 1).append("dueDate", 1))
+            val changeOrders = db.getCollection<Document>("building.change_orders")
+            changeOrders.createIndex(Document("tenantId", 1).append("number", 1), IndexOptions().unique(true))
+            changeOrders.createIndex(Document("tenantId", 1).append("projectId", 1).append("status", 1))
+            val measurements = db.getCollection<Document>("building.measurements")
+            measurements.createIndex(Document("tenantId", 1).append("projectId", 1).append("number", 1), IndexOptions().unique(true))
+            measurements.createIndex(Document("tenantId", 1).append("status", 1))
+            measurements.createIndex(Document("tenantId", 1).append("invoiceId", 1))
+
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))
             crmPayments.createIndex(Document("tenantId", 1).append("employeeId", 1))

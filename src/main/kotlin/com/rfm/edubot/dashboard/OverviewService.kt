@@ -7,6 +7,7 @@ import com.rfm.edubot.dashboard.overview.CalendarOverview
 import com.rfm.edubot.dashboard.overview.DirectoryOverview
 import com.rfm.edubot.dashboard.overview.InboxOverview
 import com.rfm.edubot.dashboard.overview.MoneyOverview
+import com.rfm.edubot.dashboard.overview.ProjectsOverview
 import com.rfm.edubot.dashboard.overview.RecentOverview
 import com.rfm.edubot.dashboard.overview.SalesOverview
 import com.rfm.edubot.integrations.IntegrationConnectionRepository
@@ -31,6 +32,7 @@ class OverviewService(private val mongo: MongoModule) {
     private val inboxCards = InboxOverview(mongo)
     private val calendarCard = CalendarOverview(mongo)
     private val agentsCard = AgentsOverview(mongo)
+    private val projectsCard = ProjectsOverview(mongo)
     private val attentionList = AttentionOverview(mongo)
     private val recentFeed = RecentOverview(mongo)
 
@@ -91,6 +93,7 @@ class OverviewService(private val mongo: MongoModule) {
             }
         }
         val agents = async { if (DashboardModules.AGENTS in modules) agentsCard.agents(tenant.id, window) else null }
+        val projects = async { if (DashboardModules.PROJECTS in modules) projectsCard.projects(tenant.id, window, modules) else null }
         val reconnects = async {
             if (DashboardModules.SETTINGS in modules) IntegrationConnectionRepository(mongo).needingReconnect(tenant.id) else emptyList()
         }
@@ -135,10 +138,14 @@ class OverviewService(private val mongo: MongoModule) {
         val paymentsDto = payments.await()
         val assistantDto = assistant.await()
         val agentsBlock = agents.await()
+        val projectsBlock = projects.await()
 
         val waiting = waitingList.await()
         val reconnectList = reconnects.await()
-        val attention = attentionList.attentionItems(tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList, employeesDto)
+        val attention = attentionList.attentionItems(
+            tenant.id, window, modules, cashDto, pipelineDto, inboxDto, calendarDto, socialDto, assistantDto, paymentsDto, agentsBlock, waiting, reconnectList, employeesDto,
+            projectsBlock?.attention.orEmpty(),
+        )
         val setup = OverviewMath.setupItems(
             modules = modules,
             hasWhatsApp = tenant.binding(Platform.WHATSAPP) != null,
@@ -157,6 +164,7 @@ class OverviewService(private val mongo: MongoModule) {
             agentAttention = agentsBlock?.let { (it.dto.pendingApprovals + it.dto.tasksDue).toInt() + it.failed.size } ?: 0,
             reconnects = reconnectList.size,
             pendingSubmissions = (employeesDto?.pendingSubmissions ?: 0).toInt(),
+            buildingAttention = projectsBlock?.attention?.size ?: 0,
         )
         OverviewHomeLayout.apply(
             OverviewDto(
@@ -188,6 +196,7 @@ class OverviewService(private val mongo: MongoModule) {
                 payments = paymentsDto,
                 assistant = assistantDto,
                 agents = agentsBlock?.dto,
+                projects = projectsBlock?.dto,
                 setup = setup,
                 cashFlow = cashFlow.await(),
                 activity = activity.await(),
