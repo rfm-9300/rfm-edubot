@@ -168,8 +168,9 @@ function groupByPeriod(items, grain, dateOf) {
   }
   return [...groups.entries()].sort((a, b) => b[0].localeCompare(a[0]));
 }
-function periodChips(active, attr, labels) {
-  return ['', 'week', 'month'].map(period => `<button class="btn btn--sm ${active === period ? 'btn--primary' : ''}" type="button" ${attr}="${period}">${escapeHTML(labels[period])}</button>`).join('');
+// `extra` adds views past the periods (e.g. Services' By client); each needs its own label.
+function periodChips(active, attr, labels, extra = []) {
+  return ['', 'week', 'month', ...extra].map(period => `<button class="btn btn--sm ${active === period ? 'btn--primary' : ''}" type="button" ${attr}="${period}">${escapeHTML(labels[period])}</button>`).join('');
 }
 function sumEur(items) {
   return items.reduce((sum, item) => sum + Number(item.totalEur || 0), 0);

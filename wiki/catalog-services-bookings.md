@@ -105,6 +105,30 @@ Decisions that matter later:
 - The services list gained an Employee column and filter. The employee portal (My services) still
   shows only what the employee registered, not work assigned to them; the mobile app has no picker.
 
+**A client's catalog items (2026-10-24):** Rodrigo asked to tie clients to the catalog items they
+buy, and to see those first when adding a service for that client.
+
+- **Stored on the client**, as `crm.clients.catalogItemIds` (catalog `id` strings like `srv-…`, in
+  the order added). `PUT /app/api/crm/clients/{id}/catalog-items` with `{itemIds}` replaces the whole
+  list. It sits in `ClientRoutes` behind `requireModules(CATALOG)`, so it needs Clients and Catalog.
+  Ids the company's catalog doesn't have are refused (`400 catalog_item_not_found`), and the list is
+  capped at 500. `ClientDto.catalogItemIds` is left out of the JSON when empty, like other defaults.
+  It is staff-only: the bot's `CrmTools` don't send it.
+- **Deleting a catalog item doesn't touch clients.** The UI skips ids it can't find in the catalog,
+  and the next save of that client drops them.
+- **Services page, By client view:** a fourth view chip next to List / By week / By month
+  (`periodChips` takes extra views; `state.filterServicePeriod === 'client'`). It's only offered with
+  both modules. It shows a client select, the client's items (code, title, type, unit, price, remove)
+  and an add select with the catalog items the client doesn't have yet. New service in this view
+  starts with that client.
+- **Service, quote and invoice forms:** `lineItemsField(catalog, { preferred })` takes a function
+  that returns the ids to list first, under the heading "Client's items". It runs each time the
+  picker opens, so it follows the client picked after the form was built. The three forms build it
+  with `preferredClientItems(getForm, clients, fixedId)` in `services.js`.
+- **Client record:** an Items tab (with the Catalog module) shows the same table and add select. It
+  reuses `clientItemsRowsHtml`, `clientItemsAddHtml` and `wireClientItems`, and an archived client's
+  list can't be changed. `loadClientRecord` loads the catalog when it isn't loaded yet.
+
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 
 Built by a Cursor cloud agent. The shared lines editor (Serviços, Orçamentos, Faturas, Pagamentos)

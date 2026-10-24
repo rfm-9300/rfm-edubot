@@ -33,6 +33,10 @@ internal data class CreateClientRequest(
     fun toDraft() = ClientDraft(name, phone, address, email, taxId, notes, postalCode, city, contactPerson, customFields)
 }
 
+/** The whole list of the client's catalog items; ids the catalog doesn't have are refused. */
+@Serializable
+internal data class ClientCatalogItemsRequest(val itemIds: List<String>)
+
 @Serializable
 internal data class CreateQuoteRequest(
     val clientId: String,

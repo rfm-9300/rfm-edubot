@@ -9,12 +9,14 @@ async function openInvoiceForm(opts = {}) {
       api('/app/api/crm/standard-items').catch(() => []),
     ]);
   } catch { return toast(STR.invoiceCreateFailed); }
-  const li = lineItemsField(catalog);
+  const pickable = withClient(clients, opts.client);
+  // The picked client's usual items lead the catalog picker.
+  const li = lineItemsField(catalog, { preferred: preferredClientItems(() => form, pickable) });
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${clientSelect(withClient(clients, opts.client), opts.client?.id)}
+      ${clientSelect(pickable, opts.client?.id)}
       <div class="form__row"><label class="lbl" for="i-due">${escapeHTML(STR.invoiceDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="i-due" type="date" required /></div>
       <div class="form__row"><label class="lbl" for="i-quote">${escapeHTML(STR.invoiceQuoteId)} <span class="opt">${escapeHTML(STR.optional)}</span></label>

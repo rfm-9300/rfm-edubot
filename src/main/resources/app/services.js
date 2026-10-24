@@ -18,8 +18,24 @@ function serviceColumns() {
   ];
 }
 
+// The client's catalog items need both directories; without them the view isn't offered.
+const serviceClientItemsOn = () => hasModule('clients') && hasModule('catalog');
+
+function serviceViewChips(period) {
+  const t = CRM.services;
+  return periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth, client: t.byClient }, serviceClientItemsOn() ? ['client'] : []);
+}
+
+function wireServiceViews(root) {
+  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; state.filterServicePeriodKey = ''; render(); }));
+}
+
 function renderServices(root) {
   const t = CRM.services;
+  if (state.filterServicePeriod === 'client') {
+    if (serviceClientItemsOn()) return renderServiceClientItems(root);
+    state.filterServicePeriod = '';
+  }
   const q = state.search.toLowerCase();
   const all = state.clientServices || [];
   const clientNames = new Map();
@@ -67,7 +83,7 @@ function renderServices(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.jobs}</td><td class="num">${fmtEUR(roll.open)}</td><td class="num">${fmtEUR(roll.invoiced)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
       }).join('')
     : '';
-  const views = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
+  const views = serviceViewChips(period);
   const tools = clientFilter + employeeFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
@@ -98,7 +114,7 @@ function renderServices(root) {
     empty: period ? t.summaryEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: period ? t.summaryEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
-  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; state.filterServicePeriodKey = ''; render(); }));
+  wireServiceViews(root);
   $$('[data-svc-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
     const dir = btn.dataset.svcPeriodNav;
     state.filterServicePeriodKey = dir === 'current' ? '' : shiftPeriodKey(nowKey, period, dir === 'prev' ? -1 : 1);
@@ -114,6 +130,100 @@ function renderServices(root) {
   }));
   $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
   wireColumnOrder(root, 'services', serviceColumns());
+}
+
+// By client: the catalog items one client usually buys. The service, quote and invoice forms list them
+// first once that client is picked, and the client record has them in its own tab. Items since removed
+// from the catalog are left out and dropped on the next save.
+function clientCatalogItems(client) {
+  const byId = new Map((state.catalog || []).map(c => [c.id, c]));
+  return (client?.catalogItemIds || []).map(id => byId.get(id)).filter(Boolean);
+}
+
+// For a form's line picker: the usual items of whichever client is picked in `#f-client` (or `fixedId`).
+// `getForm` returns the form, which the caller builds after the picker.
+function preferredClientItems(getForm, clients, fixedId = '') {
+  return () => {
+    const id = fixedId || $('#f-client', getForm())?.value;
+    return (clients || state.clients || []).find(c => c.id === id)?.catalogItemIds || [];
+  };
+}
+
+function clientItemsHead() {
+  const ti = CRM.items;
+  return [[ti.thCode], [ti.thTitle], [ti.thType], [ti.thUnit], [ti.thPrice, 'right'], ['']];
+}
+
+function clientItemsRowsHtml(items, q = '') {
+  const t = CRM.services;
+  return items
+    .filter(i => !q || foldText(`${i.code || ''} ${i.title || ''} ${i.category || ''}`).includes(q))
+    .map(i => `<tr>
+      <td class="id">${escapeHTML(i.code || '')}</td>
+      <td class="name">${escapeHTML(i.title || '')}</td>
+      <td>${catalogTypePill(i.type)}</td>
+      <td class="mono muted">${escapeHTML(i.unit || '')}</td>
+      <td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>
+      <td class="right"><button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(t.clientItemsRemove)}" aria-label="${escapeHTML(t.clientItemsRemoveAria({ name: i.title || '' }))}" data-remove-client-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button></td>
+    </tr>`).join('');
+}
+
+// The catalog items the client doesn't have yet, services first; empty when there are none.
+function clientItemsAddHtml(items) {
+  const t = CRM.services;
+  const taken = new Set(items.map(i => i.id));
+  const free = serviceCatalog().filter(c => (state.catalog || []).some(i => i.id === c.id) && !taken.has(c.id));
+  if (!free.length) return '';
+  const group = (label, list) => (list.length ? `<optgroup label="${escapeHTML(label)}">${list.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))}</option>`).join('')}</optgroup>` : '');
+  return `<select class="sel" data-svc-items-add aria-label="${escapeHTML(t.clientItemsAddPh)}"><option value="">${escapeHTML(t.clientItemsAddPh)}</option>${group(STR.catalogService, free.filter(c => c.type === 'service'))}${group(STR.catalogMaterial, free.filter(c => c.type !== 'service'))}</select>`;
+}
+
+// `onSaved(client)` runs with the saved client, after the add or remove went through.
+function wireClientItems(root, client, items, onSaved) {
+  $('[data-svc-items-add]', root)?.addEventListener('change', e => {
+    if (e.target.value) saveClientCatalogItems(client, [...items.map(i => i.id), e.target.value], onSaved);
+  });
+  $$('[data-remove-client-item]', root).forEach(btn => btn.addEventListener('click', () => {
+    saveClientCatalogItems(client, items.map(i => i.id).filter(id => id !== btn.dataset.removeClientItem), onSaved);
+  }));
+}
+
+async function saveClientCatalogItems(client, itemIds, onSaved) {
+  const t = CRM.services;
+  try {
+    const saved = await api(`/app/api/crm/clients/${encodeURIComponent(client.id)}/catalog-items`, { method: 'PUT', body: JSON.stringify({ itemIds }) });
+    state.clients = (state.clients || []).map(c => (c.id === saved.id ? saved : c));
+    toast(t.clientItemsSaved);
+    onSaved(saved);
+  } catch { toast(t.clientItemsFailed); }
+}
+
+function renderServiceClientItems(root) {
+  const t = CRM.services;
+  const clients = [...(state.clients || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  if (state.serviceItemsClient && !clients.some(c => c.id === state.serviceItemsClient)) state.serviceItemsClient = '';
+  const clientId = state.serviceItemsClient || state.filterServiceClient || '';
+  const client = clients.find(c => c.id === clientId) || null;
+  const items = clientCatalogItems(client);
+  const clientPick = `<select class="sel" data-svc-items-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(STR.lineChooseClient)}</option>${clients.map(c => `<option value="${escapeHTML(c.id)}" ${c.id === clientId ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select>`;
+  const withItems = clients.filter(c => clientCatalogItems(c).length).length;
+  const head = `<tr>${clientItemsHead().map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr>`;
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
+    { label: t.clientItemsStat, value: items.length },
+    { label: t.clientItemsClientsStat, value: withItems },
+  ])) + crmPanel({
+    title: client ? client.name : t.clientItemsTitle,
+    tag: client ? items.length : null,
+    views: serviceViewChips('client'),
+    tools: clientPick + (client ? clientItemsAddHtml(items) : ''),
+    head,
+    rows: client ? clientItemsRowsHtml(items, foldText(state.search.trim())) : '',
+    empty: !client ? t.clientItemsNoClient : (items.length ? t.emptyFiltered : t.clientItemsEmpty),
+    emptyDesc: !client ? t.clientItemsNoClientDesc : (items.length ? t.emptyFilteredDesc : t.clientItemsEmptyDesc),
+  });
+  wireServiceViews(root);
+  $('[data-svc-items-client]', root)?.addEventListener('change', e => { state.serviceItemsClient = e.target.value; render(); });
+  if (client) wireClientItems(root, client, items, saved => { state.serviceItemsClient = saved.id; render(); });
 }
 
 // Bookable services are catalog services, so both lists merge into one (the booking list only
@@ -157,7 +267,8 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
   const team = hasModule('employees');
   if (team && !state.employees.length) state.employees = await api('/app/api/crm/employees').catch(() => []);
-  const li = lineItemsField(serviceCatalog());
+  // The picked client's usual items lead the catalog picker.
+  const li = lineItemsField(serviceCatalog(), { preferred: preferredClientItems(() => form, state.clients, editing?.clientId) });
   const clientCell = editing
     ? `<div class="form__row"><span class="lbl">${escapeHTML(STR.lineClient)}</span><p class="hint">${escapeHTML(editing.clientName || '')}</p></div>`
     : clientSelect(state.clients, presetClientId || '');

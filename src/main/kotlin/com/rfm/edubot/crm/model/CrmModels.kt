@@ -33,6 +33,8 @@ data class Client(
      * Staff-only, like [notes]. A field the tenant removed may leave its value here; nothing shows it.
      */
     val customFields: Map<String, JsonPrimitive> = emptyMap(),
+    /** Catalog item ids ([com.rfm.edubot.crm.StandardItem.id]) this client usually buys; the service form lists them first. Staff-only. */
+    val catalogItemIds: List<String> = emptyList(),
 )
 
 data class LineItem(

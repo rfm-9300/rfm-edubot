@@ -514,7 +514,10 @@ async function init(relayed = false) {
     if (state.active === PORTAL_TAB) return openSubmissionForm();
     if (state.active === 'timesheets') return window.TimesheetsUI.newShift();
     if (state.active === 'clients') return openClientForm();
-    if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined, state.filterServiceEmployee || undefined);
+    if (state.active === 'services') {
+      const client = (state.filterServicePeriod === 'client' && state.serviceItemsClient) || state.filterServiceClient;
+      return openServiceForm(null, client || undefined, state.filterServiceEmployee || undefined);
+    }
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();

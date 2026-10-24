@@ -1,12 +1,14 @@
 package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.ClientFields
+import com.rfm.edubot.crm.api.ClientCatalogItemsRequest
 import com.rfm.edubot.crm.api.CreateClientRequest
 import com.rfm.edubot.crm.api.respondClientWrite
 import com.rfm.edubot.crm.api.dto
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.requireModules
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -14,10 +16,11 @@ import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import org.bson.types.ObjectId
 
-/** `/crm/clients`: the Clients directory, its own fields, and removing a client. */
+/** `/crm/clients`: the Clients directory, its own fields, the catalog items a client buys, and removing a client. */
 internal object ClientRoutes : DashboardFeature(DashboardModules.CLIENTS) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") { clientRoutes(deps) }
@@ -55,6 +58,18 @@ internal object ClientRoutes : DashboardFeature(DashboardModules.CLIENTS) {
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
             call.respond(crm.clients.findById(id)?.dto() ?: return@get call.respond(HttpStatusCode.NotFound))
         }
+        requireModules(DashboardModules.CATALOG) {
+            put("/clients/{id}/catalog-items") {
+                val crm = deps.crm(call)
+                val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@put call.respond(HttpStatusCode.BadRequest)
+                val itemIds = call.receive<ClientCatalogItemsRequest>().itemIds.map { it.trim() }.filter { it.isNotBlank() }.distinct()
+                if (itemIds.size > CLIENT_CATALOG_LIMIT) return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "too_many_items"))
+                val known = crm.standardItems.findByIds(itemIds).map { it.id }.toSet()
+                if (itemIds.any { it !in known }) return@put call.respond(HttpStatusCode.BadRequest, mapOf("error" to "catalog_item_not_found"))
+                val client = crm.clients.setCatalogItems(id, itemIds) ?: return@put call.respond(HttpStatusCode.NotFound)
+                call.respond(client.dto())
+            }
+        }
         removableDirectory("clients", deps, { clients.delete(it) }) { id, archived ->
             clients.setArchived(id, archived)?.let { ArchiveStateDto(it.archivedAt?.toString()) }
         }
@@ -62,3 +77,4 @@ internal object ClientRoutes : DashboardFeature(DashboardModules.CLIENTS) {
 }
 
 private const val CLIENT_DIRECTORY_LIMIT = 2000
+private const val CLIENT_CATALOG_LIMIT = 500

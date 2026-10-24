@@ -33,6 +33,8 @@ internal data class ClientDto(
     val archivedAt: String? = null,
     val automationPaused: Boolean = false,
     val customFields: Map<String, JsonPrimitive> = emptyMap(),
+    /** The catalog items the client usually buys, as catalog ids. */
+    val catalogItemIds: List<String> = emptyList(),
 )
 
 @Serializable
@@ -188,6 +190,7 @@ internal fun Client.dto() = ClientDto(
     archivedAt = archivedAt?.toString(),
     automationPaused = automationPaused,
     customFields = customFields,
+    catalogItemIds = catalogItemIds,
 )
 
 internal fun Quote.dto(client: Client?) = QuoteDto(
