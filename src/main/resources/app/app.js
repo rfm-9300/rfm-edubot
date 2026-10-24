@@ -121,6 +121,7 @@ async function setActive(tab) {
   state.filterInvoiceStatus = '';
   state.filterServiceStatus = '';
   state.filterServiceClient = '';
+  state.filterServiceEmployee = '';
   state.filterServicePeriod = '';
   state.filterServicePeriodKey = '';
   state.filterInvoicePeriod = '';
@@ -191,6 +192,7 @@ async function loadModule(tab) {
     ]);
     state.clientServices = services;
     state.clients = clients;
+    if (hasModule('employees')) state.employees = await api('/app/api/crm/employees').catch(() => state.employees);
     if (hasModule('catalog')) state.catalog = await api('/app/api/crm/standard-items').catch(() => state.catalog);
     if (hasModule('bookings')) state.bookingServices = await api('/app/api/bookings/services').catch(() => state.bookingServices);
   }
@@ -512,7 +514,7 @@ async function init(relayed = false) {
     if (state.active === PORTAL_TAB) return openSubmissionForm();
     if (state.active === 'timesheets') return window.TimesheetsUI.newShift();
     if (state.active === 'clients') return openClientForm();
-    if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined);
+    if (state.active === 'services') return openServiceForm(null, state.filterServiceClient || undefined, state.filterServiceEmployee || undefined);
     if (state.active === 'catalog') return openCatalogForm();
     if (state.active === 'quotes') return openQuoteForm();
     if (state.active === 'invoices') return openInvoiceForm();

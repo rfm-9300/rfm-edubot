@@ -11,6 +11,7 @@ function serviceColumns() {
       const from = s.bookingId ? t.fromBooking : s.quoteId ? t.fromQuote : '';
       return `<td>${escapeHTML(s.name)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</td>`;
     } },
+    ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td class="muted">${escapeHTML(s.employeeName || '')}</td>` }] : []),
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
     { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
@@ -26,7 +27,11 @@ function renderServices(root) {
   for (const s of all) if (!clientNames.has(s.clientId)) clientNames.set(s.clientId, s.clientName || s.clientId);
   if (state.filterServiceClient && !clientNames.has(state.filterServiceClient)) state.filterServiceClient = '';
   const clientId = state.filterServiceClient || '';
-  const scoped = clientId ? all.filter(s => s.clientId === clientId) : all;
+  const employeeNames = new Map();
+  if (hasModule('employees')) for (const s of all) if (s.employeeId) employeeNames.set(s.employeeId, s.employeeName || s.employeeId);
+  if (state.filterServiceEmployee && !employeeNames.has(state.filterServiceEmployee)) state.filterServiceEmployee = '';
+  const employeeId = state.filterServiceEmployee || '';
+  const scoped = all.filter(s => (!clientId || s.clientId === clientId) && (!employeeId || s.employeeId === employeeId));
   const columns = orderedColumns('services', serviceColumns());
   const rows = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
@@ -39,6 +44,10 @@ function renderServices(root) {
   const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
   const clientFilter = clientOptions.length
     ? `<select class="sel" data-filter-svc-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    : '';
+  const employeeOptions = [...employeeNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
+  const employeeFilter = employeeOptions.length
+    ? `<select class="sel" data-filter-svc-employee aria-label="${escapeHTML(t.thEmployee)}"><option value="">${escapeHTML(t.filterEmployeeAll)}</option>${employeeOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === employeeId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
   const period = state.filterServicePeriod || '';
   const listed = scoped
@@ -59,12 +68,12 @@ function renderServices(root) {
       }).join('')
     : '';
   const views = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
-  const tools = clientFilter
+  const tools = clientFilter + employeeFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
     + (period ? '' : columnOrderButton('services'))
     + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
-  const filtered = Boolean(clientId || state.filterServiceStatus || q);
+  const filtered = Boolean(clientId || employeeId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'services');
   const serviceNav = periodNav(nowKey, period, 'data-svc-period-nav', t);
@@ -97,6 +106,7 @@ function renderServices(root) {
   }));
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
+  $('[data-filter-svc-employee]', root)?.addEventListener('change', e => { state.filterServiceEmployee = e.target.value; render(); });
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
   $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pick-service]')) return;
@@ -123,8 +133,21 @@ function serviceNameFrom(items) {
   return name.length > 160 ? `${name.slice(0, 159)}…` : name;
 }
 
+// Who does the work: an active employee, or the one already on the row even once they are inactive.
+function serviceEmployeeField(selectedId, current) {
+  const t = CRM.services;
+  const list = [...(state.employees || [])];
+  if (selectedId && !list.some(e => e.id === selectedId)) list.unshift({ id: selectedId, name: current || selectedId });
+  list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  return `<div class="form__row"><label class="lbl" for="svc-employee">${escapeHTML(t.employee)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="svc-employee"><option value="">${escapeHTML(t.employeeNone)}</option>
+    ${list.map(e => `<option value="${escapeHTML(e.id)}"${e.id === selectedId ? ' selected' : ''}>${escapeHTML(e.name)}</option>`).join('')}</select>
+    <p class="hint">${escapeHTML(t.employeeHint)}</p></div>`;
+}
+
 // One service can sum several lines, picked from the catalog or typed; invoicing it bills each line.
-async function openServiceForm(service, presetClientId) {
+// `presetEmployeeId` preselects who does it, as when it is added from an employee's record.
+async function openServiceForm(service, presetClientId, presetEmployeeId) {
   const t = CRM.services;
   const editing = service && service.id ? service : null;
   if (editing?.status === 'INVOICED') return openServiceDetail(editing);
@@ -132,6 +155,8 @@ async function openServiceForm(service, presetClientId) {
   if ((!state.clients.length || missingPreset) && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
   if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
+  const team = hasModule('employees');
+  if (team && !state.employees.length) state.employees = await api('/app/api/crm/employees').catch(() => []);
   const li = lineItemsField(serviceCatalog());
   const clientCell = editing
     ? `<div class="form__row"><span class="lbl">${escapeHTML(STR.lineClient)}</span><p class="hint">${escapeHTML(editing.clientName || '')}</p></div>`
@@ -143,6 +168,7 @@ async function openServiceForm(service, presetClientId) {
       ${clientCell}
       <div class="form__row"><label class="lbl" for="svc-when">${escapeHTML(t.when)}</label>
         <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing ? editing.performedAt || '' : todayKey()).slice(0, 10))}" /></div>
+      ${team ? serviceEmployeeField(editing ? editing.employeeId || '' : presetEmployeeId || '', editing?.employeeName) : ''}
       <div class="form__row form__row--full"><label class="lbl" for="svc-name">${escapeHTML(t.name)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <input class="inp" id="svc-name" maxlength="160" autocomplete="off" placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" />
         <p class="hint">${escapeHTML(t.nameHint)}</p></div>
@@ -175,6 +201,7 @@ async function openServiceForm(service, presetClientId) {
       items,
       catalogItemId: $('.line[data-catalog]', form)?.dataset.catalog || null,
     };
+    if (team) payload.employeeId = $('#svc-employee', form).value;
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
@@ -184,7 +211,7 @@ async function openServiceForm(service, presetClientId) {
       await loadModule('services');
       render();
       toast(editing ? t.updated : t.created);
-    } catch { btn.disabled = false; toast(t.saveFailed); }
+    } catch (err) { btn.disabled = false; toast(err?.code === 'employee_not_found' ? t.employeeNotFound : t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form, true);
 }
@@ -265,7 +292,7 @@ async function openServiceDetail(ref) {
       lines.length > 1 ? null : { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
       booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
       invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
-      doneBy ? { label: SUB.doneBy, value: doneBy.name } : null,
+      doneBy ? { label: t.employee, value: doneBy.name } : null,
       { label: STR.detailCreated, value: fmtDay(service.createdAt) },
     ])}
     ${quote && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: quote.number }))}</p>` : ''}

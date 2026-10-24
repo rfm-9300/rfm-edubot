@@ -106,11 +106,11 @@ function renderEmployees(root) {
   ])) + crmPanel({
     title: t.directory,
     tag: source.length,
-    tools: directoryViewChips('employees') + columnsButton('employees') + columnOrderButton('employees'),
+    tools: directoryViewChips('employees', { active: t.viewActive, archived: t.viewInactive }) + columnsButton('employees') + columnOrderButton('employees'),
     head: columnsHead(columns, 'employees'),
     rows,
-    empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
-    emptyDesc: archived ? STR.directoryArchivedEmptyDesc : t.emptyDesc,
+    empty: archived ? t.inactiveEmpty : t.emptyTitle,
+    emptyDesc: archived ? t.inactiveEmptyDesc : t.emptyDesc,
   });
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
@@ -148,16 +148,18 @@ async function openPayeeDrawer(kind, ref) {
   const q = encodeURIComponent(id);
   const work = kind === 'employee' && submissionsOn();
   const signIn = kind === 'employee' && employeePortalOn();
-  const [payee, payments, submissions, access, time] = await Promise.all([
+  const assigned = kind === 'employee' && hasModule('services');
+  const [payee, payments, submissions, access, time, services] = await Promise.all([
     api(`/app/api/crm/${cfg.path}/${q}`).catch(() => known),
     hasModule('payments') ? api(`/app/api/crm/payments?${cfg.filter}=${q}`).catch(() => []) : Promise.resolve([]),
     work ? api(`/app/api/crm/service-submissions?employeeId=${q}`).catch(() => []) : Promise.resolve([]),
     signIn ? api(`/app/api/crm/employees/${q}/access`).catch(() => null) : Promise.resolve(null),
     kind === 'employee' && window.TimesheetsUI ? window.TimesheetsUI.loadRecord(id) : Promise.resolve(null),
+    assigned ? api(`/app/api/crm/services?employeeId=${q}`).catch(() => []) : Promise.resolve(null),
   ]);
   if (gen !== drawerGen) return;
   if (!payee) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
-  payeeRecord = { kind, payee, payments: payments || [], submissions: submissions || [], access, time, el: body };
+  payeeRecord = { kind, payee, payments: payments || [], submissions: submissions || [], access, time, services, el: body };
   $('#drawer-title').textContent = payee.name;
   renderDrawerEyebrow(eyebrow(payee));
   renderPayeeRecord();
@@ -190,10 +192,12 @@ function renderPayeeRecord() {
   const subs = r.submissions || [];
   const pendingSubs = subs.filter(s => s.status === 'PENDING');
   const work = kind === 'employee' && submissionsOn();
+  const assigned = r.services ? employeeServiceSplit(r.services, today) : null;
   const since = [
     cfg.since(fmtDay(p.createdAt)),
     live.length ? STR.payeePayments({ n: live.length }) : '',
     subs.length ? SUB.registeredN({ n: subs.length }) : '',
+    assigned && assigned.live.length ? t.servicesN({ n: assigned.live.length }) : '',
     lastPaid ? STR.payeeLastPaid({ when: relTime(lastPaid) }) : '',
   ].filter(Boolean).join(' · ');
   const workCells = !work ? [] : [{
@@ -202,6 +206,15 @@ function renderPayeeRecord() {
     sub: pendingSubs.length ? fmtEUR(sumBy(pendingSubs, 'totalEur')) : SUB.kpiNothingToApprove,
     tone: pendingSubs.length ? 'warn' : '',
   }];
+  if (assigned) {
+    const next = assigned.toDo[0];
+    workCells.push({
+      label: t.kpiToDo,
+      value: String(assigned.toDo.length),
+      sub: next ? t.kpiNextOn({ date: fmtDayKey(next.performedAt.slice(0, 10), { day: 'numeric', month: 'short' }) }) : t.kpiNothingToDo,
+      tone: assigned.toDo.length ? 'info' : '',
+    });
+  }
   const cells = [...workCells, ...(!hasModule('payments') ? [] : [
     {
       label: STR.payeeKpiToPay,
@@ -210,11 +223,11 @@ function renderPayeeRecord() {
         : unpaid.length ? STR.payeeKpiUnpaid({ n: unpaid.length }) : STR.payeeKpiNothingDue,
       tone: overdue.length ? 'bad' : unpaid.length ? 'warn' : '',
     },
-    {
+    ...(assigned ? [] : [{
       label: STR.payeeKpiNextDue,
       value: next ? fmtDayKey(next.dueDate.slice(0, 10), { day: 'numeric', month: 'short' }) : '—',
       sub: next ? `${fmtEUR(next.totalEur)} · ${next.number}` : STR.payeeKpiNoneDue,
-    },
+    }]),
     { label: STR.payeeKpiPaid, value: fmtEUR(sumBy(paid, 'totalEur')), sub: STR.payeePayments({ n: paid.length }) },
   ])];
   const soon = addDayKey(today, 7);
@@ -230,6 +243,7 @@ function renderPayeeRecord() {
       tone: 'warn', title: STR.clientAttnDueSoon({ number: x.number }), detail: dueWhenText(x.dueDate, false), amount: x.totalEur, open: `payment:${x.id}`,
     })),
   ];
+  const inUse = r.payments.length > 0 || subs.length > 0 || (r.services || []).length > 0;
   const rows = [...r.payments].sort((a, b) => String(b.dueDate).localeCompare(String(a.dueDate))).map(x => {
     const status = effectiveStatus(x);
     const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
@@ -242,11 +256,14 @@ function renderPayeeRecord() {
       ? recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: r.payments.length })
       : recordEmpty(STR.payeeNoPayments, p.archivedAt ? null : 'payment', t.addPayment);
   body.innerHTML = `
-    ${recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
+    ${kind === 'employee'
+    ? recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: employeeStateButtons(p, inUse), warning: p.archivedAt ? t.inactiveSince({ date: fmtDay(p.archivedAt) }) : '' })
+    : recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
     ${recordKpisHtml(cells)}
     ${recordAttentionHtml(attention)}
     ${kind === 'employee' && employeePortalOn() ? employeeAccessHtml(p, r.access) : ''}
     ${kind === 'employee' && r.time ? window.TimesheetsUI.recordHtml(p, r.time) : ''}
+    ${assigned ? employeeServicesHtml(r.services, today, !p.archivedAt) : ''}
     ${work ? employeeWorkHtml(subs, r.access) : ''}
     ${kind === 'supplier' ? supplierServicesPanel(p) : ''}
     ${payments}
@@ -255,17 +272,26 @@ function renderPayeeRecord() {
   $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
   const setArchivedAt = archivedAt => { r.payee = { ...p, archivedAt }; renderPayeeRecord(); refreshDirectory(cfg.path); };
   $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord(cfg.path, p, {
-    inUse: r.payments.length > 0 || subs.length > 0,
-    archiveBody: subs.length ? SUB.employeeArchiveBody : STR.payeeArchiveBody,
+    inUse,
+    ...(kind === 'employee'
+      ? { archiveBody: t.deactivateBody, archiveTitle: t.deactivateTitle({ name: p.name }), archiveOk: t.deactivate, archivedToast: t.deactivated }
+      : { archiveBody: STR.payeeArchiveBody }),
     onDeleted: () => { closeDrawer({ dismissed: true }); refreshDirectory(cfg.path); },
     onArchived: setArchivedAt,
   }));
   $('[data-record-restore]', body)?.addEventListener('click', () => restoreDirectoryRecord(cfg.path, p, () => setArchivedAt(null)));
+  $('[data-employee-deactivate]', body)?.addEventListener('click', () => setEmployeeActive(p, false, setArchivedAt));
+  $('[data-employee-reactivate]', body)?.addEventListener('click', () => setEmployeeActive(p, true, setArchivedAt));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => {
     const [type, id] = el.dataset.recordOpen.split(':');
-    openFrom(here(), () => (type === 'submission' ? openSubmissionDetail(id) : openPaymentDetail(id)));
+    openFrom(here(), () => (type === 'submission' ? openSubmissionDetail(id) : type === 'service' ? openServiceDetail(id) : openPaymentDetail(id)));
   }));
-  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => (b.dataset.recordAct === 'services' ? cfg.edit(p) : cfg.pay(p)))));
+  $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => openFrom(here(), () => {
+    const act = b.dataset.recordAct;
+    if (act === 'services') return cfg.edit(p);
+    if (act === 'employee-service') return openServiceForm(null, undefined, p.id);
+    return cfg.pay(p);
+  })));
   $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
   if (kind === 'employee' && r.time) {
     window.TimesheetsUI.wireRecord(body, p, here(), async () => {
@@ -273,6 +299,52 @@ function renderPayeeRecord() {
       renderPayeeRecord();
     });
   }
+}
+
+// An employee's services: to do is open work dated today or later (soonest first), done is the rest
+// that isn't cancelled (latest first).
+function employeeServiceSplit(services, today) {
+  const day = s => (s.performedAt || s.createdAt || '').slice(0, 10);
+  const live = services.filter(s => s.status !== 'CANCELLED');
+  const toDo = live.filter(s => s.status === 'OPEN' && s.performedAt && day(s) >= today).sort((a, b) => day(a).localeCompare(day(b)));
+  const done = live.filter(s => !toDo.includes(s)).sort((a, b) => day(b).localeCompare(day(a)));
+  return { live, toDo, done };
+}
+
+function employeeServicesHtml(services, today, canAdd) {
+  const t = CRM.employees;
+  if (!services.length) return recordEmpty(t.servicesNone, canAdd ? 'employee-service' : null, t.addService);
+  const { toDo, done } = employeeServiceSplit(services, today);
+  const cancelled = services.filter(s => s.status === 'CANCELLED');
+  const row = (s, pill) => `<tr class="conversation-row${s.status === 'INVOICED' ? ' is-paid' : s.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="service:${escapeHTML(s.id)}">
+      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td><td class="name">${escapeHTML(s.clientName || '')}</td><td>${escapeHTML(s.name)}</td>
+      <td>${pill}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`;
+  const rows = [
+    ...toDo.map(s => row(s, `<span class="pill pill--info">${escapeHTML(t.scheduled)}</span>`)),
+    ...[...done, ...cancelled].map(s => row(s, servicePill(s.status))),
+  ].join('');
+  const s = CRM.services;
+  return recordTable([[s.thWhen], [s.thClient], [s.thService], [s.thStatus], [s.thTotal, 'right']], rows, { title: t.servicesTitle, count: services.length })
+    + (canAdd ? recordFootHtml([['employee-service', t.addService]]) : '');
+}
+
+// Employees are deactivated rather than archived: off the lists and pickers, sign-in refused, history kept.
+// One with history can only be deactivated, so Delete shows only when nothing refers to them.
+function employeeStateButtons(p, inUse) {
+  const t = CRM.employees;
+  return p.archivedAt
+    ? `<button class="btn btn--sm btn--ghost" type="button" data-employee-reactivate>${escapeHTML(t.reactivate)}</button>`
+    : `<button class="btn btn--sm btn--ghost" type="button" data-employee-deactivate>${escapeHTML(t.deactivate)}</button>${inUse ? '' : recordRemovalButton(p)}`;
+}
+
+async function setEmployeeActive(p, active, onChanged) {
+  const t = CRM.employees;
+  if (!active && !await confirmDialog({ title: t.deactivateTitle({ name: p.name }), body: t.deactivateBody, okLabel: t.deactivate, danger: false })) return;
+  try {
+    const res = await api(`/app/api/crm/employees/${encodeURIComponent(p.id)}/${active ? 'restore' : 'archive'}`, { method: 'POST' });
+    toast(active ? t.reactivated : t.deactivated);
+    onChanged(active ? null : res.archivedAt);
+  } catch (err) { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); }
 }
 
 // A supplier's usual services, which a new payment to them offers as lines.

@@ -228,9 +228,11 @@ internal data class CreateClientServiceRequest(
     val bookingServiceId: String? = null,
     val catalogItemId: String? = null,
     val performedAt: String? = null,
+    /** Who does the work; blank or omitted leaves it unassigned. */
+    val employeeId: String? = null,
 )
 
-/** Omitted [items] keep the stored ones. */
+/** Omitted [items] keep the stored ones. An omitted [employeeId] keeps who does the work, and "" clears it. */
 @Serializable
 internal data class UpdateClientServiceRequest(
     val name: String? = null,
@@ -241,6 +243,7 @@ internal data class UpdateClientServiceRequest(
     val performedAt: String? = null,
     val status: String? = null,
     val items: List<CreateLineItemRequest>? = null,
+    val employeeId: String? = null,
 )
 
 /** Stable error code for the first invalid service line, or null. */

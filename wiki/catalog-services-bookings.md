@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-20
+updated: 2026-10-24
 ---
 
 # Catalog, Serviços and bookings
@@ -87,6 +87,23 @@ client link, quantity × unit price, the booking it came from and the invoice th
 actions by status: Invoice opens the open-work form with only this row ticked, then Edit, Cancel,
 Reopen and Delete. The booking detail gained Open service. Gotcha: `PATCH /crm/services/{id}` always
 overwrites `notes`, so any status change must resend the whole row (`servicePatch` in `app/services.js`).
+
+**Who does the work (2026-10-24):** Rodrigo asked for an employee on a service and, on the employee,
+the services they did or have to do. `crm.client_services.employeeId`, until then only set by
+approving a submission, is now an optional picker in the service form (with the Employees module).
+Decisions that matter later:
+
+- **API:** `POST` takes `employeeId` (blank or omitted = nobody); `PATCH` keeps it when omitted and
+  clears it on `""`; `GET /crm/services?employeeId=` lists one employee's rows. Rows answer
+  `employeeName` only when the company has the Employees module.
+- **Only an active employee of the company** can be given work (`400 employee_not_found`). Resending
+  the employee already on the row is accepted even once they are inactive, so editing an old row
+  never fails because its employee left.
+- **To do vs done** is read from the row, there is no done flag: to do is an open row dated today or
+  later, done is every other row that isn't cancelled. The employee record shows a To do figure (in
+  place of Next due), a Services table and Add service, which presets the employee.
+- The services list gained an Employee column and filter. The employee portal (My services) still
+  shows only what the employee registered, not work assigned to them; the mobile app has no picker.
 
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 

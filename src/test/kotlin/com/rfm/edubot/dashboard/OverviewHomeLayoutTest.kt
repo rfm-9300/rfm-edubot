@@ -20,7 +20,7 @@ class OverviewHomeLayoutTest {
             setOf(DashboardModules.OVERVIEW, DashboardModules.INVOICES, DashboardModules.CLIENTS),
         )
         assertEquals(
-            listOf("highlights", "pulse", "attention", "setup", "financeiro", "customers"),
+            listOf("highlights", "pulse", "attention", "setup", "financeiro", "customers", "recent"),
             crmOnly.map { it.id },
         )
         assertTrue(crmOnly.filter { it.group == OverviewHomeLayout.GROUP_SNAPSHOTS }.none { it.id == OverviewHomeLayout.INBOX })
@@ -43,9 +43,14 @@ class OverviewHomeLayoutTest {
             setOf(DashboardModules.OVERVIEW, DashboardModules.SUPPLIERS, DashboardModules.PAYMENTS),
         )
         assertEquals(
-            listOf("highlights", "pulse", "attention", "setup", "financeiro", "suppliers"),
+            listOf("highlights", "pulse", "attention", "setup", "financeiro", "suppliers", "recent"),
             options.map { it.id },
         )
+    }
+
+    @Test
+    fun `recent activity can be hidden`() {
+        assertEquals(listOf(OverviewHomeLayout.RECENT), OverviewHomeLayout.sanitize(listOf("recent")))
     }
 
     @Test

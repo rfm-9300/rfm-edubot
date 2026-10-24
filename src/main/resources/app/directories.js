@@ -3,10 +3,11 @@
    in columns.js. */
 
 // The directory pages list active records; the Archived chip swaps in the archived ones, ready to restore.
-function directoryViewChips(kind) {
+// `names` relabels the two chips (employees read Active / Inactive).
+function directoryViewChips(kind, names = {}) {
   const archived = state.archivedView === kind;
-  return `<button class="chip ${archived ? '' : 'is-on'}" type="button" data-directory-view="">${escapeHTML(STR.directoryActive)}</button>`
-    + `<button class="chip ${archived ? 'is-on' : ''}" type="button" data-directory-view="${kind}">${escapeHTML(STR.directoryArchived)}</button>`;
+  return `<button class="chip ${archived ? '' : 'is-on'}" type="button" data-directory-view="">${escapeHTML(names.active || STR.directoryActive)}</button>`
+    + `<button class="chip ${archived ? 'is-on' : ''}" type="button" data-directory-view="${kind}">${escapeHTML(names.archived || STR.directoryArchived)}</button>`;
 }
 
 async function showDirectoryView(kind) {

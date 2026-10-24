@@ -9,7 +9,7 @@ let token = localStorage.getItem('dashboardToken') || '';
 let state = {
   me: null, overview: null, contacts: [], conversations: [], clients: [], quotes: [], invoices: [], catalog: [],
   persona: null, personaChat: [], webWidget: null, widgetDraft: null, documentTemplate: null, companies: null,
-  clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServicePeriod: '', filterServicePeriodKey: '',
+  clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServiceEmployee: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
   suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterSupplierType: '',

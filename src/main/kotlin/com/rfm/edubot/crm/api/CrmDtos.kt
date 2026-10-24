@@ -164,8 +164,9 @@ internal data class ClientServiceDto(
     val bookingId: String? = null,
     val performedAt: String? = null,
     val createdAt: String,
-    /** Who did the work, when the row came from an employee's registered service. */
+    /** Who does or did the work. */
     val employeeId: String? = null,
+    val employeeName: String = "",
     /** The quote the row was made from. */
     val quoteId: String? = null,
 )
@@ -204,7 +205,7 @@ internal fun Quote.dto(client: Client?) = QuoteDto(
     projectId = projectId?.toHexString(),
 )
 
-internal fun ClientService.dto(client: Client?) = ClientServiceDto(
+internal fun ClientService.dto(client: Client?, employee: Employee? = null) = ClientServiceDto(
     id = id.toHexString(),
     clientId = clientId.toHexString(),
     clientName = client?.name ?: "",
@@ -223,6 +224,7 @@ internal fun ClientService.dto(client: Client?) = ClientServiceDto(
     performedAt = performedAt?.toString(),
     createdAt = createdAt.toString(),
     employeeId = employeeId?.toHexString(),
+    employeeName = employee?.name ?: "",
     quoteId = quoteId?.toHexString(),
 )
 
@@ -298,9 +300,11 @@ internal suspend fun List<Invoice>.dtos(clients: ClientRepository): List<Invoice
 
 /** These Serviços rows as lists show them, their clients read in one query. */
 @JvmName("clientServiceDtos")
-internal suspend fun List<ClientService>.dtos(clients: ClientRepository): List<ClientServiceDto> {
+/** With [employees], each row also names who does the work. */
+internal suspend fun List<ClientService>.dtos(clients: ClientRepository, employees: EmployeeRepository? = null): List<ClientServiceDto> {
     val byId = clients.findByIds(map { it.clientId })
-    return map { it.dto(byId[it.clientId]) }
+    val employeeById = employees?.findByIds(mapNotNull { it.employeeId }).orEmpty()
+    return map { it.dto(byId[it.clientId], it.employeeId?.let(employeeById::get)) }
 }
 
 /**
