@@ -128,6 +128,8 @@ async function loadClientRecord(id) {
     emails,
     ensureBookingData(),
     loadClientFields(),
+    // The Items tab names the client's catalog items from the catalog.
+    hasModule('catalog') && !state.catalog.length ? api('/app/api/crm/standard-items').then(c => { state.catalog = c; }).catch(() => {}) : null,
   ]);
   return {
     client,
@@ -427,6 +429,14 @@ function clientPaneHtml(r, m, bk) {
       group(STR.clientUpcoming, bk.upcoming) + group(STR.clientPast, bk.past),
     );
   }
+  if (r.tab === 'items') {
+    const t = CRM.services;
+    const items = clientCatalogItems(r.client);
+    const add = act('items') ? clientItemsAddHtml(items) : '';
+    const foot = add ? `<div class="record__pane-foot">${add}</div>` : '';
+    if (!items.length) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(t.clientItemsEmpty)}</p><p class="empty__desc">${escapeHTML(t.clientItemsEmptyDesc)}</p></div></div>${foot}`;
+    return recordTable(clientItemsHead(), clientItemsRowsHtml(items)) + foot;
+  }
   if (r.tab === 'services') {
     if (!r.services.length) return recordEmpty(STR.clientNoServices, act('service'), CRM.services.addForClient);
     const t = CRM.services;
@@ -475,6 +485,7 @@ function clientTabs(r) {
   if (hasModule('bookings')) tabs.push(['bookings', labels.bookings, r.bookings.length]);
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
   if (hasModule('quotes')) tabs.push(['quotes', labels.quotes, r.quotes.length]);
+  if (hasModule('catalog')) tabs.push(['items', CRM.services.clientItemsTab, clientCatalogItems(r.client).length]);
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
   if (r.emails) tabs.push(['emails', GOOGLE.tab, r.emails.length]);
   if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
@@ -514,6 +525,9 @@ function renderClientRecord(focusTab = false) {
   $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => { r.tab = b.dataset.recordTab; renderClientRecord(true); }));
   $$('[data-record-open]', body).forEach(el => el.addEventListener('click', () => openClientItem(el.dataset.recordOpen)));
   $$('[data-record-act]', body).forEach(b => b.addEventListener('click', () => clientAct(b.dataset.recordAct)));
+  if (r.tab === 'items' && !r.client.archivedAt) {
+    wireClientItems(body, r.client, clientCatalogItems(r.client), saved => { r.client = saved; renderClientRecord(); });
+  }
   const automations = $('[data-client-automations]', body);
   if (automations) {
     window.AgentsUI.renderAutomations(automations, { type: 'client', id: r.client.id }, r.automations, {

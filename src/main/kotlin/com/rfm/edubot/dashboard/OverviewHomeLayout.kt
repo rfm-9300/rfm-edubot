@@ -26,13 +26,19 @@ object OverviewHomeLayout {
     const val ASSISTANT = "assistant"
     const val AGENTS = "agents"
     const val PROJECTS = "projects"
+    const val RECENT = "recent"
 
     const val GROUP_SECTIONS = "sections"
     const val GROUP_SNAPSHOTS = "snapshots"
 
     val sections = listOf(HIGHLIGHTS, PULSE, ATTENTION, SETUP)
-    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT, AGENTS, PROJECTS)
+    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT, AGENTS, PROJECTS, RECENT)
     val all = (sections + snapshots).toSet()
+
+    /** The modules whose events feed Home's Recent activity card. */
+    private val recentSources = setOf(
+        DashboardModules.INVOICES, DashboardModules.PAYMENTS, DashboardModules.QUOTES, DashboardModules.CLIENTS, DashboardModules.BOOKINGS,
+    )
 
     fun sanitize(hidden: List<String>?): List<String> =
         hidden.orEmpty().filter { it in all }.distinct()
@@ -55,6 +61,7 @@ object OverviewHomeLayout {
         addSnapshot(ASSISTANT, DashboardModules.AI_ASSISTANT in modules)
         addSnapshot(AGENTS, DashboardModules.AGENTS in modules)
         addSnapshot(PROJECTS, DashboardModules.PROJECTS in modules)
+        addSnapshot(RECENT, recentSources.any { it in modules })
         return options
     }
 

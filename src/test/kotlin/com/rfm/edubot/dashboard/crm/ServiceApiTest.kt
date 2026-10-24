@@ -100,4 +100,33 @@ class ServiceApiTest {
         assertEquals(HttpStatusCode.OK, a.delete("/app/api/crm/invoices/${invoice.text("id")}").status)
         assertEquals("OPEN", a.get("$base/$id").text("status"), "deleting the invoice frees its rows")
     }
+
+    @Test
+    fun `a service names the employee who does it, lists by employee, and keeps an inactive one`() = dashboardApiTest(mongo) {
+        val a = company()
+        val b = company()
+        val clientId = client(a)
+        val ana = a.post("/app/api/crm/employees") { put("name", "Ana Costa"); put("phone", "+351 931 000 001") }.text("id")!!
+        val rui = a.post("/app/api/crm/employees") { put("name", "Rui Lopes"); put("phone", "+351 931 000 002") }.text("id")!!
+        val created = a.post(base) { put("clientId", clientId); put("name", "Limpeza"); put("employeeId", ana); put("performedAt", "2026-12-01") }
+        assertEquals(HttpStatusCode.Created, created.status, created.toString())
+        assertEquals("Ana Costa", created.text("employeeName"))
+        val id = created.text("id")!!
+        val unassigned = service(a, clientId)
+        assertEquals(listOf(id), a.get("$base?employeeId=$ana").ids())
+        assertEquals("in_use", a.delete("/app/api/crm/employees/$ana").error, "an employee with services is deactivated, not deleted")
+        assertEquals("Ana Costa", a.get(base).array.first { it.jsonObject["id"]!!.jsonPrimitive.content == id }.jsonObject["employeeName"]!!.jsonPrimitive.content)
+
+        assertEquals("employee_not_found", a.post(base) { put("clientId", clientId); put("name", "X"); put("employeeId", ObjectId().toHexString()) }.error)
+        val other = b.post("/app/api/crm/employees") { put("name", "Outra"); put("phone", "+351 931 000 003") }.text("id")!!
+        assertEquals("employee_not_found", a.patch("$base/$id") { put("employeeId", other) }.error, "another company's employee")
+
+        assertEquals("Ana Costa", a.patch("$base/$id") { put("name", "Limpeza geral") }.text("employeeName"), "omitted keeps who does it")
+        assertEquals("Rui Lopes", a.patch("$base/$id") { put("employeeId", rui) }.text("employeeName"))
+        assertEquals(HttpStatusCode.OK, a.post("/app/api/crm/employees/$rui/archive").status)
+        assertEquals("Rui Lopes", a.patch("$base/$id") { put("employeeId", rui); put("name", "Limpeza") }.text("employeeName"), "an inactive employee already on the row stays")
+        assertEquals("employee_not_found", a.patch("$base/$unassigned") { put("employeeId", rui) }.error, "an inactive one can't be given new work")
+        assertEquals(null, a.patch("$base/$id") { put("employeeId", "") }.text("employeeId"), "a blank id unassigns it")
+        assertEquals(emptyList(), a.get("$base?employeeId=$rui").ids())
+    }
 }

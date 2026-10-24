@@ -11,14 +11,31 @@ function serviceColumns() {
       const from = s.bookingId ? t.fromBooking : s.quoteId ? t.fromQuote : '';
       return `<td>${escapeHTML(s.name)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</td>`;
     } },
+    ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td class="muted">${escapeHTML(s.employeeName || '')}</td>` }] : []),
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
     { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
   ];
 }
 
+// The client's catalog items need both directories; without them the view isn't offered.
+const serviceClientItemsOn = () => hasModule('clients') && hasModule('catalog');
+
+function serviceViewChips(period) {
+  const t = CRM.services;
+  return periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth, client: t.byClient }, serviceClientItemsOn() ? ['client'] : []);
+}
+
+function wireServiceViews(root) {
+  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; state.filterServicePeriodKey = ''; render(); }));
+}
+
 function renderServices(root) {
   const t = CRM.services;
+  if (state.filterServicePeriod === 'client') {
+    if (serviceClientItemsOn()) return renderServiceClientItems(root);
+    state.filterServicePeriod = '';
+  }
   const q = state.search.toLowerCase();
   const all = state.clientServices || [];
   const clientNames = new Map();
@@ -26,7 +43,11 @@ function renderServices(root) {
   for (const s of all) if (!clientNames.has(s.clientId)) clientNames.set(s.clientId, s.clientName || s.clientId);
   if (state.filterServiceClient && !clientNames.has(state.filterServiceClient)) state.filterServiceClient = '';
   const clientId = state.filterServiceClient || '';
-  const scoped = clientId ? all.filter(s => s.clientId === clientId) : all;
+  const employeeNames = new Map();
+  if (hasModule('employees')) for (const s of all) if (s.employeeId) employeeNames.set(s.employeeId, s.employeeName || s.employeeId);
+  if (state.filterServiceEmployee && !employeeNames.has(state.filterServiceEmployee)) state.filterServiceEmployee = '';
+  const employeeId = state.filterServiceEmployee || '';
+  const scoped = all.filter(s => (!clientId || s.clientId === clientId) && (!employeeId || s.employeeId === employeeId));
   const columns = orderedColumns('services', serviceColumns());
   const rows = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
@@ -39,6 +60,10 @@ function renderServices(root) {
   const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
   const clientFilter = clientOptions.length
     ? `<select class="sel" data-filter-svc-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
+    : '';
+  const employeeOptions = [...employeeNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
+  const employeeFilter = employeeOptions.length
+    ? `<select class="sel" data-filter-svc-employee aria-label="${escapeHTML(t.thEmployee)}"><option value="">${escapeHTML(t.filterEmployeeAll)}</option>${employeeOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === employeeId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
   const period = state.filterServicePeriod || '';
   const listed = scoped
@@ -58,13 +83,13 @@ function renderServices(root) {
         return `<tr class="${key === nowKey ? 'is-current' : ''}"><td class="name">${escapeHTML(periodLabel(key, period))}</td><td class="num">${roll.jobs}</td><td class="num">${fmtEUR(roll.open)}</td><td class="num">${fmtEUR(roll.invoiced)}</td><td class="num">${fmtEUR(roll.total)}</td></tr>`;
       }).join('')
     : '';
-  const views = periodChips(period, 'data-svc-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
-  const tools = clientFilter
+  const views = serviceViewChips(period);
+  const tools = clientFilter + employeeFilter
     + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
     + (period ? '' : columnOrderButton('services'))
     + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
-  const filtered = Boolean(clientId || state.filterServiceStatus || q);
+  const filtered = Boolean(clientId || employeeId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'services');
   const serviceNav = periodNav(nowKey, period, 'data-svc-period-nav', t);
@@ -89,7 +114,7 @@ function renderServices(root) {
     empty: period ? t.summaryEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
     emptyDesc: period ? t.summaryEmptyDesc : (filtered ? t.emptyFilteredDesc : t.emptyDesc),
   });
-  $$('[data-svc-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServicePeriod = btn.dataset.svcPeriod; state.filterServicePeriodKey = ''; render(); }));
+  wireServiceViews(root);
   $$('[data-svc-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
     const dir = btn.dataset.svcPeriodNav;
     state.filterServicePeriodKey = dir === 'current' ? '' : shiftPeriodKey(nowKey, period, dir === 'prev' ? -1 : 1);
@@ -97,6 +122,7 @@ function renderServices(root) {
   }));
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
+  $('[data-filter-svc-employee]', root)?.addEventListener('change', e => { state.filterServiceEmployee = e.target.value; render(); });
   $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
   $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pick-service]')) return;
@@ -104,6 +130,100 @@ function renderServices(root) {
   }));
   $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
   wireColumnOrder(root, 'services', serviceColumns());
+}
+
+// By client: the catalog items one client usually buys. The service, quote and invoice forms list them
+// first once that client is picked, and the client record has them in its own tab. Items since removed
+// from the catalog are left out and dropped on the next save.
+function clientCatalogItems(client) {
+  const byId = new Map((state.catalog || []).map(c => [c.id, c]));
+  return (client?.catalogItemIds || []).map(id => byId.get(id)).filter(Boolean);
+}
+
+// For a form's line picker: the usual items of whichever client is picked in `#f-client` (or `fixedId`).
+// `getForm` returns the form, which the caller builds after the picker.
+function preferredClientItems(getForm, clients, fixedId = '') {
+  return () => {
+    const id = fixedId || $('#f-client', getForm())?.value;
+    return (clients || state.clients || []).find(c => c.id === id)?.catalogItemIds || [];
+  };
+}
+
+function clientItemsHead() {
+  const ti = CRM.items;
+  return [[ti.thCode], [ti.thTitle], [ti.thType], [ti.thUnit], [ti.thPrice, 'right'], ['']];
+}
+
+function clientItemsRowsHtml(items, q = '') {
+  const t = CRM.services;
+  return items
+    .filter(i => !q || foldText(`${i.code || ''} ${i.title || ''} ${i.category || ''}`).includes(q))
+    .map(i => `<tr>
+      <td class="id">${escapeHTML(i.code || '')}</td>
+      <td class="name">${escapeHTML(i.title || '')}</td>
+      <td>${catalogTypePill(i.type)}</td>
+      <td class="mono muted">${escapeHTML(i.unit || '')}</td>
+      <td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>
+      <td class="right"><button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(t.clientItemsRemove)}" aria-label="${escapeHTML(t.clientItemsRemoveAria({ name: i.title || '' }))}" data-remove-client-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M4 4 L12 12 M12 4 L4 12" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg></button></td>
+    </tr>`).join('');
+}
+
+// The catalog items the client doesn't have yet, services first; empty when there are none.
+function clientItemsAddHtml(items) {
+  const t = CRM.services;
+  const taken = new Set(items.map(i => i.id));
+  const free = serviceCatalog().filter(c => (state.catalog || []).some(i => i.id === c.id) && !taken.has(c.id));
+  if (!free.length) return '';
+  const group = (label, list) => (list.length ? `<optgroup label="${escapeHTML(label)}">${list.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(catalogItemLabel(c))}</option>`).join('')}</optgroup>` : '');
+  return `<select class="sel" data-svc-items-add aria-label="${escapeHTML(t.clientItemsAddPh)}"><option value="">${escapeHTML(t.clientItemsAddPh)}</option>${group(STR.catalogService, free.filter(c => c.type === 'service'))}${group(STR.catalogMaterial, free.filter(c => c.type !== 'service'))}</select>`;
+}
+
+// `onSaved(client)` runs with the saved client, after the add or remove went through.
+function wireClientItems(root, client, items, onSaved) {
+  $('[data-svc-items-add]', root)?.addEventListener('change', e => {
+    if (e.target.value) saveClientCatalogItems(client, [...items.map(i => i.id), e.target.value], onSaved);
+  });
+  $$('[data-remove-client-item]', root).forEach(btn => btn.addEventListener('click', () => {
+    saveClientCatalogItems(client, items.map(i => i.id).filter(id => id !== btn.dataset.removeClientItem), onSaved);
+  }));
+}
+
+async function saveClientCatalogItems(client, itemIds, onSaved) {
+  const t = CRM.services;
+  try {
+    const saved = await api(`/app/api/crm/clients/${encodeURIComponent(client.id)}/catalog-items`, { method: 'PUT', body: JSON.stringify({ itemIds }) });
+    state.clients = (state.clients || []).map(c => (c.id === saved.id ? saved : c));
+    toast(t.clientItemsSaved);
+    onSaved(saved);
+  } catch { toast(t.clientItemsFailed); }
+}
+
+function renderServiceClientItems(root) {
+  const t = CRM.services;
+  const clients = [...(state.clients || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  if (state.serviceItemsClient && !clients.some(c => c.id === state.serviceItemsClient)) state.serviceItemsClient = '';
+  const clientId = state.serviceItemsClient || state.filterServiceClient || '';
+  const client = clients.find(c => c.id === clientId) || null;
+  const items = clientCatalogItems(client);
+  const clientPick = `<select class="sel" data-svc-items-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(STR.lineChooseClient)}</option>${clients.map(c => `<option value="${escapeHTML(c.id)}" ${c.id === clientId ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select>`;
+  const withItems = clients.filter(c => clientCatalogItems(c).length).length;
+  const head = `<tr>${clientItemsHead().map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr>`;
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards([
+    { label: t.clientItemsStat, value: items.length },
+    { label: t.clientItemsClientsStat, value: withItems },
+  ])) + crmPanel({
+    title: client ? client.name : t.clientItemsTitle,
+    tag: client ? items.length : null,
+    views: serviceViewChips('client'),
+    tools: clientPick + (client ? clientItemsAddHtml(items) : ''),
+    head,
+    rows: client ? clientItemsRowsHtml(items, foldText(state.search.trim())) : '',
+    empty: !client ? t.clientItemsNoClient : (items.length ? t.emptyFiltered : t.clientItemsEmpty),
+    emptyDesc: !client ? t.clientItemsNoClientDesc : (items.length ? t.emptyFilteredDesc : t.clientItemsEmptyDesc),
+  });
+  wireServiceViews(root);
+  $('[data-svc-items-client]', root)?.addEventListener('change', e => { state.serviceItemsClient = e.target.value; render(); });
+  if (client) wireClientItems(root, client, items, saved => { state.serviceItemsClient = saved.id; render(); });
 }
 
 // Bookable services are catalog services, so both lists merge into one (the booking list only
@@ -123,8 +243,21 @@ function serviceNameFrom(items) {
   return name.length > 160 ? `${name.slice(0, 159)}…` : name;
 }
 
+// Who does the work: an active employee, or the one already on the row even once they are inactive.
+function serviceEmployeeField(selectedId, current) {
+  const t = CRM.services;
+  const list = [...(state.employees || [])];
+  if (selectedId && !list.some(e => e.id === selectedId)) list.unshift({ id: selectedId, name: current || selectedId });
+  list.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  return `<div class="form__row"><label class="lbl" for="svc-employee">${escapeHTML(t.employee)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="svc-employee"><option value="">${escapeHTML(t.employeeNone)}</option>
+    ${list.map(e => `<option value="${escapeHTML(e.id)}"${e.id === selectedId ? ' selected' : ''}>${escapeHTML(e.name)}</option>`).join('')}</select>
+    <p class="hint">${escapeHTML(t.employeeHint)}</p></div>`;
+}
+
 // One service can sum several lines, picked from the catalog or typed; invoicing it bills each line.
-async function openServiceForm(service, presetClientId) {
+// `presetEmployeeId` preselects who does it, as when it is added from an employee's record.
+async function openServiceForm(service, presetClientId, presetEmployeeId) {
   const t = CRM.services;
   const editing = service && service.id ? service : null;
   if (editing?.status === 'INVOICED') return openServiceDetail(editing);
@@ -132,7 +265,10 @@ async function openServiceForm(service, presetClientId) {
   if ((!state.clients.length || missingPreset) && hasModule('clients')) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
   if (hasModule('catalog') && !state.catalog.length) state.catalog = await api('/app/api/crm/standard-items').catch(() => []);
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
-  const li = lineItemsField(serviceCatalog());
+  const team = hasModule('employees');
+  if (team && !state.employees.length) state.employees = await api('/app/api/crm/employees').catch(() => []);
+  // The picked client's usual items lead the catalog picker.
+  const li = lineItemsField(serviceCatalog(), { preferred: preferredClientItems(() => form, state.clients, editing?.clientId) });
   const clientCell = editing
     ? `<div class="form__row"><span class="lbl">${escapeHTML(STR.lineClient)}</span><p class="hint">${escapeHTML(editing.clientName || '')}</p></div>`
     : clientSelect(state.clients, presetClientId || '');
@@ -143,6 +279,7 @@ async function openServiceForm(service, presetClientId) {
       ${clientCell}
       <div class="form__row"><label class="lbl" for="svc-when">${escapeHTML(t.when)}</label>
         <input class="inp" id="svc-when" type="date" value="${escapeHTML((editing ? editing.performedAt || '' : todayKey()).slice(0, 10))}" /></div>
+      ${team ? serviceEmployeeField(editing ? editing.employeeId || '' : presetEmployeeId || '', editing?.employeeName) : ''}
       <div class="form__row form__row--full"><label class="lbl" for="svc-name">${escapeHTML(t.name)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <input class="inp" id="svc-name" maxlength="160" autocomplete="off" placeholder="${escapeHTML(t.namePh)}" value="${escapeHTML(editing?.name || '')}" />
         <p class="hint">${escapeHTML(t.nameHint)}</p></div>
@@ -175,6 +312,7 @@ async function openServiceForm(service, presetClientId) {
       items,
       catalogItemId: $('.line[data-catalog]', form)?.dataset.catalog || null,
     };
+    if (team) payload.employeeId = $('#svc-employee', form).value;
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
@@ -184,7 +322,7 @@ async function openServiceForm(service, presetClientId) {
       await loadModule('services');
       render();
       toast(editing ? t.updated : t.created);
-    } catch { btn.disabled = false; toast(t.saveFailed); }
+    } catch (err) { btn.disabled = false; toast(err?.code === 'employee_not_found' ? t.employeeNotFound : t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form, true);
 }
@@ -265,7 +403,7 @@ async function openServiceDetail(ref) {
       lines.length > 1 ? null : { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
       booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
       invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
-      doneBy ? { label: SUB.doneBy, value: doneBy.name } : null,
+      doneBy ? { label: t.employee, value: doneBy.name } : null,
       { label: STR.detailCreated, value: fmtDay(service.createdAt) },
     ])}
     ${quote && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: quote.number }))}</p>` : ''}

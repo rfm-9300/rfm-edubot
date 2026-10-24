@@ -11,12 +11,14 @@ async function openQuoteForm(opts = {}) {
       api('/app/api/crm/standard-items').catch(() => []),
     ]);
   } catch { return toast(STR.quoteCreateFailed); }
-  const li = lineItemsField(catalog);
+  const pickable = withClient(clients, opts.client);
+  // The picked client's usual items lead the catalog picker.
+  const li = lineItemsField(catalog, { preferred: preferredClientItems(() => form, pickable) });
   const form = document.createElement('form');
   form.className = 'form';
   form.innerHTML = `
     <div class="form__grid">
-      ${clientSelect(withClient(clients, opts.client), opts.client?.id)}
+      ${clientSelect(pickable, opts.client?.id)}
       <div class="form__row"><label class="lbl" for="q-valid">${escapeHTML(STR.quoteValidUntil)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <input class="inp inp--mono" id="q-valid" type="date" /></div>
     </div>

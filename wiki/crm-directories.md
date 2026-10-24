@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-10-24
 ---
 
 # Clients, suppliers and employees
@@ -73,6 +73,11 @@ three. Decisions that matter later:
   when the record shows documents, or the server answers `in_use` because an off module hides them,
   the confirm offers Archive. An archived record shows a warning line and no create actions; the
   directory pages have Active / Archived chips.
+- **Employees say Deactivate (2026-10-24).** Rodrigo couldn't find how to "inactivate" an employee:
+  archiving was only offered after a refused Delete. The employee record now has Deactivate next to
+  Delete (Delete is hidden once they have payments, registered services or services to keep) and
+  Reactivate when inactive; the list chips read Active / Inactive. Same
+  `archive`/`restore` calls underneath, so a deactivated employee's sign-in is refused at once.
 
 ## Client finances (shipped 2026-09-29, `2764ed1`)
 
