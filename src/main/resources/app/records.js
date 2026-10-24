@@ -107,7 +107,8 @@ function recordRemovalButton(record) {
     : `<button class="btn btn--sm btn--ghost" type="button" data-record-remove>${escapeHTML(STR.recordDelete)}</button>`;
 }
 
-async function removeDirectoryRecord(kind, record, { inUse, archiveBody, onDeleted, onArchived }) {
+// `archiveTitle`, `archiveOk` and `archivedToast` rename archiving, as employees call it deactivating.
+async function removeDirectoryRecord(kind, record, { inUse, archiveBody, archiveTitle, archiveOk, archivedToast, onDeleted, onArchived }) {
   const url = `/app/api/crm/${kind}/${encodeURIComponent(record.id)}`;
   if (!inUse) {
     if (!await confirmDialog({ title: STR.recordDeleteTitle({ name: record.name }), body: STR.recordDeleteBody, okLabel: STR.recordDelete })) return;
@@ -120,10 +121,10 @@ async function removeDirectoryRecord(kind, record, { inUse, archiveBody, onDelet
       if (err?.code !== 'in_use') { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); return; }
     }
   }
-  if (!await confirmDialog({ title: STR.recordArchiveTitle({ name: record.name }), body: archiveBody, okLabel: STR.recordArchive, danger: false })) return;
+  if (!await confirmDialog({ title: archiveTitle || STR.recordArchiveTitle({ name: record.name }), body: archiveBody, okLabel: archiveOk || STR.recordArchive, danger: false })) return;
   try {
     const res = await api(`${url}/archive`, { method: 'POST' });
-    toast(STR.recordArchived);
+    toast(archivedToast || STR.recordArchived);
     onArchived(res.archivedAt);
   } catch (err) { if (err?.message !== 'unauthorized') toast(STR.recordRemoveFailed); }
 }

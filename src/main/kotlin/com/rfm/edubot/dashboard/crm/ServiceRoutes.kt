@@ -1,6 +1,8 @@
 package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.ClientServiceDelete
+import com.rfm.edubot.crm.EmployeeAssignment
+import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceService
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.api.CreateClientServiceRequest
@@ -11,6 +13,7 @@ import com.rfm.edubot.crm.api.dtos
 import com.rfm.edubot.crm.api.serviceItemsError
 import com.rfm.edubot.crm.eurToCents
 import com.rfm.edubot.crm.model.ClientServiceStatus
+import com.rfm.edubot.crm.model.Employee
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
@@ -37,14 +40,15 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val clientId = call.request.queryParameters["clientId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }
                 val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
                 val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "quoteId") }
-                val rows = if (quoteId != null) crm.clientServices.findByQuoteId(quoteId) else crm.clientServices.list(clientId, status)
-                call.respond(rows.dtos(crm.clients))
+                val employeeId = call.request.queryParameters["employeeId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "employeeId") }
+                val rows = if (quoteId != null) crm.clientServices.findByQuoteId(quoteId) else crm.clientServices.list(clientId, status, employeeId)
+                call.respond(rows.dtos(crm.clients, crm.teamDirectory()))
             }
             get("/services/{id}") {
                 val crm = deps.crm(call)
                 val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)
                 val service = crm.clientServices.findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
-                call.respond(service.dto(crm.clients.findById(service.clientId)))
+                call.respond(service.dto(crm.clients.findById(service.clientId), crm.doneBy(service.employeeId)))
             }
             post("/services") {
                 val crm = deps.crm(call)
@@ -53,6 +57,10 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val client = crm.clients.findById(clientId) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "client not found"))
                 if (request.name.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name required"))
                 serviceItemsError(request.items)?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
+                val employee = when (val picked = crm.assignableEmployee(request.employeeId)) {
+                    EmployeePick.Invalid -> return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee_not_found"))
+                    is EmployeePick.Picked -> picked.employee
+                }
                 val service = crm.clientServices.create(
                     clientId = clientId,
                     name = request.name,
@@ -64,8 +72,9 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                     catalogItemId = request.catalogItemId,
                     performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                     items = request.items.map { it.toLineItem() },
+                    employeeId = employee?.id,
                 )
-                call.respond(HttpStatusCode.Created, service.dto(client))
+                call.respond(HttpStatusCode.Created, service.dto(client, employee))
             }
             requireModules(DashboardModules.INVOICES) {
                 post("/services/invoice") {
@@ -88,6 +97,13 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val request = call.receive<UpdateClientServiceRequest>()
                 serviceItemsError(request.items)?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val status = request.status?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
+                // Resending who already does the work keeps them, even once they are inactive.
+                val reassigned = request.employeeId?.takeIf { it != crm.clientServices.findById(id)?.employeeId?.toHexString() }
+                val assignment = when (val picked = reassigned?.let { crm.assignableEmployee(it) }) {
+                    null -> null
+                    EmployeePick.Invalid -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee_not_found"))
+                    is EmployeePick.Picked -> EmployeeAssignment(picked.employee?.id)
+                }
                 if (status == ClientServiceStatus.OPEN) {
                     val existing = crm.clientServices.findById(id) ?: return@patch call.respond(HttpStatusCode.NotFound)
                     val quote = existing.quoteId?.takeIf { existing.status == ClientServiceStatus.CANCELLED }?.let { crm.quotes.findById(it) }
@@ -105,8 +121,9 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                     performedAt = request.performedAt?.takeIf { it.isNotBlank() }?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
                     status = status,
                     items = request.items?.takeIf { it.isNotEmpty() }?.map { it.toLineItem() },
+                    employee = assignment,
                 ) ?: return@patch call.respond(HttpStatusCode.NotFound)
-                call.respond(service.dto(crm.clients.findById(service.clientId)))
+                call.respond(service.dto(crm.clients.findById(service.clientId), crm.doneBy(service.employeeId)))
             }
             delete("/services/{id}") {
                 val crm = deps.crm(call)
@@ -119,4 +136,24 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
             }
         }
     }
+}
+
+/** The employees directory, when the company has that module; rows then name who does the work. */
+private fun TenantCrm.teamDirectory(): EmployeeRepository? =
+    employees.takeIf { DashboardModules.EMPLOYEES in DashboardModules.effectiveFor(tenant) }
+
+private suspend fun TenantCrm.doneBy(employeeId: ObjectId?): Employee? =
+    employeeId?.let { id -> teamDirectory()?.findById(id) }
+
+private sealed interface EmployeePick {
+    /** [employee] null: nobody, from a blank id. */
+    data class Picked(val employee: Employee?) : EmployeePick
+    data object Invalid : EmployeePick
+}
+
+/** A blank [id] picks nobody; otherwise it must be an active employee of this company. */
+private suspend fun TenantCrm.assignableEmployee(id: String?): EmployeePick {
+    if (id.isNullOrBlank()) return EmployeePick.Picked(null)
+    val employee = runCatching { ObjectId(id) }.getOrNull()?.let { teamDirectory()?.findById(it) }
+    return if (employee == null || employee.archivedAt != null) EmployeePick.Invalid else EmployeePick.Picked(employee)
 }

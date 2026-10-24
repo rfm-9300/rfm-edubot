@@ -40,6 +40,8 @@ import io.ktor.server.testing.testApplication
 import io.mockk.mockk
 import kotlinx.datetime.Clock
 import kotlinx.datetime.Instant
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -406,6 +408,9 @@ class TimeClockRoutesTest {
 
     @Test
     fun `the team sees who is working, corrects shifts with a reason, approves them and exports the week`() = clockTest { http ->
+        // A June morning: typed wall times are ambiguous on the night the clocks go back, which this test isn't about.
+        val base = Instant.parse("2026-06-10T08:00:00Z") - Clock.System.now()
+        offset = base
         val c = company()
         val adminToken = http.token(c.admin.email)
         val memberToken = http.token(c.member.email)
@@ -417,11 +422,12 @@ class TimeClockRoutesTest {
         assertEquals("OPEN", board.text("status"))
 
         assertEquals("not_overdue", http.send("POST", "/app/api/portal/time/shifts/$shiftId/close", employeeToken, buildJsonObject { put("end", "17:00") }).error())
-        offset = 14.hours
+        offset = base + 14.hours
         val overdue = http.send("GET", "/app/api/portal/time", employeeToken).obj()
         assertEquals("true", overdue.text("overdue"))
         val startTime = overdue["open"]!!.jsonObject.text("startTime")!!
-        val endTime = laterTime(startTime, hours = 8)
+        val startAt = Instant.parse(overdue["open"]!!.jsonObject.text("startAt")!!)
+        val endTime = laterTime(startAt, hours = 8)
         val corrected = http.send("POST", "/app/api/portal/time/shifts/$shiftId/close", employeeToken, buildJsonObject { put("end", endTime) })
         assertEquals(HttpStatusCode.OK, corrected.status, corrected.bodyAsText())
         val closed = corrected.obj()["shift"]!!.jsonObject
@@ -438,8 +444,8 @@ class TimeClockRoutesTest {
         assertNull(week["shifts"]!!.jsonArray.single().jsonObject["punches"], "the list leaves the evidence to the detail")
 
         val edit = buildJsonObject {
-            put("start", startTime); put("end", laterTime(startTime, hours = 9))
-            putJsonArray("breaks") { addJsonObject { put("start", laterTime(startTime, hours = 4)); put("end", laterTime(startTime, hours = 5)) } }
+            put("start", startTime); put("end", laterTime(startAt, hours = 9))
+            putJsonArray("breaks") { addJsonObject { put("start", laterTime(startAt, hours = 4)); put("end", laterTime(startAt, hours = 5)) } }
         }
         assertEquals("reason_required", http.send("PATCH", "/app/api/timesheets/shifts/$shiftId", memberToken, edit).error())
         val withReason = JsonObject(edit + ("reason" to kotlinx.serialization.json.JsonPrimitive("Esqueceu a pausa de almoço")))
@@ -491,8 +497,9 @@ class TimeClockRoutesTest {
     }
 
     /** [start] (`HH:mm`) plus [hours], on a 24-hour clock. */
-    private fun laterTime(start: String, hours: Int): String {
-        val (h, m) = start.split(":").map { it.toInt() }
-        return "${((h + hours) % 24).toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}"
+    /** The company's wall time [hours] real hours after [start], so a night when the clocks change still adds up. */
+    private fun laterTime(start: Instant, hours: Int): String {
+        val time = (start + hours.hours).toLocalDateTime(TimeZone.of("Europe/Lisbon")).time
+        return "${time.hour.toString().padStart(2, '0')}:${time.minute.toString().padStart(2, '0')}"
     }
 }

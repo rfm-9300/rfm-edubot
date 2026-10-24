@@ -24,3 +24,6 @@ mobile/.kotlin
 /data/
 .playwright-mcp
 /src/main/resources/pdf/*
+
+# Vim swap files
+*.swp

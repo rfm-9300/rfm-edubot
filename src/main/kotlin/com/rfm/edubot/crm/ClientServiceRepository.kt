@@ -24,6 +24,9 @@ import org.bson.types.ObjectId
 
 enum class ClientServiceDelete { Removed, NotFound, Invoiced }
 
+/** A change to who does a Serviços row's work; a null [employeeId] leaves it unassigned. */
+data class EmployeeAssignment(val employeeId: ObjectId?)
+
 class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.client_services")
     private val events = DomainEventLog(mongoModule)
@@ -42,9 +45,10 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
     suspend fun findByQuoteId(quoteId: ObjectId): List<ClientService> =
         collection.find(scoped(Filters.eq("quoteId", quoteId))).toList().map { it.toClientService() }
 
-    suspend fun list(clientId: ObjectId? = null, status: ClientServiceStatus? = null): List<ClientService> {
+    suspend fun list(clientId: ObjectId? = null, status: ClientServiceStatus? = null, employeeId: ObjectId? = null): List<ClientService> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
+        employeeId?.let { filters.add(Filters.eq("employeeId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
         return collection.find(Filters.and(filters))
             .sort(Document("performedAt", -1).append("createdAt", -1))
@@ -111,7 +115,8 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
 
     /**
      * Null [items] keep the stored ones. A row with items is summarized from them, so [quantity], [unit] and
-     * [unitPriceCents] only change a row without items.
+     * [unitPriceCents] only change a row without items. [employee] null keeps who does the work, and
+     * [EmployeeAssignment.Set] with a null id clears it.
      */
     suspend fun update(
         id: ObjectId,
@@ -123,6 +128,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         performedAt: LocalDate?,
         status: ClientServiceStatus?,
         items: List<LineItem>? = null,
+        employee: EmployeeAssignment? = null,
     ): ClientService? {
         val existing = findById(id) ?: return null
         if (existing.status == ClientServiceStatus.INVOICED) return existing
@@ -146,6 +152,7 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             Updates.set("updatedAt", now.toDate()),
         )
         items?.let { ops.add(Updates.set("items", it.map { item -> item.toDocument() })) }
+        employee?.let { ops.add(it.employeeId?.let { e -> Updates.set("employeeId", e) } ?: Updates.unset("employeeId")) }
         performedAt?.let { ops.add(Updates.set("performedAt", it.toString())) }
         status?.takeIf { it != ClientServiceStatus.INVOICED }?.let { ops.add(Updates.set("status", it.name)) }
         val doc = collection.findOneAndUpdate(

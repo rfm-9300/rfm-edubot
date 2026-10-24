@@ -102,6 +102,14 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )?.toClient()
 
+    /** Replaces the client's catalog items with [itemIds], in that order and without repeats. */
+    suspend fun setCatalogItems(id: ObjectId, itemIds: List<String>): Client? =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("_id", id)),
+            Updates.combine(Updates.set("catalogItemIds", itemIds.distinct()), Updates.set("updatedAt", SystemClock.now().toDate())),
+            FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
+        )?.toClient()
+
     suspend fun findByEmail(email: String): Client? {
         val normalized = email.trim().lowercase().takeIf { it.contains('@') } ?: return null
         return collection.find(scoped(Filters.regex("email", "^${Regex.escape(normalized)}$", "i"))).firstOrNull()?.toClient()
@@ -223,6 +231,7 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
         archivedAt = getDate("archivedAt")?.toInstantValue(),
         automationPaused = getBoolean("automationPaused") ?: false,
         customFields = get("customFields", Document::class.java)?.customFieldValues().orEmpty(),
+        catalogItemIds = getList("catalogItemIds", String::class.java).orEmpty(),
     )
 
     private fun Document.customFieldValues(): Map<String, JsonPrimitive> = entries.mapNotNull { (key, value) ->

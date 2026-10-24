@@ -33,6 +33,8 @@ data class Client(
      * Staff-only, like [notes]. A field the tenant removed may leave its value here; nothing shows it.
      */
     val customFields: Map<String, JsonPrimitive> = emptyMap(),
+    /** Catalog item ids ([com.rfm.edubot.crm.StandardItem.id]) this client usually buys; the service form lists them first. Staff-only. */
+    val catalogItemIds: List<String> = emptyList(),
 )
 
 data class LineItem(
@@ -141,7 +143,7 @@ data class ClientService(
     val performedAt: LocalDate? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
-    /** Who did the work, on a row made by approving an employee's registered service. */
+    /** Who does or did the work: set by staff on the row, or by approving an employee's registered service. */
     val employeeId: ObjectId? = null,
     /** The quote this row was made from; while the row isn't cancelled, the quote can't be billed again. */
     val quoteId: ObjectId? = null,

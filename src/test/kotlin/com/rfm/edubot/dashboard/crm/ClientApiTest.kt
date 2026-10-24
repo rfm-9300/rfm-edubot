@@ -12,7 +12,12 @@ import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
 import io.ktor.http.HttpStatusCode
 import kotlinx.datetime.Clock
+import kotlinx.serialization.json.JsonObjectBuilder
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
+import kotlinx.serialization.json.putJsonArray
 import kotlinx.serialization.json.putJsonObject
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
@@ -22,7 +27,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-/** `/app/api/crm/clients` over HTTP: its module gate, one company never reaching another's clients, and the form's error codes. */
+/**
+ * `/app/api/crm/clients` over HTTP: its module gate, one company never reaching another's clients, the form's error
+ * codes, and the catalog items a client buys.
+ */
 class ClientApiTest {
 
     companion object {
@@ -109,5 +117,45 @@ class ClientApiTest {
         assertEquals("obra", missing.detail)
         val saved = a.post(base) { put("name", "Ana"); put("phone", phone()); putJsonObject("customFields") { put("obra", 12) } }
         assertEquals(HttpStatusCode.Created, saved.status, saved.toString())
+    }
+
+    private suspend fun DashboardApi.catalogItem(company: TestCompany, title: String): String {
+        val created = company.post("/app/api/crm/standard-items") {
+            put("type", "service"); put("category", "Pintura"); put("unit", "m2"); put("defaultUnitPriceEur", 12.5); put("title", title)
+        }
+        assertEquals(HttpStatusCode.Created, created.status, created.toString())
+        return created.text("id")!!
+    }
+
+    private fun itemIds(vararg ids: String): JsonObjectBuilder.() -> Unit = { putJsonArray("itemIds") { ids.forEach { add(JsonPrimitive(it)) } } }
+
+    @Test
+    fun `a client keeps the catalog items it buys, from its own company's catalog`() = dashboardApiTest(mongo) {
+        val a = company()
+        val id = client(a)
+        val paint = catalogItem(a, "Pintura interior")
+        val wash = catalogItem(a, "Lavagem de fachada")
+        val saved = a.put("$base/$id/catalog-items", body = itemIds(wash, paint, wash))
+        assertEquals(HttpStatusCode.OK, saved.status, saved.toString())
+        assertEquals(listOf(wash, paint), saved.obj["catalogItemIds"]!!.jsonArray.map { it.jsonPrimitive.content }, "in order, without repeats")
+        assertEquals(listOf(wash, paint), a.get("$base/$id").obj["catalogItemIds"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals("Casa Martins", a.get("$base/$id").text("name"), "the rest of the client stays")
+
+        assertEquals("catalog_item_not_found", a.put("$base/$id/catalog-items", body = itemIds(paint, "srv-nada")).error)
+        val b = company()
+        val other = catalogItem(b, "Pintura de B")
+        assertEquals("catalog_item_not_found", a.put("$base/$id/catalog-items", body = itemIds(other)).error, "another company's item")
+        assertEquals(HttpStatusCode.NotFound, b.put("$base/$id/catalog-items", body = itemIds(other)).status)
+        assertEquals(HttpStatusCode.NotFound, a.put("$base/${ObjectId()}/catalog-items", body = itemIds(paint)).status)
+
+        assertEquals(HttpStatusCode.OK, a.put("$base/$id/catalog-items", body = itemIds()).status)
+        assertEquals(null, a.get("$base/$id").obj["catalogItemIds"], "an empty list is left out like other defaults")
+    }
+
+    @Test
+    fun `a client's catalog items need the catalog module`() = dashboardApiTest(mongo) {
+        val a = company(listOf(DashboardModules.CLIENTS))
+        val id = client(a)
+        assertEquals(HttpStatusCode.Forbidden, a.put("$base/$id/catalog-items", body = itemIds()).status)
     }
 }

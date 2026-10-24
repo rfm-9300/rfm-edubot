@@ -64,7 +64,9 @@ function generalPaymentFields() {
 // forces a catalog item — a line typed by hand stays as typed. The foot only adds empty rows.
 let lineComboSeq = 0;
 
-function lineItemsField(catalog) {
+// `preferred` returns the catalog ids to list first under their own heading (a client's usual items);
+// it runs on every open, so it can follow a client picked after the form was built.
+function lineItemsField(catalog, { preferred } = {}) {
   // Legacy items were stored as `servico`; group them with the services rather than dropping them.
   const options = (catalog || []).map(c => ({
     item: c,
@@ -89,13 +91,16 @@ function lineItemsField(catalog) {
     const get = k => $(`[data-k="${k}"]`, row).value;
     return { description: get('description').trim(), quantity: Number(get('quantity') || 0), unit: get('unit').trim(), unitPriceEur: Number(get('unitPriceEur') || 0) };
   }).filter(it => it.description && (it.quantity > 0 || it.unitPriceEur > 0));
-  // Services come first, then materials, each under its own heading. The rendered order is the
-  // order the arrow keys walk, so the caller keeps this list to resolve `data-opt`.
+  // The preferred items come first, then services, then materials, each under its own heading. The
+  // rendered order is the order the arrow keys walk, so the caller keeps this list to resolve `data-opt`.
   const optionsHTML = (list, optsId) => {
-    const ordered = [...list.filter(o => o.service), ...list.filter(o => !o.service)];
+    const first = new Set(preferred?.() || []);
+    const top = list.filter(o => first.has(o.item.id));
+    const rest = list.filter(o => !first.has(o.item.id));
+    const ordered = [...top, ...rest.filter(o => o.service), ...rest.filter(o => !o.service)];
     let heading = null;
     const markup = ordered.map((o, i) => {
-      const group = o.service ? STR.catalogService : STR.catalogMaterial;
+      const group = first.has(o.item.id) ? STR.catalogClientItems : o.service ? STR.catalogService : STR.catalogMaterial;
       const head = group === heading ? '' : `<p class="suggest__group">${escapeHTML(group)}</p>`;
       heading = group;
       return `${head}<button type="button" class="suggest__item" role="option" aria-selected="false" tabindex="-1" id="${optsId}-${i}" data-opt="${i}"><strong>${escapeHTML(o.label)}</strong><span class="mono">${escapeHTML(o.meta)}</span></button>`;
