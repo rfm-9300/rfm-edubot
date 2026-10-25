@@ -123,6 +123,13 @@ class OverviewService(private val mongo: MongoModule) {
             val billing = DashboardModules.INVOICES in modules && DashboardModules.CLIENTS in modules
             if (billing && wants(OverviewHomeLayout.CUSTOMERS)) moneyCard.topClients(tenant.id, window) else emptyList()
         }
+        val serviceStats = async {
+            if (DashboardModules.SERVICES in modules && wants(OverviewHomeLayout.SERVICES)) {
+                salesCards.serviceStats(tenant.id, window, employees = DashboardModules.EMPLOYEES in modules)
+            } else {
+                null
+            }
+        }
         val recent = async { if (extended) recentFeed.recent(tenant.id, modules, hidden) else emptyList() }
 
         val cashDto = cash.await()
@@ -203,6 +210,7 @@ class OverviewService(private val mongo: MongoModule) {
                 agenda = agenda.await(),
                 recent = recent.await(),
                 topClients = topClients.await(),
+                serviceStats = serviceStats.await(),
             ),
             tenant.overviewHiddenCards,
         )

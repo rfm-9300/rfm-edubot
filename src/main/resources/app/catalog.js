@@ -1,5 +1,6 @@
 /* Catalog (/app → Catalog): the company's standard services and materials, which the line-items editor
-   offers. The list deletes them; a form adds or edits one. */
+   offers. The list deletes them; a form adds or edits one. With Clients on, a second view manages the
+   items each client usually buys (the same list as the client record's Items tab). */
 
 function openCatalogForm(itemId) {
   const editing = itemId ? state.catalog.find(c => c.id === itemId) : null;
@@ -115,6 +116,7 @@ function catalogColumns() {
     { id: 'category', label: t.thCategory, cell: i => `<td class="muted">${escapeHTML(i.category)}</td>` },
     { id: 'unit', label: t.thUnit, cell: i => `<td class="mono muted">${escapeHTML(i.unit)}</td>` },
     { id: 'price', label: t.thPrice, head: 'right', cell: i => `<td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>` },
+    ...(catalogClientsOn() ? [{ id: 'clients', label: t.thClients, head: 'right', cell: i => `<td class="num muted">${catalogItemClientCount(i.id) || ''}</td>` }] : []),
     {
       id: 'actions', label: t.thActions, head: 'right', pin: 'end', cell: i => `<td class="right"><div class="actions">
         <button class="iconbtn" type="button" title="${escapeHTML(t.editTitle)}" data-edit-item="${escapeHTML(i.id)}"><svg width="13" height="13" viewBox="0 0 16 16"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg></button>
@@ -124,8 +126,29 @@ function catalogColumns() {
   ];
 }
 
+// The clients' items view needs the Clients module; the catalog page loads the clients for it.
+const catalogClientsOn = () => hasModule('clients');
+
+function catalogItemClientCount(itemId) {
+  return (state.clients || []).filter(c => (c.catalogItemIds || []).includes(itemId)).length;
+}
+
+function catalogViewChips(view) {
+  const t = CRM.items;
+  return [['', t.viewItems], ['clients', t.viewClients]]
+    .map(([v, label]) => `<button class="btn btn--sm ${view === v ? 'btn--primary' : ''}" type="button" data-cat-view="${v}">${escapeHTML(label)}</button>`).join('');
+}
+
+function wireCatalogViews(root) {
+  $$('[data-cat-view]', root).forEach(btn => btn.addEventListener('click', () => { state.catalogView = btn.dataset.catView; render(); }));
+}
+
 function renderCatalog(root) {
   const t = CRM.items;
+  if (state.catalogView === 'clients') {
+    if (catalogClientsOn()) return renderCatalogClients(root);
+    state.catalogView = '';
+  }
   const q = state.search.toLowerCase();
   const columns = orderedColumns('catalog', catalogColumns());
   const rows = state.catalog
@@ -140,6 +163,7 @@ function renderCatalog(root) {
   ])) + crmPanel({
     title: t.catalogTitle,
     tag: t.tag({ n: state.catalog.length }),
+    views: catalogClientsOn() ? catalogViewChips('') : '',
     tools: columnOrderButton('catalog'),
     head: columnsHead(columns, 'catalog'),
     rows,
@@ -149,4 +173,71 @@ function renderCatalog(root) {
   $$('[data-edit-item]', root).forEach(btn => btn.addEventListener('click', () => openCatalogForm(btn.dataset.editItem)));
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
   wireColumnOrder(root, 'catalog', catalogColumns());
+  wireCatalogViews(root);
+}
+
+// Without a client picked, every active client with how many items they have (most first); a row picks
+// that client, whose items then list with remove buttons and an add select.
+function renderCatalogClients(root) {
+  const t = CRM.items;
+  const clients = [...(state.clients || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  if (state.catalogClient && !clients.some(c => c.id === state.catalogClient)) state.catalogClient = '';
+  const client = clients.find(c => c.id === state.catalogClient) || null;
+  const q = foldText(state.search.trim());
+  const withItems = clients.filter(c => clientCatalogItems(c).length);
+  const links = withItems.reduce((sum, c) => sum + clientCatalogItems(c).length, 0);
+  const clientPick = `<select class="sel" data-cat-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.allClients)}</option>${clients.map(c => `<option value="${escapeHTML(c.id)}" ${client?.id === c.id ? 'selected' : ''}>${escapeHTML(c.name)}</option>`).join('')}</select>`;
+  const stats = statCards([
+    { label: t.clientsWithItems, value: withItems.length },
+    { label: t.clientsWithout, value: clients.length - withItems.length },
+    { label: t.itemsLinked, value: links },
+  ]);
+  let panel;
+  if (client) {
+    const items = clientCatalogItems(client);
+    panel = crmPanel({
+      title: client.name,
+      tag: items.length,
+      views: catalogViewChips('clients'),
+      tools: clientPick + clientItemsAddHtml(items),
+      head: `<tr>${clientItemsHead().map(([label, cls]) => `<th${cls ? ` class="${cls}"` : ''}>${escapeHTML(label)}</th>`).join('')}</tr>`,
+      rows: clientItemsRowsHtml(items, q),
+      empty: items.length ? CRM.services.emptyFiltered : CRM.services.clientItemsEmpty,
+      emptyDesc: items.length ? CRM.services.emptyFilteredDesc : CRM.services.clientItemsEmptyDesc,
+    });
+  } else {
+    const rows = clients
+      .map(c => ({ c, items: clientCatalogItems(c) }))
+      .filter(({ c, items }) => !q || foldText(`${c.name || ''} ${items.map(i => `${i.code || ''} ${i.title || ''}`).join(' ')}`).includes(q))
+      .sort((a, b) => b.items.length - a.items.length)
+      .map(({ c, items }) => {
+        const shown = items.slice(0, 4).map(i => i.title).join(', ');
+        const more = items.length > 4 ? ` ${t.andMore({ n: items.length - 4 })}` : '';
+        return `<tr class="conversation-row" data-cat-pick="${escapeHTML(c.id)}" tabindex="0">
+          <td class="name">${escapeHTML(c.name || '')}</td>
+          <td class="muted">${items.length ? escapeHTML(shown + more) : `<span class="muted">${escapeHTML(t.noItemsYet)}</span>`}</td>
+          <td class="num">${items.length}</td>
+          <td class="right"><button class="btn btn--sm btn--ghost" type="button" data-cat-pick="${escapeHTML(c.id)}" aria-label="${escapeHTML(t.manageAria({ name: c.name || '' }))}">${escapeHTML(t.manage)}</button></td>
+        </tr>`;
+      }).join('');
+    panel = crmPanel({
+      title: t.clientsTitle,
+      tag: clients.length,
+      views: catalogViewChips('clients'),
+      tools: clientPick,
+      head: `<tr><th>${escapeHTML(t.thClient)}</th><th>${escapeHTML(t.thItems)}</th><th class="right">${escapeHTML(t.thCount)}</th><th></th></tr>`,
+      rows,
+      empty: clients.length ? CRM.services.emptyFiltered : t.noClients,
+      emptyDesc: clients.length ? CRM.services.emptyFilteredDesc : t.noClientsDesc,
+    });
+  }
+  root.innerHTML = hero(labels.catalog, t.clientsDesc, stats) + panel;
+  wireCatalogViews(root);
+  const pick = id => { state.catalogClient = id; render(); };
+  $('[data-cat-client]', root)?.addEventListener('change', e => pick(e.target.value));
+  $$('tr[data-cat-pick]', root).forEach(row => {
+    row.addEventListener('click', () => pick(row.dataset.catPick));
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pick(row.dataset.catPick); } });
+  });
+  if (client) wireClientItems(root, client, clientCatalogItems(client), saved => { state.catalogClient = saved.id; render(); });
 }

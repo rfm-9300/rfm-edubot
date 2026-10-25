@@ -41,6 +41,7 @@ data class OverviewDto(
     val agenda: List<OverviewAgendaItemDto> = emptyList(),
     val recent: List<OverviewRecentItemDto> = emptyList(),
     val topClients: List<OverviewTopClientDto> = emptyList(),
+    val serviceStats: OverviewServiceStatsDto? = null,
 )
 
 /** Money received (paid invoices) and spent (paid payments) in one tenant-local calendar month. */
@@ -206,6 +207,52 @@ data class OverviewServicesDto(
     val openCents: Long,
     val invoicedThisMonthCount: Int,
     val invoicedThisMonthCents: Long,
+)
+
+/**
+ * Home's Services card (extended only): the work done, read like the employee record does. A row is to do
+ * while it is open and dated today or later; every other row that isn't cancelled is done. A row's day is
+ * its `performedAt`, or the tenant-local day it was created.
+ */
+@Serializable
+data class OverviewServiceStatsDto(
+    val doneThisWeek: Int,
+    val doneThisMonth: Int,
+    val doneThisMonthCents: Long,
+    val doneLastMonth: Int,
+    val doneLastMonthCents: Long,
+    val doneThisYear: Int,
+    val doneThisYearCents: Long,
+    val toDo: Int,
+    val toDoToday: Int,
+    /** The last [OverviewMath.TREND_MONTHS] months, oldest first. */
+    val months: List<OverviewServiceMonthDto>,
+    /** The lines done most often over the last [OverviewMath.TOP_CLIENT_MONTHS] months, by catalog title. */
+    val top: List<OverviewServiceTopDto>,
+    /** Who did the most this month; empty without the Employees module. */
+    val employees: List<OverviewServiceEmployeeDto> = emptyList(),
+)
+
+@Serializable
+data class OverviewServiceMonthDto(
+    val month: String,
+    val count: Int,
+    val cents: Long,
+)
+
+@Serializable
+data class OverviewServiceTopDto(
+    val name: String,
+    val count: Int,
+    val cents: Long,
+)
+
+@Serializable
+data class OverviewServiceEmployeeDto(
+    val id: String,
+    val name: String,
+    val count: Int,
+    val cents: Long,
 )
 
 @Serializable

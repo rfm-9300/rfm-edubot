@@ -1,12 +1,21 @@
 package com.rfm.edubot.dashboard.overview
 
 import com.mongodb.client.model.Filters
+import com.mongodb.client.model.Projections
 import com.rfm.edubot.dashboard.OverviewMath
 import com.rfm.edubot.dashboard.OverviewPipelineDto
+import com.rfm.edubot.dashboard.OverviewServiceEmployeeDto
+import com.rfm.edubot.dashboard.OverviewServiceMonthDto
+import com.rfm.edubot.dashboard.OverviewServiceStatsDto
+import com.rfm.edubot.dashboard.OverviewServiceTopDto
 import com.rfm.edubot.dashboard.OverviewServicesDto
 import com.rfm.edubot.persistence.MongoModule
 import java.util.Date
 import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.Instant
+import kotlinx.datetime.LocalDate
+import kotlinx.datetime.toLocalDateTime
+import org.bson.Document
 import org.bson.types.ObjectId
 
 /** The Pipeline and Services cards: open quotes and the work not invoiced yet. */
@@ -62,5 +71,86 @@ internal class SalesOverview(mongo: MongoModule) : OverviewQueries(mongo) {
             invoicedThisMonthCount = invoiced.size,
             invoicedThisMonthCents = invoiced.sumOf { it.get("totalCents").asLong() },
         )
+    }
+
+    /** Home's Services card: what was done this week, month and year, the trend, the lines done most and by whom. */
+    suspend fun serviceStats(tenantId: ObjectId, window: OverviewMath.Window, employees: Boolean): OverviewServiceStatsDto {
+        val zone = window.zone
+        val start = OverviewMath.monthsBackStart(window.today, zone, OverviewMath.TOP_CLIENT_MONTHS)
+        val startDay = start.toLocalDateTime(zone).date
+        val rows = coll("crm.client_services").find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.ne("status", "CANCELLED"),
+                Filters.or(
+                    Filters.gte("performedAt", startDay.toString()),
+                    Filters.and(Filters.`in`("performedAt", null, ""), Filters.gte("createdAt", Date(start.toEpochMilliseconds()))),
+                ),
+            ),
+        ).projection(Projections.include("status", "performedAt", "createdAt", "totalCents", "name", "items", "employeeId"))
+            .limit(SERVICE_STATS_LIMIT)
+            .toList()
+            .map { ServiceRow(it, it.localDate("performedAt") ?: Instant.fromEpochMilliseconds((it.getDate("createdAt") ?: Date(0)).time).toLocalDateTime(zone).date) }
+            .filter { it.day >= startDay }
+        val todo = rows.filter { it.open && it.day >= window.today }
+        val done = rows.filter { !(it.open && it.day >= window.today) }
+        fun between(from: Instant, to: Instant) = done.filter { it.day >= from.toLocalDateTime(zone).date && it.day < to.toLocalDateTime(zone).date }
+        val week = between(window.weekStart, window.nextWeekStart)
+        val month = between(window.monthStart, window.nextMonthStart)
+        val lastMonth = between(window.lastMonthStart, window.monthStart)
+        val year = done.filter { it.day.year == window.today.year }
+        val byMonth = done.groupBy { OverviewMath.monthKey(it.day) }
+        val months = OverviewMath.trendMonthKeys(window.today).map { key ->
+            val list = byMonth[key].orEmpty()
+            OverviewServiceMonthDto(key, list.size, list.sumOf { it.cents })
+        }
+        val top = done.flatMap { it.lines() }
+            .groupBy { it.first.lowercase() }
+            .map { (_, lines) -> OverviewServiceTopDto(lines.first().first, lines.size, lines.sumOf { it.second }) }
+            .sortedWith(compareByDescending<OverviewServiceTopDto> { it.count }.thenByDescending { it.cents })
+            .take(OverviewMath.TOP_SERVICES)
+        val people = if (employees) {
+            val byEmployee = month.filter { it.employeeId != null }.groupBy { it.employeeId!! }
+            val names = employeeNames(tenantId, byEmployee.keys)
+            byEmployee.map { (id, list) -> OverviewServiceEmployeeDto(id.toHexString(), names[id] ?: "", list.size, list.sumOf { it.cents }) }
+                .sortedWith(compareByDescending<OverviewServiceEmployeeDto> { it.count }.thenByDescending { it.cents })
+                .take(OverviewMath.TOP_SERVICES)
+        } else {
+            emptyList()
+        }
+        return OverviewServiceStatsDto(
+            doneThisWeek = week.size,
+            doneThisMonth = month.size,
+            doneThisMonthCents = month.sumOf { it.cents },
+            doneLastMonth = lastMonth.size,
+            doneLastMonthCents = lastMonth.sumOf { it.cents },
+            doneThisYear = year.size,
+            doneThisYearCents = year.sumOf { it.cents },
+            toDo = todo.size,
+            toDoToday = todo.count { it.day == window.today },
+            months = months,
+            top = top,
+            employees = people,
+        )
+    }
+
+    private class ServiceRow(private val doc: Document, val day: LocalDate) {
+        val open = doc.getString("status") == "OPEN"
+        val cents = doc.get("totalCents").asLong()
+        val employeeId = doc.getObjectIdOrNull("employeeId")
+
+        /** Each line as (title, cents); a catalog line reads "title - details", so only the title counts. A row without lines is one line. */
+        fun lines(): List<Pair<String, Long>> {
+            val items = doc.getList("items", Document::class.java).orEmpty()
+                .map { (it.getString("description") ?: "").substringBefore(" - ").trim() to it.get("totalCents").asLong() }
+                .filter { it.first.isNotEmpty() }
+            if (items.isNotEmpty()) return items
+            val name = doc.getString("name")?.trim().orEmpty()
+            return if (name.isEmpty()) emptyList() else listOf(name to cents)
+        }
+    }
+
+    private companion object {
+        const val SERVICE_STATS_LIMIT = 20_000
     }
 }
