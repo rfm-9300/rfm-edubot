@@ -58,6 +58,7 @@ object OverviewMath {
     const val TREND_DAYS = 14
     const val TOP_CLIENT_MONTHS = 12
     const val TOP_CLIENTS = 5
+    const val TOP_SERVICES = 5
     const val RECENT_LIMIT = 8
     const val AGENDA_LIMIT = 8
     /** Approvals, due tasks and failed runs each list at most this many rows in "Needs you". */

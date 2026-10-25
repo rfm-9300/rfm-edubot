@@ -212,7 +212,14 @@ async function loadModule(tab) {
     if (hasModule('invoices')) state.fetched.invoices = true;
     if (hasModule('payments')) state.fetched.payments = true;
   }
-  if (tab === 'catalog') state.catalog = await api('/app/api/crm/standard-items');
+  if (tab === 'catalog') {
+    const [catalog, clients] = await Promise.all([
+      api('/app/api/crm/standard-items'),
+      hasModule('clients') ? api('/app/api/crm/clients').catch(() => state.clients) : Promise.resolve(state.clients),
+    ]);
+    state.catalog = catalog;
+    state.clients = clients;
+  }
   if (tab === 'persona') {
     state.persona = await api('/app/api/persona');
     if (state.personaTab === 'menus') await window.MenusUI.load().catch(() => { state.personaFlows = { failed: true }; });

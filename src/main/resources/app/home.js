@@ -1,5 +1,5 @@
 /* Home (/app → overview): the cockpit from GET /app/api/overview?extended=1. A KPI strip with sparklines,
-   what needs you, today's agenda, cash flow, receivables, the quote pipeline, inbox activity, top
+   what needs you, today's agenda, cash flow, receivables, the quote pipeline, services done, inbox activity, top
    clients, recent events and module tiles. Cards hidden in Settings → Home are left out. */
 
 function centsEUR(n) { return fmtEUR(Number(n || 0) / 100); }
@@ -195,6 +195,15 @@ function dashKpis(o, hidden) {
     }
   }
   if (o.calendar && !hidden.has('calendar')) cells.push({ go: 'bookings', label: STR.hl_bookings_today, value: o.calendar.today || 0, meta: tApp('kpiThisWeek', { n: o.calendar.thisWeek || 0 }) });
+  const svc = o.serviceStats;
+  if (svc && !hidden.has('services')) {
+    const pct = pctChange(svc.doneThisMonth || 0, svc.doneLastMonth || 0);
+    cells.push({
+      go: 'services', label: STR.kpiServicesMonth, value: svc.doneThisMonth || 0,
+      meta: deltaHint(pct, STR.vsLastMonth), trend: pct > 0 ? 'up' : pct < 0 ? 'down' : '',
+      spark: (svc.months || []).map(m => m.count || 0),
+    });
+  }
   if (o.customers && !hidden.has('customers')) cells.push({ go: 'clients', label: STR.hl_clients, value: o.customers.total || 0, meta: plusThisMonth(o.customers.newThisMonth) });
   return cells.slice(0, 5);
 }
@@ -379,6 +388,45 @@ function dashTopClientsCard(o) {
   return dashCard({ order: 7, title: STR.dashTopClients, meta: STR.dashLast12Months, go: 'clients', body, flush: top.length > 0 });
 }
 
+// Work done by month, what's left to do, the lines done most and, with Employees, who did the most this month.
+function dashServicesCard(o) {
+  const st = o.serviceStats;
+  const months = st.months || [];
+  const pct = pctChange(st.doneThisMonth || 0, st.doneLastMonth || 0);
+  const figures = dashFigures([
+    [st.doneThisMonth || 0, STR.svcDoneMonth, ''],
+    [wholeCentsEUR(st.doneThisMonthCents), STR.svcValueMonth, ''],
+    [st.toDo || 0, STR.svcToDo, st.toDoToday ? 'warn' : ''],
+  ]);
+  let chart = '';
+  if (months.some(m => m.count)) {
+    const max = Math.max(1, ...months.map(m => m.count || 0));
+    const describe = m => tApp('svcMonthBar', { month: monthLabel(m.month, true), n: m.count || 0, amount: wholeCentsEUR(m.cents) });
+    const cols = months.map(m => `<div class="bars__pair" title="${escapeHTML(describe(m))}"><span class="bars__bar" data-tone="accent" style="height:${(((m.count || 0) / max) * 100).toFixed(1)}%"></span></div>`).join('');
+    const labels = months.map((m, i) => `<span class="bars__label${i === months.length - 1 ? ' is-current' : ''}">${escapeHTML(monthLabel(m.month))}</span>`).join('');
+    chart = `<div class="bars" role="img" aria-label="${escapeHTML(months.map(describe).join('; '))}"><div class="bars__scale"><span>${max}</span></div><div class="bars__plot">${cols}</div><div class="bars__labels">${labels}</div></div>`;
+  } else chart = `<p class="dash-empty">${escapeHTML(STR.svcEmpty)}</p>`;
+  const top = st.top || [];
+  const topMax = Math.max(1, ...top.map(t => t.count || 0));
+  const topHtml = top.length
+    ? `<p class="dash-sub">${escapeHTML(STR.svcMostDone)}</p><ul class="hbars">${top.map(t => `<li class="hbars__row" title="${escapeHTML(`${t.name} · ${tApp('svcTimes', { n: t.count })} · ${wholeCentsEUR(t.cents)}`)}"><span class="hbars__label">${escapeHTML(t.name)}</span><span class="hbars__track"><span class="hbars__fill" data-tone="accent" style="width:${(((t.count || 0) / topMax) * 100).toFixed(1)}%"></span></span><span class="hbars__value">${escapeHTML(tApp('svcTimes', { n: t.count }))}</span></li>`).join('')}</ul>`
+    : '';
+  const people = st.employees || [];
+  const peopleHtml = people.length
+    ? `<p class="dash-sub">${escapeHTML(STR.svcByEmployee)}</p>${dashFacts(people.map(e => [e.name || '—', `${e.count} · ${wholeCentsEUR(e.cents)}`]))}`
+    : '';
+  const facts = dashFacts([
+    [STR.svcDoneWeek, st.doneThisWeek || 0],
+    [STR.svcDoneLastMonth, `${st.doneLastMonth || 0} · ${wholeCentsEUR(st.doneLastMonthCents)}`],
+    pct != null ? [STR.svcMonthChange, `${pct > 0 ? '+' : ''}${pct}%`] : null,
+    [tApp('svcDoneYear', { year: String(o.today || '').slice(0, 4) || new Date().getFullYear() }), `${st.doneThisYear || 0} · ${wholeCentsEUR(st.doneThisYearCents)}`],
+    st.toDoToday ? [STR.svcToDo, tApp('svcToDoToday', { n: st.toDoToday })] : null,
+    o.services ? [STR.servicesOpen, `${o.services.openCount || 0} · ${wholeCentsEUR(o.services.openCents)}`] : null,
+  ]);
+  const body = `${figures}${chart}${facts}${topHtml}${peopleHtml}`;
+  return dashCard({ order: 6, title: STR.snapServices, meta: STR.dashLast6Months, go: 'services', body });
+}
+
 function dashRecentCard(o) {
   const items = (o.recent || []).filter(r => RECENT_TONES[r.kind]).slice(0, 6);
   const body = items.length
@@ -458,6 +506,7 @@ function renderOverview(root) {
   }
   if (o.pipeline && !hidden.has('pipeline')) cards.push({ col: 'main', order: 5, html: dashPipelineCard(o) });
   if (o.inbox && !hidden.has('inbox')) cards.push({ col: 'side', order: 6, html: dashInboxCard(o) });
+  if (o.serviceStats && !hidden.has('services')) cards.push({ col: 'main', order: 6, html: dashServicesCard(o) });
   if (o.customers && o.cash && !hidden.has('customers')) cards.push({ col: 'main', order: 7, html: dashTopClientsCard(o) });
   const feedSources = [['invoices', 'financeiro'], ['payments', 'financeiro'], ['quotes', 'pipeline'], ['clients', 'customers'], ['bookings', 'calendar']];
   if (!hidden.has('recent') && feedSources.some(([m, card]) => hasModule(m) && !hidden.has(card))) cards.push({ col: 'side', order: 8, html: dashRecentCard(o) });

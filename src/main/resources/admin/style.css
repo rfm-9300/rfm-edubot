@@ -3321,6 +3321,9 @@ html[data-layout="minimal"] .worklist__group { font-size: 11.5px; font-weight: 6
 .bars__labels { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 12px; margin-top: 6px; }
 .bars__label { overflow: hidden; color: var(--ink-mute); font-size: 12px; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
 .bars__label.is-current { color: var(--ink); font-weight: 700; }
+/* Facts straight under a chart (Home's Services card) keep their gap and first rule. */
+.panel__body > .bars + .dash-facts { margin-top: 14px; }
+.panel__body > .bars + .dash-facts:not(.dash-facts--row) > div:first-child { padding-top: 8px; border-top: 1px solid var(--line-soft); }
 
 .segbar { display: flex; gap: 2px; height: 10px; margin: 14px 0; overflow: hidden; border-radius: 999px; background: var(--bg-deep); }
 .segbar__seg { min-width: 3px; height: 100%; background: var(--tone, var(--ink-faint)); }

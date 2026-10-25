@@ -11,6 +11,7 @@ import kotlinx.datetime.TimeZone
 import kotlinx.datetime.atStartOfDayIn
 import kotlinx.datetime.minus
 import kotlinx.datetime.plus
+import kotlinx.datetime.toLocalDateTime
 import org.bson.Document
 import org.bson.types.ObjectId
 import org.junit.jupiter.api.AfterAll
@@ -155,6 +156,60 @@ class OverviewServiceTest {
         assertEquals(200_00, cash.topOverdue.single().amountCents)
         assertEquals(200_00, overview.topClients.single().paidCents)
         assertEquals(200_00, overview.attention.single { it.kind == OverviewMath.KIND_OVERDUE_INVOICE }.amountCents)
+    }
+
+    @Test
+    fun `services card counts work done, the trend, the lines done most and by whom`() = runBlocking<Unit> {
+        val now = SystemClock.now()
+        val window = OverviewMath.window(now, zoneId)
+        val tenant = Tenant(
+            slug = "overview-${ObjectId().toHexString()}", name = "Services", channels = emptyList(), timezone = zoneId,
+            enabledModules = listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS, DashboardModules.SERVICES, DashboardModules.EMPLOYEES),
+            createdAt = now, updatedAt = now,
+        )
+        val t = tenant.id
+        val client = ObjectId()
+        val ana = ObjectId()
+        val today = window.today
+        val lastMonthDay = window.lastMonthStart.toLocalDateTime(zone).date
+        fun line(text: String, cents: Long) = Document("description", text).append("quantity", 1.0).append("unit", "un").append("unitPriceCents", cents).append("totalCents", cents)
+        fun service(status: String, day: String?, cents: Long, name: String, items: List<Document> = emptyList(), employee: ObjectId? = null, created: Instant = now) =
+            doc(t, ObjectId()).append("clientId", client).append("name", name).append("status", status).append("performedAt", day)
+                .append("totalCents", cents).append("items", items).append("employeeId", employee)
+                .append("createdAt", date(created)).append("updatedAt", date(created))
+        insert("crm.employees", doc(t, ana).append("name", "Ana").append("createdAt", date(now)))
+        insert(
+            "crm.client_services",
+            service("INVOICED", today.toString(), 50_00, "Corte + Massagem", listOf(line("Corte", 20_00), line("Massagem - 30 min", 30_00)), ana),
+            service("OPEN", today.toString(), 10_00, "Corte"),
+            service("OPEN", today.plus(DatePeriod(days = 3)).toString(), 10_00, "Corte"),
+            service("CANCELLED", today.toString(), 99_00, "Corte"),
+            service("OPEN", lastMonthDay.toString(), 15_00, "corte"),
+            service("INVOICED", null, 20_00, "Corte", listOf(line("Corte", 20_00)), ana),
+            service("INVOICED", today.minus(DatePeriod(months = 13)).toString(), 70_00, "Velho"),
+        )
+
+        val stats = OverviewService(mongoModule).build(tenant, extended = true).serviceStats!!
+        assertEquals(2, stats.doneThisMonth, "open rows dated today or later are still to do")
+        assertEquals(70_00, stats.doneThisMonthCents)
+        assertEquals(2, stats.doneThisWeek)
+        assertEquals(1, stats.doneLastMonth)
+        assertEquals(15_00, stats.doneLastMonthCents)
+        assertEquals(if (lastMonthDay.year == today.year) 3 else 2, stats.doneThisYear)
+        assertEquals(2, stats.toDo)
+        assertEquals(1, stats.toDoToday)
+        assertEquals(OverviewMath.trendMonthKeys(today), stats.months.map { it.month })
+        assertEquals(2, stats.months.last().count)
+        assertEquals(1, stats.months[4].count)
+        assertEquals("Corte", stats.top.first().name)
+        assertEquals(3, stats.top.first().count, "lines group by title, ignoring case and the details after the dash")
+        assertEquals(55_00, stats.top.first().cents)
+        assertEquals(listOf("Massagem"), stats.top.drop(1).map { it.name })
+        assertEquals("Ana", stats.employees.single().name)
+        assertEquals(2, stats.employees.single().count)
+
+        val hidden = OverviewService(mongoModule).build(tenant.copy(overviewHiddenCards = listOf(OverviewHomeLayout.SERVICES)), extended = true)
+        assertEquals(null, hidden.serviceStats)
     }
 
     private data class Seed(

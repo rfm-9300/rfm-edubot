@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-24
+updated: 2026-10-25
 ---
 
 # Catalog, Serviços and bookings
@@ -128,6 +128,34 @@ buy, and to see those first when adding a service for that client.
 - **Client record:** an Items tab (with the Catalog module) shows the same table and add select. It
   reuses `clientItemsRowsHtml`, `clientItemsAddHtml` and `wireClientItems`, and an archived client's
   list can't be changed. `loadClientRecord` loads the catalog when it isn't loaded yet.
+
+**Catalog → Clients' items (2026-10-25):** Rodrigo wanted the client items managed from the
+Catalog page too, as a tab. The Catalog panel now has two view chips, Items and Clients' items
+(`state.catalogView`, offered with the Clients module; the Catalog page then loads the clients too).
+
+- Without a client picked it lists every active client with how many items they have and the first
+  titles, most items first; a row or Manage picks the client (`state.catalogClient`), which shows the
+  same table, remove buttons and add select as the client record (`clientItemsRowsHtml`,
+  `clientItemsAddHtml`, `wireClientItems`). Search filters clients by name or item, or the picked
+  client's items. Stats: clients with items, without, and items linked.
+- The Items list gained a Clients column: how many clients have that item.
+- The Services page's By client view stays; both edit the same `PUT /crm/clients/{id}/catalog-items`.
+
+**Home's Services card (2026-10-25):** Rodrigo asked to see on Home how many services were done.
+`GET /overview?extended=1` answers `serviceStats` (`SalesOverview.serviceStats`), only with the
+Services module and the Services card not hidden in Settings → Home.
+
+- **Done and to do follow the employee record:** to do is an open row dated today or later; done is
+  every other row that isn't cancelled. A row's day is `performedAt`, or the tenant-local day it was
+  created. Figures: done this week, month (count and value), last month, this year, to do (and today).
+- `months` is the last six months (count and value); `top` groups the lines of the last 12 months by
+  title (the part before " - ", ignoring case), a row without lines counting as one line named after
+  the row; `employees` is this month's rows by employee (Employees module only), top five each.
+- One query reads the rows of the last 12 months (projected, capped at 20,000) and the counts are made
+  in memory; a much larger company would want an aggregation.
+- The card sits in the main column (order 6): figures, a bar chart, facts, Done most and This month by
+  employee. The KPI strip gained Services this month (with its spark line) before Clients; the strip
+  still shows at most five. `.panel__body > .bars + .dash-facts` keeps the facts' gap under a chart.
 
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 
