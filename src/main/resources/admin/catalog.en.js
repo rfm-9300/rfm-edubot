@@ -2111,6 +2111,8 @@ window.__I18N_CATALOGS['en'] = {
       formTitle: 'New service', editTitle: 'Edit service', save: 'Save service',
       name: 'Service name', namePh: 'E.g.: Facade painting', nameHint: 'Left empty, it uses the line names.',
       fromBooking: 'from booking', fromQuote: 'from quote', lineCount: p => `${p.n} lines`,
+      splitLabel: 'One service per line', splitHint: 'Saves each line as its own service. Without a name, each is named after its line.',
+      createdMany: p => `${p.n} services created`, splitPartial: p => `Created ${p.done} of ${p.total} services. The rest could not be saved.`,
       qty: 'Quantity', when: 'Performed on', notes: 'Notes',
       validate: 'Choose a client',
       addLine: 'Add at least one line, from the catalog or your own',

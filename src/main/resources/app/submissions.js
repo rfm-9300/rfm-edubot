@@ -53,7 +53,7 @@ function employeeWorkHtml(subs, access) {
   if (!subs.length) return access?.email ? recordEmpty(SUB.noneYet, null, '') : '';
   const marker = { APPROVED: ' is-paid', REJECTED: ' is-draft' };
   const rows = subs.map(s => `<tr class="conversation-row${marker[s.status] || ''}" data-record-open="submission:${escapeHTML(s.id)}">
-      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td><td class="name">${escapeHTML(s.clientName)}</td><td>${escapeHTML(s.name)}</td>
+      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td><td class="name">${escapeHTML(s.clientName)}</td><td><span class="svc-name" title="${escapeHTML(serviceRowText(s))}">${escapeHTML(serviceRowText(s))}</span></td>
       <td>${submissionPill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
   return recordTable([[SUB.thWhen], [SUB.thClient], [SUB.thService], [SUB.thStatus], [SUB.thTotal, 'right']], rows, { title: SUB.registeredTitle, count: subs.length });
 }
@@ -120,7 +120,7 @@ function myServiceColumns() {
   return [
     { id: 'when', label: SUB.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt))}</td>` },
     { id: 'client', label: SUB.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName)}</td>` },
-    { id: 'service', label: SUB.thService, cell: s => `<td>${escapeHTML(s.name)}</td>` },
+    { id: 'service', label: SUB.thService, cell: s => `<td><span class="svc-name" title="${escapeHTML(serviceRowText(s))}">${escapeHTML(serviceRowText(s))}</span></td>` },
     { id: 'total', label: SUB.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
     { id: 'status', label: SUB.thStatus, cell: s => `<td>${submissionPill(s.status)}</td>` },
   ];

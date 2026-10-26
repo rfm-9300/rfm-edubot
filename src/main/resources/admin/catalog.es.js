@@ -2106,6 +2106,8 @@ window.__I18N_CATALOGS['es'] = {
       formTitle: 'Nuevo servicio', editTitle: 'Editar servicio', save: 'Guardar servicio',
       name: 'Nombre del servicio', namePh: 'Ej.: Pintura de fachada', nameHint: 'Si lo dejas vacío, usa los nombres de las líneas.',
       fromBooking: 'de una cita', fromQuote: 'de un presupuesto', lineCount: p => `${p.n} líneas`,
+      splitLabel: 'Un servicio por línea', splitHint: 'Guarda cada línea como un servicio propio. Sin nombre, cada uno usa el nombre de su línea.',
+      createdMany: p => `${p.n} servicios creados`, splitPartial: p => `Creados ${p.done} de ${p.total} servicios. El resto no se guardó.`,
       qty: 'Cantidad', when: 'Realizado el', notes: 'Notas',
       validate: 'Elige un cliente',
       addLine: 'Añade al menos una línea, del catálogo o a medida',
