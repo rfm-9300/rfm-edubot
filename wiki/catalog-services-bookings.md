@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-25
+updated: 2026-10-26
 ---
 
 # Catalog, Serviços and bookings
@@ -80,6 +80,13 @@ A Serviços row (`crm.client_services`) records work done for a client and is wh
   `servicePatch` (cancel/reopen) and the booking `unbill` resend them. **Invoicing bills each line**,
   not one line per service. The form reuses the quote lines editor; an unnamed service is named after
   its lines' titles ("Corte + Massagem"). The API always returns `items` (an older row as its one line).
+  The stored name drops each line's catalog details (the part after " - "), but the service tables
+  (Serviços, a client's and an employee's services, submissions) show such a row's lines in full,
+  "Limpeza normal / checkout - T4", clamped to two lines (`serviceRowText`, `.svc-name`). A typed name
+  shows as typed. A new service's form has **One service per line**: with it on and more than one line,
+  saving posts one service per line (`createServicePerLine`), each with that line's catalog item and
+  named after it unless a name was typed. It loops the existing `POST`, so a failure part-way leaves the
+  ones already saved and says how many.
 
 **Services detail (shipped 2026-09-29, `bfd0c55`):** a Serviços row opens a detail like an
 invoice instead of the edit form, loaded from a new `GET /app/api/crm/services/{id}`. It shows the

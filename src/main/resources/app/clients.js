@@ -444,7 +444,7 @@ function clientPaneHtml(r, m, bk) {
       .sort((a, b) => String(b.performedAt || b.createdAt).localeCompare(String(a.performedAt || a.createdAt)))
       .map(s => `<tr class="conversation-row${s.status === 'CANCELLED' ? ' is-draft' : s.status === 'INVOICED' ? ' is-paid' : ''}" data-record-open="service:${escapeHTML(s.id)}">
         <td class="mono">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>
-        <td class="name">${escapeHTML(s.name)}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</td>
+        <td class="name"><span class="svc-name" title="${escapeHTML(serviceRowText(s))}">${escapeHTML(serviceRowText(s))}${s.bookingId ? ` <span class="muted">· ${escapeHTML(t.fromBooking)}</span>` : ''}</span></td>
         <td>${servicePill(s.status)}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`).join('');
     const invoiceOpen = m.openWork.length && hasModule('invoices') && act('invoice')
       ? `<div class="record__pane-foot"><button class="btn btn--sm btn--accent" type="button" data-record-act="invoice-open-work">${escapeHTML(STR.clientInvoiceOpenWork({ amount: fmtEUR(m.openWorkTotal) }))}</button></div>` : '';

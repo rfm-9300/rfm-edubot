@@ -9,7 +9,8 @@ function serviceColumns() {
     { id: 'client', label: t.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName || '')}</td>` },
     { id: 'service', label: t.thService, cell: s => {
       const from = s.bookingId ? t.fromBooking : s.quoteId ? t.fromQuote : '';
-      return `<td>${escapeHTML(s.name)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</td>`;
+      const text = serviceRowText(s);
+      return `<td><span class="svc-name" title="${escapeHTML(text)}">${escapeHTML(text)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</span></td>`;
     } },
     ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td class="muted">${escapeHTML(s.employeeName || '')}</td>` }] : []),
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
@@ -243,6 +244,12 @@ function serviceNameFrom(items) {
   return name.length > 160 ? `${name.slice(0, 159)}…` : name;
 }
 
+// The table shows an unnamed service's lines in full ("Limpeza normal / checkout - T4"); its stored name keeps only titles.
+function serviceRowText(s) {
+  const items = s.items || [];
+  return items.length && s.name === serviceNameFrom(items) ? items.map(it => it.description.trim()).filter(Boolean).join(' + ') : s.name;
+}
+
 // Who does the work: an active employee, or the one already on the row even once they are inactive.
 function serviceEmployeeField(selectedId, current) {
   const t = CRM.services;
@@ -285,6 +292,8 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
         <p class="hint">${escapeHTML(t.nameHint)}</p></div>
     </div>
     ${li.html}
+    ${editing ? '' : `<div class="form__row form__row--full"><label class="form__check"><input type="checkbox" id="svc-split" /> ${escapeHTML(t.splitLabel)}</label>
+      <p class="hint">${escapeHTML(t.splitHint)}</p></div>`}
     <div class="form__row form__row--full"><label class="lbl" for="svc-notes">${escapeHTML(t.notes)}</label>
       <textarea class="txt" id="svc-notes">${escapeHTML(editing?.notes || '')}</textarea></div>
     <div class="actions">
@@ -315,6 +324,7 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
     if (team) payload.employeeId = $('#svc-employee', form).value;
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
+    if (!editing && items.length > 1 && $('#svc-split', form)?.checked) return createServicePerLine(payload, form, btn);
     try {
       if (editing) await api(`/app/api/crm/services/${encodeURIComponent(editing.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
       else await api('/app/api/crm/services', { method: 'POST', body: JSON.stringify(payload) });
@@ -325,6 +335,29 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
     } catch (err) { btn.disabled = false; toast(err?.code === 'employee_not_found' ? t.employeeNotFound : t.saveFailed); }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form, true);
+}
+
+// "One service per line": each line is saved as its own service, named after it unless a name was typed.
+async function createServicePerLine(payload, form, btn) {
+  const t = CRM.services;
+  const typed = $('#svc-name', form).value.trim();
+  const catalogOf = new Map($$('.line[data-catalog]', form).map(row => [$('[data-k="description"]', row).value.trim(), row.dataset.catalog]));
+  let done = 0;
+  try {
+    for (const item of payload.items) {
+      const one = { ...payload, items: [item], name: typed || serviceNameFrom([item]), catalogItemId: catalogOf.get(item.description) || null };
+      await api('/app/api/crm/services', { method: 'POST', body: JSON.stringify(one) });
+      done++;
+    }
+    closeDrawer();
+    toast(t.createdMany({ n: done }));
+  } catch (err) {
+    if (!done) { btn.disabled = false; return toast(err?.code === 'employee_not_found' ? t.employeeNotFound : t.saveFailed); }
+    closeDrawer();
+    toast(t.splitPartial({ done, total: payload.items.length }));
+  }
+  await loadModule('services');
+  render();
 }
 
 async function cancelClientService(service) {

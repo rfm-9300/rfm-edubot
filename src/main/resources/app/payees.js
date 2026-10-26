@@ -317,7 +317,7 @@ function employeeServicesHtml(services, today, canAdd) {
   const { toDo, done } = employeeServiceSplit(services, today);
   const cancelled = services.filter(s => s.status === 'CANCELLED');
   const row = (s, pill) => `<tr class="conversation-row${s.status === 'INVOICED' ? ' is-paid' : s.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="service:${escapeHTML(s.id)}">
-      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td><td class="name">${escapeHTML(s.clientName || '')}</td><td>${escapeHTML(s.name)}</td>
+      <td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td><td class="name">${escapeHTML(s.clientName || '')}</td><td><span class="svc-name" title="${escapeHTML(serviceRowText(s))}">${escapeHTML(serviceRowText(s))}</span></td>
       <td>${pill}</td><td class="num right">${fmtEUR(s.totalEur)}</td></tr>`;
   const rows = [
     ...toDo.map(s => row(s, `<span class="pill pill--info">${escapeHTML(t.scheduled)}</span>`)),
