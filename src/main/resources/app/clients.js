@@ -732,7 +732,6 @@ function customFieldValues(form) {
 async function clientSaveErrorText(err, fallback) {
   const code = err?.code || '';
   if (code === 'invalid_email') return STR.clientInvalidEmail;
-  if (code === 'phone_taken') return STR.clientPhoneTaken;
   if (REQUIRED_ERROR_FIELDS[code]) return FIELDS.missing({ field: standardClientFieldLabel(REQUIRED_ERROR_FIELDS[code]) });
   if (!code.startsWith('custom_field_')) return fallback;
   // A field an admin added after this form opened isn't known here yet.

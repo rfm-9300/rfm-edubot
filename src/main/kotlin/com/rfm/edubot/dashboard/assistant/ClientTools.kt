@@ -120,14 +120,13 @@ internal class ClientTools(private val s: AssistantToolSession) : AssistantToolG
             customFields = customValues(args, fields),
         )
         directory.check(draft)?.let { throw it.problem(fields, update = false) }
-        s.clients.findByPhone(phone)?.let { throw phoneTaken(it) }
+        if (args.bool(SAME_PHONE_OK) != true) s.clients.findByPhone(phone)?.let { throw phoneShared(it) }
         return draft
     }
 
     private suspend fun createClient(args: JsonObject): JsonObject {
         val client = when (val outcome = directory.create(newClient(args))) {
             is ClientDirectory.Outcome.Saved -> outcome.client
-            is ClientDirectory.Outcome.PhoneTaken -> throw outcome.owner?.let(::phoneTaken) ?: ToolProblem("phone_taken", "Another record already has this phone.")
             is ClientDirectory.Outcome.Invalid -> throw outcome.problem(ClientFields.of(s.tenant), update = false)
             ClientDirectory.Outcome.NotFound -> throw ToolProblem("client_not_found", "That client no longer exists.")
         }
@@ -160,7 +159,9 @@ internal class ClientTools(private val s: AssistantToolSession) : AssistantToolG
             customFields = customValues(args, fields),
         )
         directory.check(draft, existing = client)?.let { throw it.problem(fields, update = true) }
-        if (args.has("phone")) s.clients.findByPhone(phone)?.takeIf { it.id != client.id }?.let { throw phoneTaken(it) }
+        if (args.has("phone") && args.bool(SAME_PHONE_OK) != true) {
+            s.clients.findAllByPhone(phone).firstOrNull { it.id != client.id }?.let { throw phoneShared(it) }
+        }
         return ClientUpdate(client, draft)
     }
 
@@ -168,7 +169,6 @@ internal class ClientTools(private val s: AssistantToolSession) : AssistantToolG
         val change = clientUpdate(args)
         val updated = when (val outcome = directory.update(change.client.id, change.draft)) {
             is ClientDirectory.Outcome.Saved -> outcome.client
-            is ClientDirectory.Outcome.PhoneTaken -> throw ToolProblem("phone_taken", "Another record already has this phone.")
             is ClientDirectory.Outcome.Invalid -> throw outcome.problem(ClientFields.of(s.tenant), update = true)
             ClientDirectory.Outcome.NotFound -> throw ToolProblem("client_not_found", "That client no longer exists.")
         }
@@ -225,14 +225,17 @@ internal class ClientTools(private val s: AssistantToolSession) : AssistantToolG
         }.toMap()
     }
 
-    private fun phoneTaken(owner: Client) = ToolProblem(
+    // Clients may share a phone, but usually a known phone means a known client, so the assistant asks before a second one.
+    private fun phoneShared(owner: Client) = ToolProblem(
         "phone_taken",
-        "${owner.name} (${owner.number}) already has this phone${if (owner.archivedAt != null) " (archived — it can be restored in Clients)" else ""}. Use that client or ask for another number.",
+        "${owner.name} (${owner.number}) already has this phone${if (owner.archivedAt != null) " (archived — it can be restored in Clients)" else ""}. " +
+            "Use that client, or, if the user confirms this is a different client sharing the phone, call again with $SAME_PHONE_OK: true.",
     )
 
     companion object : ToolGroupSpec {
         const val GET_CLIENT = "get_client"
         const val CREATE_CLIENT = "create_client"
+        private const val SAME_PHONE_OK = "same_phone_ok"
         const val UPDATE_CLIENT = "update_client"
 
         /** The client form's error codes, as the field they are about. */
@@ -263,6 +266,7 @@ internal class ClientTools(private val s: AssistantToolSession) : AssistantToolG
             put("contact_person", prop("string", "Who to talk to, for a company"))
             put("notes", prop("string", "Staff-only notes"))
             put("custom_fields", buildJsonObject { put("type", "object"); put("description", "The company's own client fields, by label") })
+            put(SAME_PHONE_OK, prop("boolean", "True once the user confirmed another client may share this phone"))
         }
 
         override val definitions = listOf(

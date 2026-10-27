@@ -1,6 +1,5 @@
 package com.rfm.edubot.agents.actions
 
-import com.mongodb.MongoWriteException
 import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.registry.ActionCategory
 import com.rfm.edubot.agents.registry.ActionResult
@@ -77,11 +76,7 @@ object CreateClientAction : AgentAction {
             if (found.archivedAt != null) clients.setArchived(found.id, archived = false)
             return ActionResult.Done(buildJsonObject { put("clientId", found.id.toHexString()); put("number", found.number); put("existing", true) }, note = "existing_client")
         }
-        val created = try {
-            clients.create(name, phone, input.string("address"), input.string("email"), notes = input.string("notes"))
-        } catch (e: MongoWriteException) {
-            clients.findByPhone(phone) ?: return ActionResult.Failed("phone_taken")
-        }
+        val created = clients.create(name, phone, input.string("address"), input.string("email"), notes = input.string("notes"))
         return ActionResult.Done(buildJsonObject { put("clientId", created.id.toHexString()); put("number", created.number); put("existing", false) })
     }
 }

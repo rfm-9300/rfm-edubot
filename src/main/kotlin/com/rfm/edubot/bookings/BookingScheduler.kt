@@ -1,6 +1,5 @@
 package com.rfm.edubot.bookings
 
-import com.mongodb.MongoWriteException
 import com.rfm.edubot.bookings.model.AvailabilityRule
 import com.rfm.edubot.bookings.model.Booking
 import com.rfm.edubot.bookings.model.BookingSource
@@ -198,11 +197,7 @@ class BookingScheduler(
             return found.id
         }
         if (phone.count(Char::isDigit) < 6) return null
-        return try {
-            clients.create(name, phone).id
-        } catch (e: MongoWriteException) {
-            clients.findByPhone(phone)?.id
-        }
+        return clients.create(name, phone).id
     }
 
     /**

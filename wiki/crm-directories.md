@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-24
+updated: 2026-10-27
 ---
 
 # Clients, suppliers and employees
@@ -64,11 +64,9 @@ three. Decisions that matter later:
 - **Archived** (`archivedAt`) records drop out of the list endpoints (`?archived=1` lists only them),
   so out of every picker, the AI's `search_clients` and the Home totals. They stay reachable by id,
   so documents keep their name and the record drawer still opens from an invoice.
-- **The phone stays taken.** `(tenantId, phone)` is unique and an archived record keeps its number.
-  So a booking linked by phone, and the AI's `create_client`, restore an archived client instead of
-  failing on the duplicate or creating a second one; the client form's duplicate-phone hint names
-  the archived client. Suppliers and employees have no such hint, only the `phone_taken` toast
-  ("check Archived too").
+- **The phone stays taken (suppliers and employees).** Their `(tenantId, phone)` is unique and an
+  archived record keeps its number; they have no duplicate hint, only the `phone_taken` toast ("check
+  Archived too"). Clients may share a phone since 2026-10-27, see "Clients may share a phone" below.
 - **UI:** the record card has Edit plus Delete (Restore when archived) in its head. Delete confirms;
   when the record shows documents, or the server answers `in_use` because an off module hides them,
   the confirm offers Archive. An archived record shows a warning line and no create actions; the
@@ -194,4 +192,22 @@ Rodrigo asked to load a PDF of a company's billing clients into production. How 
   dispatcher marked them `DONE` within seconds, which also shows it reads the rows.
 
 - **Check the source against public registries first.** Validate every NIF's check digit and look each company up in the public registry: names in a customer's own documents can be misspelled or out of date, and an address may not be the registered seat. Rodrigo chose registered names plus the document's addresses with registry postal codes. Checking email domains for MX records catches typos, including ones staff had already saved.
-- **Product gap: a client must have a unique phone.** The `(tenantId, phone)` index isn't partial and the phone prints on quotes and invoices, so a billing-only client without one gets an 8-digit placeholder (`99999991`, `99999992`, …) and a staff note saying so. Eight digits never match a real number, because `findByPhone` compares 9+ digit numbers on their last 9. An optional phone (partial unique index, per-company required field) is still open.
+- **Product gap: a client must have a phone.** The phone is required and prints on quotes and invoices, so a billing-only client without one gets an 8-digit placeholder (`99999991`, `99999992`, …) and a staff note saying so. Eight digits never match a real number, because `findByPhone` compares 9+ digit numbers on their last 9. Clients may now share a phone, so the placeholders no longer need to differ; an optional phone (per-company required field) is still open.
+
+## Clients may share a phone (2026-10-27)
+
+A family, or a company's several sites, can share one number, so `crm.clients` no longer has a unique
+`(tenantId, phone)` index. `MongoModule` drops `tenantId_1_phone_1` and creates a plain lookup index
+under the name `tenantId_1_phone_lookup`; the new name keeps later startups from dropping and
+rebuilding it. Suppliers and employees keep their unique index and `phone_taken`.
+
+- **The form and the API save it.** `ClientDirectory` has no `PhoneTaken` outcome anymore and client
+  writes never answer `409 phone_taken`. The form's duplicate-phone hint stays as a warning with an
+  Open button, because a known number usually means a known client.
+- **One client per phone where a contact is matched by phone.** The bot, bookings, agents and the
+  chat-to-client link still use `findByPhone`, which picks an active client over an archived one,
+  then the newest. `findAllByPhone` lists them all in that order. Bookings and the bot's
+  `create_client` still reuse (and restore) the client they find instead of making a second.
+- **The dashboard assistant asks first.** `create_client`/`update_client` still refuse a phone another
+  client has with `phone_taken`, naming that client, unless called with `same_phone_ok: true` once the
+  user confirms it is a different client.

@@ -3,6 +3,7 @@ package com.rfm.edubot.crm
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
+import com.mongodb.client.model.Sorts
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.Invoice
@@ -117,19 +118,24 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
 
     /**
      * The client with this phone however it was typed ("+351 912 345 678" = "912345678"): numbers of
-     * 9+ digits match on their last 9 digits, shorter ones must match exactly.
+     * 9+ digits match on their last 9 digits, shorter ones must match exactly. Clients may share a phone;
+     * then an active one wins over an archived one, and the newest among those.
      */
-    suspend fun findByPhone(phone: String): Client? {
+    suspend fun findByPhone(phone: String): Client? = findAllByPhone(phone).firstOrNull()
+
+    /** Every client with this phone, matched as in [findByPhone] and in its order. */
+    suspend fun findAllByPhone(phone: String): List<Client> {
         val digits = phone.filter(Char::isDigit)
-        if (digits.length < 6) return null
+        if (digits.length < 6) return emptyList()
         val key = if (digits.length >= 9) digits.takeLast(9) else digits
         val pattern = key.toList().joinToString("\\D*") + "\\D*$"
-        return collection.find(scoped(Filters.regex("phone", pattern))).limit(20).toList()
+        return collection.find(scoped(Filters.regex("phone", pattern))).sort(Sorts.descending("_id")).limit(20).toList()
             .map { it.toClient() }
-            .firstOrNull { client ->
+            .filter { client ->
                 val stored = client.phone.filter(Char::isDigit)
                 if (key.length == 9) stored.length >= 9 && stored.takeLast(9) == key else stored == key
             }
+            .sortedBy { it.archivedAt != null }
     }
 
     /**
