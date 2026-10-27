@@ -112,6 +112,24 @@ Decisions that matter later:
 - The services list gained an Employee column and filter. The employee portal (My services) still
   shows only what the employee registered, not work assigned to them; the mobile app has no picker.
 
+**An employee's services report (2026-10-27):** Rodrigo asked to print a "relatório" of the services an
+employee did in a week, a month or chosen dates. The employee record's Services panel has Print report
+next to Add service: a drawer with a period (this or last week, Monday first; this or last month; or
+dates), Include scheduled (to do) and Show values (on; off for a copy to hand the employee).
+
+- **Printed from the browser, not a server PDF.** The page is built in `employeeReportHtml` and printed
+  from a hidden iframe (`printHtmlDocument`); "Save as PDF" in the print dialog gives the file. This
+  kept it in the UI catalogs (en/pt/es) without server-side PDF copy, at the cost of no company logo or
+  colour (the header is the company name). Move it to PDFBox, like the site diary's PDF, if it must
+  carry the document template or be sent by email.
+- **What it shows:** services, value, clients, days worked; the lines grouped by title (the part before
+  " - ", as Service insights counts them); every service day by day with its status and a total; two
+  signature lines. Done and to do follow the record: cancelled rows never print, to do only when ticked.
+- **API:** `GET /crm/services` takes `from` and `to` (`yyyy-MM-dd`, both or neither, at most 366 days,
+  else `400 invalid_range`). A row's day is `performedAt`, or the tenant-local day it was created
+  (`ServiceDays`). With a range the list answers up to 2,000 rows instead of 200, so a busy employee's
+  month isn't cut by the newest-200 cap.
+
 **A client's catalog items (2026-10-24):** Rodrigo asked to tie clients to the catalog items they
 buy, and to see those first when adding a service for that client.
 

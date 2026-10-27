@@ -16,16 +16,36 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 import kotlinx.serialization.json.put
 import org.bson.Document
 import org.bson.conversions.Bson
 import org.bson.types.ObjectId
+import java.util.Date
 
 enum class ClientServiceDelete { Removed, NotFound, Invoiced }
 
 /** A change to who does a Serviços row's work; a null [employeeId] leaves it unassigned. */
 data class EmployeeAssignment(val employeeId: ObjectId?)
+
+/**
+ * Rows whose day is from [from] to [to], both included. A row's day is its `performedAt`, or the day in [zone] it
+ * was created when it has none, as the employee record and Home count it.
+ */
+class ServiceDays(val from: LocalDate, val to: LocalDate, val zone: TimeZone) {
+    fun filter(): Bson = Filters.or(
+        Filters.and(Filters.gte("performedAt", from.toString()), Filters.lte("performedAt", to.toString())),
+        Filters.and(
+            Filters.`in`("performedAt", null, ""),
+            Filters.gte("createdAt", Date(from.atStartOfDayIn(zone).toEpochMilliseconds())),
+            Filters.lt("createdAt", Date(to.plus(1, DateTimeUnit.DAY).atStartOfDayIn(zone).toEpochMilliseconds())),
+        ),
+    )
+}
 
 class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.client_services")
@@ -45,14 +65,21 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
     suspend fun findByQuoteId(quoteId: ObjectId): List<ClientService> =
         collection.find(scoped(Filters.eq("quoteId", quoteId))).toList().map { it.toClientService() }
 
-    suspend fun list(clientId: ObjectId? = null, status: ClientServiceStatus? = null, employeeId: ObjectId? = null): List<ClientService> {
+    /** Newest first: at most 200 rows, or [DAYS_LIMIT] when [days] narrows them to a period. */
+    suspend fun list(
+        clientId: ObjectId? = null,
+        status: ClientServiceStatus? = null,
+        employeeId: ObjectId? = null,
+        days: ServiceDays? = null,
+    ): List<ClientService> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
         clientId?.let { filters.add(Filters.eq("clientId", it)) }
         employeeId?.let { filters.add(Filters.eq("employeeId", it)) }
         status?.let { filters.add(Filters.eq("status", it.name)) }
+        days?.let { filters.add(it.filter()) }
         return collection.find(Filters.and(filters))
             .sort(Document("performedAt", -1).append("createdAt", -1))
-            .limit(200)
+            .limit(if (days != null) DAYS_LIMIT else 200)
             .toList()
             .map { it.toClientService() }
     }
@@ -249,4 +276,9 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
         .apply { quoteId?.let { append("quoteId", it) } }
 
     private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    companion object {
+        /** Rows answered for a period, enough for a busy employee's quarter. */
+        const val DAYS_LIMIT = 2000
+    }
 }
