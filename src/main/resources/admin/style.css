@@ -3335,6 +3335,38 @@ html[data-layout="minimal"] .worklist__group { font-size: 11.5px; font-weight: 6
 .hbars__track { position: relative; height: 8px; overflow: hidden; border-radius: 999px; background: var(--bg-deep); }
 .hbars__fill { position: absolute; top: 0; bottom: 0; left: 0; border-radius: 999px; background: var(--tone, var(--accent)); }
 .hbars__value { color: var(--ink); font-family: var(--mono); font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.hbars--wide .hbars__row { grid-template-columns: minmax(96px, 180px) minmax(0, 1fr) 72px; }
+
+/* Service insights (full width under the grid): figures with deltas, tables, the who-buys-what heat map */
+.dash-figures--4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.insights__group { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.insights__group--end { margin-left: auto; }
+.insights__group[hidden] { display: none; }
+.insights__label { margin-right: 2px; color: var(--ink-mute); font-size: 12px; font-weight: 700; }
+.insights__range { margin: 0 0 10px; color: var(--ink-mute); font-size: 12.5px; }
+.insights__hint { margin: 16px 0 6px; color: var(--ink-mute); font-size: 12.5px; }
+.insights__table { margin: 14px -16px 0; }
+.insights__table + .dash-facts, .insights__split + .dash-facts { margin-top: 14px; }
+.insights__split { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.insights__split .bars__plot { height: 120px; }
+.insights .dash-figure__label .delta { margin-left: 4px; }
+.cellbar { display: block; max-width: 160px; height: 4px; margin-top: 6px; overflow: hidden; border-radius: 999px; background: var(--bg-deep); }
+.cellbar__fill { display: block; height: 100%; border-radius: inherit; background: var(--accent); }
+.heat { width: calc(100% + 6px); margin: 6px -3px 0; border-collapse: separate; border-spacing: 3px; table-layout: fixed; font-size: 12.5px; }
+.heat thead td:first-child { width: 30%; }
+.heat thead th { padding: 4px 6px; overflow: hidden; color: var(--ink-mute); font-size: 11.5px; font-weight: 700; text-align: center; text-overflow: ellipsis; white-space: nowrap; }
+.heat tbody th { padding: 0 8px 0 0; overflow: hidden; color: var(--ink); font-weight: 600; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.heat tbody th .tbl__open { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.heat__cell { height: 34px; border-radius: 6px; background: color-mix(in srgb, var(--accent) var(--heat, 0%), var(--surface-2)); color: var(--ink); font-family: var(--mono); text-align: center; font-variant-numeric: tabular-nums; }
+.heat__cell.is-hot { color: var(--accent-ink); font-weight: 700; }
+@media (max-width: 700px) {
+  .dash-figures--4 { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 14px; }
+  .insights__split { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+}
+@media (max-width: 560px) {
+  .insights__group--end { margin-left: 0; }
+  .heat :is(th, td):nth-child(n+6) { display: none; }
+}
 
 /* ranked clients */
 .rank { margin: 0; padding: 0; list-style: none; }

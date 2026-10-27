@@ -1,6 +1,6 @@
 /* Home (/app → overview): the cockpit from GET /app/api/overview?extended=1. A KPI strip with sparklines,
    what needs you, today's agenda, cash flow, receivables, the quote pipeline, services done, inbox activity, top
-   clients, recent events and module tiles. Cards hidden in Settings → Home are left out. */
+   clients, recent events, service insights and module tiles. Cards hidden in Settings → Home are left out. */
 
 function centsEUR(n) { return fmtEUR(Number(n || 0) / 100); }
 function deltaHint(deltaPct, vs) {
@@ -68,7 +68,7 @@ function homeCardCopy(id) {
   const titles = {
     highlights: STR.homeCard_highlights, pulse: STR.homeCard_pulse, attention: STR.needsYou, setup: STR.setupTitle,
     financeiro: STR.snapFinance, pipeline: STR.snapPipeline, customers: STR.snapCustomers, inbox: STR.snapInbox,
-    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices,
+    calendar: STR.homeCard_calendar, social: STR.snapSocial, catalog: STR.snapCatalog, services: STR.snapServices, service_insights: STR.siTitle,
     suppliers: STR.snapSuppliers, employees: STR.snapEmployees, assistant: STR.snapAssistant, agents: STR.snapAgents,
     projects: STR.snapProjects, recent: STR.dashRecent,
   };
@@ -76,6 +76,7 @@ function homeCardCopy(id) {
     highlights: STR.homeCard_highlightsDesc, pulse: STR.homeCard_pulseDesc, attention: STR.homeCard_attentionDesc, setup: STR.homeCard_setupDesc,
     financeiro: STR.homeCard_financeDesc, pipeline: STR.homeCard_pipelineDesc, customers: STR.homeCard_customersDesc, inbox: STR.homeCard_inboxDesc,
     calendar: STR.homeCard_calendarDesc, social: STR.homeCard_socialDesc, catalog: STR.homeCard_catalogDesc, services: STR.homeCard_servicesDesc,
+    service_insights: STR.homeCard_serviceInsightsDesc,
     suppliers: STR.homeCard_suppliersDesc, employees: STR.homeCard_employeesDesc, assistant: STR.homeCard_assistantDesc, agents: STR.homeCard_agentsDesc,
     projects: STR.homeCard_projectsDesc, recent: STR.homeCard_recentDesc,
   };
@@ -427,6 +428,234 @@ function dashServicesCard(o) {
   return dashCard({ order: 6, title: STR.snapServices, meta: STR.dashLast6Months, go: 'services', body });
 }
 
+// Service insights: the last N months against the N before (GET /overview/services?months=N), by service, by client,
+// who buys what, who is due back, and patterns. The card draws after Home; the period, view and ranking are this
+// browser's choice, and each period's answer is kept for a minute.
+const INSIGHT_PERIODS = [1, 3, 6, 12];
+const INSIGHT_VIEWS = ['services', 'clients', 'matrix', 'due', 'patterns'];
+const INSIGHT_KEY = 'homeServiceInsights';
+const INSIGHT_ROWS = 8;
+const homeInsights = restoreInsightChoice();
+
+function restoreInsightChoice() {
+  const choice = { months: 3, view: 'services', by: 'count', cache: {} };
+  try {
+    const saved = JSON.parse(localStorage.getItem(INSIGHT_KEY) || 'null') || {};
+    if (INSIGHT_PERIODS.includes(saved.months)) choice.months = saved.months;
+    if (INSIGHT_VIEWS.includes(saved.view)) choice.view = saved.view;
+    if (saved.by === 'count' || saved.by === 'cents') choice.by = saved.by;
+  } catch { /* unreadable: defaults */ }
+  return choice;
+}
+
+function saveInsightChoice() {
+  const { months, view, by } = homeInsights;
+  try { localStorage.setItem(INSIGHT_KEY, JSON.stringify({ months, view, by })); } catch { /* storage blocked: the choice lasts this visit */ }
+}
+
+const insightMeasure = x => (homeInsights.by === 'cents' ? x.cents || 0 : x.count || 0);
+const insightShow = x => (homeInsights.by === 'cents' ? wholeCentsEUR(x.cents) : String(x.count || 0));
+const insightTop = list => [...(list || [])].sort((a, b) => insightMeasure(b) - insightMeasure(a) || (b.count || 0) - (a.count || 0)).slice(0, INSIGHT_ROWS);
+const insightPct = (part, whole) => (whole ? Math.round((part / whole) * 100) : 0);
+
+function insightDelta(now, before) {
+  const pct = pctChange(now, before);
+  if (pct == null) return '';
+  return ` <span class="delta${pct > 0 ? ' delta--up' : pct < 0 ? ' delta--down' : ''}" title="${escapeHTML(STR.siVsPrevious)}">${pct > 0 ? '+' : ''}${pct}%</span>`;
+}
+
+// Against the period before: a percentage, or New when it had none.
+function insightChange(now, before) {
+  if (!before) return now ? `<span class="pill pill--accent">${escapeHTML(STR.siNew)}</span>` : '';
+  return insightDelta(now, before).trim();
+}
+
+function dashInsightsCard() {
+  const views = [['services', STR.siViewServices], ['clients', STR.siViewClients], ['matrix', STR.siViewMatrix], ['due', STR.siViewDueBack], ['patterns', STR.siViewPatterns]]
+    .map(([id, label]) => `<button type="button" class="btn btn--sm" data-si-view="${id}">${escapeHTML(label)}</button>`).join('');
+  const periods = INSIGHT_PERIODS.map(n => `<button type="button" class="chip" data-si-months="${n}">${escapeHTML(tApp('siMonths', { n }))}</button>`).join('');
+  const by = [['count', STR.siByTimes], ['cents', STR.siByValue]].map(([id, label]) => `<button type="button" class="chip" data-si-by="${id}">${escapeHTML(label)}</button>`).join('');
+  return `<section class="panel panel--card insights" data-insights>
+    <header class="panel__head"><h2 class="panel__title">${escapeHTML(STR.siTitle)}</h2><div class="panel__views" role="group" aria-label="${escapeHTML(STR.siViewsAria)}">${views}</div></header>
+    <div class="panel__filters"><div class="insights__group" role="group" aria-label="${escapeHTML(STR.siPeriodAria)}">${periods}</div><div class="insights__group insights__group--end" role="group" aria-label="${escapeHTML(STR.siRankBy)}"><span class="insights__label">${escapeHTML(STR.siRankBy)}</span>${by}</div></div>
+    <div class="panel__body" data-si-body aria-live="polite"><p class="dash-empty">${escapeHTML(STR.siLoading)}</p></div>
+  </section>`;
+}
+
+function markInsightControls(card) {
+  const on = (sel, key, value) => $$(sel, card).forEach(b => {
+    const active = String(b.dataset[key]) === String(value);
+    b.classList.toggle(sel === '[data-si-view]' ? 'btn--primary' : 'is-on', active);
+    b.setAttribute('aria-pressed', String(active));
+  });
+  on('[data-si-view]', 'siView', homeInsights.view);
+  on('[data-si-months]', 'siMonths', homeInsights.months);
+  on('[data-si-by]', 'siBy', homeInsights.by);
+  $('[data-si-by]', card).parentElement.hidden = homeInsights.view === 'due';
+}
+
+function wireInsights(root) {
+  const card = $('[data-insights]', root);
+  if (!card) return;
+  card.addEventListener('click', e => {
+    const b = e.target.closest('[data-si-view], [data-si-months], [data-si-by]');
+    if (!b) return;
+    if (b.dataset.siView) homeInsights.view = b.dataset.siView;
+    if (b.dataset.siMonths) homeInsights.months = Number(b.dataset.siMonths);
+    if (b.dataset.siBy) homeInsights.by = b.dataset.siBy;
+    saveInsightChoice();
+    loadInsights(card);
+  });
+  loadInsights(card);
+}
+
+async function loadInsights(card) {
+  markInsightControls(card);
+  const body = $('[data-si-body]', card);
+  const months = homeInsights.months;
+  let hit = homeInsights.cache[months];
+  if (!hit || Date.now() - hit.at > 60000) {
+    body.setAttribute('aria-busy', 'true');
+    try {
+      hit = homeInsights.cache[months] = { at: Date.now(), data: await api(`/app/api/overview/services?months=${months}`) };
+    } catch {
+      body.innerHTML = `<p class="dash-empty">${escapeHTML(STR.siLoadError)}</p>`;
+      return;
+    } finally {
+      body.removeAttribute('aria-busy');
+    }
+    if (!card.isConnected || months !== homeInsights.months) return;
+  }
+  body.innerHTML = insightBody(hit.data);
+  $$('[data-go]', body).forEach(b => b.addEventListener('click', () => dashGo(b)));
+}
+
+function insightBody(d) {
+  const cur = d.current || {};
+  const prev = d.previous || {};
+  const avg = p => (p.count ? (p.cents || 0) / p.count : 0);
+  const figure = (value, label, delta) => `<div class="dash-figure"><span class="dash-figure__value">${escapeHTML(String(value))}</span><span class="dash-figure__label">${escapeHTML(label)}${delta}</span></div>`;
+  const figures = `<div class="dash-figures dash-figures--4">${[
+    figure(cur.count || 0, STR.siDone, insightDelta(cur.count || 0, prev.count || 0)),
+    figure(wholeCentsEUR(cur.cents), STR.siValue, insightDelta(cur.cents || 0, prev.cents || 0)),
+    figure(centsEUR(avg(cur)), STR.siAvgTicket, insightDelta(avg(cur), avg(prev))),
+    figure(cur.clients || 0, cur.newClients ? tApp('siClientsNew', { n: cur.newClients }) : STR.siClients, insightDelta(cur.clients || 0, prev.clients || 0)),
+  ].join('')}</div>`;
+  const range = `<p class="insights__range">${escapeHTML(tApp('siRange', { from: dayLabel(d.from), to: dayLabel(d.to), n: d.months }))}</p>`;
+  const truncated = d.truncated ? `<p class="dash-empty">${escapeHTML(STR.siTruncated)}</p>` : '';
+  const view = homeInsights.view;
+  if (view === 'due') return `${range}${figures}${insightDueBack(d)}${truncated}`;
+  if (!cur.count) return `${range}${figures}<p class="dash-empty">${escapeHTML(STR.siEmpty)}</p>`;
+  const views = { services: insightServices, clients: insightClients, matrix: insightMatrix, patterns: insightPatterns };
+  return `${range}${figures}${views[view](d)}${truncated}`;
+}
+
+const insightBar = pct => `<span class="cellbar" aria-hidden="true"><span class="cellbar__fill" style="width:${Math.min(100, Math.max(0, pct)).toFixed(1)}%"></span></span>`;
+
+function insightServices(d) {
+  const cur = d.current;
+  const whole = homeInsights.by === 'cents' ? cur.lineCents : cur.lines;
+  const rows = insightTop(d.services).map(s => {
+    const share = insightPct(insightMeasure(s), whole);
+    return `<tr>
+      <td><span class="name">${escapeHTML(s.name)}</span>${insightBar(share)}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColTimes)}">${s.count}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColValue)}">${escapeHTML(wholeCentsEUR(s.cents))}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColShare)}">${share}%</td>
+      <td class="num" data-label="${escapeHTML(STR.siColClients)}">${s.clients}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColAvg)}">${escapeHTML(centsEUR(s.count ? s.cents / s.count : 0))}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColChange)}">${insightChange(s.count, s.previousCount)}</td>
+    </tr>`;
+  }).join('');
+  return `<div class="insights__table"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(STR.siColService)}</th><th class="right">${escapeHTML(STR.siColTimes)}</th><th class="right">${escapeHTML(STR.siColValue)}</th><th class="right">${escapeHTML(STR.siColShare)}</th><th class="right">${escapeHTML(STR.siColClients)}</th><th class="right">${escapeHTML(STR.siColAvg)}</th><th class="right">${escapeHTML(STR.siColChange)}</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
+function insightClients(d) {
+  const cur = d.current;
+  const whole = homeInsights.by === 'cents' ? cur.cents : cur.count;
+  const rows = insightTop(d.clients).map(c => `<tr>
+      <td><button type="button" class="tbl__open name" data-go="clients" data-open="${escapeHTML(c.id)}">${escapeHTML(c.name || '—')}</button>${insightBar(insightPct(insightMeasure(c), whole))}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColServices)}">${c.count}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColValue)}">${escapeHTML(wholeCentsEUR(c.cents))}</td>
+      <td data-label="${escapeHTML(STR.siColFavourite)}">${escapeHTML(c.topService ? tApp('siFavourite', { name: c.topService, n: c.topServiceCount }) : '—')}${c.serviceKinds > 1 ? ` <span class="muted">${escapeHTML(tApp('siKinds', { n: c.serviceKinds }))}</span>` : ''}</td>
+      <td class="nowrap" data-label="${escapeHTML(STR.siColLast)}">${escapeHTML(dayLabel(c.lastDay))}</td>
+      <td class="num" data-label="${escapeHTML(STR.siColChange)}">${insightChange(c.count, c.previousCount)}</td>
+    </tr>`).join('');
+  const facts = dashFacts([
+    [STR.siRepeat, `${insightPct(cur.repeatClients || 0, cur.clients)}% · ${cur.repeatClients || 0}`],
+    [STR.siTopFifth, tApp('siOfValue', { pct: cur.topFifthSharePct || 0 })],
+  ]);
+  return `<div class="insights__table"><table class="tbl tbl--stack"><thead><tr><th>${escapeHTML(STR.siColClient)}</th><th class="right">${escapeHTML(STR.siColServices)}</th><th class="right">${escapeHTML(STR.siColValue)}</th><th>${escapeHTML(STR.siColFavourite)}</th><th>${escapeHTML(STR.siColLast)}</th><th class="right">${escapeHTML(STR.siColChange)}</th></tr></thead><tbody>${rows}</tbody></table></div>${facts}`;
+}
+
+// Top clients against the services done most; a cell's shade is its share of the busiest cell.
+function insightMatrix(d) {
+  const m = d.matrix || { services: [], rows: [] };
+  if (!m.rows.length || !m.services.length) return `<p class="dash-empty">${escapeHTML(STR.siEmpty)}</p>`;
+  const max = Math.max(1, ...m.rows.flatMap(r => r.cells.map(insightMeasure)));
+  const head = m.services.map(s => `<th scope="col" title="${escapeHTML(s)}">${escapeHTML(s)}</th>`).join('');
+  const rows = m.rows.map(r => `<tr><th scope="row"><button type="button" class="tbl__open" data-go="clients" data-open="${escapeHTML(r.id)}">${escapeHTML(r.name || '—')}</button></th>${r.cells.map((c, i) => {
+    const heat = insightMeasure(c) / max;
+    const label = `${r.name || '—'} · ${m.services[i]} · ${tApp('svcTimes', { n: c.count })} · ${wholeCentsEUR(c.cents)}`;
+    return `<td class="heat__cell${heat > 0.55 ? ' is-hot' : ''}" style="--heat:${(heat * 100).toFixed(0)}%" title="${escapeHTML(label)}">${c.count ? escapeHTML(insightShow(c)) : ''}</td>`;
+  }).join('')}</tr>`).join('');
+  return `<p class="insights__hint">${escapeHTML(STR.siMatrixHint)}</p><table class="heat"><thead><tr><td></td>${head}</tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function insightDueBack(d) {
+  const due = d.dueBack || [];
+  const hint = `<p class="insights__hint">${escapeHTML(STR.siDueBackHint)}</p>`;
+  if (!due.length) return `${hint}<p class="dash-empty">${escapeHTML(STR.siDueBackEmpty)}</p>`;
+  return `${hint}<ul class="worklist">${due.map(c => worklistRow({
+    tone: c.lateDays > c.usualDays ? 'bad' : 'warn',
+    title: c.name || '—',
+    detail: tApp('siDueEvery', { n: c.usualDays, day: dayLabel(c.lastDay), visits: c.visits }),
+    meta: tApp('siLateDays', { n: c.lateDays }),
+    when: wholeCentsEUR(c.cents),
+    go: 'clients',
+    open: c.id,
+  })).join('')}</ul>`;
+}
+
+// Columns for a few labelled values, [scale] writing the top of the axis; the highest one's label is bold.
+function insightColumns(items, aria, scale = String) {
+  const values = items.map(it => it.value);
+  const max = Math.max(1, ...values);
+  const top = values.indexOf(Math.max(...values));
+  const cols = items.map(it => `<div class="bars__pair" title="${escapeHTML(it.title)}"><span class="bars__bar" data-tone="accent" style="height:${((it.value / max) * 100).toFixed(1)}%"></span></div>`).join('');
+  const labels = items.map((it, i) => `<span class="bars__label${i === top && it.value ? ' is-current' : ''}">${escapeHTML(it.label)}</span>`).join('');
+  return `<div class="bars" role="img" aria-label="${escapeHTML(`${aria}: ${items.map(it => it.title).join('; ')}`)}"><div class="bars__scale"><span>${escapeHTML(scale(max))}</span></div><div class="bars__plot">${cols}</div><div class="bars__labels">${labels}</div></div>`;
+}
+
+function insightPatterns(d) {
+  const cur = d.current;
+  const money = homeInsights.by === 'cents';
+  const months = (d.trend || []).map(m => ({
+    value: insightMeasure(m), label: monthLabel(m.month),
+    title: tApp('svcMonthBar', { month: monthLabel(m.month, true), n: m.count || 0, amount: wholeCentsEUR(m.cents) }),
+  }));
+  const weekdays = (d.weekdays || []).map((n, i) => {
+    const name = new Date(Date.UTC(2024, 0, 1 + i)).toLocaleDateString(uiLocale(), { weekday: 'short', timeZone: 'UTC' });
+    return { value: n, label: name, title: `${name}: ${tApp('svcTimes', { n })}` };
+  });
+  const people = insightTop(d.employees);
+  const peopleMax = Math.max(1, ...people.map(insightMeasure));
+  const team = people.length
+    ? `<p class="dash-sub">${escapeHTML(STR.siTeam)}</p><ul class="hbars hbars--wide">${people.map(e => `<li class="hbars__row" title="${escapeHTML(`${e.name || '—'} · ${tApp('svcTimes', { n: e.count })} · ${wholeCentsEUR(e.cents)}`)}"><span class="hbars__label">${escapeHTML(e.name || '—')}</span><span class="hbars__track"><span class="hbars__fill" data-tone="accent" style="width:${((insightMeasure(e) / peopleMax) * 100).toFixed(1)}%"></span></span><span class="hbars__value">${escapeHTML(insightShow(e))}</span></li>`).join('')}</ul>`
+    : '';
+  const perClient = cur.clients ? (cur.count / cur.clients).toLocaleString(uiLocale(), { maximumFractionDigits: 1 }) : '0';
+  return `<div class="insights__split">
+      <div><p class="dash-sub">${escapeHTML(money ? STR.siTrendValue : STR.siTrend)}</p>${insightColumns(months, STR.siTrend, money ? max => fmtEURCompact(max / 100) : String)}</div>
+      <div><p class="dash-sub">${escapeHTML(STR.siWeekdays)}</p>${insightColumns(weekdays, STR.siWeekdays)}</div>
+    </div>
+    ${dashFacts([
+      [STR.siPerClient, perClient],
+      [STR.siRepeat, `${insightPct(cur.repeatClients || 0, cur.clients)}% · ${cur.repeatClients || 0}`],
+      [STR.siNewClients, cur.newClients || 0],
+      [STR.siTopFifth, tApp('siOfValue', { pct: cur.topFifthSharePct || 0 })],
+    ])}${team}`;
+}
+
 function dashRecentCard(o) {
   const items = (o.recent || []).filter(r => RECENT_TONES[r.kind]).slice(0, 6);
   const body = items.length
@@ -508,6 +737,7 @@ function renderOverview(root) {
   if (o.inbox && !hidden.has('inbox')) cards.push({ col: 'side', order: 6, html: dashInboxCard(o) });
   if (o.serviceStats && !hidden.has('services')) cards.push({ col: 'main', order: 6, html: dashServicesCard(o) });
   if (o.customers && o.cash && !hidden.has('customers')) cards.push({ col: 'main', order: 7, html: dashTopClientsCard(o) });
+  const insightsHtml = hasModule('services') && !hidden.has('service_insights') ? dashInsightsCard() : '';
   const feedSources = [['invoices', 'financeiro'], ['payments', 'financeiro'], ['quotes', 'pipeline'], ['clients', 'customers'], ['bookings', 'calendar']];
   if (!hidden.has('recent') && feedSources.some(([m, card]) => hasModule(m) && !hidden.has(card))) cards.push({ col: 'side', order: 8, html: dashRecentCard(o) });
   if (o.agents && !hidden.has('agents')) cards.push({ col: 'side', order: 9, html: dashAgentsCard(o) });
@@ -537,14 +767,15 @@ function renderOverview(root) {
     ? `<section class="dash-tiles">${tiles.map(([go, label, value, meta]) => `<button type="button" class="dash-tile" data-go="${escapeHTML(go)}"><span class="dash-tile__label">${escapeHTML(label)}</span><span class="dash-tile__value">${escapeHTML(String(value ?? 0))}</span>${meta ? `<span class="dash-tile__meta">${escapeHTML(meta)}</span>` : ''}</button>`).join('')}</section>`
     : '';
 
-  const emptyHtml = !kpiHtml && !setupHtml && !gridHtml && !tilesHtml
+  const emptyHtml = !kpiHtml && !setupHtml && !gridHtml && !insightsHtml && !tilesHtml
     ? `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`
     : '';
-  root.innerHTML = `<div class="dash">${head}${kpiHtml}${setupHtml}${gridHtml}${tilesHtml}${emptyHtml}</div>`;
+  root.innerHTML = `<div class="dash">${head}${kpiHtml}${setupHtml}${gridHtml}${insightsHtml}${tilesHtml}${emptyHtml}</div>`;
   balanceDashColumns(root);
   document.fonts?.ready.then(() => balanceDashColumns(root));
   $$('[data-go]', root).forEach(b => b.addEventListener('click', () => dashGo(b)));
   $$('[data-create]', root).forEach(b => b.addEventListener('click', () => dashCreate(b.dataset.create)));
+  wireInsights(root);
 }
 
 // Card heights depend on data, so even out the two columns after layout. Needs you, Today and
