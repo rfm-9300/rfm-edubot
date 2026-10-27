@@ -38,6 +38,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
                 Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("address", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("type", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("contactPerson", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("services.description", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
@@ -52,8 +53,8 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
     suspend fun setArchived(id: ObjectId, archived: Boolean): Supplier? = collection.setArchived(tenantId, id, archived)?.toSupplier()
 
     /**
-     * [address] is replaced as given (null clears it). [type] and [services] are only written when not null, so
-     * callers that don't send them keep the stored values; a blank type or an empty list clears them.
+     * [address] is replaced as given (null clears it). [type], [contactPerson] and [services] are only written when
+     * not null, so callers that don't send them keep the stored values; a blank string or an empty list clears them.
      */
     suspend fun update(
         id: ObjectId,
@@ -62,6 +63,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         address: String?,
         type: String? = null,
         services: List<SupplierService>? = null,
+        contactPerson: String? = null,
     ): Supplier? {
         val now = SystemClock.now()
         val updates = mutableListOf(
@@ -71,6 +73,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             Updates.set("updatedAt", now.toDate()),
         )
         type?.let { updates += Updates.set("type", it.cleaned()) }
+        contactPerson?.let { updates += Updates.set("contactPerson", it.cleaned()) }
         services?.let { updates += Updates.set("services", it.map { service -> service.toDocument() }) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
@@ -86,6 +89,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         address: String? = null,
         type: String? = null,
         services: List<SupplierService> = emptyList(),
+        contactPerson: String? = null,
     ): Supplier {
         val now = SystemClock.now()
         val number = "FOR-${sequences.next("supplier_number").toString().padStart(3, '0')}"
@@ -96,6 +100,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             phone = phone.trim(),
             address = address.cleaned(),
             type = type.cleaned(),
+            contactPerson = contactPerson.cleaned(),
             createdAt = now,
             updatedAt = now,
             services = services,
@@ -112,6 +117,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         phone = getString("phone") ?: "",
         address = getString("address"),
         type = getString("type"),
+        contactPerson = getString("contactPerson"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
@@ -137,6 +143,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
         .append("phone", phone)
         .append("address", address)
         .append("type", type)
+        .append("contactPerson", contactPerson)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
         .append("services", services.map { it.toDocument() })

@@ -66,6 +66,21 @@ class DirectoryApiTest {
     }
 
     @Test
+    fun `a supplier keeps its point of contact until it is cleared`() = dashboardApiTest(mongo) {
+        val a = company()
+        val path = "/app/api/crm/suppliers"
+        val number = phone()
+        val id = a.post(path) { put("name", "Tintas Norte"); put("phone", number); put("contactPerson", " Rui Lopes ") }.text("id")!!
+        assertEquals("Rui Lopes", a.get("$path/$id").text("contactPerson"))
+        a.patch("$path/$id") { put("name", "Tintas Norte"); put("phone", number) }
+        assertEquals("Rui Lopes", a.get("$path/$id").text("contactPerson"), "a write that doesn't send it keeps it")
+        assertTrue(id in a.get("$path?q=lopes").ids(), "search finds a supplier by its point of contact")
+        a.patch("$path/$id") { put("name", "Tintas Norte"); put("phone", number); put("contactPerson", "") }
+        assertEquals(null, a.get("$path/$id").text("contactPerson"))
+        assertEquals("contact_person_too_long", a.post(path) { put("name", "X"); put("phone", phone()); put("contactPerson", "c".repeat(121)) }.error)
+    }
+
+    @Test
     fun `directory writes answer stable error codes`() = dashboardApiTest(mongo) {
         val a = company()
         for (path in listOf("/app/api/crm/suppliers", "/app/api/crm/employees")) {

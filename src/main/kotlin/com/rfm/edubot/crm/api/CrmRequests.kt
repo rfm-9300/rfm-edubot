@@ -147,10 +147,12 @@ internal data class CreateSupplierRequest(
     val address: String? = null,
     val type: String? = null,
     val services: List<SupplierServiceRequest>? = null,
+    val contactPerson: String? = null,
 ) {
     /** Stable error code for the first invalid optional field, or null. */
     fun detailsError(): String? = when {
         (type?.trim()?.length ?: 0) > MAX_TYPE -> "type_too_long"
+        (contactPerson?.trim()?.length ?: 0) > ClientDraft.MAX_CONTACT_PERSON -> "contact_person_too_long"
         services == null -> null
         services.size > MAX_SERVICES -> "too_many_services"
         services.any { it.description.isBlank() } -> "service_description_required"

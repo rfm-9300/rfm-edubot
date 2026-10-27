@@ -131,6 +131,7 @@ internal class PayablesTools(private val s: AssistantToolSession) : AssistantToo
                     addJsonObject {
                         put("id", supplier.id.toHexString()); put("number", supplier.number); put("name", supplier.name); put("phone", supplier.phone)
                         supplier.type?.let { put("type", it) }
+                        supplier.contactPerson?.let { put("contact_person", it) }
                         if (supplier.services.isNotEmpty()) put("services", JsonArray(supplier.services.map { JsonPrimitive(it.description) }))
                     }
                 }
