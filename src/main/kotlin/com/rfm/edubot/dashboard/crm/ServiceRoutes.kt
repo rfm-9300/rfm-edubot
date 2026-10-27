@@ -5,6 +5,7 @@ import com.rfm.edubot.crm.EmployeeAssignment
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.crm.InvoiceService
 import com.rfm.edubot.crm.QuoteInvoicing
+import com.rfm.edubot.crm.ServiceDays
 import com.rfm.edubot.crm.api.CreateClientServiceRequest
 import com.rfm.edubot.crm.api.InvoiceClientServicesRequest
 import com.rfm.edubot.crm.api.UpdateClientServiceRequest
@@ -18,8 +19,13 @@ import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.dashboard.requireModules
+import com.rfm.edubot.http.ErrorBody
+import com.rfm.edubot.http.dateValue
 import com.rfm.edubot.http.idValue
+import com.rfm.edubot.tenant.model.Tenant
+import com.rfm.edubot.tenant.model.TenantTimeZones
 import io.ktor.http.HttpStatusCode
+import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
@@ -29,6 +35,8 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.daysUntil
 import org.bson.types.ObjectId
 
 /** `/crm/services`: Serviços, the work done for clients, and invoicing it (which needs invoices too). */
@@ -41,7 +49,8 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
                 val status = call.request.queryParameters["status"]?.takeIf { it.isNotBlank() }?.let { runCatching { ClientServiceStatus.valueOf(it.uppercase()) }.getOrNull() }
                 val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "quoteId") }
                 val employeeId = call.request.queryParameters["employeeId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "employeeId") }
-                val rows = if (quoteId != null) crm.clientServices.findByQuoteId(quoteId) else crm.clientServices.list(clientId, status, employeeId)
+                val days = call.serviceDays(crm.tenant) ?: return@get
+                val rows = if (quoteId != null) crm.clientServices.findByQuoteId(quoteId) else crm.clientServices.list(clientId, status, employeeId, days.range)
                 call.respond(rows.dtos(crm.clients, crm.teamDirectory()))
             }
             get("/services/{id}") {
@@ -136,6 +145,26 @@ internal object ServiceRoutes : DashboardFeature(DashboardModules.SERVICES) {
             }
         }
     }
+}
+
+private class DaysParam(val range: ServiceDays?)
+
+private const val MAX_RANGE_DAYS = 366
+
+/**
+ * `from` and `to` (`yyyy-MM-dd`, both or neither) narrow the list to those days, at most a year, as an employee's
+ * report prints them. Null after answering 400 `invalid_range` for a range backwards, half given or too long.
+ */
+private suspend fun ApplicationCall.serviceDays(tenant: Tenant): DaysParam? {
+    val params = request.queryParameters
+    val from = params["from"]?.takeIf { it.isNotBlank() }?.let { dateValue(it, "from") }
+    val to = params["to"]?.takeIf { it.isNotBlank() }?.let { dateValue(it, "to") }
+    if (from == null && to == null) return DaysParam(null)
+    if (from == null || to == null || to < from || from.daysUntil(to) >= MAX_RANGE_DAYS) {
+        respond(HttpStatusCode.BadRequest, ErrorBody("invalid_range"))
+        return null
+    }
+    return DaysParam(ServiceDays(from, to, TimeZone.of(TenantTimeZones.normalize(tenant.timezone))))
 }
 
 /** The employees directory, when the company has that module; rows then name who does the work. */

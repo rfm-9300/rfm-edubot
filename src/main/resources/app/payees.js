@@ -13,6 +13,7 @@ function supplierColumns() {
     { id: 'name', label: t.thName, fixed: true, cell: s => `<td class="name long">${name(s)}</td>` },
     { id: 'type', label: t.thType, default: true, cell: s => `<td class="muted">${escapeHTML(s.type || '')}</td>` },
     { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
+    { id: 'contactPerson', label: t.formContact, cell: s => `<td class="muted">${escapeHTML(s.contactPerson || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
     { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono nowrap">${fmtDay(s.createdAt)}</td>` },
     { id: 'number', label: t.thNo, default: true, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
@@ -60,7 +61,7 @@ function renderSuppliers(root) {
   const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${s.contactPerson || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, s, ids)}</tr>`)
     .join('');
   const typeFilter = types.length
@@ -184,6 +185,7 @@ function renderPayeeRecord() {
   const lines = [
     p.type ? `<span class="record-card__line">${escapeHTML(p.type)}</span>` : '',
     `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
+    p.contactPerson ? `<span class="record-card__line">${escapeHTML(STR.clientContactShort({ name: p.contactPerson }))}</span>` : '',
     p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
     p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
     p.birthDate ? `<span class="record-card__line">${escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))}</span>` : '',
@@ -293,6 +295,7 @@ function renderPayeeRecord() {
     return cfg.pay(p);
   })));
   $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
+  $('[data-employee-report]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeReportForm(p)));
   if (kind === 'employee' && r.time) {
     window.TimesheetsUI.wireRecord(body, p, here(), async () => {
       r.time = await window.TimesheetsUI.loadRecord(p.id);
@@ -324,8 +327,169 @@ function employeeServicesHtml(services, today, canAdd) {
     ...[...done, ...cancelled].map(s => row(s, servicePill(s.status))),
   ].join('');
   const s = CRM.services;
+  const add = canAdd ? `<button class="btn btn--sm" type="button" data-record-act="employee-service"><span class="btn__plus">+</span> ${escapeHTML(t.addService)}</button>` : '';
   return recordTable([[s.thWhen], [s.thClient], [s.thService], [s.thStatus], [s.thTotal, 'right']], rows, { title: t.servicesTitle, count: services.length })
-    + (canAdd ? recordFootHtml([['employee-service', t.addService]]) : '');
+    + `<div class="drawer__foot record__foot">${add}<button class="btn btn--sm btn--ghost" type="button" data-employee-report>${escapeHTML(t.report)}</button></div>`;
+}
+
+// ── An employee's services report ───────────────────────────────────────────────
+// The services an employee did in a week, a month or any days up to a year, printed from the browser
+// (or saved as a PDF from its print dialog). The rows come from GET /crm/services?employeeId=&from=&to=.
+const EMPLOYEE_REPORT_MAX_DAYS = 366;
+
+// [from, to] of a preset period, in tenant-local day keys. Weeks start on Monday.
+function employeeReportRange(preset, today = todayKey()) {
+  const monday = addDayKey(today, -((dayKeyDate(today).getUTCDay() + 6) % 7));
+  const monthStart = `${today.slice(0, 7)}-01`;
+  const lastMonthEnd = addDayKey(monthStart, -1);
+  const monthEnd = addDayKey(`${addDayKey(monthStart, 31).slice(0, 7)}-01`, -1);
+  return {
+    thisWeek: [monday, addDayKey(monday, 6)],
+    lastWeek: [addDayKey(monday, -7), addDayKey(monday, -1)],
+    thisMonth: [monthStart, monthEnd],
+    lastMonth: [`${lastMonthEnd.slice(0, 7)}-01`, lastMonthEnd],
+  }[preset] || null;
+}
+
+function openEmployeeReportForm(p) {
+  const t = CRM.employees;
+  const presets = ['thisWeek', 'lastWeek', 'thisMonth', 'lastMonth', 'custom'];
+  const [from, to] = employeeReportRange('thisMonth');
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `<p class="hint">${escapeHTML(t.reportIntro)}</p>
+    <div class="form__row"><label class="lbl" for="er-period">${escapeHTML(t.reportPeriod)}</label>
+      <select class="sel" id="er-period">${presets.map(k => `<option value="${k}"${k === 'thisMonth' ? ' selected' : ''}>${escapeHTML(t.reportPeriods[k])}</option>`).join('')}</select></div>
+    <div class="form__grid">
+      <div class="form__row"><label class="lbl" for="er-from">${escapeHTML(t.reportFrom)}</label><input class="inp inp--mono" id="er-from" type="date" required value="${from}" /></div>
+      <div class="form__row"><label class="lbl" for="er-to">${escapeHTML(t.reportTo)}</label><input class="inp inp--mono" id="er-to" type="date" required value="${to}" /></div>
+    </div>
+    <label class="form__check"><input type="checkbox" id="er-todo" /> ${escapeHTML(t.reportScheduled)}</label>
+    <label class="form__check"><input type="checkbox" id="er-values" checked /> ${escapeHTML(t.reportValues)}</label>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(STR.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(t.reportPrint)}</button></div>`;
+  bindDrawerClose(form);
+  const period = $('#er-period', form);
+  period.addEventListener('change', () => {
+    const range = employeeReportRange(period.value);
+    if (!range) return;
+    [$('#er-from', form).value, $('#er-to', form).value] = range;
+  });
+  ['#er-from', '#er-to'].forEach(sel => $(sel, form).addEventListener('input', () => { period.value = 'custom'; }));
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const start = $('#er-from', form).value;
+    const end = $('#er-to', form).value;
+    if (!start || !end || end < start) return toast(t.reportBadRange);
+    if ((dayKeyDate(end) - dayKeyDate(start)) / 86400000 >= EMPLOYEE_REPORT_MAX_DAYS) return toast(t.reportTooLong);
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      const rows = await api(`/app/api/crm/services?employeeId=${encodeURIComponent(p.id)}&from=${start}&to=${end}`);
+      printHtmlDocument(employeeReportHtml(p, rows || [], start, end, { toDo: $('#er-todo', form).checked, values: $('#er-values', form).checked }));
+    } catch {
+      toast(t.reportFailed);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  openDrawer(t.reportTitle, form, false, { eyebrow: p.name });
+}
+
+// The printable page: who, when, the figures, the services by title, and every service day by day.
+function employeeReportHtml(p, services, from, to, opts) {
+  const t = CRM.employees;
+  const s = CRM.services;
+  const today = todayKey();
+  const day = x => (x.performedAt ? x.performedAt.slice(0, 10) : localDay(x.createdAt));
+  const { toDo, done } = employeeServiceSplit(services, today);
+  const rows = [...done, ...(opts.toDo ? toDo : [])].sort((a, b) => day(a).localeCompare(day(b)));
+  const scheduled = new Set(toDo);
+  const total = sumBy(rows, 'totalEur');
+  const byTitle = new Map();
+  for (const x of rows) {
+    // Lines grouped by title (the part before " - "), as Home's Service insights count them.
+    const lines = x.items && x.items.length ? x.items : [{ description: x.name, quantity: 1, unitPriceEur: x.totalEur }];
+    for (const line of lines) {
+      const title = String(line.description || x.name).split(' - ')[0].trim() || x.name;
+      const key = foldText(title);
+      const group = byTitle.get(key) || { title, times: 0, eur: 0 };
+      group.times += 1;
+      group.eur += Math.round(Number(line.quantity || 0) * Number(line.unitPriceEur || 0) * 100) / 100;
+      byTitle.set(key, group);
+    }
+  }
+  const groups = [...byTitle.values()].sort((a, b) => b.times - a.times || b.eur - a.eur);
+  const long = { day: 'numeric', month: 'long', year: 'numeric' };
+  const period = from === to ? fmtDayKey(from, long) : `${fmtDayKey(from, long)} – ${fmtDayKey(to, long)}`;
+  const status = x => (scheduled.has(x) ? t.scheduled : serviceStatusLabel(x.status));
+  const money = opts.values;
+  const facts = [
+    [t.reportServices, String(rows.length)],
+    ...(money ? [[t.reportValue, fmtEUR(total)]] : []),
+    [t.reportClients, String(new Set(rows.map(x => x.clientId)).size)],
+    [t.reportDays, String(new Set(rows.map(day)).size)],
+  ];
+  const who = [p.role, p.taxId ? STR.clientTaxIdShort({ id: p.taxId }) : ''].filter(Boolean).join(' · ');
+  const body = !rows.length ? `<p class="none">${escapeHTML(t.reportNone)}</p>` : `
+    <h2>${escapeHTML(t.reportByService)}</h2>
+    <table><thead><tr><th>${escapeHTML(s.thService)}</th><th class="num">${escapeHTML(t.reportTimes)}</th>${money ? `<th class="num">${escapeHTML(s.thTotal)}</th>` : ''}</tr></thead>
+      <tbody>${groups.map(g => `<tr><td>${escapeHTML(g.title)}</td><td class="num">${g.times}</td>${money ? `<td class="num">${fmtEUR(g.eur)}</td>` : ''}</tr>`).join('')}</tbody></table>
+    <h2>${escapeHTML(t.reportDetail)}</h2>
+    <table><thead><tr><th>${escapeHTML(s.thWhen)}</th><th>${escapeHTML(s.thClient)}</th><th>${escapeHTML(s.thService)}</th><th>${escapeHTML(s.thStatus)}</th>${money ? `<th class="num">${escapeHTML(s.thTotal)}</th>` : ''}</tr></thead>
+      <tbody>${rows.map(x => `<tr><td class="nowrap">${escapeHTML(fmtDay(day(x)))}</td><td>${escapeHTML(x.clientName || '')}</td><td>${escapeHTML(serviceRowText(x))}</td><td>${escapeHTML(status(x))}</td>${money ? `<td class="num">${fmtEUR(x.totalEur)}</td>` : ''}</tr>`).join('')}</tbody>
+      ${money ? `<tfoot><tr><td colspan="4">${escapeHTML(t.reportTotal)}</td><td class="num">${fmtEUR(total)}</td></tr></tfoot>` : ''}</table>`;
+  return `<!doctype html><html lang="${escapeHTML(uiLocale())}"><head><meta charset="utf-8" />
+    <title>${escapeHTML(t.reportDocTitle({ name: p.name, period }))}</title>
+    <style>
+      :root { --ink: #111318; --soft: #475467; --muted: #667085; --rule: #e4e7ec; --surface: #f4f6f8; }
+      @page { size: A4; margin: 16mm 14mm; }
+      * { box-sizing: border-box; }
+      body { margin: 0; font: 10pt/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: var(--ink); background: #fff; }
+      header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1.5pt solid var(--ink); padding-bottom: 8px; }
+      .company { font-weight: 700; font-size: 12pt; }
+      .printed { color: var(--muted); font-size: 8.5pt; text-align: right; }
+      h1 { font-size: 17pt; margin: 18px 0 2px; }
+      .who { margin: 0; font-size: 11pt; }
+      .meta { margin: 2px 0 0; color: var(--soft); }
+      .facts { display: grid; grid-template-columns: repeat(${facts.length}, 1fr); gap: 8px; margin: 16px 0 8px; }
+      .fact { background: var(--surface); border-radius: 6px; padding: 8px 10px; }
+      .fact span { display: block; color: var(--muted); font-size: 7.5pt; text-transform: uppercase; letter-spacing: .04em; }
+      .fact b { font-size: 13pt; }
+      h2 { font-size: 10.5pt; margin: 18px 0 6px; }
+      table { width: 100%; border-collapse: collapse; }
+      th { text-align: left; font-size: 7.5pt; text-transform: uppercase; letter-spacing: .04em; color: var(--soft); background: var(--surface); padding: 5px 6px; }
+      td { padding: 5px 6px; border-bottom: .5pt solid var(--rule); vertical-align: top; }
+      tr { break-inside: avoid; }
+      tfoot td { font-weight: 700; border-bottom: 0; border-top: 1pt solid var(--ink); }
+      .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+      .nowrap { white-space: nowrap; }
+      .none { color: var(--muted); margin-top: 24px; }
+      .sign { display: flex; gap: 32px; margin-top: 48px; break-inside: avoid; }
+      .sign div { flex: 1; border-top: .75pt solid var(--ink); padding-top: 4px; color: var(--soft); font-size: 8.5pt; }
+    </style></head><body>
+    <header><span class="company">${escapeHTML(state.me?.tenant?.name || '')}</span><span class="printed">${escapeHTML(t.reportPrinted({ date: fmtDayKey(today, long) }))}</span></header>
+    <h1>${escapeHTML(t.reportTitle)}</h1>
+    <p class="who"><b>${escapeHTML(p.name)}</b>${who ? ` · ${escapeHTML(who)}` : ''}</p>
+    <p class="meta">${escapeHTML(t.reportPeriod)}: ${escapeHTML(period)}</p>
+    <div class="facts">${facts.map(([label, value]) => `<div class="fact"><span>${escapeHTML(label)}</span><b>${escapeHTML(value)}</b></div>`).join('')}</div>
+    ${body}
+    <div class="sign"><div>${escapeHTML(t.reportSignEmployee)}</div><div>${escapeHTML(t.reportSignCompany)}</div></div>
+  </body></html>`;
+}
+
+// Prints a whole HTML document from a hidden frame, so the dashboard stays as it is.
+function printHtmlDocument(html) {
+  const frame = document.createElement('iframe');
+  frame.className = 'print-frame';
+  frame.setAttribute('aria-hidden', 'true');
+  frame.addEventListener('load', () => {
+    const win = frame.contentWindow;
+    win.addEventListener('afterprint', () => setTimeout(() => frame.remove(), 0));
+    win.focus();
+    win.print();
+  }, { once: true });
+  frame.srcdoc = html;
+  document.body.appendChild(frame);
 }
 
 // Employees are deactivated rather than archived: off the lists and pickers, sign-in refused, history kept.
@@ -423,6 +587,8 @@ async function openSupplierForm(supplier, opts = {}) {
       <datalist id="sf-type-options">${supplierTypes(state.suppliers || []).map(v => `<option value="${escapeHTML(v)}"></option>`).join('')}</datalist></div>
     <div class="form__row"><label class="lbl" for="sf-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
       <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(values.phone || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="sf-contact">${escapeHTML(t.formContact)}</label>
+      <input class="inp" id="sf-contact" maxlength="120" autocomplete="off" placeholder="${escapeHTML(t.phContact)}" value="${escapeHTML(values.contactPerson || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
       <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(values.address || '')}" /></div>
     ${services.html}
@@ -438,8 +604,9 @@ async function openSupplierForm(supplier, opts = {}) {
     const phone = $('#sf-phone', form).value.trim();
     const address = $('#sf-address', form).value.trim() || undefined;
     const type = $('#sf-type', form).value.trim();
+    const contactPerson = $('#sf-contact', form).value.trim();
     if (!name || !phone) return toast(t.validate);
-    const payload = { name, phone, address, type, services: services.collect(form) };
+    const payload = { name, phone, address, type, contactPerson, services: services.collect(form) };
     if (payload.services.some(s => !(s.unitPriceEur == null || s.unitPriceEur >= 0))) return toast(t.err_service_price_invalid);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;

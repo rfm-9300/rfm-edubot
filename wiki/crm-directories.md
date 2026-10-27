@@ -49,6 +49,14 @@ Back walks the stack one step at a time, and links that would lead back to the t
 hidden. Converting a quote that already has an invoice now answers `409 already_invoiced`; before,
 a double click could create two invoices. The quote detail finally has a PDF button.
 
+## A supplier's point of contact (2026-10-27)
+
+Suppliers have an optional `contactPerson` ("Point of contact" in the form), like the client field of
+the same name: at most 120 characters (`contact_person_too_long`), searchable, shown on the record
+card as "Contact: …" and as an optional list column. A write that leaves it out keeps the stored value,
+an empty string clears it, as with `type`. The assistant's `list_suppliers` returns it as
+`contact_person`. Mobile doesn't show it yet.
+
 ## Deleting clients, suppliers and employees (shipped 2026-09-29, `8a0ec5a`)
 
 None of the three directories could be deleted. Rodrigo's choice: delete a record when nothing refers

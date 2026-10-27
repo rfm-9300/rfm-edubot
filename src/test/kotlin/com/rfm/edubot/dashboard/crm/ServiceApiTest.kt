@@ -7,6 +7,9 @@ import com.rfm.edubot.testing.TestCompany
 import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
 import io.ktor.http.HttpStatusCode
+import kotlinx.datetime.Clock
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.add
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -128,5 +131,28 @@ class ServiceApiTest {
         assertEquals("employee_not_found", a.patch("$base/$unassigned") { put("employeeId", rui) }.error, "an inactive one can't be given new work")
         assertEquals(null, a.patch("$base/$id") { put("employeeId", "") }.text("employeeId"), "a blank id unassigns it")
         assertEquals(emptyList(), a.get("$base?employeeId=$rui").ids())
+    }
+
+    @Test
+    fun `an employee's services for a period, as their report prints them`() = dashboardApiTest(mongo) {
+        val a = company()
+        val clientId = client(a)
+        val ana = a.post("/app/api/crm/employees") { put("name", "Ana Costa"); put("phone", "+351 931 000 011") }.text("id")!!
+        suspend fun on(day: String) = a.post(base) { put("clientId", clientId); put("name", "Limpeza"); put("employeeId", ana); put("performedAt", day) }.text("id")!!
+        val before = on("2025-09-30")
+        val first = on("2025-10-01")
+        val last = on("2025-10-31")
+        val after = on("2025-11-01")
+        val undated = a.post(base) { put("clientId", clientId); put("name", "Sem data"); put("employeeId", ana) }.text("id")!!
+
+        assertEquals(setOf(first, last), a.get("$base?employeeId=$ana&from=2025-10-01&to=2025-10-31").ids().toSet(), "both ends included")
+        assertEquals(setOf(before, first, last, after, undated), a.get("$base?employeeId=$ana").ids().toSet())
+        val today = Clock.System.now().toLocalDateTime(TimeZone.of("Europe/Lisbon")).date
+        assertEquals(listOf(undated), a.get("$base?employeeId=$ana&from=$today&to=$today").ids(), "a row without a date counts on the day it was created")
+
+        assertEquals("invalid_range", a.get("$base?from=2026-10-31&to=2026-10-01").error)
+        assertEquals("invalid_range", a.get("$base?from=2026-10-01").error)
+        assertEquals("invalid_range", a.get("$base?from=2025-01-01&to=2026-10-01").error, "more than a year")
+        assertEquals("invalid_date", a.get("$base?from=x&to=2026-10-01").error)
     }
 }

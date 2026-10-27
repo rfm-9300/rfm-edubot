@@ -21,6 +21,7 @@ object OverviewHomeLayout {
     const val SOCIAL = "social"
     const val CATALOG = "catalog"
     const val SERVICES = "services"
+    const val SERVICE_INSIGHTS = "service_insights"
     const val SUPPLIERS = "suppliers"
     const val EMPLOYEES = "employees"
     const val ASSISTANT = "assistant"
@@ -32,7 +33,7 @@ object OverviewHomeLayout {
     const val GROUP_SNAPSHOTS = "snapshots"
 
     val sections = listOf(HIGHLIGHTS, PULSE, ATTENTION, SETUP)
-    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT, AGENTS, PROJECTS, RECENT)
+    val snapshots = listOf(FINANCEIRO, PIPELINE, CUSTOMERS, SERVICES, SERVICE_INSIGHTS, SUPPLIERS, EMPLOYEES, INBOX, CALENDAR, SOCIAL, CATALOG, ASSISTANT, AGENTS, PROJECTS, RECENT)
     val all = (sections + snapshots).toSet()
 
     /** The modules whose events feed Home's Recent activity card. */
@@ -52,6 +53,7 @@ object OverviewHomeLayout {
         addSnapshot(PIPELINE, DashboardModules.QUOTES in modules)
         addSnapshot(CUSTOMERS, DashboardModules.CLIENTS in modules)
         addSnapshot(SERVICES, DashboardModules.SERVICES in modules)
+        addSnapshot(SERVICE_INSIGHTS, DashboardModules.SERVICES in modules)
         addSnapshot(SUPPLIERS, DashboardModules.SUPPLIERS in modules)
         addSnapshot(EMPLOYEES, DashboardModules.EMPLOYEES in modules)
         addSnapshot(INBOX, DashboardModules.CONVERSATIONS in modules || DashboardModules.CONTACTS in modules)

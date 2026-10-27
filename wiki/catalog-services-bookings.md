@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Catalog, Serviços and bookings
@@ -112,6 +112,24 @@ Decisions that matter later:
 - The services list gained an Employee column and filter. The employee portal (My services) still
   shows only what the employee registered, not work assigned to them; the mobile app has no picker.
 
+**An employee's services report (2026-10-27):** Rodrigo asked to print a "relatório" of the services an
+employee did in a week, a month or chosen dates. The employee record's Services panel has Print report
+next to Add service: a drawer with a period (this or last week, Monday first; this or last month; or
+dates), Include scheduled (to do) and Show values (on; off for a copy to hand the employee).
+
+- **Printed from the browser, not a server PDF.** The page is built in `employeeReportHtml` and printed
+  from a hidden iframe (`printHtmlDocument`); "Save as PDF" in the print dialog gives the file. This
+  kept it in the UI catalogs (en/pt/es) without server-side PDF copy, at the cost of no company logo or
+  colour (the header is the company name). Move it to PDFBox, like the site diary's PDF, if it must
+  carry the document template or be sent by email.
+- **What it shows:** services, value, clients, days worked; the lines grouped by title (the part before
+  " - ", as Service insights counts them); every service day by day with its status and a total; two
+  signature lines. Done and to do follow the record: cancelled rows never print, to do only when ticked.
+- **API:** `GET /crm/services` takes `from` and `to` (`yyyy-MM-dd`, both or neither, at most 366 days,
+  else `400 invalid_range`). A row's day is `performedAt`, or the tenant-local day it was created
+  (`ServiceDays`). With a range the list answers up to 2,000 rows instead of 200, so a busy employee's
+  month isn't cut by the newest-200 cap.
+
 **A client's catalog items (2026-10-24):** Rodrigo asked to tie clients to the catalog items they
 buy, and to see those first when adding a service for that client.
 
@@ -163,6 +181,31 @@ Services module and the Services card not hidden in Settings → Home.
 - The card sits in the main column (order 6): figures, a bar chart, facts, Done most and This month by
   employee. The KPI strip gained Services this month (with its spark line) before Clients; the strip
   still shows at most five. `.panel__body > .bars + .dash-facts` keeps the facts' gap under a chart.
+
+**Home's Service insights card (2026-10-27):** Rodrigo asked for more on Home, such as which services
+each client has done most, analysed the way a data analyst would. It is a separate Home card,
+`service_insights` in Settings → Home (Services module), drawn full width under the grid. It loads
+on its own from `GET /overview/services?months=1|3|6|12` (`ServiceInsightsOverview`; default 3, and
+any other value falls back to 3). The overview call stays the same.
+
+- **Period against the period before.** The period is the last N months up to today, both ends
+  included, compared with the N months before it. Done and to do follow the Services card. Figures:
+  services done, value, average per service, clients (and how many are new), each with a % change.
+- **Views:** Services (lines grouped by title, with times, value, share of all lines, distinct
+  clients, average, and change, or New), Clients (services, value, the line they had done most,
+  last service, change, repeat rate, and the top 20% of clients' share of value), Who buys what (a
+  heat map of the top 6 clients × top 6 services), Due back, and Patterns (by month, by weekday, by
+  employee, services per client). "Rank by times / value" re-sorts the lists in the browser, so the
+  server sends the top 8 by both. The period, view and ranking are kept in localStorage
+  (`homeServiceInsights`), and each period's answer is cached for a minute.
+- **Due back** looks at the last two years whatever the period: a client with 3+ visit days, the
+  median gap between visits as their usual rhythm, nothing open from today on, and a last visit
+  older than that gap plus a quarter of it (at least 3 days). They are sorted by lateness relative
+  to their rhythm, and shown red once they are more than one full rhythm late.
+- **New client** means no service before the period. Rows older than the two years read are
+  checked with one `distinct` query, so a client returning after years is not counted as new.
+- One read takes 24 months (projected, capped at 30,000 rows, newest first), and `truncated` says
+  when the cap was hit. It is also counted in memory, like `serviceStats`.
 
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 
