@@ -1,6 +1,7 @@
 package com.rfm.edubot.dashboard
 
 import com.rfm.edubot.config.AppConfig
+import com.rfm.edubot.dashboard.overview.ServiceInsightsOverview
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Tenant
@@ -210,6 +211,60 @@ class OverviewServiceTest {
 
         val hidden = OverviewService(mongoModule).build(tenant.copy(overviewHiddenCards = listOf(OverviewHomeLayout.SERVICES)), extended = true)
         assertEquals(null, hidden.serviceStats)
+    }
+
+    @Test
+    fun `service insights compare the period, rank services and clients, and find who is due back`() = runBlocking<Unit> {
+        val now = SystemClock.now()
+        val window = OverviewMath.window(now, zoneId)
+        val t = ObjectId()
+        val (ana, bruno, carla, dora) = List(4) { ObjectId() }
+        val today = window.today
+        fun ago(days: Int) = today.minus(DatePeriod(days = days)).toString()
+        fun line(text: String, cents: Long) = Document("description", text).append("totalCents", cents)
+        fun service(client: ObjectId, day: String, vararg lines: Document, status: String = "INVOICED") =
+            doc(t, ObjectId()).append("clientId", client).append("name", "").append("status", status).append("performedAt", day)
+                .append("totalCents", lines.sumOf { it.getLong("totalCents") }).append("items", lines.toList()).append("createdAt", date(now))
+        insert("crm.clients", *listOf(ana to "Ana", bruno to "Bruno", carla to "Carla", dora to "Dora").map { (id, name) -> doc(t, id).append("name", name) }.toTypedArray())
+        insert(
+            "crm.client_services",
+            service(ana, ago(10), line("Corte", 20_00)),
+            service(ana, ago(20), line("Corte", 20_00), line("Barba - curta", 10_00)),
+            // Bruno and Carla come every two weeks and last came 72 days ago; Carla has her next one booked.
+            service(bruno, ago(100), line("Corte", 20_00)), service(bruno, ago(86), line("Corte", 20_00)), service(bruno, ago(72), line("corte", 20_00)),
+            service(carla, ago(100), line("Corte", 20_00)), service(carla, ago(86), line("Corte", 20_00)), service(carla, ago(72), line("Corte", 20_00)),
+            service(carla, today.plus(DatePeriod(days = 5)).toString(), line("Corte", 20_00), status = "OPEN"),
+            // Dora came back after two and a half years: not a new client.
+            service(dora, today.minus(DatePeriod(months = 30)).toString(), line("Corte", 20_00)),
+            service(dora, ago(5), line("Barba", 10_00)),
+        )
+
+        val insights = ServiceInsightsOverview(mongoModule).insights(t, window, months = 3, employees = false)
+        assertEquals(today.minus(DatePeriod(months = 3)).plus(DatePeriod(days = 1)).toString(), insights.from)
+        assertEquals(7, insights.current.count, "the booked visit is still to do")
+        assertEquals(140_00, insights.current.cents)
+        assertEquals(4, insights.current.clients)
+        assertEquals(3, insights.current.repeatClients)
+        assertEquals(1, insights.current.newClients, "only Ana had no service before the period")
+        assertEquals(35, insights.current.topFifthSharePct)
+        assertEquals(2, insights.previous.count)
+        assertEquals(8, insights.current.lines)
+        assertEquals(listOf("Corte", "Barba"), insights.services.map { it.name })
+        assertEquals(6, insights.services[0].count)
+        assertEquals(3, insights.services[0].clients)
+        assertEquals(2, insights.services[0].previousCount)
+        assertEquals("Ana", insights.clients.first().name)
+        assertEquals("Corte", insights.clients.first().topService)
+        assertEquals(2, insights.clients.first().serviceKinds)
+        assertEquals(listOf("Corte", "Barba"), insights.matrix.services)
+        assertEquals(listOf(2, 1), insights.matrix.rows.first { it.name == "Ana" }.cells.map { it.count })
+        val due = insights.dueBack.single()
+        assertEquals("Bruno", due.name)
+        assertEquals(14, due.usualDays)
+        assertEquals(58, due.lateDays)
+        assertEquals(7, insights.weekdays.sum())
+        assertEquals(OverviewMath.trendMonthKeys(today), insights.trend.map { it.month })
+        assertEquals(12, ServiceInsightsOverview(mongoModule).insights(t, window, months = 12, employees = false).trend.size)
     }
 
     private data class Seed(

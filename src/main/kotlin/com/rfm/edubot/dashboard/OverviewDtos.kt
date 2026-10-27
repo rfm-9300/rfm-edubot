@@ -255,6 +255,107 @@ data class OverviewServiceEmployeeDto(
     val cents: Long,
 )
 
+/**
+ * Home's Service insights card, `GET /overview/services?months=N`: the work done in the last [months] months
+ * ([from] to [to], both included) against the [months] before, read the way [OverviewServiceStatsDto] is.
+ * Lists are capped; the page ranks [services] and [clients] by times or by value, so each holds the top by both.
+ */
+@Serializable
+data class ServiceInsightsDto(
+    val months: Int,
+    val from: String,
+    val to: String,
+    val current: ServicePeriodDto,
+    val previous: ServicePeriodDto,
+    /** Calendar months ending with this one, oldest first: at least [OverviewMath.TREND_MONTHS], or [months]. */
+    val trend: List<OverviewServiceMonthDto>,
+    val services: List<ServiceInsightItemDto>,
+    val clients: List<ServiceInsightClientDto>,
+    val matrix: ServiceMatrixDto,
+    val dueBack: List<ServiceDueBackDto>,
+    /** Services done in the period by weekday, Monday first. */
+    val weekdays: List<Int>,
+    /** Empty without the Employees module. */
+    val employees: List<OverviewServiceEmployeeDto> = emptyList(),
+    /** True when the company has more rows than one read takes, so the figures miss the oldest ones. */
+    val truncated: Boolean = false,
+)
+
+@Serializable
+data class ServicePeriodDto(
+    val count: Int,
+    val cents: Long,
+    /** The services' lines, which [ServiceInsightItemDto] counts: their number and value. */
+    val lines: Int,
+    val lineCents: Long,
+    val clients: Int,
+    /** Clients with two services or more in the period. */
+    val repeatClients: Int,
+    /** Clients whose first service ever is in the period; only counted for the current period. */
+    val newClients: Int = 0,
+    /** The share of the value that the top fifth of clients brought, 0–100. */
+    val topFifthSharePct: Int = 0,
+)
+
+@Serializable
+data class ServiceInsightItemDto(
+    val name: String,
+    val count: Int,
+    val cents: Long,
+    val clients: Int,
+    val previousCount: Int,
+)
+
+@Serializable
+data class ServiceInsightClientDto(
+    val id: String,
+    val name: String,
+    val count: Int,
+    val cents: Long,
+    val previousCount: Int,
+    val lastDay: String,
+    /** The line this client had done most in the period, and how often. */
+    val topService: String,
+    val topServiceCount: Int,
+    /** How many different lines the client had done. */
+    val serviceKinds: Int,
+)
+
+/** Who buys what: the top clients (rows) against the top services (columns), each cell that client's lines of that service. */
+@Serializable
+data class ServiceMatrixDto(
+    val services: List<String>,
+    val rows: List<ServiceMatrixRowDto>,
+)
+
+@Serializable
+data class ServiceMatrixRowDto(
+    val id: String,
+    val name: String,
+    val cells: List<ServiceMatrixCellDto>,
+)
+
+@Serializable
+data class ServiceMatrixCellDto(
+    val count: Int,
+    val cents: Long,
+)
+
+/**
+ * A regular client later than usual: the median gap between their visits over the last two years is [usualDays],
+ * the last was on [lastDay], and they have nothing booked. [lateDays] counts from the day they were due.
+ */
+@Serializable
+data class ServiceDueBackDto(
+    val id: String,
+    val name: String,
+    val visits: Int,
+    val usualDays: Int,
+    val lastDay: String,
+    val lateDays: Int,
+    val cents: Long,
+)
+
 @Serializable
 data class OverviewSuppliersDto(
     val total: Long,

@@ -818,7 +818,10 @@ Building blocks of the minimal-layout Home ([patterns.md](patterns.md#home-minim
 | `.bars` (`__scale` `__plot` `__pair` `__bar` `__labels` `__label.is-current`) | Grouped month columns; bar height is an inline `%` like `.meter__fill`; `role="img"` + a text `aria-label` |
 | `svg.spark` (`__line` `__area`, `.spark--tall`) | Trend line in the accent color, built in JS |
 | `.segbar` > `.segbar__seg` + `.legend` / `.legend--rows` (`__item` `__swatch` `__value`) | Receivables aging split and its key |
-| `.hbars` > `.hbars__row` (`__label` `__track` `__fill` `__value`) | Pipeline stages |
+| `.hbars` > `.hbars__row` (`__label` `__track` `__fill` `__value`), `.hbars--wide` for names | Pipeline stages, work by employee |
+| `.insights` (`__group` `__group--end` `__label` `__range` `__hint` `__table` `__split`) · `.dash-figures--4` | Service insights card: a `.panel__views` switch, period and rank-by chip groups in `.panel__filters`, four figures with a `.delta` in each label, bleeding `.tbl--stack` tables |
+| `.cellbar` > `.cellbar__fill` | Thin share bar under a table cell's name (inline `%` width) |
+| `table.heat` > `td.heat__cell` (`--heat: 0–100%`, `.is-hot` above 55%) | Who-buys-what heat map: accent mixed into `--surface-2`, so it works in both themes; under 560px only four service columns show |
 | `.rank` > `button.rank__item` (`__pos` `__name` `__value` `__bar` `__fill` `__fill--billed` `__meta`) | Top clients, billed vs paid |
 | `.dash-split` · `.dash-figures` · `.dash-figure` (`--lg` `--end`, `__value--bad\|warn`, `__label`) | Headline numbers inside a card |
 | `dl.dash-facts` (`--row`, `--stack`) · `.dash-sub` · `.dash-empty` (`--center`) · `.dash-axis` | Key/value rows (a long value wraps; `--stack`, for long values like a tenant's channels, puts each label above its value under 560px), sub-heading, quiet empty line, sparkline axis |

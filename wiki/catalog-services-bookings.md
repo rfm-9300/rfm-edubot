@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-26
+updated: 2026-10-27
 ---
 
 # Catalog, Serviços and bookings
@@ -163,6 +163,31 @@ Services module and the Services card not hidden in Settings → Home.
 - The card sits in the main column (order 6): figures, a bar chart, facts, Done most and This month by
   employee. The KPI strip gained Services this month (with its spark line) before Clients; the strip
   still shows at most five. `.panel__body > .bars + .dash-facts` keeps the facts' gap under a chart.
+
+**Home's Service insights card (2026-10-27):** Rodrigo asked for more on Home, such as which services
+each client has done most, analysed the way a data analyst would. It is a separate Home card,
+`service_insights` in Settings → Home (Services module), drawn full width under the grid. It loads
+on its own from `GET /overview/services?months=1|3|6|12` (`ServiceInsightsOverview`; default 3, and
+any other value falls back to 3). The overview call stays the same.
+
+- **Period against the period before.** The period is the last N months up to today, both ends
+  included, compared with the N months before it. Done and to do follow the Services card. Figures:
+  services done, value, average per service, clients (and how many are new), each with a % change.
+- **Views:** Services (lines grouped by title, with times, value, share of all lines, distinct
+  clients, average, and change, or New), Clients (services, value, the line they had done most,
+  last service, change, repeat rate, and the top 20% of clients' share of value), Who buys what (a
+  heat map of the top 6 clients × top 6 services), Due back, and Patterns (by month, by weekday, by
+  employee, services per client). "Rank by times / value" re-sorts the lists in the browser, so the
+  server sends the top 8 by both. The period, view and ranking are kept in localStorage
+  (`homeServiceInsights`), and each period's answer is cached for a minute.
+- **Due back** looks at the last two years whatever the period: a client with 3+ visit days, the
+  median gap between visits as their usual rhythm, nothing open from today on, and a last visit
+  older than that gap plus a quarter of it (at least 3 days). They are sorted by lateness relative
+  to their rhythm, and shown red once they are more than one full rhythm late.
+- **New client** means no service before the period. Rows older than the two years read are
+  checked with one `distinct` query, so a client returning after years is not counted as new.
+- One read takes 24 months (projected, capped at 30,000 rows, newest first), and `truncated` says
+  when the cap was hit. It is also counted in memory, like `serviceStats`.
 
 ## Catalog picker in the line items editor (PR #43, shipped 2026-10-02, `48b2e38`)
 

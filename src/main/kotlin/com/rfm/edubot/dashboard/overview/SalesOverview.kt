@@ -14,6 +14,7 @@ import java.util.Date
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.toLocalDateTime
 import org.bson.Document
 import org.bson.types.ObjectId
@@ -90,7 +91,7 @@ internal class SalesOverview(mongo: MongoModule) : OverviewQueries(mongo) {
         ).projection(Projections.include("status", "performedAt", "createdAt", "totalCents", "name", "items", "employeeId"))
             .limit(SERVICE_STATS_LIMIT)
             .toList()
-            .map { ServiceRow(it, it.localDate("performedAt") ?: Instant.fromEpochMilliseconds((it.getDate("createdAt") ?: Date(0)).time).toLocalDateTime(zone).date) }
+            .map { ServiceRow.of(it, zone) }
             .filter { it.day >= startDay }
         val todo = rows.filter { it.open && it.day >= window.today }
         val done = rows.filter { !(it.open && it.day >= window.today) }
@@ -134,23 +135,30 @@ internal class SalesOverview(mongo: MongoModule) : OverviewQueries(mongo) {
         )
     }
 
-    private class ServiceRow(private val doc: Document, val day: LocalDate) {
-        val open = doc.getString("status") == "OPEN"
-        val cents = doc.get("totalCents").asLong()
-        val employeeId = doc.getObjectIdOrNull("employeeId")
-
-        /** Each line as (title, cents); a catalog line reads "title - details", so only the title counts. A row without lines is one line. */
-        fun lines(): List<Pair<String, Long>> {
-            val items = doc.getList("items", Document::class.java).orEmpty()
-                .map { (it.getString("description") ?: "").substringBefore(" - ").trim() to it.get("totalCents").asLong() }
-                .filter { it.first.isNotEmpty() }
-            if (items.isNotEmpty()) return items
-            val name = doc.getString("name")?.trim().orEmpty()
-            return if (name.isEmpty()) emptyList() else listOf(name to cents)
-        }
-    }
-
     private companion object {
         const val SERVICE_STATS_LIMIT = 20_000
+    }
+}
+
+/** One Serviços row read for Home's service cards. Its [day] is `performedAt`, or the tenant-local day it was created. */
+internal class ServiceRow(private val doc: Document, val day: LocalDate) {
+    val open = doc.getString("status") == "OPEN"
+    val cents = doc.get("totalCents").asLong()
+    val employeeId = doc.getObjectIdOrNull("employeeId")
+    val clientId = doc.getObjectIdOrNull("clientId")
+
+    /** Each line as (title, cents); a catalog line reads "title - details", so only the title counts. A row without lines is one line. */
+    fun lines(): List<Pair<String, Long>> {
+        val items = doc.getList("items", Document::class.java).orEmpty()
+            .map { (it.getString("description") ?: "").substringBefore(" - ").trim() to it.get("totalCents").asLong() }
+            .filter { it.first.isNotEmpty() }
+        if (items.isNotEmpty()) return items
+        val name = doc.getString("name")?.trim().orEmpty()
+        return if (name.isEmpty()) emptyList() else listOf(name to cents)
+    }
+
+    companion object {
+        fun of(doc: Document, zone: TimeZone) =
+            ServiceRow(doc, doc.localDate("performedAt") ?: Instant.fromEpochMilliseconds((doc.getDate("createdAt") ?: Date(0)).time).toLocalDateTime(zone).date)
     }
 }
