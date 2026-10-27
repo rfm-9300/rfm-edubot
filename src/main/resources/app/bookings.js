@@ -44,38 +44,30 @@ function withinOpeningHours(dayKey, time, minutes) {
 function renderBookings(root) {
   const days = weekDayKeys();
   const today = todayKey();
-  const live = weekBookings().filter(b => b.status !== 'CANCELLED');
-  const todays = state.bookingUpcoming.filter(b => b.status !== 'CANCELLED' && bookingLocal(b).slice(0, 10) === today);
-  const pending = pendingUpcomingBookings();
-  const weekValue = live.filter(b => b.status !== 'NO_SHOW').reduce((sum, b) => sum + Number(bookingPrice(b) || 0), 0);
-  const stats = statCards([
-    { label: STR.bookingsStatToday, value: todays.length },
-    { label: STR.bookingsStatWeek, value: live.length },
-    { label: STR.bookingsStatPending, value: pending.length },
-    { label: STR.bookingsStatValue, value: fmtEUR(weekValue) },
-  ]);
   const agenda = state.bookingView === 'agenda';
   const atThisWeek = days[0] === periodKey(today, 'week');
-  const weekLabel = `${fmtDayKey(days[0], { day: '2-digit', month: 'short' })} – ${fmtDayKey(days[6], { day: '2-digit', month: 'short', year: 'numeric' })}`;
-  const toolbar = `<div class="booking-toolbar">
-    <div class="booking-toolbar__views">
-      <button type="button" class="btn btn--sm ${agenda ? '' : 'btn--primary'}" data-booking-view="week">${escapeHTML(STR.bookingsWeek)}</button>
-      <button type="button" class="btn btn--sm ${agenda ? 'btn--primary' : ''}" data-booking-view="agenda">${escapeHTML(STR.bookingsAgenda)}</button>
-    </div>
-    ${agenda ? '' : `<div class="booking-toolbar__nav period-nav">
+  const weekLabel = `${fmtDayKey(days[0], { day: 'numeric', month: 'short' })} – ${fmtDayKey(days[6], { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  const list = agenda ? bookingAgendaList() : [];
+  // The design's head: Week / List, the list's status tabs, then the week's arrows and the setup buttons at the end.
+  const view = (key, label) => `<button class="chip ${(key === 'agenda') === agenda ? 'is-on' : ''}" type="button" data-booking-view="${key}">${escapeHTML(label)}</button>`;
+  const upcoming = agenda ? bookingAgendaList('') : [];
+  const statusTabs = !agenda ? '' : '<span class="panel__sep" aria-hidden="true"></span>' + [''].concat(BOOKING_STATUSES)
+    .map(st => `<button class="chip ${state.bookingStatusFilter === st ? 'is-on' : ''}" type="button" data-booking-filter="${st}">${escapeHTML(st ? bookingStatusLabel(st) : STR.bookingsStatusAll)}${chipCount(st ? upcoming.filter(x => x.status === st).length : upcoming.length)}</button>`)
+    .join('');
+  const nav = agenda ? '' : `<div class="period-nav">
       <button type="button" class="btn btn--sm" data-week-shift="-7" aria-label="${escapeHTML(STR.bookingsPrev)}">‹</button>
-      <span class="period-nav__label mono">${escapeHTML(weekLabel)}</span>
       <button type="button" class="btn btn--sm" data-week-shift="7" aria-label="${escapeHTML(STR.bookingsNext)}">›</button>
       ${atThisWeek ? '' : `<button type="button" class="btn btn--sm" data-week-shift="0">${escapeHTML(STR.bookingsToday)}</button>`}
-    </div>`}
-    <div class="booking-toolbar__actions">
-      <button type="button" class="btn btn--sm" data-booking-services>${escapeHTML(STR.bookingsManageServices)}</button>
-      <button type="button" class="btn btn--sm" data-booking-availability>${escapeHTML(STR.bookingsManageAvailability)}</button>
-    </div>
-  </div>`;
-  const body = agenda ? bookingAgendaHtml() : bookingPendingPanel(pending) + bookingWeekHtml(days, today);
-  root.innerHTML = hero(labels.bookings, STR.bookingsDesc, stats) + bookingSetupHtml() + toolbar + body;
+    </div>`;
+  const tools = view('week', STR.bookingsWeek) + view('agenda', STR.bookingsList) + statusTabs
+    + `<span class="panel__tools-end">${nav}${agenda ? columnOrderButton('bookings') : ''}<button type="button" class="btn btn--sm btn--ghost" data-booking-services>${escapeHTML(STR.bookingsManageServices)}</button><button type="button" class="btn btn--sm btn--ghost" data-booking-availability>${escapeHTML(STR.bookingsManageAvailability)}</button></span>`;
+  pageCount(agenda ? list.length : weekLabel);
+  const panel = agenda
+    ? bookingAgendaHtml(list, tools)
+    : `<div class="panel"><div class="panel__head panel__head--tabs"><div class="panel__tools">${tools}</div></div>${bookingWeekHtml(days, today)}</div>`;
+  root.innerHTML = hero(labels.bookings, STR.bookingsDesc) + bookingSetupHtml() + panel;
   wireColumnOrder(root, 'bookings', agendaColumns());
+  if (agenda) wireSelection(root, 'bookings', list.map(x => x.id));
 
   $$('[data-booking-view]', root).forEach(b => b.addEventListener('click', () => { state.bookingView = b.dataset.bookingView; render(); }));
   $$('[data-week-shift]', root).forEach(b => b.addEventListener('click', async () => {
@@ -87,7 +79,6 @@ function renderBookings(root) {
   $$('[data-booking-services]', root).forEach(b => b.addEventListener('click', openBookingServicesForm));
   $$('[data-booking-availability]', root).forEach(b => b.addEventListener('click', openBookingAvailabilityForm));
   $$('[data-booking-filter]', root).forEach(b => b.addEventListener('click', () => { state.bookingStatusFilter = b.dataset.bookingFilter; render(); }));
-  $('[data-booking-see-pending]', root)?.addEventListener('click', () => { state.bookingView = 'agenda'; state.bookingStatusFilter = 'PENDING'; render(); });
   $$('[data-booking-status]', root).forEach(b => b.addEventListener('click', e => {
     e.stopPropagation();
     changeBookingStatus(b.dataset.bookingTarget, b.dataset.bookingStatus);
@@ -96,10 +87,7 @@ function renderBookings(root) {
     e.stopPropagation();
     openBookingById(el.dataset.bookingOpen);
   }));
-  $$('[data-booking-slot]', root).forEach(el => el.addEventListener('click', e => {
-    if (e.target.closest('[data-booking-open]')) return;
-    openBookingForm(null, { slot: el.dataset.bookingSlot });
-  }));
+  $$('[data-booking-slot]', root).forEach(el => el.addEventListener('click', () => openBookingForm(null, { slot: el.dataset.bookingSlot })));
 }
 
 // Nothing can be booked until at least one catalog service is bookable and opening hours exist.
@@ -111,117 +99,66 @@ function bookingSetupHtml() {
   return `<div class="overview-block"><h2 class="panel__title">${escapeHTML(STR.bookingsSetupTitle)}</h2><div class="setup-list">${steps.map((s, i) => `<button type="button" class="queue__item" ${s.attr}><span class="queue__icon queue__icon--info mono" aria-hidden="true">${i + 1}</span><div><strong>${escapeHTML(s.title)}</strong><span>${escapeHTML(s.detail)}</span></div></button>`).join('')}</div></div>`;
 }
 
-function bookingPendingPanel(pending) {
-  if (!pending.length) return '';
-  const rows = pending.slice(0, 5).map(b => `<tr class="conversation-row" data-booking-open="${escapeHTML(b.id)}">
-      <td class="mono">${escapeHTML(bookingWhen(b))}</td>
-      <td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td>
-      <td>${escapeHTML(bookingServiceName(b))}</td>
-      <td class="muted">${escapeHTML(bookingSourceLabel(b.source))}</td>
-      <td class="right"><div class="actions">
-        <button class="btn btn--sm btn--accent" type="button" data-booking-status="CONFIRMED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsConfirm)}</button>
-        <button class="btn btn--sm btn--ghost" type="button" data-booking-status="CANCELLED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsDecline)}</button>
-      </div></td>
-    </tr>`).join('');
-  return crmPanel({
-    title: STR.bookingsToConfirm,
-    tag: pending.length,
-    tools: pending.length > 5 ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-see-pending>${escapeHTML(STR.bookingsToConfirmAll)}</button>` : '',
-    head: `<tr><th>${escapeHTML(STR.bookingsThWhen)}</th><th>${escapeHTML(STR.bookingsThContact)}</th><th>${escapeHTML(STR.bookingsThService)}</th><th>${escapeHTML(STR.bookingsSource)}</th><th></th></tr>`,
-    rows,
-    empty: '',
-  });
-}
-
-function bookingHourRange(days) {
-  let start = 24;
-  let end = 0;
-  for (const r of state.bookingAvailability) {
-    start = Math.min(start, Math.floor(hhmmMinutes(r.startLocal) / 60));
-    end = Math.max(end, Math.ceil(hhmmMinutes(r.endLocal) / 60));
-  }
-  if (start >= end) { start = 8; end = 19; }
-  const keys = new Set(days);
-  for (const b of state.bookings) {
-    const from = bookingLocal(b);
-    if (!keys.has(from.slice(0, 10))) continue;
-    const to = toLocalInputValue(b.endAt);
-    start = Math.min(start, Number(from.slice(11, 13)));
-    end = Math.max(end, to.slice(0, 10) === from.slice(0, 10) ? Math.ceil(hhmmMinutes(to.slice(11, 16)) / 60) : 24);
-  }
-  return { start: Math.max(0, start), end: Math.min(24, Math.max(end, start + 1)) };
-}
-
+// The week as seven day columns of booking cards, as the design draws it; a card's left edge says its status.
+// Each day ends in a + that books it at its first opening hour.
 function bookingWeekHtml(days, today) {
-  const { start, end } = bookingHourRange(days);
-  const byCell = new Map();
-  for (const b of state.bookings) {
-    const local = bookingLocal(b);
-    const key = `${local.slice(0, 10)}|${Number(local.slice(11, 13))}`;
-    if (!byCell.has(key)) byCell.set(key, []);
-    byCell.get(key).push(b);
-  }
-  const hasHours = state.bookingAvailability.length > 0;
-  const head = `<div class="cal-grid__corner"></div>${days.map((d, i) => `<div class="cal-grid__dayhead${d === today ? ' is-today' : ''}"><div>${escapeHTML(STR[`weekday${i + 1}`])}</div><div class="mono muted">${escapeHTML(fmtDayKey(d, { day: '2-digit', month: '2-digit' }))}</div></div>`).join('')}`;
-  let rows = '';
-  for (let hour = start; hour < end; hour += 1) {
-    const hh = String(hour).padStart(2, '0');
-    const cells = days.map((d, i) => {
-      const chips = (byCell.get(`${d}|${hour}`) || [])
-        .sort((a, b) => a.startAt.localeCompare(b.startAt))
-        .map(b => {
-          const service = bookingServiceName(b);
-          const title = [bookingTimeRange(b), b.contactName, service, bookingStatusLabel(b.status)].filter(Boolean).join(' · ');
-          return `<button type="button" class="cal-event cal-event--${b.status.toLowerCase().replace('_', '-')}" data-booking-open="${escapeHTML(b.id)}" title="${escapeHTML(title)}"><span class="cal-event__time mono">${escapeHTML(bookingTimeRange(b))}</span><span class="cal-event__who">${escapeHTML(b.contactName)}</span>${service ? `<span class="cal-event__what">${escapeHTML(service)}</span>` : ''}</button>`;
-        }).join('');
-      const open = !hasHours || state.bookingAvailability.some(r => r.dayOfWeek === i + 1 && hhmmMinutes(r.startLocal) < (hour + 1) * 60 && hhmmMinutes(r.endLocal) > hour * 60);
-      return `<div class="cal-grid__cell${open ? '' : ' is-closed'}${d === today ? ' is-today' : ''}" data-booking-slot="${d}T${hh}:00">${chips}</div>`;
+  const byDay = new Map(days.map(d => [d, []]));
+  for (const b of state.bookings) byDay.get(bookingLocal(b).slice(0, 10))?.push(b);
+  return `<div class="week-board">${days.map((d, i) => {
+    const windows = state.bookingAvailability.filter(r => r.dayOfWeek === i + 1).sort((x, y) => hhmmMinutes(x.startLocal) - hhmmMinutes(y.startLocal));
+    const closed = state.bookingAvailability.length > 0 && !windows.length;
+    const first = windows[0]?.startLocal?.slice(0, 5) || '09:00';
+    const cards = byDay.get(d).sort((x, y) => x.startAt.localeCompare(y.startAt)).map(b => {
+      const service = bookingServiceName(b);
+      const title = [bookingTimeRange(b), b.contactName, service, bookingStatusLabel(b.status)].filter(Boolean).join(' · ');
+      return `<button type="button" class="week-event week-event--${b.status.toLowerCase().replace('_', '-')}" data-booking-open="${escapeHTML(b.id)}" title="${escapeHTML(title)}"><b>${escapeHTML(b.contactName)}</b><span>${escapeHTML([fmtTime(b.startAt), service].filter(Boolean).join(' · '))}</span></button>`;
     }).join('');
-    rows += `<div class="cal-grid__hour mono muted">${hh}:00</div>${cells}`;
-  }
-  return `<div class="panel cal-wrap"><div class="cal-grid">${head}${rows}</div></div>`;
+    const dayName = fmtDayKey(d, { weekday: 'long', day: 'numeric', month: 'long' });
+    return `<section class="week-board__day${d === today ? ' is-today' : ''}${closed ? ' is-closed' : ''}" aria-label="${escapeHTML(capFirst(dayName))}">
+      <h3 class="week-board__head"><b>${escapeHTML(fmtDayKey(d, { day: 'numeric' }))}</b>${escapeHTML(STR[`weekday${i + 1}`])}</h3>
+      ${cards}
+      <button type="button" class="week-board__add" data-booking-slot="${d}T${first}" aria-label="${escapeHTML(STR.bookingsAddOn({ day: dayName }))}" title="${escapeHTML(STR.bookingsAddOn({ day: dayName }))}">+</button>
+    </section>`;
+  }).join('')}</div>`;
 }
 
 function agendaColumns() {
   return [
-    { id: 'when', label: STR.bookingsThWhen, cell: b => `<td class="mono">${escapeHTML(bookingTimeRange(b))}</td>` },
-    { id: 'contact', label: STR.bookingsThContact, cell: b => `<td class="name">${escapeHTML(b.contactName)}<div class="muted mono">${escapeHTML(b.contactPhone)}</div></td>` },
-    { id: 'service', label: STR.bookingsThService, cell: b => `<td>${escapeHTML(bookingServiceName(b))}</td>` },
-    { id: 'price', label: STR.bookingsPrice, head: 'right', cell: b => `<td class="num">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : '—'}</td>` },
+    selectColumn('bookings'),
+    { id: 'when', label: STR.bookingsThWhen, cell: b => `<td class="nowrap"><button class="tbl__open" type="button">${escapeHTML(capFirst(fmtDayKey(bookingLocal(b).slice(0, 10), { weekday: 'short', day: 'numeric', month: 'short' })))} · ${escapeHTML(bookingTimeRange(b))}</button></td>` },
+    { id: 'contact', label: STR.bookingsThContact, cell: b => `<td class="name">${nameWithInitials(b.contactName)}</td>` },
+    { id: 'phone', label: STR.bookingsContactPhone, cell: b => `<td class="mono muted nowrap">${escapeHTML(b.contactPhone || '')}</td>` },
+    { id: 'service', label: STR.bookingsThService, cell: b => `<td class="muted">${escapeHTML(bookingServiceName(b))}</td>` },
+    { id: 'duration', label: STR.bookingsDuration, cell: b => `<td class="muted nowrap">${bookingMinutes(b) ? escapeHTML(fmtMinutes(bookingMinutes(b))) : '—'}</td>` },
     { id: 'status', label: STR.bookingsThStatus, cell: b => `<td>${bookingPill(b.status)}</td>` },
+    { id: 'price', label: STR.bookingsPrice, head: 'right', cell: b => `<td class="num">${bookingPrice(b) != null ? fmtEUR(bookingPrice(b)) : '—'}</td>` },
     {
       id: 'action', label: '', pin: 'end', cell: b => `<td class="right">${b.status === 'PENDING'
-        ? `<button class="btn btn--sm btn--accent" type="button" data-booking-status="CONFIRMED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsConfirm)}</button>`
+        ? `<button class="btn btn--sm btn--primary" type="button" data-booking-status="CONFIRMED" data-booking-target="${escapeHTML(b.id)}">${escapeHTML(STR.bookingsConfirm)}</button>`
         : `<span class="muted">${escapeHTML(bookingSourceLabel(b.source))}</span>`}</td>`,
     },
   ];
 }
 
-function bookingAgendaHtml() {
+// The bookings from today on, in the next BOOKING_AGENDA_DAYS days, by status (`filter`) and the search.
+function bookingAgendaList(filter = state.bookingStatusFilter) {
   const q = state.search.toLowerCase();
-  const filter = state.bookingStatusFilter;
   const today = todayKey();
-  const columns = orderedColumns('bookings', agendaColumns());
-  const list = state.bookingUpcoming
+  return state.bookingUpcoming
     .filter(b => bookingLocal(b).slice(0, 10) >= today)
     .filter(b => !filter || b.status === filter)
     .filter(b => !q || `${b.contactName} ${b.contactPhone} ${bookingServiceName(b)} ${b.notes || ''}`.toLowerCase().includes(q))
     .sort((a, b) => a.startAt.localeCompare(b.startAt));
-  let lastDay = '';
-  const rows = list.map(b => {
-    const day = bookingLocal(b).slice(0, 10);
-    const dayRow = day === lastDay ? '' : `<tr class="is-day"><td colspan="${columns.length}">${escapeHTML(capFirst([relativeDayLabel(day), fmtDayKey(day, { weekday: 'long', day: 'numeric', month: 'long' })].filter(Boolean).join(' · ')))}</td></tr>`;
-    lastDay = day;
-    return `${dayRow}<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-booking-open="${escapeHTML(b.id)}">${columnCells(columns, b)}</tr>`;
-  }).join('');
-  const chips = [''].concat(BOOKING_STATUSES)
-    .map(s => `<button class="chip ${filter === s ? 'is-on' : ''}" type="button" data-booking-filter="${s}">${escapeHTML(s ? bookingStatusLabel(s) : STR.bookingsStatusAll)}</button>`)
-    .join('');
-  const narrowed = Boolean(filter || q);
+}
+
+function bookingAgendaHtml(list, tools) {
+  const columns = orderedColumns('bookings', agendaColumns());
+  const rows = list.map(b => `<tr class="conversation-row${b.status === 'CANCELLED' ? ' is-draft' : ''}" data-booking-open="${escapeHTML(b.id)}">${columnCells(columns, b)}</tr>`).join('');
+  const narrowed = Boolean(state.bookingStatusFilter || state.search);
   return crmPanel({
-    title: STR.bookingsAgendaTitle({ days: BOOKING_AGENDA_DAYS }),
-    tag: list.length,
-    tools: chips + columnOrderButton('bookings'),
+    title: '',
+    tools,
+    bar: selectionBar('bookings'),
     head: columnsHead(columns, 'bookings'),
     rows,
     empty: narrowed ? STR.bookingsEmptyList : STR.bookingsEmptyAgenda,
@@ -273,38 +210,39 @@ async function openBookingDetail(b) {
   const minutes = bookingMinutes(b);
   const statusButton = (status, label, tone = '') =>
     `<button class="btn btn--sm ${tone}" type="button" data-set-status="${status}">${escapeHTML(label)}</button>`;
-  const actions = [];
-  if (b.status === 'PENDING') actions.push(statusButton('CONFIRMED', STR.bookingsConfirm, 'btn--accent'));
-  if (b.status === 'PENDING' || b.status === 'CONFIRMED') {
-    actions.push(statusButton('COMPLETED', STR.bookingsComplete, b.status === 'CONFIRMED' ? 'btn--accent' : ''));
-    actions.push(statusButton('NO_SHOW', STR.bookingsNoShow));
-    actions.push(statusButton('CANCELLED', STR.bookingsCancel, 'btn--ghost'));
-  } else {
-    actions.push(statusButton('CONFIRMED', STR.bookingsReopen, 'btn--ghost'));
-  }
   const canInvoice = b.status === 'COMPLETED' && billing === 'OPEN' && hasModule('invoices');
-  const billingHint = billing === 'INVOICED'
-    ? `<p class="hint"><span class="pill pill--ok">${escapeHTML(STR.bookingsInvoiced)}</span></p>`
-    : billing === 'OPEN' ? `<p class="hint">${escapeHTML(STR.bookingsBilled)}</p>` : '';
+  const live = b.status === 'PENDING' || b.status === 'CONFIRMED';
+  // The foot as the design orders it: links and the quieter steps first, the one that moves the booking on last.
+  const main = b.status === 'PENDING' ? statusButton('CONFIRMED', STR.bookingsConfirm, 'btn--primary')
+    : b.status === 'CONFIRMED' ? statusButton('COMPLETED', STR.bookingsComplete, 'btn--primary')
+    : canInvoice ? `<button class="btn btn--sm btn--primary" type="button" data-booking-invoice>${escapeHTML(STR.bookingsInvoice)}</button>` : '';
+  const actions = [
+    b.clientServiceId && hasModule('services') && !linksBackTo(`service:${b.clientServiceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-service>${escapeHTML(STR.bookingsOpenService)}</button>` : '',
+    `<button class="btn btn--sm btn--ghost" type="button" data-booking-edit>${escapeHTML(STR.bookingsEditAction)}</button>`,
+    live ? statusButton('CANCELLED', STR.bookingsCancel, 'btn--ghost') : statusButton('CONFIRMED', STR.bookingsReopen, 'btn--ghost'),
+    live ? statusButton('NO_SHOW', STR.bookingsNoShow) : '',
+    b.status === 'PENDING' ? statusButton('COMPLETED', STR.bookingsComplete) : '',
+    main,
+  ];
+  const billingText = billing === 'INVOICED' ? `<span class="pill pill--ok">${escapeHTML(STR.bookingsInvoiced)}</span>`
+    : billing === 'OPEN' ? escapeHTML(STR.bookingsBilled) : '';
   const clientLink = !!b.clientId && hasModule('clients') && !linksBackTo(`client:${b.clientId}`);
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    ${detailHead(b.contactName, bookingPill(b.status), bookingPrice(b) || 0, bookingTone(b.status), clientLink)}
-    ${detailMeta([
-      { label: STR.bookingsThWhen, value: bookingWhen(b) },
-      { label: STR.bookingsService, value: [bookingServiceName(b), minutes ? fmtMinutes(minutes) : ''].filter(Boolean).join(' · ') },
-      { label: STR.bookingsContactPhone, value: b.contactPhone },
-      { label: STR.bookingsSource, value: bookingSourceLabel(b.source) },
+    ${recordFieldsHtml([
+      [STR.bookingsStatus, bookingPill(b.status)],
+      [STR.bookingsThContact, docClientHtml(b.contactName, clientLink)],
+      b.contactPhone ? [STR.bookingsContactPhone, `<span class="mono">${escapeHTML(b.contactPhone)}</span>`] : null,
+      [STR.bookingsThWhen, escapeHTML(bookingWhen(b))],
+      [STR.bookingsService, escapeHTML(bookingServiceName(b))],
+      minutes ? [STR.bookingsDuration, escapeHTML(fmtMinutes(minutes))] : null,
+      bookingPrice(b) != null ? [STR.bookingsPrice, recordFigureHtml(fmtEUR(bookingPrice(b))), bookingTone(b.status)] : null,
+      [STR.bookingsSource, escapeHTML(bookingSourceLabel(b.source))],
+      billingText ? [STR.bookingsBilling, billingText] : null,
+      b.notes ? [STR.bookingsNotes, escapeHTML(b.notes)] : null,
     ])}
-    ${b.notes ? `<p class="hint">${escapeHTML(b.notes)}</p>` : ''}
-    ${billingHint}
-    <div class="detail__foot">
-      ${actions.join('')}
-      ${canInvoice ? `<button class="btn btn--sm btn--accent" type="button" data-booking-invoice>${escapeHTML(STR.bookingsInvoice)}</button>` : ''}
-      <button class="btn btn--sm btn--ghost" type="button" data-booking-edit>${escapeHTML(STR.bookingsEditAction)}</button>
-      ${b.clientServiceId && hasModule('services') && !linksBackTo(`service:${b.clientServiceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-booking-service>${escapeHTML(STR.bookingsOpenService)}</button>` : ''}
-    </div>`;
+    ${docFootHtml(actions.join(''))}`;
   $$('[data-set-status]', body).forEach(btn => btn.addEventListener('click', async () => {
     btn.disabled = true;
     const updated = await changeBookingStatus(b.id, btn.dataset.setStatus);
@@ -320,7 +258,7 @@ async function openBookingDetail(b) {
   };
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(b.clientId)));
   $('[data-booking-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(b.clientServiceId)));
-  openDrawer(bookingServiceName(b) || STR.bookingsEdit, body);
+  openDrawer(bookingServiceName(b) || STR.bookingsEdit, body, false, { eyebrow: STR.clientKindBooking });
   mountRecordAutomations(body, { type: 'booking', id: b.id }, here);
 }
 

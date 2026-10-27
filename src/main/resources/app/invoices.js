@@ -61,11 +61,14 @@ function invoiceColumns() {
     return `<td class="right"><div class="actions">${pay}${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}</div></td>`;
   };
   return [
-    { id: 'number', label: t.thNumber, cell: inv => `<td class="id">${escapeHTML(inv.number)}</td>` },
-    { id: 'client', label: t.thClient, cell: inv => `<td class="name">${escapeHTML(inv.clientName || '')}</td>` },
+    selectColumn('invoices'),
+    { id: 'number', label: t.thNumber, cell: inv => `<td class="id"><button class="tbl__open" type="button">${escapeHTML(inv.number)}</button></td>` },
+    { id: 'client', label: t.thClient, cell: inv => `<td class="name">${nameWithInitials(inv.clientName)}</td>` },
     { id: 'status', label: t.thStatus, cell: inv => `<td>${invoicePill(inv.status)}</td>` },
+    { id: 'issued', label: t.thIssued, cell: inv => `<td class="mono muted nowrap">${fmtDay(inv.createdAt)}</td>` },
     { id: 'dueDate', label: t.thDueDate, cell: inv => `<td class="mono muted">${fmtDay(inv.dueDate)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: inv => `<td class="num">${invoiceTotalCell(inv)}</td>` },
+    { id: 'paid', label: t.thPaid, head: 'right', cell: inv => `<td class="num muted">${inv.status === 'CANCELLED' ? '—' : fmtEUR(invoicePaidEur(inv))}</td>` },
     { id: 'actions', label: t.thPdfActions, head: 'right', pin: 'end', cell: actions },
   ];
 }
@@ -81,7 +84,6 @@ function renderInvoices(root) {
     .filter(matches)
     .map(inv => `<tr class="conversation-row ${rowClass(inv)}" data-invoice="${escapeHTML(inv.id)}">${columnCells(columns, inv)}</tr>`)
     .join('');
-  const { paid, pending, overdue } = invoiceRollup(state.invoices);
   const period = state.filterInvoicePeriod || '';
   const listed = state.invoices
     .filter(inv => !state.filterInvoiceStatus || inv.status === state.filterInvoiceStatus)
@@ -101,9 +103,11 @@ function renderInvoices(root) {
       }).join('')
     : '';
   const views = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
-  const tools = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(t.filterAll)}</button>`
-    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}</button>`).join('')
-    + (period ? '' : columnOrderButton('invoices'));
+  const statusTabs = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(period ? t.filterAll : t.tabAll)}${chipCount(state.invoices.length)}</button>`
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}${chipCount(state.invoices.filter(i => i.status === s).length)}</button>`).join('');
+  // The list is the design's grid: status tabs, then the views and column reset at the end. The week and month
+  // wrap-ups keep their title, figures and view switch.
+  const tools = period ? statusTabs : `${statusTabs}<span class="panel__tools-end">${views}${columnOrderButton('invoices')}</span>`;
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'invoices');
   const invoiceNav = periodNav(nowKey, period, 'data-inv-period-nav', t);
@@ -114,16 +118,14 @@ function renderInvoices(root) {
       { label: t.overdue, value: fmtEUR(nowRoll.overdue) },
       { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
     ]
-    : [
-      { label: t.paid, value: fmtEUR(paid) },
-      { label: t.pending, value: fmtEUR(pending) },
-      { label: t.overdue, value: fmtEUR(overdue) },
-    ];
-  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, statCards(invoiceStats), invoiceNav) + crmPanel({
-    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.documents,
+    : [];
+  pageCount(period ? null : listed.length);
+  root.innerHTML = hero(labels.invoices, CRM.tabs.faturas.desc, period ? statCards(invoiceStats) : '', invoiceNav) + crmPanel({
+    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : '',
     tag: period ? invoiceGroups.length : listed.length,
-    views,
+    views: period ? views : '',
     tools,
+    bar: period ? '' : selectionBar('invoices'),
     head: period ? summaryHead : listHead,
     rows: period ? summaryRows : rows,
     empty: period ? t.summaryEmpty : t.emptyTitle,
@@ -131,6 +133,7 @@ function renderInvoices(root) {
   });
   wirePdfButtons(root);
   wireColumnOrder(root, 'invoices', invoiceColumns());
+  if (!period) wireSelection(root, 'invoices', listed.map(i => i.id));
   $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; state.filterInvoicePeriodKey = ''; render(); }));
   $$('[data-inv-period-nav]', root).forEach(btn => btn.addEventListener('click', () => {
     const dir = btn.dataset.invPeriodNav;
@@ -268,34 +271,35 @@ async function openInvoiceDetail(id) {
   const projectLink = hasModule('projects') && !!inv.projectId && !linksBackTo(`project:${inv.projectId}`);
   const form = document.createElement('div');
   form.className = 'form';
+  const t = CRM.invoices;
+  const owed = invoiceOutstandingEur(inv);
+  // The design's document drawer: its fields (what it is, then the money), its lines and installments, then the
+  // actions in the foot, the main step last.
   form.innerHTML = `
-    ${detailHead(inv.clientName, invoicePill(status), inv.totalEur, invoiceTone(status), clientLink)}
-    ${detailMeta([
-      { label: STR.detailIssued, value: fmtDay(inv.createdAt) },
-      {
-        label: unpaid && parts.length ? STR.invoiceNextDue : STR.thDueDate,
-        value: unpaid ? `${fmtDay(inv.dueDate)} · ${dueWhenText(inv.dueDate, status === 'OVERDUE')}` : fmtDay(inv.dueDate),
-      },
-      inv.status === 'PAID' && inv.paidAt ? { label: STR.paidOnLabel, value: fmtDay(inv.paidAt) } : null,
-      unpaid && received > 0 ? { label: STR.invoiceReceived, value: fmtEUR(received) } : null,
-      unpaid && received > 0 ? { label: STR.invoiceStillOwed, value: fmtEUR(invoiceOutstandingEur(inv)) } : null,
-      inv.taxOfficeCode ? { label: STR.invoiceTaxCode, value: inv.taxOfficeCode } : null,
-      inv.projectLabel ? { label: BLD.project, value: [inv.projectLabel, inv.measurementNumber ? bt('measurementN', { n: inv.measurementNumber }) : '', inv.retentionRelease ? BLD.retentionReleaseLabel : ''].filter(Boolean).join(' · ') } : null,
+    ${recordFieldsHtml([
+      [t.thStatus, invoicePill(status)],
+      [t.thClient, docClientHtml(inv.clientName, clientLink)],
+      [t.thIssued, escapeHTML(fmtDay(inv.createdAt))],
+      [unpaid && parts.length ? STR.invoiceNextDue : STR.thDueDate, escapeHTML(unpaid ? `${fmtDay(inv.dueDate)} · ${dueWhenText(inv.dueDate, status === 'OVERDUE')}` : fmtDay(inv.dueDate))],
+      [t.thTotal, recordFigureHtml(fmtEUR(inv.totalEur))],
+      inv.status === 'CANCELLED' ? null : [t.thPaid, recordFigureHtml(fmtEUR(received), inv.status === 'PAID' && inv.paidAt ? fmtDay(inv.paidAt) : '')],
+      unpaid ? [STR.invoiceStillOwed, recordFigureHtml(fmtEUR(owed)), status === 'OVERDUE' ? 'bad' : 'warn'] : null,
+      inv.taxOfficeCode ? [STR.invoiceTaxCode, escapeHTML(inv.taxOfficeCode)] : null,
+      inv.projectLabel ? [BLD.project, escapeHTML([inv.projectLabel, inv.measurementNumber ? bt('measurementN', { n: inv.measurementNumber }) : '', inv.retentionRelease ? BLD.retentionReleaseLabel : ''].filter(Boolean).join(' · '))] : null,
     ])}
     ${inv.quoteNumber && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: inv.quoteNumber }))}</p>` : ''}
-    ${itemsTable(inv.items)}
+    ${docLinesHtml(inv.items, inv.totalEur)}
     ${parts.length ? installmentsPanel(inv) : ''}
-    <div class="detail__foot">
-      ${unpaid ? `<button class="btn btn--sm btn--accent" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}
-      ${unpaid ? `<button class="btn btn--sm" type="button" data-inv-parts>${escapeHTML(parts.length ? STR.installmentsChange : STR.installmentsSplit)}</button>` : ''}
-      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
+    ${docFootHtml(`
       ${pdfButton(inv.id, 'invoices', inv.hasPdf, inv.number)}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-quote>${escapeHTML(STR.detailOpenDoc({ number: inv.quoteNumber || '' }))}</button>` : ''}
       ${projectLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(BLD.openProject)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-inv-taxcode>${escapeHTML(inv.taxOfficeCode ? STR.invoiceTaxCodeChange : STR.invoiceTaxCodeAdd)}</button>
       ${unpaid && received === 0 ? `<button class="btn btn--sm btn--ghost" type="button" data-inv-cancel>${escapeHTML(STR.invoiceCancel)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-inv-delete>${escapeHTML(STR.invoiceDelete)}</button>
-    </div>`;
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
+      ${unpaid ? `<button class="btn btn--sm" type="button" data-inv-parts>${escapeHTML(parts.length ? STR.installmentsChange : STR.installmentsSplit)}</button>` : ''}
+      ${unpaid ? `<button class="btn btn--sm btn--primary" type="button" id="inv-paid">${escapeHTML(STR.markPaid)}</button>` : ''}`)}`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(inv.clientId)));
   $('[data-open-quote]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteDetail(inv.quoteId)));
   $('[data-open-project]', form)?.addEventListener('click', () => openFrom(here, () => openProjectDrawer(inv.projectId, 'measurements')));
@@ -307,7 +311,7 @@ async function openInvoiceDetail(id) {
   $('[data-inv-delete]', form)?.addEventListener('click', () => deleteInvoice(inv));
   $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
-  openDrawer(inv.number, form);
+  openDrawer(inv.number, form, false, { eyebrow: STR.eyebrowInvoice });
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
 }
 

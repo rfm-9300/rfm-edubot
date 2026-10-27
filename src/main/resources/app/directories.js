@@ -2,14 +2,7 @@
    picker. Each page's own columns are defined beside it (clientColumns in clients.js…), and their order is
    in columns.js. */
 
-// The directory pages list active records; the Archived chip swaps in the archived ones, ready to restore.
-// `names` relabels the two chips (employees read Active / Inactive).
-function directoryViewChips(kind, names = {}) {
-  const archived = state.archivedView === kind;
-  return `<button class="chip ${archived ? '' : 'is-on'}" type="button" data-directory-view="">${escapeHTML(names.active || STR.directoryActive)}</button>`
-    + `<button class="chip ${archived ? 'is-on' : ''}" type="button" data-directory-view="${kind}">${escapeHTML(names.archived || STR.directoryArchived)}</button>`;
-}
-
+// The directory pages list active records; their Archived tab swaps in the archived ones, ready to restore.
 async function showDirectoryView(kind) {
   if (kind) {
     const rows = await api(`/app/api/crm/${kind}?archived=1`).catch(() => null);
@@ -61,7 +54,7 @@ function openColumnPicker(table, columns, eyebrow) {
     </section>` : '');
   body.innerHTML = `
     <p class="hint">${escapeHTML(COLUMNS.intro)}</p>
-    ${group('columns-standard', COLUMNS.standard, columns.filter(c => !c.custom))}
+    ${group('columns-standard', COLUMNS.standard, columns.filter(c => !c.custom && !c.pin))}
     ${group('columns-custom', FIELDS.customTitle, columns.filter(c => c.custom))}
     <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-columns-reset>${escapeHTML(COLUMNS.reset)}</button></div>`;
   openDrawer(COLUMNS.title, body, false, { eyebrow });

@@ -69,6 +69,30 @@ function recordCardHtml({ name, lines, since, contact = '', notes = '', actions 
   </section>`;
 }
 
+// A record's or a document's fields, one per line: [label, trusted html, tone?]; empty rows are left out.
+function recordFieldsHtml(rows) {
+  const items = rows.filter(row => row && row[1]);
+  if (!items.length) return '';
+  return `<dl class="record-fields">${items.map(([label, html, tone]) => `<div${tone ? ` data-tone="${tone}"` : ''}><dt>${escapeHTML(label)}</dt><dd>${html}</dd></div>`).join('')}</dl>`;
+}
+// A figure for a field: the value, then a quieter note ("€235.00 · €35.00 overdue").
+const recordFigureHtml = (value, note = '') => `<span class="record-fields__value">${escapeHTML(value)}</span>${note ? `<span class="record-fields__sub">${escapeHTML(note)}</span>` : ''}`;
+// KPI cells ({ label, value, sub, tone }) as fields.
+const kpiFieldRows = cells => cells.map(k => [k.label, recordFigureHtml(k.value, k.sub), k.tone]);
+
+// Under a record drawer's head: initials, contact buttons, then edit, archive or delete at the end (trusted html).
+function recordBarHtml({ name, contact = '', end = '' }) {
+  return `<div class="record-bar">
+      <span class="record-bar__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>
+      ${contact ? `<div class="actions">${contact}</div>` : ''}
+      <div class="actions record-bar__end">${end}</div>
+    </div>`;
+}
+// A record's tabs: [id, label, count]; wire [data-record-tab].
+function recordTabsHtml(tabs, current) {
+  return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === current ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === current}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
+}
+
 function recordKpisHtml(cells) {
   const shown = cells.slice(0, 4);
   if (!shown.length) return '';

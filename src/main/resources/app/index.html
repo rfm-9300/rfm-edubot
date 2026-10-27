@@ -1,12 +1,12 @@
 <!doctype html>
-<html lang="pt-PT" data-layout="minimal">
+<html lang="pt-PT" data-layout="minimal" data-shell="compact">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@500;600;700;800&family=Nunito:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
 <link rel="stylesheet" href="/admin/style.css" />
 <script src="/admin/theme.js"></script>
 <script src="/admin/catalog.en.js"></script>
@@ -16,11 +16,14 @@
 </head>
 <body>
   <aside class="sidebar" id="app-sidebar">
-    <button class="brand brand--switch" id="brand" type="button" aria-haspopup="dialog" disabled>
-      <span class="brand__mark" aria-hidden="true">AI</span>
-      <span class="brand__text"><span class="brand__name" id="brand-name">Dashboard</span><span class="brand__sub" id="brand-sub">Chatbot · Data</span></span>
-      <span class="brand__chevron" aria-hidden="true"></span>
-    </button>
+    <div class="sidebar__head">
+      <button class="brand brand--switch" id="brand" type="button" aria-haspopup="dialog" disabled>
+        <span class="brand__mark" aria-hidden="true">AI</span>
+        <span class="brand__text"><span class="brand__name" id="brand-name">Dashboard</span><span class="brand__sub" id="brand-sub">Chatbot · Data</span></span>
+        <span class="brand__chevron" aria-hidden="true"></span>
+      </button>
+      <button class="iconbtn sidebar__toggle" id="btn-sidebar" type="button" aria-controls="app-sidebar" aria-expanded="true" aria-label="Collapse sidebar" title="Collapse sidebar"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg></button>
+    </div>
     <nav class="nav" id="nav"></nav>
     <div class="sidebar__foot">
       <div class="kpi"><div class="kpi__label" id="kpi-1-label" data-i18n="app.statMessages">Messages</div><div class="kpi__value" id="kpi-messages">—</div></div>
@@ -35,7 +38,7 @@
         <button class="iconbtn iconbtn--menu" id="btn-nav" type="button" data-i18n-aria-label="common.menuOpenAria" aria-label="Open menu" aria-controls="app-sidebar" aria-expanded="false">
           <span class="menu-bars" aria-hidden="true"><span></span><span></span><span></span></span>
         </button>
-        <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span></div>
+        <div class="crumb"><span class="crumb__root" data-i18n="app.dashboardWord">Dashboard</span><span class="crumb__sep">/</span><span class="crumb__leaf" id="crumb-leaf">Overview</span><span class="crumb__count" id="crumb-count" hidden></span></div>
       </div>
       <div class="topbar__search"><input type="text" id="search" data-i18n-placeholder="app.searchPlaceholder" data-i18n-aria-label="app.searchPlaceholder" placeholder="Search…" aria-label="Search…" autocomplete="off" /><kbd aria-hidden="true">/</kbd></div>
       <div class="topbar__actions"><button class="iconbtn iconbtn--theme" id="btn-theme" type="button" data-i18n-aria-label="app.themeAria" aria-label="Toggle theme">🌙</button><button class="iconbtn iconbtn--theme iconbtn--bell" id="btn-notifications" type="button" aria-haspopup="dialog" data-i18n-aria-label="app.notifications.aria" data-i18n-title="app.notifications.aria" aria-label="Notifications" title="Notifications" hidden><svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 11.5V7a4 4 0 0 1 8 0v4.5l1 1H3z M8 1.6V3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.5 13.6a1.5 1.5 0 0 0 3 0" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><span class="iconbtn__count" aria-hidden="true" hidden></span></button><button class="iconbtn iconbtn--theme iconbtn--avatar" id="btn-account" type="button" data-i18n-aria-label="app.accountAria" data-i18n-title="app.accountAria" aria-label="Your account" title="Your account" hidden></button><a class="btn btn--ghost" id="btn-backoffice" href="/backoffice/" data-i18n-aria-label="app.backToBackofficeAria" data-i18n-title="app.backToBackofficeAria" aria-label="Back to the backoffice" title="Back to the backoffice" hidden><span aria-hidden="true">←</span> <span class="btn__text" data-i18n="app.backToBackoffice">Backoffice</span></a><button class="btn btn--ghost" id="btn-logout" data-i18n="app.logout">Log out</button><button class="btn btn--primary" id="btn-new" hidden><span class="btn__plus" aria-hidden="true">+</span><span class="btn__label" data-i18n="app.newPrefix">New</span></button></div>

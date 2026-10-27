@@ -7,16 +7,17 @@ function supplierColumns() {
   const t = CRM.suppliers;
   const name = s => {
     const services = supplierServiceNames(s);
-    return services ? `<div class="col"><span class="name">${escapeHTML(s.name)}</span><span class="sub">${escapeHTML(services)}</span></div>` : escapeHTML(s.name);
+    return services ? `<div class="col">${nameWithInitials(s.name, true)}<span class="sub">${escapeHTML(services)}</span></div>` : nameWithInitials(s.name, true);
   };
   return [
+    selectColumn('suppliers'),
     { id: 'name', label: t.thName, fixed: true, cell: s => `<td class="name long">${name(s)}</td>` },
     { id: 'type', label: t.thType, default: true, cell: s => `<td class="muted">${escapeHTML(s.type || '')}</td>` },
     { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
     { id: 'contactPerson', label: t.formContact, cell: s => `<td class="muted">${escapeHTML(s.contactPerson || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
-    { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono nowrap">${fmtDay(s.createdAt)}</td>` },
-    { id: 'number', label: t.thNo, default: true, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono muted nowrap">${fmtDay(s.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
   ];
 }
 
@@ -24,16 +25,21 @@ function employeeColumns() {
   const t = CRM.employees;
   const toApprove = new Map();
   for (const s of state.pendingSubmissions) toApprove.set(s.employeeId, (toApprove.get(s.employeeId) || 0) + 1);
-  const pendingPill = id => (toApprove.get(id) ? ` <span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(id) }))}</span>` : '');
+  // Inactive (archived), services waiting for approval, or active.
+  const statusPill = e => (e.archivedAt ? `<span class="pill">${escapeHTML(t.viewInactive)}</span>`
+    : toApprove.get(e.id) ? `<span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: toApprove.get(e.id) }))}</span>`
+    : `<span class="pill pill--ok">${escapeHTML(t.viewActive)}</span>`);
   return [
-    { id: 'name', label: t.thName, fixed: true, cell: e => `<td class="name long">${escapeHTML(e.name)}${pendingPill(e.id)}</td>` },
+    selectColumn('employees'),
+    { id: 'name', label: t.thName, fixed: true, cell: e => `<td class="name long">${nameWithInitials(e.name, true)}</td>` },
     { id: 'role', label: t.thRole, default: true, cell: e => `<td class="muted">${escapeHTML(e.role || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.phone)}</td>` },
+    { id: 'status', label: t.thStatus, default: true, cell: e => `<td>${statusPill(e)}</td>` },
     { id: 'taxId', label: t.formTaxId, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.taxId || '')}</td>` },
     { id: 'birthDate', label: t.formBirthDate, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.birthDate ? fmtDay(e.birthDate) : '')}</td>` },
     { id: 'address', label: t.formAddress, cell: e => `<td class="muted long">${escapeHTML(e.address || '')}</td>` },
-    { id: 'createdAt', label: t.thCreated, default: true, cell: e => `<td class="mono nowrap">${fmtDay(e.createdAt)}</td>` },
-    { id: 'number', label: t.thNo, default: true, head: 'right', cell: e => `<td class="id right">${escapeHTML(e.number)}</td>` },
+    { id: 'createdAt', label: t.thCreated, default: true, cell: e => `<td class="mono muted nowrap">${fmtDay(e.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, head: 'right', cell: e => `<td class="id right">${escapeHTML(e.number)}</td>` },
   ];
 }
 
@@ -59,8 +65,8 @@ function renderSuppliers(root) {
   if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
   const columns = shownColumns('suppliers', supplierColumns());
   const ids = new Set(columns.map(c => c.id));
-  const rows = source
-    .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
+  const shown = source.filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey);
+  const rows = shown
     .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${s.contactPerson || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, s, ids)}</tr>`)
     .join('');
@@ -68,14 +74,13 @@ function renderSuppliers(root) {
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
     : '';
   const filtered = Boolean(state.filterSupplierType || q);
-  const new30 = (state.suppliers || []).filter(s => s.createdAt && (Date.now() - new Date(s.createdAt)) / 86400000 <= 30).length;
-  root.innerHTML = hero(labels.suppliers, CRM.tabs.fornecedores.desc, statCards([
-    { label: t.total, value: (state.suppliers || []).length },
-    { label: t.new30, value: new30 },
-  ])) + crmPanel({
-    title: t.directory,
-    tag: source.length,
-    tools: typeFilter + directoryViewChips('suppliers') + columnsButton('suppliers') + columnOrderButton('suppliers'),
+  const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-directory-view="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
+  const tabs = tab('', t.filterAll, (state.suppliers || []).length, !archived) + tab('suppliers', STR.directoryArchived, archived ? source.length : null, archived);
+  pageCount(shown.length);
+  root.innerHTML = hero(labels.suppliers, CRM.tabs.fornecedores.desc) + crmPanel({
+    title: '',
+    tools: `${tabs}<span class="panel__tools-end">${typeFilter}${columnsButton('suppliers')}${columnOrderButton('suppliers')}</span>`,
+    bar: selectionBar('suppliers'),
     head: columnsHead(columns, 'suppliers'),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
@@ -85,6 +90,7 @@ function renderSuppliers(root) {
   $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('suppliers', supplierColumns(), labels.suppliers));
   wireColumnOrder(root, 'suppliers', supplierColumns());
+  wireSelection(root, 'suppliers', shown.map(s => s.id));
   wireDirectoryView(root);
 }
 
@@ -95,19 +101,24 @@ function renderEmployees(root) {
   const q = state.search.toLowerCase();
   const columns = shownColumns('employees', employeeColumns());
   const ids = new Set(columns.map(c => c.id));
-  const rows = source
+  // Tabs: everyone active, those with services to approve (with the employee portal), the inactive ones.
+  const waiting = new Set(state.pendingSubmissions.map(s => s.employeeId));
+  const toApproveTab = !archived && state.filterEmployeeView === 'toApprove';
+  const shown = toApproveTab ? source.filter(e => waiting.has(e.id)) : source;
+  const rows = shown
     .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
     .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, e, ids)}</tr>`)
     .join('');
-  const new30 = (state.employees || []).filter(e => e.createdAt && (Date.now() - new Date(e.createdAt)) / 86400000 <= 30).length;
-  root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc, statCards([
-    { label: t.total, value: (state.employees || []).length },
-    { label: t.new30, value: new30 },
-    ...(state.fetched.submissions ? [{ label: SUB.kpiToApprove, value: state.pendingSubmissions.length }] : []),
-  ])) + crmPanel({
-    title: t.directory,
-    tag: source.length,
-    tools: directoryViewChips('employees', { active: t.viewActive, archived: t.viewInactive }) + columnsButton('employees') + columnOrderButton('employees'),
+  const active = state.employees || [];
+  const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-employee-tab="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
+  const tabs = tab('', t.tabAll, active.length, !archived && !toApproveTab)
+    + (state.fetched.submissions ? tab('toApprove', SUB.kpiToApprove, active.filter(e => waiting.has(e.id)).length, toApproveTab) : '')
+    + tab('inactive', t.viewInactive, archived ? source.length : null, archived);
+  pageCount(shown.length);
+  root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc) + crmPanel({
+    title: '',
+    tools: `${tabs}<span class="panel__tools-end">${columnsButton('employees')}${columnOrderButton('employees')}</span>`,
+    bar: selectionBar('employees'),
     head: columnsHead(columns, 'employees'),
     rows,
     empty: archived ? t.inactiveEmpty : t.emptyTitle,
@@ -116,7 +127,14 @@ function renderEmployees(root) {
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
   wireColumnOrder(root, 'employees', employeeColumns());
-  wireDirectoryView(root);
+  wireSelection(root, 'employees', shown.map(e => e.id));
+  $$('[data-employee-tab]', root).forEach(b => b.addEventListener('click', () => {
+    const key = b.dataset.employeeTab;
+    if (key === 'inactive') return showDirectoryView('employees');
+    state.filterEmployeeView = key;
+    if (archived) return showDirectoryView('');
+    render();
+  }));
 }
 
 // ── Supplier and employee records ──────────────────────────────────────────────
@@ -182,15 +200,6 @@ function renderPayeeRecord() {
   const paid = live.filter(x => x.status === 'PAID');
   const next = unpaid.find(x => !isPastDue(x, today));
   const lastPaid = paid.map(x => x.paidAt).filter(Boolean).sort().pop();
-  const lines = [
-    p.type ? `<span class="record-card__line">${escapeHTML(p.type)}</span>` : '',
-    `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
-    p.contactPerson ? `<span class="record-card__line">${escapeHTML(STR.clientContactShort({ name: p.contactPerson }))}</span>` : '',
-    p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
-    p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
-    p.birthDate ? `<span class="record-card__line">${escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))}</span>` : '',
-    p.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: p.taxId }))}</span>` : '',
-  ].filter(Boolean).join('');
   const subs = r.submissions || [];
   const pendingSubs = subs.filter(s => s.status === 'PENDING');
   const work = kind === 'employee' && submissionsOn();
@@ -257,21 +266,16 @@ function renderPayeeRecord() {
     : r.payments.length
       ? recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: r.payments.length })
       : recordEmpty(STR.payeeNoPayments, p.archivedAt ? null : 'payment', t.addPayment);
-  body.innerHTML = `
-    ${kind === 'employee'
-    ? recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: employeeStateButtons(p, inUse), warning: p.archivedAt ? t.inactiveSince({ date: fmtDay(p.archivedAt) }) : '' })
-    : recordCardHtml({ name: p.name, lines, since, contact: contactButtons(p.phone), actions: recordRemovalButton(p), archivedAt: p.archivedAt })}
-    ${recordKpisHtml(cells)}
-    ${recordAttentionHtml(attention)}
-    ${kind === 'employee' && employeePortalOn() ? employeeAccessHtml(p, r.access) : ''}
-    ${kind === 'employee' && r.time ? window.TimesheetsUI.recordHtml(p, r.time) : ''}
-    ${assigned ? employeeServicesHtml(r.services, today, !p.archivedAt) : ''}
-    ${work ? employeeWorkHtml(subs, r.access) : ''}
-    ${kind === 'supplier' ? supplierServicesPanel(p) : ''}
-    ${payments}
-    ${hasModule('payments') && !p.archivedAt ? recordFootHtml([['payment', t.addPayment]]) : ''}`;
+  body.innerHTML = kind === 'employee'
+    ? employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today })
+    : supplierRecordHtml(r, { since, cells, attention, payments });
   const here = () => payeeTrailEntry(kind, p);
   $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
+  $$('[data-record-tab]', body).forEach(b => b.addEventListener('click', () => {
+    r.tab = b.dataset.recordTab;
+    renderPayeeRecord();
+    $('[data-record-tab].is-on', body)?.focus();
+  }));
   const setArchivedAt = archivedAt => { r.payee = { ...p, archivedAt }; renderPayeeRecord(); refreshDirectory(cfg.path); };
   $('[data-record-remove]', body)?.addEventListener('click', () => removeDirectoryRecord(cfg.path, p, {
     inUse,
@@ -302,6 +306,92 @@ function renderPayeeRecord() {
       renderPayeeRecord();
     });
   }
+}
+
+// The employee's record, as the design draws it: a bar (call, edit, deactivate), then tabs: Profile (the fields,
+// the app sign-in and what needs attention), then services, timesheet, registered services and payments, as the
+// company's modules have them.
+function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today }) {
+  const p = r.payee;
+  const t = CRM.employees;
+  const tabs = [['profile', t.recordProfile, 0]];
+  if (assigned) tabs.push(['services', labels.services, r.services.length]);
+  if (r.time) tabs.push(['time', labels.timesheets, 0]);
+  if (work) tabs.push(['work', SUB.registeredTitle, r.submissions.length]);
+  if (hasModule('payments')) tabs.push(['payments', labels.payments, r.payments.length]);
+  if (!tabs.some(([id]) => id === r.tab)) r.tab = 'profile';
+  const status = p.archivedAt ? `<span class="pill">${escapeHTML(t.viewInactive)}</span>`
+    : pendingSubs.length ? `<span class="pill pill--warn">${escapeHTML(SUB.toApproveN({ n: pendingSubs.length }))}</span>`
+    : `<span class="pill pill--ok">${escapeHTML(t.viewActive)}</span>`;
+  const profile = `<div class="record__stack">
+    ${recordFieldsHtml([
+      [t.thStatus, status],
+      p.role ? [t.thRole, escapeHTML(p.role)] : null,
+      [t.thPhone, `<span class="mono">${escapeHTML(p.phone)}</span>`],
+      p.birthDate ? [t.formBirthDate, escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))] : null,
+      p.address ? [t.formAddress, `<a href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>`] : null,
+      p.taxId ? [t.formTaxId, `<span class="mono">${escapeHTML(p.taxId)}</span>`] : null,
+      ...kpiFieldRows(cells),
+    ])}
+    <p class="record-card__since">${escapeHTML(since)}</p>
+    ${employeePortalOn() ? employeeAccessHtml(p, r.access) : ''}
+    ${recordAttentionHtml(attention)}
+  </div>`;
+  const pane = {
+    services: () => employeeServicesHtml(r.services, today, !p.archivedAt),
+    time: () => window.TimesheetsUI.recordHtml(p, r.time),
+    // With nothing registered and no sign-in yet, that section draws nothing; its tab says so instead.
+    work: () => employeeWorkHtml(r.submissions, r.access) || recordEmpty(SUB.noneYet, null, ''),
+    payments: () => payments,
+  }[r.tab]?.() ?? profile;
+  // The services tab has its own foot (add a service, the report).
+  const foot = hasModule('payments') && !p.archivedAt && r.tab !== 'services' ? recordFootHtml([['payment', t.addPayment]]) : '';
+  return `
+    ${recordBarHtml({
+      name: p.name,
+      contact: contactButtons(p.phone),
+      end: `<button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${employeeStateButtons(p, inUse)}`,
+    })}
+    ${p.archivedAt ? `<p class="hint hint--warn">${escapeHTML(t.inactiveSince({ date: fmtDay(p.archivedAt) }))}</p>` : ''}
+    ${recordTabsHtml(tabs, r.tab)}
+    <div class="record__pane" role="tabpanel">${pane}</div>
+    ${foot}`;
+}
+
+// The supplier's record, like the employee's: the bar, then Profile (the fields and what needs attention), the
+// services they usually do and their payments.
+function supplierRecordHtml(r, { since, cells, attention, payments }) {
+  const p = r.payee;
+  const t = CRM.suppliers;
+  const tabs = [['profile', CRM.employees.recordProfile, 0], ['services', t.servicesLabel, (p.services || []).length]];
+  if (hasModule('payments')) tabs.push(['payments', labels.payments, r.payments.length]);
+  if (!tabs.some(([id]) => id === r.tab)) r.tab = 'profile';
+  const profile = `<div class="record__stack">
+    ${recordFieldsHtml([
+      p.type ? [t.thType, escapeHTML(p.type)] : null,
+      [t.thPhone, `<span class="mono">${escapeHTML(p.phone)}</span>`],
+      p.contactPerson ? [t.formContact, escapeHTML(p.contactPerson)] : null,
+      p.address ? [t.thAddress, `<a href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>`] : null,
+      p.taxId ? [CRM.employees.formTaxId, `<span class="mono">${escapeHTML(p.taxId)}</span>`] : null,
+      ...kpiFieldRows(cells),
+    ])}
+    <p class="record-card__since">${escapeHTML(since)}</p>
+    ${recordAttentionHtml(attention)}
+  </div>`;
+  const pane = {
+    services: () => supplierServicesPanel(p) || recordEmpty(t.servicesEmpty, null, ''),
+    payments: () => payments,
+  }[r.tab]?.() ?? profile;
+  return `
+    ${recordBarHtml({
+      name: p.name,
+      contact: contactButtons(p.phone),
+      end: `<button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${recordRemovalButton(p)}`,
+    })}
+    ${p.archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(p.archivedAt) }))}</p>` : ''}
+    ${recordTabsHtml(tabs, r.tab)}
+    <div class="record__pane" role="tabpanel">${pane}</div>
+    ${hasModule('payments') && !p.archivedAt ? recordFootHtml([['payment', CRM.employees.addPayment]]) : ''}`;
 }
 
 // An employee's services: to do is open work dated today or later (soonest first), done is the rest

@@ -4,18 +4,18 @@
 function serviceColumns() {
   const t = CRM.services;
   return [
-    { id: 'pick', label: '', pin: 'start', cell: s => `<td class="check">${s.status === 'OPEN' ? `<input type="checkbox" data-pick-service="${escapeHTML(s.id)}" data-client="${escapeHTML(s.clientId)}" />` : ''}</td>` },
-    { id: 'when', label: t.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>` },
-    { id: 'client', label: t.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName || '')}</td>` },
+    selectColumn('services'),
     { id: 'service', label: t.thService, cell: s => {
       const from = s.bookingId ? t.fromBooking : s.quoteId ? t.fromQuote : '';
       const text = serviceRowText(s);
-      return `<td><span class="svc-name" title="${escapeHTML(text)}">${escapeHTML(text)}${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</span></td>`;
+      return `<td><span class="svc-name" title="${escapeHTML(text)}"><button class="tbl__open" type="button">${escapeHTML(text)}</button>${from ? ` <span class="muted">· ${escapeHTML(from)}</span>` : ''}</span></td>`;
     } },
-    ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td class="muted">${escapeHTML(s.employeeName || '')}</td>` }] : []),
+    { id: 'client', label: t.thClient, cell: s => `<td class="name">${escapeHTML(s.clientName || '')}</td>` },
+    ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td>${s.employeeName ? nameWithInitials(s.employeeName) : ''}</td>` }] : []),
+    { id: 'when', label: t.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>` },
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
-    { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
     { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
+    { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
   ];
 }
 
@@ -55,9 +55,6 @@ function renderServices(root) {
     .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row ${s.status === 'INVOICED' ? 'is-paid' : ''}" data-service="${escapeHTML(s.id)}">${columnCells(columns, s)}</tr>`)
     .join('');
-  const open = scoped.filter(s => s.status === 'OPEN');
-  const openCents = open.reduce((sum, s) => sum + Number(s.totalEur || 0), 0);
-  const invoiced = scoped.filter(s => s.status === 'INVOICED');
   const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
   const clientFilter = clientOptions.length
     ? `<select class="sel" data-filter-svc-client aria-label="${escapeHTML(t.thClient)}"><option value="">${escapeHTML(t.filterClientAll)}</option>${clientOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === clientId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
@@ -85,11 +82,13 @@ function renderServices(root) {
       }).join('')
     : '';
   const views = serviceViewChips(period);
-  const tools = clientFilter + employeeFilter
-    + `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(t.filterAll)}</button>`
-    + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}</button>`).join('')
-    + (period ? '' : columnOrderButton('services'))
-    + (!period && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '');
+  // The counts follow the client and employee picked, so each tab's number is the rows it shows.
+  const statusTabs = `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(period ? t.filterAll : t.tabAll)}${chipCount(scoped.length)}</button>`
+    + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}${chipCount(scoped.filter(x => x.status === s).length)}</button>`).join('');
+  const tools = period
+    ? clientFilter + employeeFilter + statusTabs
+    : `${statusTabs}<span class="panel__tools-end">${clientFilter}${employeeFilter}${views}${columnOrderButton('services')}</span>`;
+  const invoiceAction = hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '';
   const filtered = Boolean(clientId || employeeId || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'services');
@@ -101,15 +100,14 @@ function renderServices(root) {
       { label: t.invoiced, value: fmtEUR(nowRoll.invoiced) },
       { label: t.thTotal, value: fmtEUR(nowRoll.total), hint: delta.text ? t.vsPrev({ delta: delta.text }) : '', trend: delta.trend },
     ]
-    : [
-      { label: t.open, value: `${open.length} · ${fmtEUR(openCents)}` },
-      { label: t.invoiced, value: invoiced.length },
-    ];
-  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, statCards(serviceStats), serviceNav) + crmPanel({
-    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : t.work,
+    : [];
+  pageCount(period ? null : listed.length);
+  root.innerHTML = hero(labels.services, CRM.tabs.servicos.desc, period ? statCards(serviceStats) : '', serviceNav) + crmPanel({
+    title: period === 'week' ? t.summaryWeek : period === 'month' ? t.summaryMonth : '',
     tag: period ? serviceGroups.length : listed.length,
-    views,
+    views: period ? views : '',
     tools,
+    bar: period ? '' : selectionBar('services', invoiceAction),
     head: period ? summaryHead : listHead,
     rows: period ? summaryRows : rows,
     empty: period ? t.summaryEmpty : (filtered ? t.emptyFiltered : t.emptyTitle),
@@ -124,9 +122,8 @@ function renderServices(root) {
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
   $('[data-filter-svc-employee]', root)?.addEventListener('change', e => { state.filterServiceEmployee = e.target.value; render(); });
-  $$('[data-pick-service]', root).forEach(box => box.addEventListener('click', e => e.stopPropagation()));
-  $$('[data-service]', root).forEach(r => r.addEventListener('click', e => {
-    if (e.target.closest('[data-pick-service]')) return;
+  if (!period) wireSelection(root, 'services', listed.map(s => s.id));
+  $$('[data-service]', root).forEach(r => r.addEventListener('click', () => {
     openServiceDetail(state.clientServices.find(s => s.id === r.dataset.service) || r.dataset.service);
   }));
   $('[data-invoice-services]', root)?.addEventListener('click', invoiceSelectedServices);
@@ -429,31 +426,33 @@ async function openServiceDetail(ref) {
   const showLines = lines.length > 1 || (lines.length === 1 && lines[0].description !== service.name);
   const body = document.createElement('div');
   body.className = 'form';
+  // The design's document drawer: its fields, its lines when it has several, then the actions in the foot.
   body.innerHTML = `
-    ${detailHead(service.clientName, servicePill(service.status), service.totalEur, tone, clientLink)}
-    ${detailMeta([
-      { label: t.when, value: service.performedAt ? fmtDay(service.performedAt) : '—' },
-      lines.length > 1 ? null : { label: t.qty, value: `${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}` },
-      booking ? { label: STR.clientKindBooking, value: bookingWhen(booking) } : null,
-      invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
-      doneBy ? { label: t.employee, value: doneBy.name } : null,
-      { label: STR.detailCreated, value: fmtDay(service.createdAt) },
+    ${recordFieldsHtml([
+      [t.thStatus, servicePill(service.status)],
+      [t.thClient, docClientHtml(service.clientName, clientLink)],
+      doneBy ? [t.employee, escapeHTML(doneBy.name)] : null,
+      [t.when, escapeHTML(service.performedAt ? fmtDay(service.performedAt) : '—')],
+      lines.length > 1 ? null : [t.qty, escapeHTML(`${service.quantity}${service.unit ? ` ${service.unit}` : ''} × ${fmtEUR(service.unitPriceEur)}`)],
+      [t.thTotal, recordFigureHtml(fmtEUR(service.totalEur)), tone],
+      booking ? [STR.clientKindBooking, escapeHTML(bookingWhen(booking))] : null,
+      invoice ? [STR.detailInvoice, escapeHTML(invoice.number)] : null,
+      [STR.detailCreated, escapeHTML(fmtDay(service.createdAt))],
+      service.notes ? [STR.clientFormNotes, escapeHTML(service.notes)] : null,
     ])}
     ${quote && !quoteLink ? `<p class="hint">${escapeHTML(STR.invoiceFromQuote({ number: quote.number }))}</p>` : ''}
-    ${showLines ? itemsTable(lines) : ''}
-    ${service.notes ? `<p class="hint">${escapeHTML(service.notes)}</p>` : ''}
+    ${showLines ? docLinesHtml(lines, service.totalEur) : ''}
     ${service.status === 'INVOICED' ? `<p class="hint">${escapeHTML(t.invoicedLocked)}</p>` : ''}
-    <div class="detail__foot">
-      ${isOpen && hasModule('invoices') ? `<button class="btn btn--sm btn--accent" type="button" data-svc-invoice>${escapeHTML(t.invoiceNow)}</button>` : ''}
-      ${isOpen ? `<button class="btn btn--sm" type="button" data-svc-edit>${escapeHTML(STR.clientEditAction)}</button>` : ''}
-      ${service.status === 'CANCELLED' && !service.bookingId ? `<button class="btn btn--sm" type="button" data-svc-reopen>${escapeHTML(t.reopen)}</button>` : ''}
+    ${docFootHtml(`
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
       ${booking && !linksBackTo(`booking:${booking.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-booking>${escapeHTML(t.openBooking)}</button>` : ''}
       ${quoteLink ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-quote>${escapeHTML(STR.detailOpenDoc({ number: quote.number }))}</button>` : ''}
       ${doneBy && !linksBackTo(`employee:${doneBy.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-open-employee>${escapeHTML(SUB.openEmployee({ name: doneBy.name }))}</button>` : ''}
       ${isOpen ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-cancel>${escapeHTML(t.cancel)}</button>` : ''}
       ${service.status !== 'INVOICED' ? `<button class="btn btn--sm btn--ghost" type="button" data-svc-delete>${escapeHTML(t.delete)}</button>` : ''}
-    </div>`;
+      ${service.status === 'CANCELLED' && !service.bookingId ? `<button class="btn btn--sm" type="button" data-svc-reopen>${escapeHTML(t.reopen)}</button>` : ''}
+      ${isOpen ? `<button class="btn btn--sm" type="button" data-svc-edit>${escapeHTML(STR.clientEditAction)}</button>` : ''}
+      ${isOpen && hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-svc-invoice>${escapeHTML(t.invoiceNow)}</button>` : ''}`)}`;
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(service.clientId)));
   $('[data-svc-edit]', body)?.addEventListener('click', () => openFrom(here, () => openServiceForm(service)));
   $('[data-svc-invoice]', body)?.addEventListener('click', () => openFrom(here, async () => {
@@ -476,20 +475,22 @@ async function openServiceDetail(ref) {
       openServiceDetail(service.id);
     } catch (err) { btn.disabled = false; toast(err?.code === 'quote_billed' ? t.reopenQuoteBilled : t.reopenFailed); }
   });
-  openDrawer(service.name, body);
+  openDrawer(service.name, body, false, { eyebrow: STR.eyebrowService });
 }
 
 async function invoiceSelectedServices() {
   const t = CRM.services;
-  const boxes = $$('[data-pick-service]:checked');
-  if (!boxes.length) return toast(t.invoiceNeedRows);
-  const clientIds = [...new Set(boxes.map(b => b.dataset.client))];
+  // Only open services are billed; other ticked rows (invoiced, cancelled) are left as they are.
+  const picked = selectedRows('services');
+  const open = state.clientServices.filter(s => picked.has(s.id) && s.status === 'OPEN');
+  if (!open.length) return toast(t.invoiceNeedRows);
+  const clientIds = [...new Set(open.map(s => s.clientId))];
   if (clientIds.length !== 1) return toast(t.invoiceNeedSameClient);
   const form = document.createElement('form');
   form.className = 'form';
   const due = new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10);
   form.innerHTML = `
-    <p class="hint">${escapeHTML(boxes.length + ' · ' + (state.clients.find(c => c.id === clientIds[0])?.name || ''))}</p>
+    <p class="hint">${escapeHTML(open.length + ' · ' + (state.clients.find(c => c.id === clientIds[0])?.name || ''))}</p>
     <div class="form__row"><label class="lbl" for="svc-due">${escapeHTML(t.invoiceDue)} <span class="req">●</span></label>
       <input class="inp" id="svc-due" type="date" required value="${due}" /></div>
     <button class="btn btn--primary" type="submit">${escapeHTML(t.invoiceSelected)}</button>`;
@@ -502,9 +503,10 @@ async function invoiceSelectedServices() {
     try {
       const invoice = await api('/app/api/crm/services/invoice', {
         method: 'POST',
-        body: JSON.stringify({ clientId: clientIds[0], serviceIds: boxes.map(b => b.dataset.pickService), dueDate }),
+        body: JSON.stringify({ clientId: clientIds[0], serviceIds: open.map(s => s.id), dueDate }),
       });
       closeDrawer();
+      picked.clear();
       await loadModule('services');
       if (hasModule('invoices')) state.invoices = await api('/app/api/crm/invoices').catch(() => state.invoices);
       render();

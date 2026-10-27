@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-20
+updated: 2026-10-27
 ---
 
 # Dashboard UI decisions
@@ -243,3 +243,93 @@ template studio's logo block, for the PDFs. Decisions (he confirmed the first tw
 Verified with route tests (an employee reads the logo, a non-image is refused, the bytes decide) and in
 headless Chrome: PNG and SVG uploads, the PDF drawing it, a reload, the studio's upload reaching the
 sidebar, Remove through the confirm, light and dark, and a 375px phone.
+
+## The compact shell (2026-10-27)
+
+Rodrigo had a "Tenant Dashboard" design drawn (a Twenty-style CRM: a sidebar on a gray page, one white
+main card, a 40px page bar, filter tabs with counts, dense grid tables, drawers floating inset) and
+asked for it in `/app`. Decisions:
+
+- **A layer, not a new skin.** `/app/index.html` declares `data-shell="compact"` beside
+  `data-layout="minimal"`, and its rules come last in the stylesheet. It changes density, radius and
+  layout; colors, the yellow-as-fill rule and the fonts stay. The design used Inter 13px; the design
+  system keeps Outfit and Nunito, so the page runs Nunito at 13.5px. The backoffice doesn't carry the
+  attribute yet, so it looks as before.
+- **The page bar names the page.** The crumb shows the nav icon and the page name, so each page's hero
+  heading and description are visually hidden (the `h1` stays for screen readers) and the hero shows
+  only its figures, as number cards. The design had no descriptions, so they are gone from view.
+- **The design's own content was not invented.** Its bulk-select boxes, Filter/Sort/Options buttons,
+  "+ Add New" rows, project kanban and "Edit layout" have no feature behind them, so they were left
+  out; pages keep their own content (Home's cards, the inbox, the bookings grid) restyled.
+- **The sidebar folds** to a 56px rail of icons on the desktop, remembered per browser
+  (`ui:sidebarCollapsed`). The active item is a gray fill, as in the design, instead of the yellow-soft
+  bar.
+- **Filter tabs show counts** on Quotes and Invoices, where the status is the only filter. Services and
+  Payments also filter by client, employee or supplier, so a status count there would not match the
+  rows; they have none.
+
+Checked in headless Chrome at 1440px and on a 375px phone with touch emulation, light and dark, with the
+sidebar open and folded and a client and quote drawer open.
+
+**Clients, rebuilt to the design (same day).** A re-skin alone left Clients far from the design (stat cards, a
+"Directory" heading, Address and Created columns, the big record card), and Rodrigo said so. Now:
+
+- The page bar shows the count; the list's head is only tabs: All clients, Owing, Overdue, Not billed
+  (those three with the invoices module) and Archived, each with its count, and Columns and Fields at the end.
+- Default columns are the name with initials, Email, Phone, Status, Billed, Owes and Client since; Address and
+  Client no. moved to the column picker. Status, Billed and Owes come from the company's invoices, fetched with
+  the clients on that page (`clientBalances()`): cancelled invoices don't count, Owes is what is still to
+  receive, Overdue means an invoice past due, Not billed means none. The design's Active and Lead statuses
+  have no field behind them, so the status is the client's money standing instead.
+- The record opens on an Overview tab: a list of fields (status, contact details, own fields, what is owed,
+  booked, to invoice, billed and quoted, client since), the notes and what needs attention. The bar above the
+  tabs keeps call, WhatsApp, the chat, edit and delete. The other tabs are as before.
+
+**The other lists, the font and picking rows (same day).** Rodrigo asked for the same rebuild on Quotes,
+Invoices, Services and Employees, for Inter as in the design (the design system's font rule changed with it:
+`/app` runs Inter and JetBrains Mono, the backoffice and the share page keep Outfit and Nunito), and for the
+design's select-all boxes.
+
+- Each list shows its count in the page bar, has no figures or heading above it, and its head is status tabs
+  with counts, then its selects, views and column reset at the end. Invoices and Services keep their figures
+  and titles in the By week and By month wrap-ups, where the figures are the point. New columns: Issued on
+  Quotes and Invoices, Paid on Invoices; the client, employee and name cells lead with initials. Services' tab
+  counts follow the client and employee picked, so they match the rows. Employees' tabs are All, To approve
+  (with the employee portal) and Inactive, and a Status column shows Active, To approve or Inactive; the
+  design's email, hours and sign-in columns have no data behind them.
+- The tick boxes needed something to do. Every list's bar has Export CSV (the ticked rows, as the columns
+  show them) and Clear; Services' Invoice selected moved there from the toolbar and bills the ticked open
+  services, which used to be the only rows with a box. Bulk archive, delete or send were not added: each is
+  a server change and a confirm of its own, to decide separately.
+- With Inter, weights drop by one step from Nunito's (500 for names, nav and buttons, 600 for titles and
+  figures), and list tables set numbers, dates and codes in Inter with tabular figures instead of the mono.
+
+**The drawers of Quotes, Invoices, Services and Employees (same day).** Rodrigo saw they still differed from
+the design, so they follow the Clients record now:
+
+- Quote, invoice and service drawers carry their kind as the eyebrow (Quote, Invoice, Service), then one list
+  of fields: status, the client (a link to the client's record), issued and due or valid dates, total, paid and
+  still owed, the tax office code, the project, the service's employee, quantity and booking, notes. Their
+  lines are a Lines table with a ruled Total line, and their actions sit in the drawer's foot at the bottom,
+  links and removal first, the main step (Convert to invoice, Mark paid, Invoice) last as the primary button.
+  The design's Subtotal and VAT lines were not drawn: the documents keep no VAT breakdown. Its Duplicate, Send
+  reminder, Reschedule and Mark done buttons have no feature behind them; the drawers keep their own actions.
+- The employee record has the client's bar (call, WhatsApp, edit, deactivate) and tabs: Profile (the fields,
+  the app sign-in and what needs attention), then Services, Timesheet, Registered services and Payments as the
+  company's modules have them. Suppliers keep the record card.
+- Gotcha: a `.drawer__foot` only sticks once the drawer scrolls; to keep a short drawer's foot at the bottom,
+  a body whose `.form` or `.record` ends in one becomes a flex column with the foot at `margin-top: auto`.
+
+**Suppliers and Bookings (same day).** Suppliers got the employee's layout: the list's head is All suppliers /
+Archived tabs with the type select and Columns at the end, tick boxes and initials; the record is the bar
+(call, WhatsApp, edit, archive or delete) and tabs Profile (type, phone, contact, address, tax ID, what is owed
+and paid, what needs attention), Usual services and Payments. No record card is drawn any more.
+
+Bookings follows the design's artboard: no figures above it; the page bar shows the week's range; the head has
+Week / List, then the arrows, Services and Opening hours. The week is seven day columns of cards instead of the
+hour grid, so a long booking no longer stretches across hours, and an empty day is booked from its + at its
+first opening hour (the hour cells were the old way in). The "To confirm" panel above the week went: pending
+bookings are the orange cards, the List's Pending tab counts them, and List rows keep a Confirm button. The
+List lost its day group rows (When carries the day) and gained tick boxes, status tabs with counts, phone and
+duration columns. The booking drawer is a field list with its actions in the foot, Confirm, Mark done or
+Invoice last. The design's "Where" and "Assigned to" fields have no data behind them on a booking.

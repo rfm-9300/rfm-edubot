@@ -21,7 +21,7 @@ let state = {
   instagramFilter: 'needs',
   search: '', active: 'overview', selectedAsset: '',
   // Directory ('clients', 'suppliers' or 'employees') whose archived records are listed instead of the active ones.
-  archivedView: '', archivedRows: [],
+  archivedView: '', archivedRows: [], filterClientStanding: '', clientBalances: null, selectedRows: {}, filterEmployeeView: '',
   // What the company asks for about clients: required standard fields and its own fields (GET /app/api/crm/clients/fields).
   clientFields: null,
   // Column choices of the directory lists and the column order of every list as read from this browser, by

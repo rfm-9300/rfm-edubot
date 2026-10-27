@@ -69,6 +69,10 @@ Active = `.is-active`. New tabs **must** get a `--nav-icon` outline mask in the 
 
 In the minimal skin the active item is a `--accent-soft` fill with a 3px `--accent` bar on the left (`box-shadow: inset 3px 0 0`), `--ink` text at weight 700 and a dark icon; icons follow the label color. Group labels are small sentence-case `--ink-mute` text. Items are 32px tall; the sidebar scrolls when the nav outgrows the window.
 
+### Compact shell: sidebar head and folding
+
+On `/app` (`html[data-shell="compact"]`) the brand shares a `.sidebar__head` with `.sidebar__toggle` (`#btn-sidebar`), which folds the desktop sidebar to a 56px rail of icons: `body.sidebar-collapsed`, kept per browser in `localStorage` `ui:sidebarCollapsed`. Folded, group labels become 1px rules, counts and the foot hide, and each `.nav__label` stays for screen readers (visually hidden) while the link's `title` names it on hover; `renderNav()` sets that `title`. The toggle's label (`app.sidebarCollapse` / `app.sidebarExpand`) and `aria-expanded` are set by `paintSidebarCollapsed()`. Under 920px the toggle hides and the slide-in menu works as before. The sidebar sits on the gray `--bg` with 28px items, a `--nav-active` gray fill for the active one (no yellow bar), and group labels 24px tall.
+
 ## Topbar
 
 ```html
@@ -99,6 +103,8 @@ The backoffice only searches tenants, so it sets `hidden` on `.topbar__search` o
 The backoffice's bar is `.topbar.topbar--one-row`: under 920px its search stays on the first row (menu and crumb · search · actions) instead of taking a row of its own, and under 620px it is the menu, the search and New. There the search takes the crumb's place while it shows (the page title below says the same), and the theme switch and Log out move to the end of the menu, in a `.sidebar__session` ([Sidebar KPIs](#sidebar-kpis)); signed out there is no menu, so the theme switch stays in the bar. `/app` keeps the two rows: its bar also holds the bell and the account button.
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
+
+In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon (`render()` sets its `data-tab`, which the `--nav-icon` rules key on, as for `.nav__item`) and name. Its buttons are 28px. Under 560px the icon hides.
 
 ## View hero + stats
 
@@ -226,6 +232,16 @@ A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter S
 `input.inp.panel__search` (`type="search"`) is a compact search field for a panel's tools or filters: 220px wide and as tall as the chips and toolbar selects beside it (28px, 36px on touch phones, 16px text on touch screens), the full width under 560px. The backoffice's Board and Passwords use it; the tenants list keeps the top bar's search. Redraw only what it filters, or put the focus and caret back, so typing isn't interrupted.
 
 `.view__foot` holds secondary actions at the end of a view, right-aligned under its last panel (Passwords' "Change the master password").
+
+In the compact shell the chips in `.panel__tools`, `.panel__filters` and `.panel__views` read as flat view tabs: no border, `--nav-active` gray when chosen. A filter chip may end with `chipCount(n)` (`components.js`, a `.chip__count`) for the records it leads to, as Quotes and Invoices do; only add it where the chip's count matches the rows it shows (not where another filter, a client or supplier select, narrows the list too). The list page's panel (`.view > .panel`) runs edge to edge of the main card with only top and bottom rules, the table is a 32px grid (hairlines between columns), and `.view__hero` shows only its stats, as separate number cards: its heading is visually hidden, since the page bar names the page.
+
+`crmPanel({ title: '' })` draws a head of view tabs only (`.panel__head--tabs`, the page bar names the page); wrap buttons that belong at its end (Columns, Fields) in `.panel__tools-end`. `pageCount(n)` (`components.js`) shows the list's count beside the page name in the bar (`#crumb-count`); `render()` clears it for every page, so a page sets it each render. A hero with no figures is `.view__hero--bare`, and in the compact shell the list under it starts right under the page bar. A list's name cell may lead with initials: `.tbl__who` > `.tbl__avatar` + a `.tbl__open` button (the Clients list).
+
+**Picking rows** (`columns.js`): `selectColumn(table, canPick?)` is a list's first column (pinned, left out of the column picker), its heading a select-all box. `selectionBar(table, actions?)` goes in `crmPanel({ bar })` and shows while a row is ticked: the count (`app.columns.selected`), the page's own buttons, Export CSV and Clear. `wireSelection(root, table, listedIds)` wires it; the ticks live in `state.selectedRows[table]` while the page is open (through searches, filters and redraws, for rows still listed) and clear on a page change. Export CSV writes the ticked rows with the columns as shown, pinned columns aside, semicolon-separated where the language writes decimal commas. A tick box and its cell don't open the row's record. Clients, Quotes, Invoices, Services and Employees have it; Services adds Invoice selected (the ticked open services of one client). Names lead with `nameWithInitials(name, open?)` (`components.js`).
+
+**Record and document drawers** (`records.js`, `components.js`): `recordBarHtml({ name, contact, end })` is the bar under the head (initials, contact buttons, edit and remove at the end), `recordTabsHtml(tabs, current)` the tabs (wire `[data-record-tab]`), `recordFieldsHtml(rows)` the field list (`[label, trusted html, tone?]`, empty rows dropped), `recordFigureHtml(value, note)` a figure in a field and `kpiFieldRows(cells)` KPI cells as fields. A quote, invoice or service drawer is `recordFieldsHtml` (Status, Client via `docClientHtml(name, link)`, dates, money), `docLinesHtml(items, total)` (a "Lines" table with a ruled Total line), notes as `.hint`, then `docFootHtml(buttons)`: the actions pinned to the drawer's foot, links and removal first, the main step (`.btn--primary`) last. A drawer whose `.form` or `.record` ends in a `.drawer__foot` fills the drawer, so the foot sits at the bottom even when the content is short; `mountRecordAutomations()` inserts above that foot. The client and employee records open on Overview / Profile; suppliers keep the record card.
+
+Records: `.record-bar` (avatar, contact buttons, `.record-bar__end` for edit and remove) replaces the record card at the top of the client's drawer, and its Overview tab is a `dl.record-fields` (label and value per line; a KPI's value takes `.record-fields__value`, its note `.record-fields__sub`, and a `data-tone` colors it). In the compact shell a record's `.chip-tabs` read as underlined tabs on one scrolling line.
 
 ### Panel with a view switch (List / By week / By month)
 
@@ -869,33 +885,27 @@ The isolated embed under `resources/widget/` accepts `data-title`, `data-subtitl
 
 ## Bookings calendar
 
-Reuse `.booking-toolbar`, `.cal-grid`, `.cal-event`. Do not introduce a third-party calendar skin.
+The Bookings page is one panel: a head of view tabs (Week / List; in List the status tabs with counts after a `.panel__sep`) with the week's ‹ › (and "This week" once moved), Services and Opening hours in `.panel__tools-end`; the page bar shows the week's range, or the List's count. Do not introduce a third-party calendar skin.
 
 ```html
-<div class="booking-toolbar">
-  <div class="booking-toolbar__views"><!-- Week / Agenda: .btn.btn--sm, active = .btn--primary --></div>
-  <div class="booking-toolbar__nav period-nav"><!-- ‹ label › and "This week" once navigated away --></div>
-  <div class="booking-toolbar__actions"><!-- Services · Opening hours --></div>
+<div class="week-board">
+  <section class="week-board__day is-today" aria-label="Tuesday, 27 October">
+    <h3 class="week-board__head"><b>27</b>Tue</h3>
+    <button class="week-event week-event--confirmed" type="button" data-booking-open="…"><b>Ana Silva</b><span>10:00 · Consulta</span></button>
+    <button class="week-board__add" type="button" data-booking-slot="2026-10-27T09:00" aria-label="New booking on …">+</button>
+  </section>
+  <section class="week-board__day is-closed">…</section>
 </div>
-<div class="panel cal-wrap"><div class="cal-grid">
-  <div class="cal-grid__dayhead is-today">…</div>
-  <div class="cal-grid__cell is-today" data-booking-slot="2026-09-28T10:00">
-    <button class="cal-event cal-event--confirmed" type="button">
-      <span class="cal-event__time mono">10:00–11:00</span>
-      <span class="cal-event__who">Ana Silva</span>
-      <span class="cal-event__what">Consulta</span>
-    </button>
-  </div>
-  <div class="cal-grid__cell is-closed"></div>
-</div></div>
 ```
 
-- Status modifiers: `.cal-event--pending|confirmed|completed|no-show|cancelled`, tinted from `--warn` / `--ok` / `--info` / `--bad` / `--ink-faint` (soft fill + 3px inset bar). No raw hex.
-- `.is-today` marks today's column (accent underline on the head, faint tint on cells). `.is-closed` hatches hours outside the opening hours — staff can still click it to book.
-- Grid cells, day keys and prefilled times are **tenant-local** (`Tenant.timezone`), never the browser zone.
+- Seven day columns of cards (one column under 900px). A card's 2px left edge and tint carry its status: `.week-event--pending` (`--warn`), `--confirmed` (`--accent` fill), `--completed` (`--ok` edge), `--no-show` (`--bad` edge, faded), `--cancelled` (faded, name struck through). No raw hex.
+- `.is-today` puts the date in a yellow badge; `.is-closed` hatches a day without opening hours. Each day ends in `.week-board__add`, which books it at its first opening hour (shown on hover and focus, always on touch screens).
+- Day keys and prefilled times are **tenant-local** (`Tenant.timezone`), never the browser zone.
+- List: `agendaColumns()` (tick box, when with its day, contact with initials, phone, service, duration, status, price, then Confirm or the source pinned at the end), no day group rows.
+- The booking drawer is a document drawer: `recordFieldsHtml` (status, contact, phone, when, service, duration, price, source, billing, notes), then `docFootHtml` with the step that moves it on (Confirm, Mark done or Invoice) last.
 - Opening-hours editor rows: `.booking-avail` > `.booking-avail-row` (day `.sel`, from/to `.inp`, remove `.iconbtn--danger`); `.booking-avail-row--head` carries the column labels.
-- Free-time picker in the booking drawer: `.slot-picks` of `.chip` buttons (picked = `.is-on`).
-- Agenda list: day group rows are `tr.is-day` (surface band, uppercase label in classic, sentence case in minimal).
+- Free-time picker in the booking form: `.slot-picks` of `.chip` buttons (picked = `.is-on`).
+- `.booking-toolbar`, `.cal-grid` and `.cal-event` (the old hour grid) are left in the stylesheet but nothing draws them since 2026-10-27.
 
 ## Document template studio
 

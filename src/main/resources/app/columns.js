@@ -60,7 +60,7 @@ function moveColumn(table, columns, ids, id, beforeId) {
 // With a `table` and at least two columns that move, each of their headings carries its id and takes the focus.
 function columnsHead(columns, table) {
   const movable = !!table && columns.filter(c => !c.pin).length > 1;
-  const th = c => `<th${c.head ? ` class="${c.head}"` : ''}${movable && !c.pin ? ` data-col="${escapeHTML(c.id)}" tabindex="0" title="${escapeHTML(COLUMNS.moveHint)}"` : ''}>${escapeHTML(c.label)}</th>`;
+  const th = c => c.headHtml || `<th${c.head ? ` class="${c.head}"` : ''}${c.pin ? ` data-pin="${c.pin}"` : ''}${movable && !c.pin ? ` data-col="${escapeHTML(c.id)}" tabindex="0" title="${escapeHTML(COLUMNS.moveHint)}"` : ''}>${escapeHTML(c.label)}</th>`;
   return `<tr${movable ? ` data-col-table="${table}"` : ''}>${columns.map(th).join('')}</tr>`;
 }
 // A cell may read which other columns are shown (`ids`), e.g. the address leaves the city to its own column.
@@ -193,4 +193,80 @@ function dragColumn(down, th, row, onDrop, onEnd) {
   addEventListener('keydown', onKey, true);
   if (s.hold) s.timer = setTimeout(begin, COLUMN_HOLD_MS);
   return s;
+}
+
+// ── Picking rows ──────────────────────────────────────────────────────────────
+// A list's first column ticks rows; its heading ticks every row shown. While any is ticked, a bar over the table
+// counts them and offers what can be done with them (export them as CSV, and the page's own actions). The ticks stay
+// while the page is open, through searches and filters, and only for rows still listed.
+const selectedRows = table => (state.selectedRows[table] ||= new Set());
+// `canPick(row)`: rows that can't be picked get an empty cell.
+function selectColumn(table, canPick = () => true) {
+  return {
+    id: 'select', label: COLUMNS.selectAll, pin: 'start', fixed: true,
+    headHtml: `<th class="check" data-pin="start"><input type="checkbox" data-select-all="${table}" aria-label="${escapeHTML(COLUMNS.selectAll)}" /></th>`,
+    cell: row => `<td class="check">${canPick(row) ? `<label class="tbl__check"><input type="checkbox" data-select-row="${escapeHTML(row.id)}" aria-label="${escapeHTML(COLUMNS.selectRow)}"${selectedRows(table).has(row.id) ? ' checked' : ''} /></label>` : ''}</td>`,
+  };
+}
+// `actions`: the page's own buttons (trusted HTML), after the count.
+function selectionBar(table, actions = '') {
+  return `<div class="selection-bar" data-selection="${table}" hidden>
+    <span class="selection-bar__count" data-selection-count></span>
+    <div class="actions">${actions}<button class="btn btn--sm" type="button" data-selection-export>${escapeHTML(COLUMNS.exportCsv)}</button><button class="btn btn--sm btn--ghost" type="button" data-selection-clear>${escapeHTML(COLUMNS.clearSelection)}</button></div>
+  </div>`;
+}
+// `listedIds`: every row the list holds now (a search may still hide some).
+function wireSelection(root, table, listedIds) {
+  const picked = selectedRows(table);
+  const listed = new Set(listedIds);
+  [...picked].forEach(id => { if (!listed.has(id)) picked.delete(id); });
+  const all = $(`[data-select-all="${table}"]`, root);
+  const bar = $(`[data-selection="${table}"]`, root);
+  const boxes = () => $$('[data-select-row]', root);
+  const paint = () => {
+    const shown = boxes();
+    const n = shown.filter(b => b.checked).length;
+    if (all) {
+      all.checked = n > 0 && n === shown.length;
+      all.indeterminate = n > 0 && n < shown.length;
+      all.disabled = !shown.length;
+    }
+    if (bar) {
+      bar.hidden = !n;
+      $('[data-selection-count]', bar).textContent = COLUMNS.selected({ n });
+    }
+  };
+  const pick = (box, on) => { box.checked = on; if (on) picked.add(box.dataset.selectRow); else picked.delete(box.dataset.selectRow); };
+  // The row opens its record on a click; the tick box and its cell don't.
+  $$('.tbl__check, td.check', root).forEach(el => el.addEventListener('click', e => e.stopPropagation()));
+  boxes().forEach(box => box.addEventListener('change', () => { pick(box, box.checked); paint(); }));
+  all?.addEventListener('change', () => { boxes().forEach(box => pick(box, all.checked)); paint(); });
+  $('[data-selection-clear]', bar)?.addEventListener('click', () => { boxes().forEach(box => pick(box, false)); picked.clear(); paint(); });
+  $('[data-selection-export]', bar)?.addEventListener('click', () => exportSelectedRows(all?.closest('table'), table));
+  paint();
+}
+// The ticked rows of `tableEl` as a CSV file, with the columns as shown (tick boxes and row actions aside). Semicolons
+// where the language writes decimal commas, as spreadsheets there expect; a BOM so they read the accents.
+function exportSelectedRows(tableEl, table) {
+  if (!tableEl) return;
+  const heads = $$('thead th', tableEl);
+  const keep = heads.map((th, i) => (th.dataset.pin ? -1 : i)).filter(i => i >= 0);
+  const sep = (1.5).toLocaleString(uiLocale()).includes(',') ? ';' : ',';
+  const cell = text => {
+    const v = String(text || '').replace(/\s+/g, ' ').trim();
+    return /[",;\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+  };
+  const lines = [keep.map(i => cell(heads[i].textContent)).join(sep)];
+  $$('tbody tr', tableEl).filter(tr => $('[data-select-row]', tr)?.checked).forEach(tr => {
+    const cells = $$(':scope > td', tr);
+    lines.push(keep.map(i => cell(cells[i]?.innerText)).join(sep));
+  });
+  const url = URL.createObjectURL(new Blob([`\ufeff${lines.join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${table}-${todayKey()}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 60000);
 }

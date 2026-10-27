@@ -50,9 +50,11 @@ async function openQuoteForm(opts = {}) {
 function quoteColumns() {
   const t = CRM.quotes;
   return [
-    { id: 'number', label: t.thNumber, cell: quote => `<td class="id">${escapeHTML(quote.number)}</td>` },
-    { id: 'client', label: t.thClient, cell: quote => `<td class="name">${escapeHTML(quote.clientName || '')}</td>` },
+    selectColumn('quotes'),
+    { id: 'number', label: t.thNumber, cell: quote => `<td class="id"><button class="tbl__open" type="button">${escapeHTML(quote.number)}</button></td>` },
+    { id: 'client', label: t.thClient, cell: quote => `<td class="name">${nameWithInitials(quote.clientName)}</td>` },
     { id: 'status', label: t.thStatus, cell: quote => `<td>${quotePill(quote.status)}</td>` },
+    { id: 'issued', label: t.thIssued, cell: quote => `<td class="mono muted nowrap">${fmtDay(quote.createdAt)}</td>` },
     { id: 'validUntil', label: t.thValidUntil, cell: quote => `<td class="mono muted">${fmtDay(quote.validUntil)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: quote => `<td class="num">${fmtEUR(quote.totalEur)}</td>` },
     { id: 'pdf', label: t.thPdf, head: 'right', pin: 'end', cell: quote => `<td class="right"><div class="actions">${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}</div></td>` },
@@ -63,24 +65,19 @@ function renderQuotes(root) {
   const t = CRM.quotes;
   const q = state.search.toLowerCase();
   const columns = orderedColumns('quotes', quoteColumns());
-  const rows = state.quotes
-    .filter(quote => !state.filterQuoteStatus || quote.status === state.filterQuoteStatus)
+  const listed = state.quotes.filter(quote => !state.filterQuoteStatus || quote.status === state.filterQuoteStatus);
+  const rows = listed
     .filter(quote => !q || `${quote.number} ${quote.clientName || ''} ${quoteStatusLabel(quote.status)}`.toLowerCase().includes(q))
     .map(quote => `<tr class="conversation-row ${quote.status === 'ACEITO' ? 'is-paid' : ''}" data-quote="${escapeHTML(quote.id)}">${columnCells(columns, quote)}</tr>`)
     .join('');
-  const accepted = state.quotes.filter(o => o.status === 'ACEITO').reduce((sum, o) => sum + Number(o.totalEur || 0), 0);
-  const sent = state.quotes.filter(o => o.status === 'PENDENTE' || o.status === 'SENT').reduce((sum, o) => sum + Number(o.totalEur || 0), 0);
-  const tools = `<button class="chip ${!state.filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(t.filterAll)}</button>`
-    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}</button>`).join('')
-    + columnOrderButton('quotes');
-  root.innerHTML = hero(labels.quotes, CRM.tabs.orcamentos.desc, statCards([
-    { label: t.total, value: state.quotes.length },
-    { label: t.sent, value: fmtEUR(sent) },
-    { label: t.accepted, value: fmtEUR(accepted) },
-  ])) + crmPanel({
-    title: t.proposals,
-    tag: rows ? state.quotes.filter(o => !state.filterQuoteStatus || o.status === state.filterQuoteStatus).length : 0,
+  const tools = `<button class="chip ${!state.filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(t.tabAll)}${chipCount(state.quotes.length)}</button>`
+    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}${chipCount(state.quotes.filter(o => o.status === s).length)}</button>`).join('')
+    + `<span class="panel__tools-end">${columnOrderButton('quotes')}</span>`;
+  pageCount(listed.length);
+  root.innerHTML = hero(labels.quotes, CRM.tabs.orcamentos.desc) + crmPanel({
+    title: '',
     tools,
+    bar: selectionBar('quotes'),
     head: columnsHead(columns, 'quotes'),
     rows,
     empty: t.emptyTitle,
@@ -88,6 +85,7 @@ function renderQuotes(root) {
   });
   wirePdfButtons(root);
   wireColumnOrder(root, 'quotes', quoteColumns());
+  wireSelection(root, 'quotes', listed.map(o => o.id));
   $$('[data-filter-quote]', root).forEach(btn => btn.addEventListener('click', () => { state.filterQuoteStatus = btn.dataset.filterQuote; render(); }));
   $$('[data-quote]', root).forEach(r => r.addEventListener('click', e => {
     if (e.target.closest('[data-pdf-url]')) return;
@@ -135,33 +133,37 @@ async function openQuoteDetail(id) {
   const canConvert = hasModule('invoices') && billable;
   const canService = hasModule('services') && billable;
   const clientLink = hasModule('clients') && !!quote.clientId && !linksBackTo(`client:${quote.clientId}`);
+  const t = CRM.quotes;
+  // The design's document drawer: its fields, its lines with the total, then the actions in the foot
+  // (links and removal first, the main step last).
   form.innerHTML = `
-    ${detailHead(quote.clientName, quotePill(quote.status), quote.totalEur, quoteTone(quote.status), clientLink)}
-    ${detailMeta([
-      { label: STR.detailCreated, value: fmtDay(quote.createdAt) },
-      quote.validUntil ? { label: CRM.quotes.thValidUntil, value: validity } : null,
-      service ? { label: STR.clientKindService, value: service.name } : null,
-      invoice ? { label: STR.detailInvoice, value: invoice.number } : null,
-      project ? { label: BLD.project, value: projectLabel(project) } : null,
+    ${recordFieldsHtml([
+      [t.thStatus, quotePill(quote.status)],
+      [t.thClient, docClientHtml(quote.clientName, clientLink)],
+      [t.thTotal, recordFigureHtml(fmtEUR(quote.totalEur)), quoteTone(quote.status)],
+      [t.thIssued, escapeHTML(fmtDay(quote.createdAt))],
+      quote.validUntil ? [t.thValidUntil, escapeHTML(validity)] : null,
+      service ? [STR.clientKindService, escapeHTML(service.name)] : null,
+      invoice ? [STR.detailInvoice, escapeHTML(invoice.number)] : null,
+      project ? [BLD.project, escapeHTML(projectLabel(project))] : null,
+      quote.notes ? [t.notes, escapeHTML(quote.notes)] : null,
     ])}
-    ${itemsTable(quote.items)}
-    ${quote.notes ? `<p class="hint">${escapeHTML(quote.notes)}</p>` : ''}
+    ${docLinesHtml(quote.items, quote.totalEur)}
     ${quote.projectId ? `<p class="hint">${escapeHTML(STR.quoteBilledByProject({ number: project?.number || '' }))}</p>` : ''}
     ${canConvert ? `<div class="form__row"><label class="lbl" for="q-due">${escapeHTML(STR.quoteConvertDue)}</label>
       <input class="inp" id="q-due" type="date" value="${new Date(Date.now() + 14 * 86400000).toISOString().slice(0, 10)}" /></div>` : ''}
-    <div class="detail__foot">
-      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
-      ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
-      ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
-      ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}
-      ${canService ? `<button class="btn btn--sm" type="button" data-q-service>${escapeHTML(STR.quoteToService)}</button>` : ''}
-      ${canProject ? `<button class="btn btn--sm" type="button" data-q-project>${escapeHTML(STR.quoteToProject)}</button>` : ''}
+    ${docFootHtml(`
       ${pdfButton(quote.id, 'quotes', quote.hasPdf, quote.number)}
       ${service && !linksBackTo(`service:${service.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-service>${escapeHTML(STR.bookingsOpenService)}</button>` : ''}
       ${invoice && !linksBackTo(`invoice:${invoice.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: invoice.number }))}</button>` : ''}
       ${project && !linksBackTo(`project:${project.id}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(STR.detailOpenDoc({ number: project.number }))}</button>` : ''}
       ${canDelete ? `<button class="btn btn--sm btn--ghost" type="button" data-q-delete>${escapeHTML(STR.quoteDelete)}</button>` : ''}
-    </div>`;
+      ${canEmail ? `<button class="btn btn--sm" type="button" data-send-email>${escapeHTML(GOOGLE.sendByEmail)}</button>` : ''}
+      ${canSend ? `<button class="btn btn--sm" type="button" data-q-status="SENT">${escapeHTML(STR.quoteMarkSent)}</button>` : ''}
+      ${canAccept ? `<button class="btn btn--sm" type="button" data-q-status="ACEITO">${escapeHTML(STR.quoteAccept)}</button>` : ''}
+      ${canService ? `<button class="btn btn--sm" type="button" data-q-service>${escapeHTML(STR.quoteToService)}</button>` : ''}
+      ${canProject ? `<button class="btn btn--sm" type="button" data-q-project>${escapeHTML(STR.quoteToProject)}</button>` : ''}
+      ${canConvert ? `<button class="btn btn--sm btn--primary" type="button" id="q-convert">${escapeHTML(STR.quoteConvert)}</button>` : ''}`)}`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(quote.clientId)));
   $('[data-q-service]', form)?.addEventListener('click', () => openFrom(here, () => openQuoteServiceForm(quote)));
   $('[data-open-service]', form)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(service.id)));
@@ -198,7 +200,7 @@ async function openQuoteDetail(id) {
   });
   $('[data-q-delete]', form)?.addEventListener('click', () => deleteQuote(quote));
   wirePdfButtons(form);
-  openDrawer(quote.number, form);
+  openDrawer(quote.number, form, false, { eyebrow: STR.eyebrowQuote });
   mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
 }
 

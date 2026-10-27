@@ -24,7 +24,7 @@ Follow these rules for any change under `src/main/resources/admin/`, `app/`, or 
 
 - Do not add a second stylesheet for admin / app / backoffice.
 - Do not hardcode hex, `oklch()`, or `rgb()` in component rules. Add a token on `:root` (and `html[data-theme="dark"]` if the dark value differs; for the minimal skin, in both minimal blocks).
-- Do not introduce a new font family. Stack is Outfit + Nunito + JetBrains Mono.
+- Do not introduce a new font family. `/app` (the compact shell) runs Inter + JetBrains Mono; the backoffice, `/admin` and the share page keep Outfit + Nunito + JetBrains Mono. Set a family through `--sans` / `--display` / `--mono`, never by name in a component rule.
 - Do not hardcode Portuguese (or any locale) in markup or JS render functions.
 - Do not copy widget (`.tbl-*`) styles into the dashboards, or dashboard classes into the widget.
 - Do not restyle legal pages to look like the CRM unless explicitly asked.

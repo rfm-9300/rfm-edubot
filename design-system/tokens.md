@@ -89,6 +89,18 @@ A second axis next to the theme. `classic` is everything above: the base layer. 
 
 Yellow is a fill. On white it is far below text contrast, so never color text or thin lines with `--accent` in the light skin: text on tints uses `--accent-deep` (or `--ink`, as the active nav item and selected chips do), and trend lines use `--accent-deep`. `--ink-faint` is decorative in minimal (bars); text uses `--ink-mute` or darker (≥ 4.5:1 on `--bg` and `--surface`). Components that read tokens restyle for free; add a `html[data-layout="minimal"]` rule only for what tokens can't express (uppercase labels, emoji, literal `999px` radii, heavy font weights).
 
+### Compact shell (`html[data-shell="compact"]`, `/app` only)
+
+`/app/index.html` also declares `data-shell="compact"`: the dense workspace layout from the 2026-10-27 "Tenant Dashboard" design, on top of the minimal skin. It changes size, density, radius and the font (Inter, see [Type](#type)), not the palette. The backoffice does not carry it; it adopts the layout by adding the attribute (and the `.sidebar__head` markup) once its own views are checked.
+
+| Token | Compact light | Compact dark |
+|---|---|---|
+| `--bg` | `#f1f2f4` (the page the sidebar sits on; the main card is `--surface`) | `#08090c` |
+| `--r-xs` … `--r-lg` | `4` / `4` / `6` / `8px` | inherited |
+| `--sidebar` | `228px` (`56px` folded, `body.sidebar-collapsed`) | inherited |
+| `--shadow-sm` / `--shadow-md` | none / `0 8px 24px` at 12% (floating drawers) | none / black 50% |
+| `--nav-hover` / `--nav-active` | `--ink` at 5% / 8% (hover, the active nav item, the chosen filter tab) | same mix |
+
 On dark, text that sits on an accent tint should use `var(--accent)` (not `--accent-deep`). Existing overrides: `.panel__title .tag`, `.pill--accent`, `.drawer__eyebrow`, `.auth__eyebrow`, `.pdf:hover`, `.lines__total .v`.
 
 ## Type
@@ -107,7 +119,9 @@ Nunito:400;600;700;800
 JetBrains Mono:400;500;600
 ```
 
-Body: `14px / 1.5`, antialiased. Do not add a fourth family. On touch screens (`pointer: coarse`) `.inp`, `.sel`, `.txt`, the top bar search and line-item fields are 16px: iOS zooms the page into a focused field under 16px.
+Body: `14px / 1.5`, antialiased. Do not add a fourth family.
+
+**`/app` (compact shell):** `--sans` and `--display` are both `"Inter", ui-sans-serif, system-ui, sans-serif`, loaded as `Inter:400;500;600;700` beside JetBrains Mono (`/app/index.html` no longer loads Outfit or Nunito). Body is 13px. Inter runs a weight lighter than Nunito for the same look: regular text 400, names, nav items, buttons and tabs 500, titles, the active nav item and figures 600. List tables set their numbers, dates and codes in Inter with tabular figures instead of the mono; JetBrains Mono stays for keys, kbd and code. On touch screens (`pointer: coarse`) `.inp`, `.sel`, `.txt`, the top bar search and line-item fields are 16px: iOS zooms the page into a focused field under 16px.
 
 | Role | Size | Weight | Font |
 |---|---|---|---|

@@ -3,7 +3,8 @@
 
 function hero(title, desc, stats = '', nav = '') {
   const right = nav ? `<div class="view__hero-right">${nav}${stats}</div>` : stats;
-  return `<div class="view__hero"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div>${right}</div>`;
+  // Bare: only the heading, which the compact shell hides, so the list below starts under the page bar.
+  return `<div class="view__hero${right ? '' : ' view__hero--bare'}"><div><h1 class="view__title">${escapeHTML(title)}</h1><p class="view__desc">${escapeHTML(desc)}</p></div>${right}</div>`;
 }
 function periodNav(selectedKey, grain, attr, t) {
   if (!grain) return '';
@@ -24,12 +25,22 @@ function statCards(items, size = '') {
     return `<div class="stat${sizeCls}${icon ? ' stat--icon' : ''}">${icon}<div class="stat__label">${escapeHTML(it.label)}</div><div class="stat__value${i === items.length - 1 ? ' stat__value--accent' : ''}">${escapeHTML(String(it.value))}</div>${it.hint ? `<div class="stat__hint${trendCls}">${escapeHTML(it.hint)}</div>` : ''}</div>`;
   }).join('')}</div>`;
 }
+// How many records the page lists, beside its name in the top bar; null hides it (render() clears it for every page).
+function pageCount(n) {
+  const el = $('#crumb-count');
+  el.hidden = n == null;
+  el.textContent = n == null ? '' : String(n);
+}
+// A name led by its initials, for a list's cell. `open`: the name is a button, so a keyboard reaches the row's record.
+const nameWithInitials = (name, open = false) => `<span class="tbl__who"><span class="tbl__avatar" aria-hidden="true">${escapeHTML(clientInitials(name))}</span>${open ? `<button class="tbl__open" type="button">${escapeHTML(name || '')}</button>` : `<span>${escapeHTML(name || '')}</span>`}</span>`;
+// How many records a filter chip leads to, after its label.
+const chipCount = n => `<span class="chip__count">${Number(n) || 0}</span>`;
 function panelTable(head, rows, empty = STR.noData, emptyDesc = '') {
   const cols = (String(head).match(/<th/g) || []).length || 8;
   const emptyCell = `<tr><td colspan="${cols}"><div class="empty"><p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
   return `<div class="panel"><div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || emptyCell}</tbody></table></div></div>`;
 }
-function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, emptyDesc, emptyArt = '' }) {
+function crmPanel({ title, tag, views = '', tools = '', bar = '', head, rows, empty, emptyDesc, emptyArt = '' }) {
   const cols = (String(head).match(/<th/g) || []).length || 8;
   const emptyCell = `<tr><td colspan="${cols}"><div class="empty${emptyArt ? ' empty--art' : ''}">${emptyArt}<p class="empty__title">${escapeHTML(empty)}</p>${emptyDesc ? `<p class="empty__desc">${escapeHTML(emptyDesc)}</p>` : ''}</div></td></tr>`;
   // `views` switches the panel's whole layout (e.g. List / By week / By month). Keep it out of
@@ -37,12 +48,15 @@ function crmPanel({ title, tag, views = '', tools = '', head, rows, empty, empty
   // and any `tools` (status/client filters) drop to their own `.panel__filters` row underneath.
   const headTools = views ? `<div class="panel__views">${views}</div>` : (tools ? `<div class="panel__tools">${tools}</div>` : '');
   const filtersRow = views && tools ? `<div class="panel__filters">${tools}</div>` : '';
+  // Without a title the head is a bar of view tabs (the top bar names the page); `.panel__tools-end` pushes buttons right.
+  const heading = title ? `<h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2>` : '';
   return `<div class="panel">
-    <div class="panel__head">
-      <h2 class="panel__title">${escapeHTML(title)}${tag != null ? ` <span class="tag">${escapeHTML(String(tag))}</span>` : ''}</h2>
+    <div class="panel__head${title ? '' : ' panel__head--tabs'}">
+      ${heading}
       ${headTools}
     </div>
     ${filtersRow}
+    ${bar}
     <div class="tbl-wrap"><table class="tbl"><thead>${head}</thead><tbody>${rows || emptyCell}</tbody></table></div>
   </div>`;
 }
@@ -51,6 +65,30 @@ function dashFacts(rows, inline = false) {
   if (!items.length) return '';
   return `<dl class="dash-facts${inline ? ' dash-facts--row' : ''}">${items.map(([label, value]) => `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(String(value))}</dd></div>`).join('')}</dl>`;
 }
+
+// ── A document's drawer (quote, invoice, service): its fields (recordFieldsHtml), its lines with their total,
+// then its actions in the drawer's foot. ──
+// The client as a field's value; with `link`, a button that opens the client's record (wire [data-detail-link]).
+function docClientHtml(name, link = false) {
+  const text = escapeHTML(name || '');
+  return link
+    ? `<button class="record-fields__link" type="button" data-detail-link aria-label="${escapeHTML(STR.detailOpenRecordAria({ name: name || '' }))}">${text}</button>`
+    : text;
+}
+function docLinesHtml(items, totalEur) {
+  if (!items || !items.length) return '';
+  const rows = items.map(it => `<tr><td>${escapeHTML(it.description)}</td><td class="num">${it.quantity}${it.unit ? ` ${escapeHTML(it.unit)}` : ''}</td><td class="num">${fmtEUR(it.unitPriceEur)}</td><td class="num">${fmtEUR(it.quantity * it.unitPriceEur)}</td></tr>`).join('');
+  return `<section class="doc-lines">
+    <h3 class="doc-lines__title">${escapeHTML(STR.detailLines)}</h3>
+    <div class="tbl-wrap"><table class="doc-lines__tbl">
+      <thead><tr><th>${escapeHTML(STR.lineColDesc)}</th><th class="num">${escapeHTML(STR.lineColQty)}</th><th class="num">${escapeHTML(STR.lineColPrice)}</th><th class="num">${escapeHTML(STR.lineTotal)}</th></tr></thead>
+      <tbody>${rows}</tbody>
+      <tfoot><tr><td colspan="3">${escapeHTML(STR.lineTotal)}</td><td class="num">${fmtEUR(totalEur)}</td></tr></tfoot>
+    </table></div>
+  </section>`;
+}
+// The actions (trusted html), pinned to the drawer's foot; nothing when there are none.
+const docFootHtml = buttons => (String(buttons).trim() ? `<div class="drawer__foot detail__foot">${buttons}</div>` : '');
 
 // With `link`, the name opens that client's or payee's record (wire [data-detail-link]).
 function detailHead(clientName, pillHtml, totalEur, tone, link = false) {

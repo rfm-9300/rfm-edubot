@@ -13,6 +13,7 @@ async function bootAuthed() {
   I18N.applyDom(document);
   document.documentElement.lang = I18N.locale();
   window.refreshThemeLabels?.();
+  paintSidebarCollapsed(document.body.classList.contains('sidebar-collapsed'));
   document.title = `${state.me.tenant.name} · ${STR.dashboardWord}`;
   $('#brand-name').textContent = state.me.tenant.name;
   $('#brand-sub').textContent = state.me.tenant.slug;
@@ -102,7 +103,7 @@ function renderNav() {
     const label = g.id === 'home' ? '' : `<div class="nav__group-label">${escapeHTML(labels[g.id] || g.id)}</div>`;
     const links = items.map(m => {
       const countHtml = Object.prototype.hasOwnProperty.call(counts, m) ? `<span class="nav__count${alerts[m] ? ' is-alert' : ''}">${counts[m]}</span>` : '';
-      return `<a class="nav__item${m === state.active ? ' is-active' : ''}" data-tab="${m}" href="#${m}"><span class="nav__dot"></span><span class="nav__label">${labels[m] || m}</span>${countHtml}</a>`;
+      return `<a class="nav__item${m === state.active ? ' is-active' : ''}" data-tab="${m}" href="#${m}" title="${escapeHTML(labels[m] || m)}"><span class="nav__dot"></span><span class="nav__label">${labels[m] || m}</span>${countHtml}</a>`;
     }).join('');
     return `<div class="nav__group">${label}${links}</div>`;
   }).join('');
@@ -135,6 +136,9 @@ async function setActive(tab) {
   state.filterSupplierType = '';
   state.filterSubmissionStatus = '';
   state.archivedView = '';
+  state.filterClientStanding = '';
+  state.selectedRows = {};
+  state.filterEmployeeView = '';
   try {
     await loadModule(tab);
     render();
@@ -150,7 +154,20 @@ async function loadModule(tab) {
     state.conversations = await api('/app/api/conversations');
     state.fetched.conversations = true;
   }
-  if (tab === 'clients') [state.clients] = await Promise.all([api('/app/api/crm/clients'), loadClientFields(true)]);
+  if (tab === 'clients') {
+    // The list's Status, Billed and Owes come from the company's invoices.
+    const [clients, invoices] = await Promise.all([
+      api('/app/api/crm/clients'),
+      hasModule('invoices') ? api('/app/api/crm/invoices').catch(() => null) : Promise.resolve(null),
+      loadClientFields(true),
+    ]);
+    state.clients = clients;
+    if (invoices) {
+      state.invoices = invoices;
+      state.fetched.invoices = true;
+    }
+    state.clientBalances = invoices ? new Map() : null;
+  }
   if (tab === 'suppliers') state.suppliers = await api('/app/api/crm/suppliers');
   if (tab === 'employees') {
     const [employees, pending] = await Promise.all([
@@ -281,6 +298,8 @@ function render() {
   renderCompanySwitch();
   renderBell();
   $('#crumb-leaf').textContent = labels[state.active] || state.active;
+  $('#crumb-leaf').dataset.tab = state.active;
+  pageCount(null);
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
   $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB,
@@ -499,8 +518,30 @@ function mountRecordAutomations(parent, subject, back) {
   if (!hasModule('agents') || !window.AgentsUI) return;
   const el = document.createElement('div');
   el.hidden = true;
-  parent.appendChild(el);
+  // Above the drawer's pinned foot, when it has one.
+  parent.insertBefore(el, [...parent.children].find(c => c.classList.contains('drawer__foot')) || null);
   window.AgentsUI.mountAutomations(el, subject, { back, hideEmpty: true }).then(() => { el.hidden = !el.childElementCount; });
+}
+
+// The desktop sidebar folds to a rail of icons; each browser remembers the choice. Phones keep the slide-in menu.
+const SIDEBAR_COLLAPSED_KEY = 'ui:sidebarCollapsed';
+function paintSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  const btn = $('#btn-sidebar');
+  const label = collapsed ? STR.sidebarExpand : STR.sidebarCollapse;
+  btn.setAttribute('aria-expanded', String(!collapsed));
+  btn.setAttribute('aria-label', label);
+  btn.title = label;
+}
+function wireSidebarToggle() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === '1'; } catch { /* storage blocked: start open */ }
+  paintSidebarCollapsed(collapsed);
+  $('#btn-sidebar').addEventListener('click', () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* keep it for this page only */ }
+    paintSidebarCollapsed(collapsed);
+  });
 }
 
 // `relayed`: this is a consent popup that already passed its outcome on and couldn't close.
@@ -512,6 +553,7 @@ async function init(relayed = false) {
   window.EmailUI?.init(emailDeps());
   window.MenusUI?.init(menusDeps());
   I18N.applyDom(document);
+  wireSidebarToggle();
   $('#btn-logout').addEventListener('click', () => signOut());
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
   $('#btn-notifications').addEventListener('click', () => { drawerTrail = []; openNotifications(); });

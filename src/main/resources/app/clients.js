@@ -20,25 +20,57 @@ const CLIENTS_EMPTY_ART = `<svg class="empty__art" viewBox="0 0 128 84" aria-hid
   </g>
 </svg>`;
 
+// What each client was billed and still owes, from the company's invoices (cancelled ones aside).
+function clientBalances() {
+  const today = todayKey();
+  const byClient = new Map();
+  for (const i of state.invoices) {
+    if (i.status === 'CANCELLED' || !i.clientId) continue;
+    const b = byClient.get(i.clientId) || { billed: 0, owes: 0, overdue: false };
+    b.billed += Number(i.totalEur || 0);
+    if (i.status === 'PENDING' || i.status === 'OVERDUE') {
+      b.owes += invoiceOutstandingEur(i);
+      if (isPastDue(i, today)) b.overdue = true;
+    }
+    byClient.set(i.clientId, b);
+  }
+  return byClient;
+}
+const NO_BALANCE = { billed: 0, owes: 0, overdue: false };
+// overdue · owing · paid (billed, nothing owed) · none (never billed).
+const clientStanding = b => (b.overdue ? 'overdue' : b.owes > 0.004 ? 'owing' : b.billed > 0 ? 'paid' : 'none');
+const CLIENT_STANDING_TONES = { overdue: 'bad', owing: 'warn', paid: 'ok', none: '' };
+const clientStandingPill = standing => `<span class="pill${CLIENT_STANDING_TONES[standing] ? ` pill--${CLIENT_STANDING_TONES[standing]}` : ''}">${escapeHTML(CRM.clients.standing[standing])}</span>`;
+// A status tab keeps the clients it names; `owing` includes the overdue ones.
+const CLIENT_STANDING_FILTERS = { owing: s => s === 'owing' || s === 'overdue', overdue: s => s === 'overdue', none: s => s === 'none' };
+
 function clientColumns() {
   const t = CRM.clients;
   const muted = value => `<td class="muted">${escapeHTML(value || '')}</td>`;
   const mono = value => `<td class="mono muted nowrap">${escapeHTML(value || '')}</td>`;
+  const balance = c => state.clientBalances?.get(c.id) || NO_BALANCE;
+  const money = hasModule('invoices') ? [
+    { id: 'standing', label: t.thStatus, default: true, cell: c => `<td>${clientStandingPill(clientStanding(balance(c)))}</td>` },
+    { id: 'billed', label: t.thBilled, default: true, head: 'right', cell: c => `<td class="num right nowrap">${balance(c).billed ? fmtEUR(balance(c).billed) : '—'}</td>` },
+    { id: 'owes', label: t.thOwes, default: true, head: 'right', cell: c => `<td class="num right nowrap${balance(c).overdue ? ' is-bad' : ''}">${balance(c).owes > 0.004 ? fmtEUR(balance(c).owes) : '—'}</td>` },
+  ] : [];
   return [
-    { id: 'name', label: t.thName, fixed: true, cell: c => `<td class="name long">${escapeHTML(c.name)}</td>` },
+    selectColumn('clients'),
+    { id: 'name', label: t.thName, fixed: true, cell: c => `<td class="name long">${nameWithInitials(c.name, true)}</td>` },
     { id: 'contactPerson', label: standardClientFieldLabel('contactPerson'), cell: c => muted(c.contactPerson) },
-    { id: 'address', label: t.thAddress, default: true, cell: (c, ids) => `<td class="muted long">${escapeHTML(ids.has('city') ? c.address || '' : [c.address, c.city].filter(Boolean).join(', '))}</td>` },
+    { id: 'address', label: t.thAddress, cell: (c, ids) => `<td class="muted long">${escapeHTML(ids.has('city') ? c.address || '' : [c.address, c.city].filter(Boolean).join(', '))}</td>` },
     { id: 'postalCode', label: standardClientFieldLabel('postalCode'), cell: c => mono(c.postalCode) },
     { id: 'city', label: standardClientFieldLabel('city'), cell: c => muted(c.city) },
+    { id: 'email', label: standardClientFieldLabel('email'), default: true, cell: c => muted(c.email) },
     { id: 'phone', label: t.thPhone, default: true, cell: c => mono(c.phone) },
-    { id: 'email', label: standardClientFieldLabel('email'), cell: c => muted(c.email) },
     { id: 'taxId', label: standardClientFieldLabel('taxId'), cell: c => mono(c.taxId) },
     ...clientCustomFields().map(f => ({
       id: f.key, label: f.label, default: f.showInList, custom: true, head: f.type === 'NUMBER' ? 'right' : '',
       cell: c => `<td class="${{ NUMBER: 'num nowrap', DATE: 'mono muted nowrap', CHECKBOX: 'muted' }[f.type] || 'muted long'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`,
     })),
-    { id: 'createdAt', label: t.thCreated, default: true, cell: c => `<td class="mono nowrap">${fmtDay(c.createdAt)}</td>` },
-    { id: 'number', label: t.thNo, default: true, head: 'right', cell: c => `<td class="id right">${escapeHTML(c.number)}</td>` },
+    ...money,
+    { id: 'createdAt', label: t.thSince, default: true, cell: c => `<td class="mono muted nowrap">${fmtDay(c.createdAt)}</td>` },
+    { id: 'number', label: t.thNo, head: 'right', cell: c => `<td class="id right">${escapeHTML(c.number)}</td>` },
   ];
 }
 
@@ -54,20 +86,28 @@ function renderClients(root) {
   const matches = c => !q
     || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
-  const rows = source
+  const money = hasModule('invoices') && !!state.clientBalances;
+  state.clientBalances = money ? clientBalances() : null;
+  const standingOf = c => clientStanding(state.clientBalances?.get(c.id) || NO_BALANCE);
+  const filter = !archived && money ? CLIENT_STANDING_FILTERS[state.filterClientStanding] : null;
+  const shown = source.filter(c => !filter || filter(standingOf(c)));
+  const rows = shown
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
     .map(c => `<tr class="conversation-row" data-client="${escapeHTML(c.id)}">${columnCells(columns, c, ids)}</tr>`)
     .join('');
-  const new30 = state.clients.filter(c => c.createdAt && (Date.now() - new Date(c.createdAt)) / 86400000 <= 30).length;
-  root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc, statCards([
-    { label: t.total, value: state.clients.length, icon: 'users' },
-    { label: t.new30, value: new30, icon: 'user-plus' },
-  ])) + crmPanel({
-    title: t.directory,
-    tag: source.length,
-    tools: directoryViewChips('clients') + columnsButton('clients') + columnOrderButton('clients')
-      + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : ''),
+  // Tabs: every client, then by what they owe (with the invoices module), then the archived ones.
+  const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-client-tab="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
+  const standingTab = (key, label) => tab(key, label, state.clients.filter(c => CLIENT_STANDING_FILTERS[key](standingOf(c))).length, !archived && state.filterClientStanding === key);
+  const tabs = tab('', t.tabAll, state.clients.length, !archived && !filter)
+    + (money ? standingTab('owing', t.tabOwing) + standingTab('overdue', t.tabOverdue) + standingTab('none', t.tabNotBilled) : '')
+    + tab('archived', STR.directoryArchived, archived ? source.length : null, archived);
+  pageCount(shown.length);
+  root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc) + crmPanel({
+    title: '',
+    tools: tabs + `<span class="panel__tools-end">${columnsButton('clients') + columnOrderButton('clients')
+      + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : '')}</span>`,
+    bar: selectionBar('clients'),
     head: columnsHead(columns, 'clients'),
     rows,
     empty: archived ? STR.directoryArchivedEmpty : t.emptyTitle,
@@ -78,7 +118,14 @@ function renderClients(root) {
   $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('clients', clientColumns(), labels.clients));
   wireColumnOrder(root, 'clients', clientColumns());
-  wireDirectoryView(root);
+  wireSelection(root, 'clients', shown.map(c => c.id));
+  $$('[data-client-tab]', root).forEach(b => b.addEventListener('click', () => {
+    const key = b.dataset.clientTab;
+    if (key === 'archived') return showDirectoryView('clients');
+    state.filterClientStanding = key;
+    if (archived) return showDirectoryView('');
+    render();
+  }));
 }
 
 // ── Client record ──────────────────────────────────────────────────────────────
@@ -191,38 +238,50 @@ function clientLastActivity(r) {
   ].filter(s => s && new Date(s).getTime() <= now).sort().pop() || null;
 }
 
-function clientCardHtml(r, bk) {
-  const c = r.client;
+// "3/2/25 · 4 visits · last activity 2 days ago", under the Client since label.
+function clientSinceText(r, bk) {
   const last = clientLastActivity(r);
-  const since = [
-    STR.clientSince({ date: fmtDay(c.createdAt) }),
+  return [
+    fmtDay(r.client.createdAt),
     bk.visits ? STR.clientVisits({ n: bk.visits }) : '',
     bk.noShows ? STR.bookingsClientNoShows({ n: bk.noShows }) : '',
     last ? STR.clientLastActivity({ when: relTime(last) }) : '',
   ].filter(Boolean).join(' · ');
-  const address = fullAddress(c);
-  const lines = [
-    `<span class="record-card__line mono">${escapeHTML(c.phone)}</span>`,
-    c.email ? `<a class="record-card__line" href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>` : '',
-    c.contactPerson ? `<span class="record-card__line">${escapeHTML(STR.clientContactShort({ name: c.contactPerson }))}</span>` : '',
-    address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(address))}" target="_blank" rel="noopener">${escapeHTML(address)}</a>` : '',
-    c.taxId ? `<span class="record-card__line mono">${escapeHTML(STR.clientTaxIdShort({ id: c.taxId }))}</span>` : '',
-  ].filter(Boolean).join('');
+}
+
+// Under the drawer's head: call, WhatsApp and the chat, then edit and archive or delete.
+function clientBarHtml(r) {
+  const c = r.client;
   const chat = r.conversation
     ? `<button class="btn btn--sm" type="button" data-record-open="chat">${escapeHTML(STR.clientOpenChat)}${r.conversation.waiting ? ` <span class="pill pill--warn">${escapeHTML(STR.waiting)}</span>` : ''}</button>`
     : '';
-  return recordCardHtml({
-    name: c.name, lines, since, contact: contactButtons(c.phone, chat), notes: c.notes,
-    actions: recordRemovalButton(c), archivedAt: c.archivedAt,
-    warning: c.automationPaused && hasModule('agents') ? I18N.t('app.agents.automations.pausedTitle') : '',
-  });
+  return `${recordBarHtml({
+    name: c.name,
+    contact: contactButtons(c.phone, chat),
+    end: `<button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${recordRemovalButton(c)}`,
+  })}
+    ${c.archivedAt ? `<p class="hint hint--warn">${escapeHTML(STR.recordArchivedOn({ date: fmtDay(c.archivedAt) }))}</p>` : ''}
+    ${c.automationPaused && hasModule('agents') ? `<p class="hint hint--warn">${escapeHTML(I18N.t('app.agents.automations.pausedTitle'))}</p>` : ''}`;
 }
 
-// The company's own fields that this client has a value for.
-function clientDetailsHtml(c) {
-  const facts = clientCustomFields().map(f => [f.label, customFieldText(f, c.customFields?.[f.key])]).filter(([, text]) => text);
-  if (!facts.length) return '';
-  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(FIELDS.detailsTitle)}</h2></header><div class="panel__body">${dashFacts(facts)}</div></section>`;
+// The Overview tab: who the client is and where they stand, as one list of fields, the notes, then what needs attention.
+function clientOverviewHtml(r, m, bk) {
+  const c = r.client;
+  const t = CRM.clients;
+  const address = fullAddress(c);
+  const fields = recordFieldsHtml([
+    hasModule('invoices') ? [t.thStatus, clientStandingPill(clientStanding({ billed: m.billed, owes: m.outstanding, overdue: m.overdue.length > 0 }))] : null,
+    [standardClientFieldLabel('phone'), `<span class="mono">${escapeHTML(c.phone)}</span>`],
+    c.email ? [standardClientFieldLabel('email'), `<a href="mailto:${escapeHTML(c.email)}">${escapeHTML(c.email)}</a>`] : null,
+    c.contactPerson ? [standardClientFieldLabel('contactPerson'), escapeHTML(c.contactPerson)] : null,
+    address ? [t.thAddress, `<a href="${escapeHTML(mapsHref(address))}" target="_blank" rel="noopener">${escapeHTML(address)}</a>`] : null,
+    c.taxId ? [standardClientFieldLabel('taxId'), `<span class="mono">${escapeHTML(c.taxId)}</span>`] : null,
+    ...clientCustomFields().map(f => [f.label, escapeHTML(customFieldText(f, c.customFields?.[f.key]))]),
+    ...kpiFieldRows(clientKpiCells(m, bk)),
+    [t.thSince, escapeHTML(clientSinceText(r, bk))],
+  ]);
+  const notes = c.notes ? `<div class="record-card__notes"><span class="record-card__notes-label">${escapeHTML(STR.clientFormNotes)}</span>${escapeHTML(c.notes)}</div>` : '';
+  return `<div class="record__stack">${fields}${notes}${recordAttentionHtml(clientAttention(r, m, bk))}</div>`;
 }
 
 function clientKpiCells(m, bk) {
@@ -412,6 +471,7 @@ function clientFinanceHtml(r, m, act) {
 function clientPaneHtml(r, m, bk) {
   // An archived client gets no new documents until it is restored.
   const act = kind => (r.client.archivedAt ? null : kind);
+  if (r.tab === 'overview') return clientOverviewHtml(r, m, bk);
   if (r.tab === 'automations') return '<div data-client-automations></div>';
   if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
   if (r.tab === 'emails') {
@@ -480,7 +540,7 @@ function clientPaneHtml(r, m, bk) {
 }
 
 function clientTabs(r) {
-  const tabs = [['activity', STR.clientTabActivity, 0]];
+  const tabs = [['overview', CRM.clients.recordOverview, 0], ['activity', STR.clientTabActivity, 0]];
   if (hasModule('invoices') || hasModule('payments')) tabs.push(['finance', labels.financeiro, 0]);
   if (hasModule('bookings')) tabs.push(['bookings', labels.bookings, r.bookings.length]);
   if (hasModule('services')) tabs.push(['services', labels.services, r.services.length]);
@@ -489,8 +549,8 @@ function clientTabs(r) {
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
   if (r.emails) tabs.push(['emails', GOOGLE.tab, r.emails.length]);
   if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
-  if (!tabs.some(([id]) => id === r.tab)) r.tab = 'activity';
-  return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
+  if (!tabs.some(([id]) => id === r.tab)) r.tab = 'overview';
+  return recordTabsHtml(tabs, r.tab);
 }
 
 function renderClientRecord(focusTab = false) {
@@ -506,10 +566,7 @@ function renderClientRecord(focusTab = false) {
     hasModule('invoices') ? ['invoice', CRM.tabs.faturas.newLabel] : null,
   ].filter(Boolean);
   body.innerHTML = `
-    ${clientCardHtml(r, bk)}
-    ${clientDetailsHtml(r.client)}
-    ${recordKpisHtml(clientKpiCells(m, bk))}
-    ${recordAttentionHtml(clientAttention(r, m, bk))}
+    ${clientBarHtml(r)}
     ${clientTabs(r)}
     <div class="record__pane" role="tabpanel">${clientPaneHtml(r, m, bk)}</div>
     ${r.client.archivedAt ? '' : recordFootHtml(acts)}`;
@@ -613,7 +670,7 @@ async function openClientDrawer(ref, tab) {
   const record = await loadClientRecord(id);
   if (gen !== drawerGen) return;
   if (!record.client) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
-  clientRecord = { ...record, el: body, tab: tab || (clientRecord?.client?.id === id ? clientRecord.tab : 'activity') };
+  clientRecord = { ...record, el: body, tab: tab || (clientRecord?.client?.id === id ? clientRecord.tab : 'overview') };
   $('#drawer-title').textContent = record.client.name;
   renderDrawerEyebrow(eyebrow(record.client));
   renderClientRecord();
