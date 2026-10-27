@@ -1,7 +1,5 @@
 package com.rfm.edubot.crm
 
-import com.mongodb.ErrorCategory
-import com.mongodb.MongoServerException
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.tenant.model.DirectoryFields
 import kotlinx.serialization.json.JsonPrimitive
@@ -9,8 +7,8 @@ import org.bson.types.ObjectId
 
 /**
  * A company's clients and the rules for changing them. [create] and [update] apply the client form's rules in its
- * order: a name and a phone, what the company requires ([fields]), valid details, its own fields, then one client
- * per phone. The Clients page, the backoffice and the dashboard assistant write through them; the bot's
+ * order: a name and a phone, what the company requires ([fields]), valid details, then its own fields. Clients may
+ * share a phone. The Clients page, the backoffice and the dashboard assistant write through them; the bot's
  * `create_client` uses [createOrRestore], which needs only a name and a phone.
  */
 class ClientDirectory(private val clients: ClientRepository, private val fields: DirectoryFields = ClientFields.DEFAULT) {
@@ -21,9 +19,6 @@ class ClientDirectory(private val clients: ClientRepository, private val fields:
         /** [error] is a stable code; [field] is the key of the company's own field it is about, if it is about one. */
         data class Invalid(val error: String, val field: String? = null) : Outcome
 
-        /** Another client of the company has the phone: [owner], while it can still be read. */
-        data class PhoneTaken(val owner: Client?) : Outcome
-
         data object NotFound : Outcome
     }
 
@@ -33,7 +28,7 @@ class ClientDirectory(private val clients: ClientRepository, private val fields:
     suspend fun create(draft: ClientDraft): Outcome {
         val checked = checked(draft, existing = null)
         checked.invalid?.let { return it }
-        return write(draft.phone) {
+        return saved {
             clients.create(
                 draft.name, draft.phone, draft.address, draft.email, draft.taxId, draft.notes,
                 draft.postalCode, draft.city, draft.contactPerson,
@@ -47,7 +42,7 @@ class ClientDirectory(private val clients: ClientRepository, private val fields:
         val existing = clients.findById(id) ?: return Outcome.NotFound
         val checked = checked(draft, existing)
         checked.invalid?.let { return it }
-        return write(draft.phone) {
+        return saved {
             clients.update(
                 id, draft.name, draft.phone, draft.address, draft.email, draft.taxId, draft.notes,
                 draft.postalCode, draft.city, draft.contactPerson, customFieldChanges = checked.custom,
@@ -73,14 +68,7 @@ class ClientDirectory(private val clients: ClientRepository, private val fields:
         }
     }
 
-    // Phone is unique per company (an index), so a clash surfaces as a duplicate key: inserts throw
-    // MongoWriteException, findOneAndUpdate MongoCommandException, and both carry the code.
-    private suspend fun write(phone: String, save: suspend () -> Client?): Outcome = try {
-        save()?.let { Outcome.Saved(it) } ?: Outcome.NotFound
-    } catch (e: MongoServerException) {
-        if (ErrorCategory.fromErrorCode(e.code) != ErrorCategory.DUPLICATE_KEY) throw e
-        Outcome.PhoneTaken(clients.findByPhone(phone))
-    }
+    private suspend fun saved(save: suspend () -> Client?): Outcome = save()?.let { Outcome.Saved(it) } ?: Outcome.NotFound
 
     companion object {
         const val NAME_AND_PHONE_REQUIRED = "name and phone are required"

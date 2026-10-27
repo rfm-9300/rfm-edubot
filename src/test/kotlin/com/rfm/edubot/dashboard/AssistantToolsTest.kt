@@ -214,6 +214,10 @@ class AssistantToolsTest {
         }!!
         assertEquals("phone_taken", taken.text("error"))
         assertTrue("Ana Ribeiro (${ana.number})" in taken.text("message")!!, "however the number is typed")
+        assertNull(c.check("create_client") {
+            put("name", "Rui"); put("phone", "912345678"); put("tax_id", "234567890"); put("email", "rui@example.pt"); put("same_phone_ok", true)
+            putJsonObject("custom_fields") { put("pet's name", "Bobi") }
+        }, "once the user confirms, a client may share the phone")
 
         val created = c.run("create_client") {
             put("name", "Rui Costa"); put("phone", c.phone()); put("tax_id", "234567890"); put("email", "rui@example.pt"); put("city", "Porto")
@@ -237,6 +241,7 @@ class AssistantToolsTest {
         assertEquals("nothing_to_change", c.check("update_client") { put("client_id", ana.id.toHexString()); put("city", "Lisboa") }!!.text("error"))
         assertEquals("tax_id_required", c.check("update_client") { put("client_id", ana.id.toHexString()); put("tax_id", "") }!!.text("error"))
         assertEquals("phone_taken", c.check("update_client") { put("client_id", ana.id.toHexString()); put("phone", rui.phone) }!!.text("error"))
+        assertNull(c.check("update_client") { put("client_id", ana.id.toHexString()); put("phone", rui.phone); put("same_phone_ok", true) })
 
         c.run("update_client") { put("client_id", ana.id.toHexString()); put("email", "ana@new.pt"); put("notes", "VIP") }
         val updated = c.clients.findById(ana.id)!!

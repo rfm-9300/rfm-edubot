@@ -83,7 +83,7 @@ class ClientApiTest {
         assertFalse(id in b.get(base).ids())
         assertTrue(id in a.get(base).ids())
         assertEquals("Casa Martins", a.get("$base/$id").text("name"), "nothing b sent reached it")
-        assertEquals(HttpStatusCode.Created, b.post(base) { put("name", "Casa B"); put("phone", number); put("taxId", "1"); put("address", "x") }.status, "phones are unique per company")
+        assertEquals(HttpStatusCode.Created, b.post(base) { put("name", "Casa B"); put("phone", number); put("taxId", "1"); put("address", "x") }.status, "another company's client may have the phone")
     }
 
     @Test
@@ -96,9 +96,8 @@ class ClientApiTest {
         assertEquals("name and phone are required", a.post(base) { put("name", " "); put("phone", phone()) }.error)
         assertEquals("tax_id_required", a.post(base) { put("name", "Ana"); put("phone", phone()); put("address", "Rua 1") }.error)
         assertEquals("invalid_email", a.post(base) { put("name", "Ana"); put("phone", phone()); put("taxId", "1"); put("address", "Rua 1"); put("email", "ana@") }.error)
-        val taken = a.post(base) { put("name", "Ana"); put("phone", number); put("taxId", "1"); put("address", "Rua 1") }
-        assertEquals(HttpStatusCode.Conflict, taken.status)
-        assertEquals("phone_taken", taken.error)
+        val shared = a.post(base) { put("name", "Ana"); put("phone", number); put("taxId", "1"); put("address", "Rua 1") }
+        assertEquals(HttpStatusCode.Created, shared.status, "clients may share a phone")
         assertEquals(HttpStatusCode.BadRequest, a.get("$base/not-an-id").status)
         assertEquals(HttpStatusCode.NotFound, a.get("$base/${ObjectId()}").status)
         assertEquals(HttpStatusCode.NotFound, a.patch("$base/${ObjectId()}") { put("name", "Ana"); put("phone", phone()); put("taxId", "1"); put("address", "Rua 1") }.status)

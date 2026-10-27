@@ -51,6 +51,18 @@ class DirectoryRecordsTest {
     }
 
     @Test
+    fun `clients may share a phone, and the lookup prefers an active one, then the newest`() = runBlocking<Unit> {
+        val clients = ClientRepository(mongoModule, tenantId)
+        val first = clients.create("Ana Ribeiro", "+351 913 000 001")
+        val second = clients.create("Rui Ribeiro", "913000001")
+        val third = clients.create("Eva Ribeiro", "913 000 001")
+
+        assertEquals(third.id, clients.findByPhone("913000001")?.id)
+        clients.setArchived(third.id, archived = true)
+        assertEquals(listOf(second.id, first.id, third.id), clients.findAllByPhone("+351913000001").map { it.id })
+    }
+
+    @Test
     fun `a client with no documents is deleted, one with documents is archived and restored`() = runBlocking<Unit> {
         val clients = ClientRepository(mongoModule, tenantId)
         val unused = clients.create("Ana Ribeiro", "+351 911 000 001")
@@ -66,7 +78,7 @@ class DirectoryRecordsTest {
         assertEquals(emptyList(), clients.search("").map { it.id })
         assertEquals(listOf(busy.id), clients.search("", archived = true).map { it.id })
         assertEquals(emptyList(), clients.search("Bruno").map { it.id }, "pickers and the bot's search skip archived clients")
-        assertEquals(busy.id, clients.findByPhone("911000002")?.id, "an archived client still owns its phone")
+        assertEquals(busy.id, clients.findByPhone("911000002")?.id, "an archived client is still found by its phone")
         assertEquals(archivedAt, clients.setArchived(busy.id, archived = true)?.archivedAt, "archiving twice keeps the first date")
 
         assertNull(clients.setArchived(busy.id, archived = false)?.archivedAt)

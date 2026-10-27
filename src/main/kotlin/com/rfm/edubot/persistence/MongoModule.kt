@@ -95,7 +95,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
 
             val crmClients = db.getCollection<Document>("crm.clients")
             crmClients.dropIndexIfExists("phone_1")
-            crmClients.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().unique(true))
+            // Clients may share a phone (a family, a company's sites), so the old unique index goes; the lookup one keeps a new name
+            // so later startups don't drop and rebuild it.
+            crmClients.dropIndexIfExists("tenantId_1_phone_1")
+            crmClients.createIndex(Document("tenantId", 1).append("phone", 1), IndexOptions().name("tenantId_1_phone_lookup"))
             crmClients.createIndex(Document("name", "text"))
             crmClients.createIndex(
                 Document("tenantId", 1).append("email", 1),

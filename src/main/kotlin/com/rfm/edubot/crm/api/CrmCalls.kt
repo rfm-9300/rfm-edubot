@@ -51,7 +51,7 @@ private suspend fun ApplicationCall.respondCatalogWrite(status: HttpStatusCode, 
 
 /**
  * A client write as the client form reads it: the saved client, 400 with the error code (and, for one of the
- * company's own fields, its key as `detail`), 409 `phone_taken` or 404.
+ * company's own fields, its key as `detail`) or 404.
  */
 internal suspend fun ApplicationCall.respondClientWrite(outcome: ClientDirectory.Outcome, saved: HttpStatusCode) = when (outcome) {
     is ClientDirectory.Outcome.Saved -> respond(saved, outcome.client.dto())
@@ -59,6 +59,5 @@ internal suspend fun ApplicationCall.respondClientWrite(outcome: ClientDirectory
         HttpStatusCode.BadRequest,
         if (outcome.field == null) mapOf("error" to outcome.error) else mapOf("error" to outcome.error, "detail" to outcome.field),
     )
-    is ClientDirectory.Outcome.PhoneTaken -> respond(HttpStatusCode.Conflict, mapOf("error" to "phone_taken"))
     ClientDirectory.Outcome.NotFound -> respond(HttpStatusCode.NotFound)
 }
