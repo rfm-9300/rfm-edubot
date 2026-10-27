@@ -935,6 +935,8 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 .record__stack > .record__pane-foot { margin-top: 0; }
 .record__stack > .hint { margin: 0; }
 .record__foot { justify-content: flex-start; flex-wrap: wrap; }
+/* The hidden frame a printed report (printHtmlDocument) is laid out in. */
+.print-frame { position: fixed; right: 0; bottom: 0; width: 0; height: 0; border: 0; }
 @media (max-width: 560px) {
   .record-kpis, .record-kpis[data-count="3"] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .record-card__head { grid-template-columns: auto minmax(0, 1fr); }
