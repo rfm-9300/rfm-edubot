@@ -13,6 +13,7 @@ function supplierColumns() {
     { id: 'name', label: t.thName, fixed: true, cell: s => `<td class="name long">${name(s)}</td>` },
     { id: 'type', label: t.thType, default: true, cell: s => `<td class="muted">${escapeHTML(s.type || '')}</td>` },
     { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
+    { id: 'contactPerson', label: t.formContact, cell: s => `<td class="muted">${escapeHTML(s.contactPerson || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
     { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono nowrap">${fmtDay(s.createdAt)}</td>` },
     { id: 'number', label: t.thNo, default: true, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
@@ -60,7 +61,7 @@ function renderSuppliers(root) {
   const ids = new Set(columns.map(c => c.id));
   const rows = source
     .filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey)
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${s.contactPerson || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, s, ids)}</tr>`)
     .join('');
   const typeFilter = types.length
@@ -184,6 +185,7 @@ function renderPayeeRecord() {
   const lines = [
     p.type ? `<span class="record-card__line">${escapeHTML(p.type)}</span>` : '',
     `<span class="record-card__line mono">${escapeHTML(p.phone)}</span>`,
+    p.contactPerson ? `<span class="record-card__line">${escapeHTML(STR.clientContactShort({ name: p.contactPerson }))}</span>` : '',
     p.address ? `<a class="record-card__line" href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>` : '',
     p.role ? `<span class="record-card__line">${escapeHTML(p.role)}</span>` : '',
     p.birthDate ? `<span class="record-card__line">${escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))}</span>` : '',
@@ -423,6 +425,8 @@ async function openSupplierForm(supplier, opts = {}) {
       <datalist id="sf-type-options">${supplierTypes(state.suppliers || []).map(v => `<option value="${escapeHTML(v)}"></option>`).join('')}</datalist></div>
     <div class="form__row"><label class="lbl" for="sf-phone">${escapeHTML(t.formPhone)} <span class="req">●</span></label>
       <input class="inp inp--mono" id="sf-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(values.phone || '')}" /></div>
+    <div class="form__row"><label class="lbl" for="sf-contact">${escapeHTML(t.formContact)}</label>
+      <input class="inp" id="sf-contact" maxlength="120" autocomplete="off" placeholder="${escapeHTML(t.phContact)}" value="${escapeHTML(values.contactPerson || '')}" /></div>
     <div class="form__row"><label class="lbl" for="sf-address">${escapeHTML(t.formAddress)}</label>
       <input class="inp" id="sf-address" placeholder="${escapeHTML(t.phAddress)}" value="${escapeHTML(values.address || '')}" /></div>
     ${services.html}
@@ -438,8 +442,9 @@ async function openSupplierForm(supplier, opts = {}) {
     const phone = $('#sf-phone', form).value.trim();
     const address = $('#sf-address', form).value.trim() || undefined;
     const type = $('#sf-type', form).value.trim();
+    const contactPerson = $('#sf-contact', form).value.trim();
     if (!name || !phone) return toast(t.validate);
-    const payload = { name, phone, address, type, services: services.collect(form) };
+    const payload = { name, phone, address, type, contactPerson, services: services.collect(form) };
     if (payload.services.some(s => !(s.unitPriceEur == null || s.unitPriceEur >= 0))) return toast(t.err_service_price_invalid);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;

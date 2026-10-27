@@ -35,7 +35,7 @@ internal object SupplierRoutes : DashboardFeature(DashboardModules.SUPPLIERS) {
                 if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                 request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val supplier = call.uniquePhone {
-                    crm.suppliers.create(request.name, request.phone, request.address, request.type, request.supplierServices().orEmpty())
+                    crm.suppliers.create(request.name, request.phone, request.address, request.type, request.supplierServices().orEmpty(), request.contactPerson)
                 } ?: return@post
                 call.respond(HttpStatusCode.Created, supplier.value.dto())
             }
@@ -46,7 +46,7 @@ internal object SupplierRoutes : DashboardFeature(DashboardModules.SUPPLIERS) {
                 if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                 request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val supplier = (call.uniquePhone {
-                    crm.suppliers.update(id, request.name, request.phone, request.address, request.type, request.supplierServices())
+                    crm.suppliers.update(id, request.name, request.phone, request.address, request.type, request.supplierServices(), request.contactPerson)
                 } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
                 call.respond(supplier.dto())
             }
