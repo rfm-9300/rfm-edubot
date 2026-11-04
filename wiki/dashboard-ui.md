@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-27
+updated: 2026-11-04
 ---
 
 # Dashboard UI decisions
@@ -319,6 +319,15 @@ the design, so they follow the Clients record now:
   company's modules have them. Suppliers keep the record card.
 - Gotcha: a `.drawer__foot` only sticks once the drawer scrolls; to keep a short drawer's foot at the bottom,
   a body whose `.form` or `.record` ends in one becomes a flex column with the foot at `margin-top: auto`.
+
+**Catalog items open a record (2026-11-04).** Rodrigo found that clicking a catalog row did nothing and
+its only drawer, the form, didn't look like the others. A row (or Enter on its title, a `.tbl__open`) now
+opens the item's drawer: the kind (Service or Material) as the eyebrow, a field list (code, type with the
+bookable pill, category, price with its unit, description, how many clients have it), then Delete and Edit
+in the foot. Edit goes in the trail, so the form has the way back and saving returns to the item; the form
+reloads the catalog before it closes for that reason. Edit takes the focus, since the drawer would
+otherwise focus its first button, Delete. The row's pencil and bin stay for a quick edit. The list itself
+(hero figures, a titled panel) wasn't rebuilt to the design yet.
 
 **Suppliers and Bookings (same day).** Suppliers got the employee's layout: the list's head is All suppliers /
 Archived tabs with the type select and Columns at the end, tick boxes and initials; the record is the bar

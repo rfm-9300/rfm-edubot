@@ -37,7 +37,11 @@ function openCatalogForm(itemId) {
         <input class="inp inp--mono" id="cat-duration" type="number" min="5" step="5" value="${editing?.durationMinutes ?? 30}" /></div>` : ''}
     </div>
     ${editing ? `<p class="hint">${escapeHTML(t.editingHint)}</p>` : ''}
-    <button class="btn btn--primary" type="submit">${escapeHTML(editing ? t.saveChanges : t.createItem)}</button>`;
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(editing ? t.saveChanges : t.createItem)}</button>
+      <button class="btn btn--ghost" type="button" data-cat-cancel>${escapeHTML(STR.cancel)}</button>
+    </div>`;
+  $('[data-cat-cancel]', form).addEventListener('click', () => closeDrawer());
   const titleEl = $('#cat-title', form), codeEl = $('#cat-code', form), descEl = $('#cat-desc', form), typeEl = $('#cat-type', form);
   typeEl.addEventListener('change', () => {
     $$('[data-booking-fields]', form).forEach(row => { row.hidden = typeEl.value !== 'service'; });
@@ -58,14 +62,50 @@ function openCatalogForm(itemId) {
     try {
       const path = editing ? `/app/api/crm/standard-items/${encodeURIComponent(editing.id)}` : '/app/api/crm/standard-items';
       const saved = await api(path, { method: 'POST', body: JSON.stringify({ code: code || undefined, type, title, category, description, unit, defaultUnitPriceEur, ...booking }) });
-      closeDrawer();
+      // Reload first: closing goes back to the item's record when it was opened from there, and that reads the catalog.
       await loadModule('catalog');
       render();
+      closeDrawer();
       const ref = saved?.code || title;
       toast(editing ? t.updated({ code: ref }) : t.created({ code: ref }));
     } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : err?.code === 'code_invalid' ? t.codeInvalid : STR.catalogCreateFailed); }
   });
-  openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form);
+  openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form, false, { eyebrow: t.eyebrow });
+}
+
+const catalogTrailEntry = item => ({ key: `catalog:${item.id}`, label: item.title, open: () => openCatalogDetail(item.id) });
+
+// The item's record, as the other lists open theirs: its kind as the eyebrow, one list of fields, and
+// the actions in the drawer's foot with Edit last.
+function openCatalogDetail(id) {
+  const item = state.catalog.find(c => c.id === id);
+  if (!item) return toast(STR.loadFailed);
+  const t = CRM.items;
+  const service = item.type === 'service' || item.type === 'servico';
+  const bookable = service && item.bookable && item.durationMinutes && hasModule('bookings');
+  const details = catalogDetails(item);
+  const clients = catalogClientsOn() ? (state.clients || []).filter(c => (c.catalogItemIds || []).includes(item.id)) : [];
+  const clientNames = clients.slice(0, 4).map(c => c.name).join(', ') + (clients.length > 4 ? ` ${t.andMore({ n: clients.length - 4 })}` : '');
+  const here = catalogTrailEntry(item);
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `
+    ${recordFieldsHtml([
+      [t.thCode, `<span class="mono">${escapeHTML(item.code || '—')}</span>`],
+      [t.thType, `<span class="tbl__pills">${catalogTypePill(item.type)}${bookable ? `<span class="pill pill--ok">${escapeHTML(t.bookablePill({ min: item.durationMinutes }))}</span>` : ''}</span>`],
+      [t.thCategory, escapeHTML(item.category || '—')],
+      [t.thPrice, recordFigureHtml(fmtEUR(item.defaultUnitPriceEur), item.unit || '')],
+      details ? [t.descLabel, escapeHTML(details)] : null,
+      catalogClientsOn() ? [t.thClients, clients.length ? recordFigureHtml(String(clients.length), clientNames) : escapeHTML('0')] : null,
+    ])}
+    ${docFootHtml(`
+      <button class="btn btn--sm btn--ghost" type="button" data-cat-delete>${escapeHTML(t.deleteTitle)}</button>
+      <button class="btn btn--sm btn--primary" type="button" data-cat-edit>${escapeHTML(STR.clientEditAction)}</button>`)}`;
+  $('[data-cat-edit]', body).addEventListener('click', () => openFrom(here, () => openCatalogForm(item.id)));
+  $('[data-cat-delete]', body).addEventListener('click', () => deleteCatalogItem(item.id));
+  openDrawer(item.title, body, false, { eyebrow: service ? t.service : t.material });
+  // The drawer focuses its first button, which here is Delete; Edit is the safer start (after the drawer's own frame).
+  requestAnimationFrame(() => $('[data-cat-edit]', body)?.focus());
 }
 
 async function deleteCatalogItem(id) {
@@ -76,6 +116,7 @@ async function deleteCatalogItem(id) {
   if (!ok) return;
   try {
     await api(`/app/api/crm/standard-items/${encodeURIComponent(id)}`, { method: 'DELETE' });
+    if (!$('#drawer').hidden) closeDrawer({ dismissed: true });
     await loadModule('catalog');
     render();
     toast(t.deleted({ code: item.code || item.title }));
@@ -107,7 +148,7 @@ function catalogColumns() {
   const t = CRM.items;
   const title = i => {
     const details = catalogDetails(i);
-    return `<td><div class="col"><span class="name">${escapeHTML(i.title)}</span>${details ? `<span class="sub">${escapeHTML(details)}</span>` : ''}</div></td>`;
+    return `<td><div class="col"><button class="tbl__open name" type="button">${escapeHTML(i.title)}</button>${details ? `<span class="sub">${escapeHTML(details)}</span>` : ''}</div></td>`;
   };
   return [
     { id: 'code', label: t.thCode, cell: i => `<td class="id">${escapeHTML(i.code || '')}</td>` },
@@ -153,7 +194,7 @@ function renderCatalog(root) {
   const columns = orderedColumns('catalog', catalogColumns());
   const rows = state.catalog
     .filter(i => !q || `${i.code || ''} ${i.title || ''} ${i.description || ''} ${i.category || ''}`.toLowerCase().includes(q))
-    .map(i => `<tr>${columnCells(columns, i)}</tr>`)
+    .map(i => `<tr class="conversation-row" data-cat-item="${escapeHTML(i.id)}">${columnCells(columns, i)}</tr>`)
     .join('');
   const nSrv = state.catalog.filter(i => i.type === 'service' || i.type === 'servico').length;
   const nMat = state.catalog.length - nSrv;
@@ -170,6 +211,10 @@ function renderCatalog(root) {
     empty: t.emptyTitle,
     emptyDesc: t.emptyDesc,
   });
+  $$('[data-cat-item]', root).forEach(row => row.addEventListener('click', e => {
+    if (e.target.closest('[data-edit-item], [data-delete-item]')) return;
+    openCatalogDetail(row.dataset.catItem);
+  }));
   $$('[data-edit-item]', root).forEach(btn => btn.addEventListener('click', () => openCatalogForm(btn.dataset.editItem)));
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
   wireColumnOrder(root, 'catalog', catalogColumns());
