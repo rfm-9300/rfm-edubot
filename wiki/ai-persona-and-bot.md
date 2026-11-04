@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-17
+updated: 2026-11-04
 ---
 
 # Customer-facing bot and persona
@@ -35,8 +35,17 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
   team answers in the inbox, that customer gets no menu until someone presses Resume.
 - **Stored** as one `chat_flows` document per company (unique `tenantId`), read on every message, so
   a saved change applies at once; a flow with problems is skipped and logged (`Skipping chat flow`).
-  The first company's flows were written with `mongosh` after a backup, before the editor existed. A
-  keyword starts a flow at its first step, and each button names the step it leads to:
+  The first company's flows were written with `mongosh` after a backup, before the editor existed.
+  **Trap (2026-11-04): flows are read on every message, a persona is not.** `TenantPipelineFactory`
+  builds one `MessagePipeline` per company and caches it with the persona captured in its
+  constructor, so a `tenant_persona` written with `mongosh` (rules, language, handoff) changes
+  nothing until that cache is evicted: by saving a real change in the Persona page (a save that
+  changes nothing returns early, without evicting), or by restarting the app. A hand-written
+  persona that "didn't take" is this, not the prompt. Also: the Rules box is one rule per line
+  (`persona.js` splits on `\n`), so a rule written by hand with line breaks is split into several
+  rules on the next dashboard save, and each shows as a `-` bullet the model copies. A fixed
+  multi-line reply belongs in the Instructions text, not in a rule. A keyword starts a flow at its first step, and
+  each button names the step it leads to:
 
   ```js
   { tenantId: ObjectId("…"), teamOnlyChannels: ["INSTAGRAM"], flows: [{

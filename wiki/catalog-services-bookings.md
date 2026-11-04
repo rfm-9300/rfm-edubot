@@ -269,7 +269,7 @@ A catalog price can be per unit (`hora`, `m2`), but a completed booking bills 1 
 hourly or per-m² service needs its Serviços quantity fixed before invoicing. Whether to derive the
 quantity from the duration, or keep per-session catalog items, is still open.
 
-**Completed bookings into Serviços can be turned off (2026-11-04):** Rodrigo asked for a toggle on
+**Completed bookings into Serviços can be turned off (shipped 2026-11-04 in v2.1.0, `b8cb0f2`):** Rodrigo asked for a toggle on
 "a completed booking creates a service as done". The behaviour already existed (above); what was missing
 was a way to turn it off.
 

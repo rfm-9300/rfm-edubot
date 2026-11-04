@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-04
 ---
 
 # Cross-cutting gotchas
@@ -67,6 +67,10 @@ only for older engines.
   from 2026-10-19, and the Test job gates the image build and the deploy. On an `ubuntu-26.04` runner
   (2026-10-11) the suite failed with 1.20.3 (59 failures, 48 of them whole test classes that couldn't
   start) and passed all 796 tests with 1.21.4.
+- **The same message on a Mac usually means Docker Desktop isn't running** (2026-11-04): every
+  Mongo-backed class fails at once and the pure unit tests pass. `open -a Docker`, wait for
+  `docker info`, rerun. Piping Gradle (`./gradlew test … | tail`) reports `tail`'s exit code, 0, so a
+  failed run looks green: read Gradle's own exit code or `build/test-results/test/*.xml`.
 - **Before the bump**, Rodrigo's Mac hit it first with Docker Desktop 29.x and got by with
   `JAVA_TOOL_OPTIONS="-Dapi.version=1.44" ./gradlew test --no-daemon` (`DOCKER_API_VERSION` did not
   help), and the Cursor cloud environment pins the same through `~/.docker-java.properties`. 1.21.4

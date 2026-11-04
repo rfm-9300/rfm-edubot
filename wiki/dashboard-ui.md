@@ -320,7 +320,7 @@ the design, so they follow the Clients record now:
 - Gotcha: a `.drawer__foot` only sticks once the drawer scrolls; to keep a short drawer's foot at the bottom,
   a body whose `.form` or `.record` ends in one becomes a flex column with the foot at `margin-top: auto`.
 
-**Catalog items open a record (2026-11-04).** Rodrigo found that clicking a catalog row did nothing and
+**Catalog items open a record (shipped 2026-11-04 in v2.1.1, `87376c3`).** Rodrigo found that clicking a catalog row did nothing and
 its only drawer, the form, didn't look like the others. A row (or Enter on its title, a `.tbl__open`) now
 opens the item's drawer: the kind (Service or Material) as the eyebrow, a field list (code, type with the
 bookable pill, category, price with its unit, description, how many clients have it), then Delete and Edit

@@ -68,7 +68,7 @@ page: [password-vault.md](password-vault.md).
   geometry set inline), a dashed slot shows where it lands, the board and page scroll near the edges,
   Escape cancels, and the click that ends a drag doesn't open the card. The page moves the card at
   once and reloads the board if the server refuses.
-- **The empty space under a short column is that column's** (fixed 2026-11-04). Columns are top-aligned,
+- **The empty space under a short column is that column's** (fixed 2026-11-04, shipped in v2.1.0). Columns are top-aligned,
   so each is only as tall as its cards, and the drop target was read only from the column under the
   pointer. Released below a short or empty column, the slot stayed where it was and the card went back,
   so a move "only worked at one spot". Over the board but not a column, the drag now takes the nearest
