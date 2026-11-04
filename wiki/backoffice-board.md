@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-22
+updated: 2026-11-04
 ---
 
 # Backoffice board
@@ -68,6 +68,12 @@ page: [password-vault.md](password-vault.md).
   geometry set inline), a dashed slot shows where it lands, the board and page scroll near the edges,
   Escape cancels, and the click that ends a drag doesn't open the card. The page moves the card at
   once and reloads the board if the server refuses.
+- **The empty space under a short column is that column's** (fixed 2026-11-04). Columns are top-aligned,
+  so each is only as tall as its cards, and the drop target was read only from the column under the
+  pointer. Released below a short or empty column, the slot stayed where it was and the card went back,
+  so a move "only worked at one spot". Over the board but not a column, the drag now takes the nearest
+  column (`boardNearestList`: sideways first, then up or down, which also covers stacked columns on
+  phones). Reproduced and checked with real mouse input in headless Chrome against a stubbed page.
 - **Where a card lands is read from its neighbours**, not from the slot's position among the cards on
   screen: with a filter on, the visible cards are a subset of the column, so the index sent is the
   position of the card it was dropped before (or after) in the full column.

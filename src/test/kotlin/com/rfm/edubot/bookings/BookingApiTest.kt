@@ -57,7 +57,7 @@ class BookingApiTest {
     @Test
     fun `bookings answer 403 without their module`() = dashboardApiTest(mongo) {
         val off = company(listOf(DashboardModules.CLIENTS))
-        for (path in listOf(base, "$base/services", "$base/availability", "$base/slots?serviceId=consulta&$week", "$base/${ObjectId()}")) {
+        for (path in listOf(base, "$base/services", "$base/availability", "$base/settings","$base/slots?serviceId=consulta&$week", "$base/${ObjectId()}")) {
             assertEquals(HttpStatusCode.Forbidden, off.get(path).status, path)
         }
         assertEquals(HttpStatusCode.Forbidden, off.post(base) { booking("consulta") }.status)
@@ -124,5 +124,16 @@ class BookingApiTest {
         assertEquals("name_required", a.post("$base/services") { put("name", " ") }.error)
         assertEquals("invalid_time", a.post("$base/services") { put("name", "Rápido"); put("durationMinutes", 1) }.error)
         assertEquals("CANCELLED", a.post("$base/$id") { put("status", "CANCELLED") }.text("status"))
+        assertEquals("invalid_body", a.put("$base/settings") { }.error, "createServiceOnComplete is required")
+    }
+
+    @Test
+    fun `a company's booking settings default on and are its own`() = dashboardApiTest(mongo) {
+        val a = company()
+        val b = company()
+        assertEquals("true", a.get("$base/settings").text("createServiceOnComplete"))
+        assertEquals("false", a.put("$base/settings") { put("createServiceOnComplete", false) }.text("createServiceOnComplete"))
+        assertEquals("false", a.get("$base/settings").text("createServiceOnComplete"))
+        assertEquals("true", b.get("$base/settings").text("createServiceOnComplete"))
     }
 }

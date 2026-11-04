@@ -60,7 +60,7 @@ function renderBookings(root) {
       ${atThisWeek ? '' : `<button type="button" class="btn btn--sm" data-week-shift="0">${escapeHTML(STR.bookingsToday)}</button>`}
     </div>`;
   const tools = view('week', STR.bookingsWeek) + view('agenda', STR.bookingsList) + statusTabs
-    + `<span class="panel__tools-end">${nav}${agenda ? columnOrderButton('bookings') : ''}<button type="button" class="btn btn--sm btn--ghost" data-booking-services>${escapeHTML(STR.bookingsManageServices)}</button><button type="button" class="btn btn--sm btn--ghost" data-booking-availability>${escapeHTML(STR.bookingsManageAvailability)}</button></span>`;
+    + `<span class="panel__tools-end">${nav}${agenda ? columnOrderButton('bookings') : ''}<button type="button" class="btn btn--sm btn--ghost" data-booking-services>${escapeHTML(STR.bookingsManageServices)}</button><button type="button" class="btn btn--sm btn--ghost" data-booking-availability>${escapeHTML(STR.bookingsManageAvailability)}</button>${hasModule('services') ? `<button type="button" class="btn btn--sm btn--ghost" data-booking-settings>${escapeHTML(STR.bookingsSettings)}</button>` : ''}</span>`;
   pageCount(agenda ? list.length : weekLabel);
   const panel = agenda
     ? bookingAgendaHtml(list, tools)
@@ -78,6 +78,7 @@ function renderBookings(root) {
   }));
   $$('[data-booking-services]', root).forEach(b => b.addEventListener('click', openBookingServicesForm));
   $$('[data-booking-availability]', root).forEach(b => b.addEventListener('click', openBookingAvailabilityForm));
+  $$('[data-booking-settings]', root).forEach(b => b.addEventListener('click', openBookingSettingsForm));
   $$('[data-booking-filter]', root).forEach(b => b.addEventListener('click', () => { state.bookingStatusFilter = b.dataset.bookingFilter; render(); }));
   $$('[data-booking-status]', root).forEach(b => b.addEventListener('click', e => {
     e.stopPropagation();
@@ -524,6 +525,34 @@ function openBookingServicesForm() {
     } catch (err) { toast(bookingErrorText(err)); }
   });
   openDrawer(STR.bookingsManageServices, body, true);
+}
+
+// The company's booking options. Today one: whether completing a booking adds it to Services.
+async function openBookingSettingsForm() {
+  let settings;
+  try { settings = await api('/app/api/bookings/settings'); } catch { return toast(STR.loadFailed); }
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    <div class="form__row form__row--full">
+      <label class="form__check"><input type="checkbox" name="createServiceOnComplete"${settings.createServiceOnComplete ? ' checked' : ''} /> ${escapeHTML(STR.bookingsCreateServiceOnComplete)}</label>
+      <p class="hint">${escapeHTML(STR.bookingsCreateServiceOnCompleteHint)}</p>
+    </div>
+    <div class="actions"><button class="btn btn--primary" type="submit">${escapeHTML(STR.bookingsSaveSettings)}</button></div>`;
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    try {
+      await api('/app/api/bookings/settings', { method: 'PUT', body: JSON.stringify({ createServiceOnComplete: $('[name=createServiceOnComplete]', form).checked }) });
+      closeDrawer();
+      toast(STR.bookingsSettingsSaved);
+    } catch {
+      btn.disabled = false;
+      toast(STR.bookingsSaveFailed);
+    }
+  });
+  openDrawer(STR.bookingsSettings, form, true);
 }
 
 function openBookingAvailabilityForm() {

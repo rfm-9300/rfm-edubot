@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-27
+updated: 2026-11-04
 ---
 
 # Catalog, Serviços and bookings
@@ -268,5 +268,20 @@ bills a booking without `priceCents` at the service's current catalog price (it 
 A catalog price can be per unit (`hora`, `m2`), but a completed booking bills 1 × that price, so an
 hourly or per-m² service needs its Serviços quantity fixed before invoicing. Whether to derive the
 quantity from the duration, or keep per-session catalog items, is still open.
+
+**Completed bookings into Serviços can be turned off (2026-11-04):** Rodrigo asked for a toggle on
+"a completed booking creates a service as done". The behaviour already existed (above); what was missing
+was a way to turn it off.
+
+- **Per company, on by default**, in `bookings.settings` (`_id` = tenant id, like `timesheets.settings`;
+  a company that never saved keeps today's behaviour). `GET`/`PUT /bookings/settings` with
+  `{createServiceOnComplete}`, behind the Bookings gate; the backoffice's twin routes get it too. The
+  `/app` Bookings toolbar shows Settings (only with the Services module) with one `.form__check`.
+- **Off means no row is made or reopened**, from every source (dashboard, bot, assistant, agents),
+  because `BookingScheduler.billCompleted` reads it. `unbill` is untouched: a booking completed while it
+  was on still has its open row cancelled when it's moved away from Completed. The booking detail keys off
+  `clientServiceId`, so it simply shows no Open service.
+- "Done" is not a status: the row is OPEN and dated the booking's day, which the employee record and
+  Home read as done once the day has passed (see "Who does the work").
 
 Open gaps (reported, not fixed): bookings have no employee assignment or capacity (one booking at a time per tenant), no reminders, and no holiday closures. (The 20-row cap on `GET /app/api/crm/clients` was fixed by the client record work, see [crm-directories.md](crm-directories.md).)

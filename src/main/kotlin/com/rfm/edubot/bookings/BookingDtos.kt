@@ -49,6 +49,16 @@ data class ReplaceAvailabilityRequest(
 )
 
 @Serializable
+data class BookingSettingsDto(
+    val createServiceOnComplete: Boolean,
+)
+
+@Serializable
+data class UpdateBookingSettingsRequest(
+    val createServiceOnComplete: Boolean,
+)
+
+@Serializable
 data class BookingDto(
     val id: String,
     val serviceId: String,
@@ -110,7 +120,9 @@ fun BookableService.dto() = BookingServiceDto(
     active = active,
 )
 
-fun AvailabilityRule.dto() = AvailabilityRuleDto(dayOfWeek = dayOfWeek, startLocal = startLocal, endLocal = endLocal)
+fun BookingSettings.dto() = BookingSettingsDto(createServiceOnComplete = createServiceOnComplete)
+
+fun AvailabilityRule.dto() =AvailabilityRuleDto(dayOfWeek = dayOfWeek, startLocal = startLocal, endLocal = endLocal)
 
 fun Booking.dto() = BookingDto(
     id = id.toHexString(),

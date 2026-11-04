@@ -3,6 +3,7 @@ package com.rfm.edubot.bookings
 import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
+import com.mongodb.client.model.UpdateOptions
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.bookings.model.AvailabilityRule
 import com.rfm.edubot.bookings.model.BookableService
@@ -121,6 +122,35 @@ class AvailabilityRepository(mongoModule: MongoModule, private val tenantId: Obj
         .append("dayOfWeek", dayOfWeek)
         .append("startLocal", startLocal)
         .append("endLocal", endLocal)
+}
+
+/** A company's booking options. A company that never saved them gets these defaults. */
+data class BookingSettings(
+    /** Completing a booking adds an open Serviços row for it, dated the booking's day. */
+    val createServiceOnComplete: Boolean = true,
+)
+
+/** `bookings.settings`: one document per company, `_id` = tenant id. */
+class BookingSettingsRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
+    private val collection = mongoModule.database.getCollection<Document>("bookings.settings")
+
+    suspend fun get(): BookingSettings {
+        val doc = collection.find(Filters.eq("_id", tenantId)).firstOrNull() ?: return BookingSettings()
+        return BookingSettings(createServiceOnComplete = doc.getBoolean("createServiceOnComplete") ?: true)
+    }
+
+    suspend fun save(settings: BookingSettings): BookingSettings {
+        collection.updateOne(
+            Filters.eq("_id", tenantId),
+            Updates.combine(
+                Updates.set("tenantId", tenantId),
+                Updates.set("createServiceOnComplete", settings.createServiceOnComplete),
+                Updates.set("updatedAt", Date()),
+            ),
+            UpdateOptions().upsert(true),
+        )
+        return settings
+    }
 }
 
 class BookingRepository(private val mongoModule: MongoModule, val tenantId: ObjectId) {

@@ -182,6 +182,31 @@ class BookingFlowTest {
     }
 
     @Test
+    fun `with the setting off completing a booking adds no service, and an earlier row is still cancelled`() = runBlocking<Unit> {
+        val tenant = tenant()
+        val deps = deps(tenant)
+        val rows = ClientServiceRepository(mongoModule, tenant.id)
+        assertTrue(deps.settings.get().createServiceOnComplete, "on by default")
+
+        val billed = deps.scheduler.create(newBooking(day(1), 10, contactName = "Rita", contactPhone = "+351 966 111 222"))
+        val row = assertNotNull(deps.scheduler.setStatus(billed.id, BookingStatus.COMPLETED).clientServiceId)
+
+        deps.settings.save(BookingSettings(createServiceOnComplete = false))
+        assertEquals(false, deps.settings.get().createServiceOnComplete)
+
+        val other = deps.scheduler.create(newBooking(day(1), 14, contactName = "Rui", contactPhone = "+351 966 333 444"))
+        val done = deps.scheduler.setStatus(other.id, BookingStatus.COMPLETED)
+        assertEquals(BookingStatus.COMPLETED, done.status)
+        assertNull(done.clientServiceId)
+        assertTrue(rows.list(clientId = other.clientId).isEmpty())
+
+        deps.scheduler.setStatus(billed.id, BookingStatus.CONFIRMED)
+        assertEquals(ClientServiceStatus.CANCELLED, rows.findById(row)!!.status, "undoing still cancels the row made while it was on")
+        deps.scheduler.setStatus(billed.id, BookingStatus.COMPLETED)
+        assertEquals(ClientServiceStatus.CANCELLED, rows.findById(row)!!.status, "and doesn't reopen it while off")
+    }
+
+    @Test
     fun `a booking stored without a price bills at the catalog price`() = runBlocking<Unit> {
         val tenant = tenant()
         val id = ObjectId()

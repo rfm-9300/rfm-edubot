@@ -370,6 +370,20 @@ function boardScroller(el) {
   return document.scrollingElement;
 }
 
+// The card list of the column nearest a point: sideways first, then up or down, so it works side by side and stacked.
+function boardNearestList(cols, x, y) {
+  let best = null;
+  let bestDx = Infinity;
+  let bestDy = Infinity;
+  for (const col of $$('.board-col', cols)) {
+    const r = col.getBoundingClientRect();
+    const dx = Math.max(r.left - x, 0, x - r.right);
+    const dy = Math.max(r.top - y, 0, y - r.bottom);
+    if (dx < bestDx || (dx === bestDx && dy < bestDy)) { best = col; bestDx = dx; bestDy = dy; }
+  }
+  return best?.querySelector('[data-col-cards]') || null;
+}
+
 // One drag, from the press on card `cardEl`: the card follows the pointer, a dashed slot shows where it will land,
 // and the board scrolls near its edges. Escape or a cancelled touch puts it back.
 function boardDrag(down, cardEl, cols, onDrop, onEnd) {
@@ -381,7 +395,9 @@ function boardDrag(down, cardEl, cols, onDrop, onEnd) {
   };
   const place = () => {
     const under = document.elementFromPoint(s.x, s.y);
-    const list = under?.closest('[data-col-cards]') || under?.closest('.board-col')?.querySelector('[data-col-cards]');
+    let list = under?.closest('[data-col-cards]') || under?.closest('.board-col')?.querySelector('[data-col-cards]');
+    // Columns are only as tall as their cards, so the board's empty space under a short column belongs to that one.
+    if (!list && under && cols.contains(under)) list = boardNearestList(cols, s.x, s.y);
     if (!list || !cols.contains(list)) return;
     const others = [...list.children].filter(el => el !== cardEl && el !== s.slot);
     const before = others.find(el => { const r = el.getBoundingClientRect(); return s.y < r.top + r.height / 2; });

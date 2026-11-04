@@ -31,10 +31,14 @@ class BookingConflictException(message: String) : Exception(message)
 /** A booking rule was broken. [code] is stable so the dashboard and the AI tools can explain it. */
 class BookingRuleException(val code: String) : IllegalArgumentException(code)
 
-/** CRM modules bookings feed into; each is null when that module is off for the tenant. */
+/**
+ * CRM modules bookings feed into; each is null when that module is off for the tenant. [settings] says
+ * whether completing a booking adds a Serviços row; without it, it always does.
+ */
 class BookingCrmLink(
     val clients: ClientRepository? = null,
     val clientServices: ClientServiceRepository? = null,
+    val settings: BookingSettingsRepository? = null,
 )
 
 data class NewBooking(
@@ -203,10 +207,13 @@ class BookingScheduler(
     /**
      * A completed booking becomes an open Serviços row on its client, ready to invoice. Bookings made
      * before prices were snapshotted have none, so they bill at the service's current catalog price.
+     * A company can turn this off in its booking settings; a row an earlier completion made is then
+     * still cancelled by [unbill], but no row is made or reopened.
      */
     private suspend fun billCompleted(booking: Booking): Booking {
         val rows = crm.clientServices ?: return booking
         val clientId = booking.clientId ?: return booking
+        if (crm.settings?.get()?.createServiceOnComplete == false) return booking
         val performedAt = booking.startAt.toLocalDateTime(zone).date
         val row = booking.clientServiceId?.let { rows.findById(it) } ?: rows.findByBookingId(booking.id)
         val service = services.findById(booking.serviceId)

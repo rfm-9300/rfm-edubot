@@ -30,6 +30,7 @@ data class BookingDeps(
     val tenant: Tenant,
     val services: BookableServiceRepository,
     val availability: AvailabilityRepository,
+    val settings: BookingSettingsRepository,
     val bookings: BookingRepository,
     val scheduler: BookingScheduler,
     val source: BookingSource,
@@ -43,14 +44,17 @@ fun bookingDeps(mongo: MongoModule, tenant: Tenant, source: BookingSource): Book
     val services = BookableServiceRepository(mongo, tenant.id)
     val availability = AvailabilityRepository(mongo, tenant.id)
     val bookings = BookingRepository(mongo, tenant.id)
+    val settings = BookingSettingsRepository(mongo, tenant.id)
     val crm = BookingCrmLink(
         clients = ClientRepository(mongo, tenant.id).takeIf { DashboardModules.CLIENTS in modules },
         clientServices = ClientServiceRepository(mongo, tenant.id).takeIf { DashboardModules.SERVICES in modules },
+        settings = settings,
     )
     return BookingDeps(
         tenant = tenant,
         services = services,
         availability = availability,
+        settings = settings,
         bookings = bookings,
         scheduler = BookingScheduler(services, availability, bookings, tenant.timezone, crm),
         source = source,
@@ -133,6 +137,16 @@ fun Route.installBookingRoutes(resolve: suspend ApplicationCall.() -> BookingDep
             if (invalid) return@put call.respondError(HttpStatusCode.BadRequest, "invalid_availability")
             val saved = deps.availability.replaceAll(request.rules.map { it.toRule(deps.tenant.id) })
             call.respond(saved.map { it.dto() })
+        }
+
+        get("/settings") {
+            val deps = call.resolve() ?: return@get
+            call.respond(deps.settings.get().dto())
+        }
+        put("/settings") {
+            val deps = call.resolve() ?: return@put
+            val request = call.receive<UpdateBookingSettingsRequest>()
+            call.respond(deps.settings.save(BookingSettings(createServiceOnComplete = request.createServiceOnComplete)).dto())
         }
 
         get("/slots") {

@@ -916,6 +916,7 @@ flowchart LR
 | `dashboard_assistant_settings` | A company's settings for its assistant: instructions, reply style, language, changes on or off, modules kept out | `_id` = tenant id |
 | `bookings.services` | Legacy booking services, moved into `crm.standard_items` at startup (stamped `catalogItemId`) | `tenantId`, `active` |
 | `bookings.availability` | Weekly availability windows in tenant local time | `tenantId`, `dayOfWeek` |
+| `bookings.settings` | A company's booking options: whether completing a booking adds a Serviços row (`createServiceOnComplete`, on when missing) | `_id` = tenant id |
 | `bookings.appointments` | Bookings: `catalogItemId`, service name/price snapshot, UTC start/end, status, `clientId`, `clientServiceId` | `tenantId`, `startAt` |
 | `timesheets.shifts` | One per shift: employee, local `day`, start/end, punches (time, channel, location and site verdict, verification, flags), breaks, worked minutes, flags, review, edit history, `version` | unique partial `(tenantId, employeeId)` where `OPEN` (`one_open_shift`); `tenantId+day`; `tenantId+siteId`; `tenantId+employeeId+day`; `tenantId+status+review.status`; `punches.at` |
 | `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
