@@ -1,5 +1,6 @@
-/* Connecting the company's accounts from Settings → Channels: Instagram (an OAuth popup), Gmail (Google's
-   consent in a popup or a redirect, and whether it reads the inbox) and WhatsApp (Meta's Embedded Signup).
+/* Connecting the company's accounts from Settings → Channels: Instagram (an OAuth popup), the company's own
+   email address (forwarding to it, sending from it), Gmail (Google's consent in a popup or a redirect, and
+   whether it reads the inbox; not offered while companies get their own address) and WhatsApp (Meta's Embedded Signup).
    Also the OAuth popup's side: back on /app, it hands its outcome to the dashboard that opened it. Meta's SDK
    and Instagram's consent popup are in /admin/common.js, shared with the backoffice. */
 
@@ -51,12 +52,14 @@ async function emailStatus() {
   return state.email;
 }
 
-// Hidden while the platform has no Google OAuth client.
+// Hidden while the platform has no Google OAuth client. While companies get their own address, Gmail isn't
+// offered any more: only an account a company already connected is listed, so it can still be managed.
 function googleRowsHtml() {
   const info = state.integrations;
   if (!info?.google?.configured) return '';
-  const canConnect = !!info.google.canConnect;
   const accounts = googleAccounts();
+  if (mailboxOn() && !accounts.length) return '';
+  const canConnect = !!info.google.canConnect && !mailboxOn();
   const name = `<td class="name">${escapeHTML(GOOGLE.rowName)}</td>`;
   if (!accounts.length) {
     const action = canConnect
@@ -79,6 +82,185 @@ function googleRowsHtml() {
     ].filter(Boolean).join(' ');
     return `<tr>${name}<td class="mono">${escapeHTML(c.accountEmail)}</td><td>${status}${isDefault}${inbox}</td><td class="right">${actions}</td></tr>`;
   }).join('');
+}
+
+// ── Email (the company's own address) ───────────────────────────────────────────
+// The company forwards its mail to an address on the platform's domain (Amazon SES receives it), and its
+// email goes out from that address. Anyone who manages settings sets it up: nothing is read until the
+// company turns forwarding on in its own mailbox.
+const mailboxAccount = () => (state.integrations?.connections || []).find(c => c.provider === 'mailbox') || null;
+const mailboxOn = () => !!state.integrations?.mailbox?.configured;
+// The forwarding steps each provider's tab lists (`app.integrations.mailbox.step.<provider><n>`).
+const MAILBOX_STEPS = { gmail: 4, outlook: 3, other: 3 };
+let mailboxProvider = 'gmail';
+
+function mailboxRowHtml() {
+  if (!mailboxOn()) return '';
+  const info = state.integrations;
+  const account = mailboxAccount();
+  const name = `<td class="name">${escapeHTML(MAILBOX.rowName)}</td>`;
+  if (!account) {
+    const action = info.canManage
+      ? `<button class="btn btn--sm btn--primary" type="button" data-mailbox-setup>${escapeHTML(MAILBOX.setUp)}</button>`
+      : `<span class="muted">${escapeHTML(MAILBOX.adminsOnly)}</span>`;
+    return `<tr>${name}<td class="mono">—</td><td><span class="muted">${escapeHTML(MAILBOX.notSetUp)}</span></td><td class="right">${action}</td></tr>`;
+  }
+  const status = account.confirmation
+    ? `<span class="pill pill--info">${escapeHTML(MAILBOX.statusCode)}</span>`
+    : account.receivedAt ? escapeHTML(MAILBOX.statusReceiving) : `<span class="pill pill--warn">${escapeHTML(MAILBOX.statusWaiting)}</span>`;
+  const action = info.canManage ? `<button class="btn btn--sm" type="button" data-mailbox-open>${escapeHTML(MAILBOX.manage)}</button>` : '';
+  return `<tr>${name}<td class="mono">${escapeHTML(account.accountEmail)}</td><td>${status}</td><td class="right">${action}</td></tr>`;
+}
+
+// Gives the company its address (or opens the one it has) and shows how to forward to it.
+async function setupMailbox() {
+  let account;
+  try { account = await api('/app/api/integrations/mailbox', { method: 'POST' }); }
+  catch (err) {
+    if (err.message !== 'unauthorized') toast(MAILBOX.setUpFailed);
+    return;
+  }
+  await refreshGoogle();
+  if (state.active === 'settings') render();
+  if (state.active === 'email') await window.EmailUI?.refresh();
+  toast(MAILBOX.created);
+  openMailbox(account.id);
+}
+
+function mailboxStepsHtml(provider) {
+  const count = MAILBOX_STEPS[provider] || 0;
+  const steps = Array.from({ length: count }, (_, i) => `<li>${escapeHTML(mailboxText(`step.${provider}${i + 1}`))}</li>`).join('');
+  return `<ol class="plain-list plain-list--steps">${steps}</ol>
+    <p class="hint">${escapeHTML(mailboxText(`note.${provider}`))}</p>
+    <p class="hint">${escapeHTML(MAILBOX.byHand)} ${escapeHTML(MAILBOX.ownReplies)}</p>`;
+}
+
+// What Gmail asked, with the code to type and its own confirmation page. Only Google's links reach here.
+function mailboxConfirmationHtml(confirmation, actions = true) {
+  if (!confirmation) return '';
+  const desc = !confirmation.code ? MAILBOX.confirmLink
+    : confirmation.account ? mailboxText('confirmCodeFor', { account: confirmation.account, code: confirmation.code })
+      : mailboxText('confirmCode', { code: confirmation.code });
+  const open = confirmation.link
+    ? `<a class="btn btn--sm btn--primary" href="${escapeHTML(confirmation.link)}" target="_blank" rel="noopener noreferrer">${escapeHTML(MAILBOX.confirmOpen)}</a>`
+    : '';
+  const done = actions ? `<button class="btn btn--sm btn--ghost" type="button" data-mb-confirm-done>${escapeHTML(MAILBOX.confirmDone)}</button>` : '';
+  return `<div class="notice notice--info" role="status">
+    <div class="notice__text"><strong>${escapeHTML(MAILBOX.confirmTitle)}</strong><span>${escapeHTML(desc)}</span></div>
+    ${open || done ? `<div class="notice__actions">${open}${done}</div>` : ''}
+  </div>`;
+}
+
+function openMailbox(id) {
+  const account = mailboxAccount();
+  if (!account || (id && account.id !== id)) return;
+  const company = state.documentTemplate?.companyName || state.me?.tenant?.name || '';
+  const optional = `<span class="opt">${escapeHTML(STR.optional)}</span>`;
+  const chips = Object.keys(MAILBOX_STEPS).map(p => `<button type="button" class="chip${p === mailboxProvider ? ' is-on' : ''}" data-mb-provider="${p}" aria-pressed="${p === mailboxProvider}">${escapeHTML(mailboxText(`provider.${p}`))}</button>`).join('');
+  const form = document.createElement('form');
+  form.className = 'form';
+  form.innerHTML = `
+    ${mailboxConfirmationHtml(account.confirmation)}
+    <div class="form__row"><label class="lbl" for="mb-address">${escapeHTML(MAILBOX.addressLabel)}</label>
+      <div class="inp-row"><input class="inp mono" id="mb-address" readonly value="${escapeHTML(account.accountEmail)}" />
+        <button class="btn btn--sm" type="button" data-mb-copy>${escapeHTML(MAILBOX.copy)}</button></div></div>
+    <dl class="dash-facts">
+      <div><dt>${escapeHTML(MAILBOX.factLastEmail)}</dt><dd>${escapeHTML(account.receivedAt ? relTime(account.receivedAt) : MAILBOX.factNoneYet)}</dd></div>
+      ${account.forwarders?.length ? `<div><dt>${escapeHTML(MAILBOX.factForwardedFrom)}</dt><dd>${escapeHTML(account.forwarders.join(', '))}</dd></div>` : ''}
+      ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-mb-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
+    </dl>
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(MAILBOX.forwardTitle)}</h2>
+      <div class="panel__tools panel__tools--chips" role="group" aria-label="${escapeHTML(MAILBOX.providersAria)}">${chips}</div></header>
+      <div class="panel__body" data-mb-steps>${mailboxStepsHtml(mailboxProvider)}</div></section>
+    <div class="form__row"><label class="lbl" for="mb-name">${escapeHTML(GOOGLE.senderName)} ${optional}</label>
+      <input class="inp" id="mb-name" maxlength="80" autocomplete="off" placeholder="${escapeHTML(company)}" value="${escapeHTML(account.senderName || '')}" />
+      <p class="hint">${escapeHTML(googleText('senderNameHint', { company }))}</p></div>
+    <div class="form__row"><label class="lbl" for="mb-reply">${escapeHTML(GOOGLE.replyTo)} ${optional}</label>
+      <input class="inp" id="mb-reply" type="email" maxlength="254" autocomplete="off" placeholder="${escapeHTML(account.accountEmail)}" value="${escapeHTML(account.replyTo || '')}" />
+      <p class="hint">${escapeHTML(MAILBOX.replyToHint)}</p></div>
+    <div class="form__row"><label class="lbl" for="mb-signature">${escapeHTML(GOOGLE.signature)} ${optional}</label>
+      <textarea class="txt" id="mb-signature" rows="4" maxlength="2000">${escapeHTML(account.signature || '')}</textarea>
+      <p class="hint">${escapeHTML(GOOGLE.signatureHint)}</p></div>
+    <div class="actions">
+      <button class="btn btn--primary" type="submit">${escapeHTML(GOOGLE.save)}</button>
+      ${account.canSend ? `<button class="btn btn--ghost" type="button" data-mb-test>${escapeHTML(GOOGLE.test)}</button>` : ''}
+      <button class="btn btn--ghost" type="button" data-mb-remove>${escapeHTML(MAILBOX.remove)}</button>
+    </div>`;
+  const path = `/app/api/integrations/${encodeURIComponent(account.id)}`;
+  $$('[data-mb-provider]', form).forEach(chip => chip.addEventListener('click', () => {
+    mailboxProvider = chip.dataset.mbProvider;
+    $$('[data-mb-provider]', form).forEach(c => { const on = c === chip; c.classList.toggle('is-on', on); c.setAttribute('aria-pressed', String(on)); });
+    $('[data-mb-steps]', form).innerHTML = mailboxStepsHtml(mailboxProvider);
+  }));
+  $('[data-mb-copy]', form).addEventListener('click', async () => {
+    const input = $('#mb-address', form);
+    try { await navigator.clipboard.writeText(account.accountEmail); toast(MAILBOX.copied); }
+    catch { input.focus(); input.select(); toast(MAILBOX.copyFailed); }
+  });
+  $('[data-mb-confirm-done]', form)?.addEventListener('click', async e => {
+    e.currentTarget.disabled = true;
+    try {
+      await api(`${path}/confirmation`, { method: 'DELETE' });
+      toast(MAILBOX.confirmHidden);
+      await refreshGoogle();
+      if (state.active === 'settings') render();
+      if (state.active === 'email') await window.EmailUI?.refresh();
+      if (form.isConnected) openMailbox(account.id);
+    } catch (err) {
+      e.currentTarget.disabled = false;
+      if (err.message !== 'unauthorized') toast(GOOGLE.saveFailed);
+    }
+  });
+  form.addEventListener('submit', async e => {
+    e.preventDefault();
+    const btn = $('button[type=submit]', form);
+    btn.disabled = true;
+    const payload = { senderName: $('#mb-name', form).value.trim(), replyTo: $('#mb-reply', form).value.trim(), signature: $('#mb-signature', form).value.trim() };
+    try {
+      await api(path, { method: 'PATCH', body: JSON.stringify(payload) });
+      await refreshGoogle();
+      closeDrawer();
+      toast(GOOGLE.saved);
+      if (state.active === 'settings') render();
+    } catch (err) {
+      btn.disabled = false;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`errors.${err.code || ''}`, GOOGLE.saveFailed));
+    }
+  });
+  $('[data-mb-test]', form)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    try {
+      const sent = await api(`${path}/test-email`, { method: 'POST' });
+      toast(googleText('testSent', { to: sent.to }));
+      await refreshGoogle();
+      const fresh = mailboxAccount();
+      const counter = $('[data-mb-sent]', form);
+      if (fresh?.dailyLimit && counter) counter.textContent = googleText('sentToday', { sent: fresh.sentToday || 0, limit: fresh.dailyLimit });
+    } catch (err) {
+      if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.testFailed));
+    } finally { btn.disabled = false; }
+  });
+  $('[data-mb-remove]', form).addEventListener('click', () => removeMailbox(account));
+  openDrawer(account.accountEmail, form, false, { eyebrow: MAILBOX.eyebrow });
+}
+
+async function removeMailbox(account) {
+  const ok = await confirmDialog({
+    title: mailboxText('removeTitle', { address: account.accountEmail }),
+    body: MAILBOX.removeBody,
+    okLabel: MAILBOX.remove,
+  });
+  if (!ok) return;
+  try {
+    await api(`/app/api/integrations/${encodeURIComponent(account.id)}`, { method: 'DELETE' });
+    await refreshGoogle();
+    closeDrawer({ dismissed: true });
+    toast(MAILBOX.removed);
+    if (state.active === 'settings') render();
+  } catch (err) {
+    if (err.message !== 'unauthorized') toast(MAILBOX.removeFailed);
+  }
 }
 
 // Google's pages send Cross-Origin-Opener-Policy, which can cut the popup off from this window on its

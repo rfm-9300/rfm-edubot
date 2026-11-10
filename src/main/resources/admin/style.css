@@ -2722,6 +2722,9 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 .empty__actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 14px; }
 .empty__actions .btn { margin-top: 0; }
 .plain-list { margin: 0; padding-left: 18px; color: var(--ink-2); font-size: 13px; }
+/* Numbered how-to steps (an `ol`): room between them, since each is a sentence or two. */
+.plain-list--steps { color: var(--ink); line-height: 1.5; }
+.plain-list--steps li + li { margin-top: 6px; }
 .agents-settings { display: grid; gap: 16px; }
 .agents-settings .form { display: grid; gap: 12px; }
 .panel__body > .dash-facts { margin-top: 0; }

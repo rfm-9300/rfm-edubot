@@ -1,17 +1,12 @@
 package com.rfm.edubot.integrations.google
 
-import com.rfm.edubot.crm.ClientRepository
-import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.events.DomainEventLog
-import com.rfm.edubot.events.DomainEventTypes
-import com.rfm.edubot.events.SubjectRef
-import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationProviders
 import com.rfm.edubot.integrations.email.EmailAddresses
-import com.rfm.edubot.integrations.email.EmailDirection
-import com.rfm.edubot.integrations.email.EmailMessage
 import com.rfm.edubot.integrations.email.EmailMessageRepository
+import com.rfm.edubot.integrations.email.ReceivedEmail
+import com.rfm.edubot.integrations.email.ReceivedEmails
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.shared.jobs.PeriodicJob
@@ -20,8 +15,6 @@ import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantStatus
 import kotlinx.coroutines.CancellationException
 import kotlinx.datetime.Instant
-import kotlinx.serialization.json.buildJsonObject
-import kotlinx.serialization.json.put
 import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 import kotlin.time.Duration
@@ -44,6 +37,7 @@ class GmailSyncWorker(
     private val clock: () -> Instant = SystemClock::now,
 ) {
     private val log = LoggerFactory.getLogger("GmailSyncWorker")
+    private val received = ReceivedEmails(messages, events, mongo, clock)
 
     fun job(lease: SchedulerLease?, interval: Duration): PeriodicJob = PeriodicJob("gmail-sync", interval, lease) { syncAll() }
 
@@ -176,58 +170,23 @@ class GmailSyncWorker(
         private suspend fun keep(message: GmailMessage): Boolean {
             if (message.labelIds.any { it in SKIPPED_LABELS }) return false
             val from = message.from ?: return false
-            if (from.email in own) return false
-            val replyTo = message.replyTo?.email?.takeIf { it != from.email && it !in own }
-            val clients = ClientRepository(mongo, tenant.id)
-            val client = clients.findByEmail(from.email) ?: replyTo?.let { clients.findByEmail(it) }
-            if (client == null && message.labelIds.any { it in BULK_CATEGORIES }) return false
-            val now = clock()
-            val email = EmailMessage(
-                tenantId = tenant.id,
-                connectionId = connection.id,
+            val email = ReceivedEmail(
                 providerMessageId = message.id,
                 threadId = message.threadId,
                 messageIdHeader = message.messageIdHeader,
-                direction = EmailDirection.INBOUND,
-                from = from.email,
-                fromName = from.name?.take(MAX_NAME),
-                replyTo = replyTo,
-                to = message.to.take(MAX_RECIPIENTS),
-                cc = message.cc.take(MAX_RECIPIENTS),
-                subject = message.subject.take(EmailMessage.MAX_SUBJECT),
+                from = from,
+                replyTo = message.replyTo,
+                to = message.to,
+                cc = message.cc,
+                subject = message.subject,
+                text = message.text,
                 snippet = message.snippet,
-                bodyText = message.text,
-                attachments = message.attachments.take(MAX_ATTACHMENTS),
+                attachments = message.attachments,
                 automated = message.automated,
-                clientId = client?.id,
-                date = message.date ?: now,
-                createdAt = now,
+                autoReply = message.autoReply,
+                date = message.date,
             )
-            val stored = messages.insert(email)
-            if (stored.id != email.id) return false
-            if (!message.autoReply) announce(stored, client)
-            return true
-        }
-
-        /** The event carries no text: triggers that look into the body read it from the stored email. */
-        private suspend fun announce(email: EmailMessage, client: Client?) {
-            events.append(
-                tenantId = tenant.id,
-                type = DomainEventTypes.EMAIL_RECEIVED,
-                subject = SubjectRef.of(SubjectTypes.EMAIL, email.id),
-                payload = buildJsonObject {
-                    put("from", email.from)
-                    email.fromName?.let { put("fromName", it) }
-                    put("subject", email.subject)
-                    put("hasAttachments", email.attachments.isNotEmpty())
-                    put("hasPdf", email.attachments.any { it.isPdf })
-                    put("automated", email.automated)
-                    put("connectionId", email.connectionId.toHexString())
-                    email.threadId?.let { put("threadId", it) }
-                    client?.let { put("clientId", it.id.toHexString()) }
-                },
-                related = listOfNotNull(client?.let { SubjectRef.of(SubjectTypes.CLIENT, it.id) }),
-            )
+            return received.keep(tenant, connection, email, own, bulk = message.labelIds.any { it in BULK_CATEGORIES }) != null
         }
 
         private suspend fun <T> read(call: suspend (String) -> GmailClient.Read<T>): GmailClient.Read<T> {
@@ -269,9 +228,6 @@ class GmailSyncWorker(
         private const val TOKEN_REFUSED = "token_refused"
         private const val TOKEN_UNAVAILABLE = "token_unavailable"
         private const val MAX_PAGES = 20
-        private const val MAX_NAME = 200
-        private const val MAX_RECIPIENTS = 50
-        private const val MAX_ATTACHMENTS = 30
         private val RESYNC_WINDOW = 7.days
         private val RESYNC_MARGIN = 1.hours
         private val SKIPPED_LABELS = setOf("SPAM", "TRASH", "DRAFT", "SENT", "CHAT")

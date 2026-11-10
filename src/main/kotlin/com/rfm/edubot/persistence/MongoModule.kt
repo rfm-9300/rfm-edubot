@@ -160,9 +160,20 @@ class MongoModule(config: AppConfig.MongoConfig) {
             val integrationConnections = db.getCollection<Document>("integration_connections")
             integrationConnections.createIndex(Document("tenantId", 1).append("provider", 1).append("accountEmail", 1), IndexOptions().unique(true))
             integrationConnections.createIndex(Document("provider", 1).append("status", 1))
+            // A company address belongs to one company, and a company has one: mail is routed by the address alone.
+            integrationConnections.createIndex(
+                Document("accountEmail", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("provider", "mailbox")).name("mailbox_address"),
+            )
+            integrationConnections.createIndex(
+                Document("tenantId", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("provider", "mailbox")).name("mailbox_per_company"),
+            )
 
             val emailMessages = db.getCollection<Document>("email_messages")
             emailMessages.createIndex(Document("tenantId", 1).append("connectionId", 1).append("providerMessageId", 1), IndexOptions().unique(true))
+            // Threading a reply to a company address: the email whose Message-ID it names.
+            emailMessages.createIndex(Document("tenantId", 1).append("connectionId", 1).append("messageIdHeader", 1))
             emailMessages.createIndex(Document("tenantId", 1).append("clientId", 1).append("date", -1))
             emailMessages.createIndex(Document("tenantId", 1).append("threadId", 1))
             emailMessages.createIndex(Document("bodyPurgedAt", 1).append("date", 1))

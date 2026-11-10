@@ -17,7 +17,42 @@ data class AppConfig(
     val agents: AgentsConfig = AgentsConfig(),
     val google: GoogleConfig = GoogleConfig(),
     val integrations: IntegrationsConfig = IntegrationsConfig(),
+    val mailbox: MailboxConfig = MailboxConfig(),
 ) {
+    /**
+     * The companies' own addresses on [domain] (docs/architecture.md, "Company email addresses"):
+     * Amazon SES receives the mail they forward there into [bucket] and announces each email on one of
+     * [topicArns], and sends their email from the same address. Env-only; blank values turn it off and
+     * the app still boots.
+     */
+    data class MailboxConfig(
+        /** The subdomain the addresses live on, e.g. `mail.thebotslab.pt`; SES verifies it and its MX points at SES. */
+        val domain: String = "",
+        val region: String = DEFAULT_REGION,
+        val accessKeyId: String = "",
+        val secretAccessKey: String = "",
+        /** Where SES's receipt rule writes each received email. */
+        val bucket: String = "",
+        /** The SNS topics whose notifications the inbound endpoint accepts. */
+        val topicArns: Set<String> = emptySet(),
+        /** Where SES's API is; blank means AWS's. Local end-to-end runs point it at a stand-in. */
+        val sesUrl: String = "",
+        /** Where S3 is (path-style); blank means AWS's. Local end-to-end runs point it at a stand-in. */
+        val s3Url: String = "",
+        /** One more signing-certificate URL SNS messages may name besides AWS's own; local end-to-end runs only. */
+        val trustedCertUrl: String = "",
+    ) {
+        /** Sending needs the domain SES verified and the credentials. */
+        val sendingEnabled: Boolean get() = domain.isNotBlank() && accessKeyId.isNotBlank() && secretAccessKey.isNotBlank()
+
+        /** Companies get addresses only when mail sent to them can also be received. */
+        val enabled: Boolean get() = sendingEnabled && bucket.isNotBlank() && topicArns.isNotEmpty()
+
+        companion object {
+            const val DEFAULT_REGION = "eu-west-1"
+        }
+    }
+
     /** The agents runtime: how often the scheduler ticks and how many runs work at once. */
     data class AgentsConfig(
         val tickSeconds: Int = 30,
@@ -239,6 +274,17 @@ data class AppConfig(
                     gmailApiUrl = getOptional(config, "app.google.gmail.apiUrl").trim().trimEnd('/'),
                 ),
                 integrations = IntegrationsConfig(encryptionKey = getOptional(config, "app.integrations.encryptionKey").trim()),
+                mailbox = MailboxConfig(
+                    domain = getOptional(config, "app.mailbox.domain").trim().lowercase().trimEnd('.'),
+                    region = getOptional(config, "app.mailbox.region").trim().lowercase().ifEmpty { MailboxConfig.DEFAULT_REGION },
+                    accessKeyId = getOptional(config, "app.mailbox.accessKeyId").trim(),
+                    secretAccessKey = getOptional(config, "app.mailbox.secretAccessKey").trim(),
+                    bucket = getOptional(config, "app.mailbox.bucket").trim(),
+                    topicArns = getOptional(config, "app.mailbox.topicArns").split(',', ' ').map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
+                    sesUrl = getOptional(config, "app.mailbox.sesUrl").trim().trimEnd('/'),
+                    s3Url = getOptional(config, "app.mailbox.s3Url").trim().trimEnd('/'),
+                    trustedCertUrl = getOptional(config, "app.mailbox.trustedCertUrl").trim(),
+                ),
             )
         }
 
@@ -289,6 +335,11 @@ data class AppConfig(
                 "app.google.oauth.clientSecret",
                 "app.google.oauth.redirectUri",
                 "app.integrations.encryptionKey",
+                "app.mailbox.domain",
+                "app.mailbox.accessKeyId",
+                "app.mailbox.secretAccessKey",
+                "app.mailbox.bucket",
+                "app.mailbox.topicArns",
             )
 
             val present = keys.filter { config.hasPath(it) }

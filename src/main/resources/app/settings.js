@@ -205,13 +205,15 @@ function renderSettings(root) {
             <td class="right">${state.whatsAppSignup?.enabled ? `<button class="btn btn--sm" id="wa-connect">${escapeHTML(wa ? STR.waReconnect : STR.waConnect)}</button>` : ''}</td></tr>
           <tr><td class="name">Instagram</td><td class="mono">${ig ? escapeHTML(ig.displayName ? '@' + ig.displayName : ig.externalId) : '—'}</td><td>${ig ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right"><button class="btn btn--sm" id="ig-connect">${escapeHTML(ig ? STR.igReconnect : STR.igConnect)}</button>${ig ? ` <button class="btn btn--sm btn--ghost" id="ig-disconnect">${escapeHTML(STR.igDisconnect)}</button>` : ''}</td></tr>
+          ${mailboxRowHtml()}
           ${googleRowsHtml()}
           <tr><td class="name">${escapeHTML(STR.webRowName)}</td><td class="mono">${web.publicKey ? escapeHTML(web.publicKey) : '—'}</td><td>${web.publicKey ? escapeHTML(STR.connected) : `<span class="muted">${escapeHTML(STR.notConnected)}</span>`}</td>
             <td class="right">${web.publicKey ? `<span class="muted">${escapeHTML(STR.webRegenerate)}</span>` : `<button class="btn btn--sm" id="web-generate">${escapeHTML(STR.webGenerate)}</button>`}</td></tr>
         </tbody>
       </table></div>
       <div class="hint" style="margin-top:10px">${escapeHTML(ig && !ig.commentsEnabled ? STR.instagramReconnectBanner : STR.channelsHint)}</div>
-      ${state.integrations?.google?.configured && !googleAccounts().length ? `<div class="hint" style="margin-top:6px">${escapeHTML(GOOGLE.hint)}</div>` : ''}
+      ${mailboxOn() && !mailboxAccount() ? `<div class="hint" style="margin-top:6px">${escapeHTML(MAILBOX.hint)}</div>`
+        : !mailboxOn() && state.integrations?.google?.configured && !googleAccounts().length ? `<div class="hint" style="margin-top:6px">${escapeHTML(GOOGLE.hint)}</div>` : ''}
     </div>`;
   const widgetPanel = `<div class="panel widget-customizer">
       <div class="widget-customizer__head">
@@ -332,6 +334,14 @@ function renderSettings(root) {
     connectGoogle(b.dataset.googleConnect, { inbox: readsInbox(account) });
   }));
   $$('[data-google-account]', root).forEach(b => b.addEventListener('click', () => openEmailAccount(b.dataset.googleAccount)));
+  $('[data-mailbox-setup]', root)?.addEventListener('click', async e => {
+    const button = e.currentTarget;
+    button.disabled = true;
+    await setupMailbox();
+    // A refused set-up leaves the row as it was; a done one redrew it already.
+    if (button.isConnected) button.disabled = false;
+  });
+  $('[data-mailbox-open]', root)?.addEventListener('click', () => openMailbox());
   const localeSel = $('#ui-locale');
   if (localeSel) localeSel.addEventListener('change', async () => {
     const locale = localeSel.value;

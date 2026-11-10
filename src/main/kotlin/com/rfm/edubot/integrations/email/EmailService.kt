@@ -17,10 +17,12 @@ import com.rfm.edubot.events.currentActor
 import com.rfm.edubot.integrations.ConnectionStatus
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationProviders
+import com.rfm.edubot.integrations.aws.SesClient
 import com.rfm.edubot.integrations.google.GmailClient
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
 import com.rfm.edubot.integrations.google.GoogleTokenProvider
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Tenant
 import com.rfm.edubot.tenant.model.TenantTimeZones
@@ -34,10 +36,11 @@ import org.bson.types.ObjectId
 import org.slf4j.LoggerFactory
 
 /**
- * Sends a company's email from its default Google account, in the company's branded layout with the
- * account's sender name, reply-to and signature. Each send is claimed in the outbound log before
- * Gmail is called, so one key never goes out twice; each account has a daily allowance; what went
- * out is kept in `email_messages` and announced as `email.sent`.
+ * Sends a company's email from its account, in the company's branded layout with the account's sender
+ * name, reply-to and signature: from its own address on the platform's mail domain through Amazon SES
+ * when it has one ([MailboxIntegration]), else from its default Google account through Gmail. Each send
+ * is claimed in the outbound log before the provider is called, so one key never goes out twice; each
+ * account has a daily allowance; what went out is kept in `email_messages` and announced as `email.sent`.
  */
 class EmailService(
     private val google: GoogleIntegration,
@@ -48,32 +51,46 @@ class EmailService(
     private val runs: AgentRunRepository,
     private val approvals: AgentApprovalRepository,
     private val clock: () -> Instant = SystemClock::now,
+    private val mailbox: MailboxIntegration? = null,
 ) : EmailSender {
     private val log = LoggerFactory.getLogger("EmailService")
 
-    /** The platform has a Google OAuth client and a token key. */
-    val configured: Boolean get() = google.configured
+    /** Companies can have email at all: the platform's mail domain, or a Google OAuth client and a token key. */
+    val configured: Boolean get() = google.configured || mailbox?.configured == true
 
-    /** The account email goes out from when none is named. */
-    suspend fun sender(tenant: Tenant): IntegrationConnection? =
-        google.connections.defaultFor(tenant.id, IntegrationProviders.GOOGLE)
+    /** Companies get their own address; Gmail isn't offered while they do. */
+    val mailboxConfigured: Boolean get() = mailbox?.configured == true
 
-    override suspend fun isAvailable(tenant: Tenant): Boolean =
-        google.configured && sender(tenant)?.let(::canSend) == true
+    /** The account email goes out from when none is named: the company's own address, else its default Google account. */
+    suspend fun sender(tenant: Tenant): IntegrationConnection? {
+        if (mailbox?.sending == true) google.connections.mailboxFor(tenant.id)?.takeIf { it.status == ConnectionStatus.ACTIVE }?.let { return it }
+        return google.connections.defaultFor(tenant.id, IntegrationProviders.GOOGLE)
+    }
+
+    override suspend fun isAvailable(tenant: Tenant): Boolean = canSendFrom(sender(tenant))
 
     /**
-     * What automations may use. Sending still counts while the account only needs a reconnect: runs
-     * then stop with `needs_reconnect`, which its admins were already asked to fix. The inbox counts
-     * once an account has inbox sync on with the read scopes.
+     * What automations may use. Sending still counts while a Google account only needs a reconnect: runs
+     * then stop with `needs_reconnect`, which its admins were already asked to fix. The inbox counts once
+     * the company has its own address (whatever it forwards there arrives) or a Google account reading
+     * its inbox with the read scopes.
      */
     suspend fun availability(tenant: Tenant): EmailAvailability {
-        if (!google.configured) return EmailAvailability()
-        val accounts = google.connections.list(tenant.id, IntegrationProviders.GOOGLE).filter { it.status != ConnectionStatus.REVOKED }
+        val address = if (mailbox?.sending == true) google.connections.mailboxFor(tenant.id)?.takeIf { it.status == ConnectionStatus.ACTIVE } else null
+        val accounts = if (google.configured) {
+            google.connections.list(tenant.id, IntegrationProviders.GOOGLE).filter { it.status != ConnectionStatus.REVOKED }
+        } else {
+            emptyList()
+        }
         return EmailAvailability(
-            send = accounts.any { GoogleScopes.canSend(it.scopes) },
-            inbox = google.inboxAvailable && accounts.any { it.settings.inboxSync && GoogleScopes.canRead(it.scopes) },
+            send = address != null || accounts.any { GoogleScopes.canSend(it.scopes) },
+            inbox = (address != null && mailbox?.configured == true) ||
+                (google.inboxAvailable && accounts.any { it.settings.inboxSync && GoogleScopes.canRead(it.scopes) }),
         )
     }
+
+    /** Whether [connection] can send now: its provider is set up on the platform and the account works. */
+    fun canSendFrom(connection: IntegrationConnection?): Boolean = connection != null && providerReady(connection) && canSend(connection)
 
     /** How many emails each of the company's accounts may send a day. */
     suspend fun dailyLimit(tenant: Tenant): Int = agentSettings.get(tenant.id).platform.emailSendsPerDay
@@ -88,7 +105,7 @@ class EmailService(
     }
 
     override suspend fun sendFrom(tenant: Tenant, connectionId: ObjectId, email: OutgoingEmail, idempotencyKey: String?): EmailSendResult {
-        val connection = google.connections.find(tenant.id, connectionId)?.takeIf { it.provider == IntegrationProviders.GOOGLE }
+        val connection = google.connections.find(tenant.id, connectionId)?.takeIf { it.provider in SENDING_PROVIDERS }
             ?: return EmailSendResult.Failed(NO_ACCOUNT)
         return sendFrom(tenant, connection, email, idempotencyKey)
     }
@@ -118,7 +135,7 @@ class EmailService(
 
     /** Sends from [connection], one of [tenant]'s accounts. Without [idempotencyKey] every call is a new email. */
     suspend fun sendFrom(tenant: Tenant, connection: IntegrationConnection, email: OutgoingEmail, idempotencyKey: String? = null): EmailSendResult {
-        if (!google.configured || connection.tenantId != tenant.id) return EmailSendResult.Failed(NO_ACCOUNT)
+        if (!providerReady(connection) || connection.tenantId != tenant.id) return EmailSendResult.Failed(NO_ACCOUNT)
         if (!canSend(connection)) return EmailSendResult.Failed(NEEDS_RECONNECT)
         val prepared = when (val result = prepare(tenant, connection, email)) {
             is Prepared.Ready -> result
@@ -148,26 +165,48 @@ class EmailService(
             return EmailSendResult.Failed(DAILY_LIMIT)
         }
         val result = try {
-            transmit(connection, prepared.raw, email.threadId)
+            if (connection.provider == IntegrationProviders.MAILBOX) transmitSes(connection, prepared, email.threadId) else transmit(connection, prepared.raw, email.threadId)
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             log.warn("Email send crashed: tenant={} connection={} error={}", tenant.id, connection.id, e.message)
-            GmailClient.Send.Failed(SEND_FAILED, retryable = true)
+            Transmission.Failed(SEND_FAILED, retryable = true)
         }
         return when (result) {
-            is GmailClient.Send.Sent -> {
+            is Transmission.Sent -> {
                 outboundLog.markSent(key, result.id)
                 record(tenant, connection, email, prepared, result, actor)
                 EmailSendResult.Sent(result.id, result.threadId, connection.accountEmail)
             }
-            is GmailClient.Send.Failed -> {
-                // Gmail took the message without saying so: the log stays SENDING so nobody sends it twice.
+            is Transmission.Failed -> {
+                // The provider took the message without saying so: the log stays SENDING so nobody sends it twice.
                 if (result.key == IN_DOUBT) return EmailSendResult.Failed(IN_DOUBT)
                 google.connections.releaseSend(connection.id, day)
                 outboundLog.markFailed(key, result.key)
                 EmailSendResult.Failed(result.key, retryable = result.retryable)
             }
+        }
+    }
+
+    /** What a provider made of a send: its id for the email and the thread it's in, and the Message-ID recipients see. */
+    private sealed interface Transmission {
+        data class Sent(val id: String, val threadId: String?, val messageIdHeader: String? = null) : Transmission
+        data class Failed(val key: String, val retryable: Boolean) : Transmission
+    }
+
+    /**
+     * Sends from the company's own address through SES. The thread is the one replied in, or a new one;
+     * SES's id names the Message-ID recipients see, which their replies answer.
+     */
+    private suspend fun transmitSes(connection: IntegrationConnection, prepared: Prepared.Ready, threadId: String?): Transmission {
+        val ses = mailbox ?: return Transmission.Failed(NO_ACCOUNT, retryable = false)
+        return when (val sent = ses.ses.sendRaw(prepared.raw, connection.accountEmail, prepared.to, prepared.cc, prepared.bcc)) {
+            is SesClient.Send.Sent -> Transmission.Sent(
+                id = sent.messageId,
+                threadId = threadId ?: "mb-${ObjectId().toHexString()}",
+                messageIdHeader = SesClient.messageIdHeader(sent.messageId, ses.config.region),
+            )
+            is SesClient.Send.Failed -> Transmission.Failed(sent.key, sent.retryable)
         }
     }
 
@@ -205,6 +244,7 @@ class EmailService(
         val rendered = EmailLayout.render(subject, email.text, template, connection.settings.signature, tenant.locale)
         val messageId = MimeMessageBuilder.newMessageId(connection.accountEmail)
         val date = clock()
+        val viaSes = connection.provider == IntegrationProviders.MAILBOX
         val raw = try {
             MimeMessageBuilder.build(
                 MimeMessageBuilder.Message(
@@ -219,25 +259,36 @@ class EmailService(
                     attachments = email.attachments,
                     messageId = messageId,
                     inReplyTo = email.inReplyTo?.takeIf { it.isNotBlank() },
+                    references = email.references.filter { it.isNotBlank() }.takeLast(MAX_REFERENCES),
                     date = date,
                     autoReplied = email.autoReplied,
+                    // SES takes the recipients apart; in the message, a Bcc header would show them to everyone.
+                    bccHeader = !viaSes,
                 ),
             )
         } catch (e: IllegalArgumentException) {
             return Prepared.Invalid(INVALID_MESSAGE)
         }
-        if (raw.size > GmailClient.MAX_RAW_BYTES) return Prepared.Invalid(TOO_LARGE)
+        if (raw.size > (if (viaSes) SesClient.MAX_RAW_BYTES else GmailClient.MAX_RAW_BYTES)) return Prepared.Invalid(TOO_LARGE)
         return Prepared.Ready(to, cc, bcc, fromName, subject, rendered.text, messageId, raw, date)
     }
 
     /** Sends with the account's token; a token Gmail refuses before it expires is renewed and the send tried once more. */
-    private suspend fun transmit(connection: IntegrationConnection, raw: ByteArray, threadId: String?): GmailClient.Send {
+    private suspend fun transmit(connection: IntegrationConnection, raw: ByteArray, threadId: String?): Transmission {
         val first = attempt(connection, raw, threadId)
-        if (first !is GmailClient.Send.Failed || first.key != UNAUTHORIZED) return first
-        google.connections.expireAccessToken(connection.id)
-        val fresh = google.connections.findById(connection.id) ?: return GmailClient.Send.Failed(NEEDS_RECONNECT, retryable = false)
-        val second = attempt(fresh, raw, threadId)
-        return if (second is GmailClient.Send.Failed && second.key == UNAUTHORIZED) GmailClient.Send.Failed(SEND_FAILED, retryable = true, second.status) else second
+        if (first is GmailClient.Send.Failed && first.key == UNAUTHORIZED) {
+            google.connections.expireAccessToken(connection.id)
+            val fresh = google.connections.findById(connection.id) ?: return Transmission.Failed(NEEDS_RECONNECT, retryable = false)
+            val second = attempt(fresh, raw, threadId)
+            return when (second) {
+                is GmailClient.Send.Sent -> Transmission.Sent(second.id, second.threadId)
+                is GmailClient.Send.Failed -> Transmission.Failed(if (second.key == UNAUTHORIZED) SEND_FAILED else second.key, if (second.key == UNAUTHORIZED) true else second.retryable)
+            }
+        }
+        return when (first) {
+            is GmailClient.Send.Sent -> Transmission.Sent(first.id, first.threadId)
+            is GmailClient.Send.Failed -> Transmission.Failed(first.key, first.retryable)
+        }
     }
 
     private suspend fun attempt(connection: IntegrationConnection, raw: ByteArray, threadId: String?): GmailClient.Send {
@@ -252,7 +303,7 @@ class EmailService(
     }
 
     /** Keeps what went out and announces it; the email is already sent, so a failure here is only logged. */
-    private suspend fun record(tenant: Tenant, connection: IntegrationConnection, email: OutgoingEmail, prepared: Prepared.Ready, sent: GmailClient.Send.Sent, actor: Actor) {
+    private suspend fun record(tenant: Tenant, connection: IntegrationConnection, email: OutgoingEmail, prepared: Prepared.Ready, sent: Transmission.Sent, actor: Actor) {
         val stored = try {
             messages.insert(
                 EmailMessage(
@@ -260,7 +311,7 @@ class EmailService(
                     connectionId = connection.id,
                     providerMessageId = sent.id,
                     threadId = sent.threadId,
-                    messageIdHeader = prepared.messageId,
+                    messageIdHeader = sent.messageIdHeader ?: prepared.messageId,
                     direction = EmailDirection.OUTBOUND,
                     from = connection.accountEmail,
                     fromName = prepared.fromName,
@@ -311,7 +362,17 @@ class EmailService(
     }
 
     private fun canSend(connection: IntegrationConnection): Boolean =
-        connection.status == ConnectionStatus.ACTIVE && GoogleScopes.canSend(connection.scopes)
+        connection.status == ConnectionStatus.ACTIVE && when (connection.provider) {
+            IntegrationProviders.MAILBOX -> true
+            else -> GoogleScopes.canSend(connection.scopes)
+        }
+
+    /** The platform is set up for [connection]'s provider: SES for a company address, Google OAuth for a Gmail account. */
+    private fun providerReady(connection: IntegrationConnection): Boolean = when (connection.provider) {
+        IntegrationProviders.MAILBOX -> mailbox?.sending == true
+        IntegrationProviders.GOOGLE -> google.configured
+        else -> false
+    }
 
     /** Normalised and deduplicated; null when one of them isn't an address. */
     private fun addresses(raw: List<String>): List<String>? =
@@ -322,6 +383,8 @@ class EmailService(
     companion object {
         const val CHANNEL = "email"
         const val MAX_RECIPIENTS = 20
+        private const val MAX_REFERENCES = 20
+        private val SENDING_PROVIDERS = setOf(IntegrationProviders.GOOGLE, IntegrationProviders.MAILBOX)
         const val NO_ACCOUNT = "no_email_account"
         const val NEEDS_RECONNECT = "needs_reconnect"
         const val INVALID_RECIPIENT = "invalid_recipient"

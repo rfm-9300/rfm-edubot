@@ -1,28 +1,47 @@
-"""Deterministic stand-ins for the Email page's end-to-end runs: OpenRouter's /chat/completions and the Gmail API.
+"""Deterministic stand-ins for the Email page's end-to-end runs: OpenRouter's /chat/completions, the Gmail API, and
+Amazon SES, S3 and SNS for a company's own address.
 
 The model answers the Email page's forced `submit_insights` call from simple rules over the email it was given
 (Portuguese, English and Spanish keywords): an intent, the sender's details, lines, a date, an amount and a short
 reply. It checks plumbing and the page, not model quality. The Gmail API serves one mailbox the walkthrough fills
 through hooks, so the app's real inbox sync stores the mail, and it keeps what the app sends.
 
+For a company's own address, /__ses/receive does what SES's receipt rule does: it stores the email in the "S3"
+bucket and posts SNS's notification of it, signed with a key `openssl` makes at startup, to the app's inbound
+endpoint, which then reads the email back from here. SES's SendEmail keeps what the app sends.
+
     python3 fake-services.py [port] [log]     # defaults: 8099, /tmp/fake-email-services.jsonl
     # then run the app with OPENROUTER_BASE_URL=http://127.0.0.1:8099/api/v1 GMAIL_API_URL=http://127.0.0.1:8099/gmail/v1
+    # and, for the company's own address: MAILBOX_DOMAIN=mail.example.test SES_ACCESS_KEY_ID=fake SES_SECRET_ACCESS_KEY=fake
+    #   SES_INBOUND_BUCKET=inbound SES_INBOUND_TOPIC_ARN=arn:aws:sns:eu-west-1:000000000000:inbound
+    #   SES_API_URL=http://127.0.0.1:8099/ses SES_S3_URL=http://127.0.0.1:8099/s3 SNS_TRUSTED_CERT_URL=http://127.0.0.1:8099/sns/cert.pem
 
 Hooks:
     POST /__gmail/reset    {"emailAddress": "obras@example.test"}   empties the mailbox and the sent mail
     POST /__gmail/receive  {"from", "subject", "text", "threadId"?, "to"?, "minutesAgo"?, "labels"?, "headers"?, "attachments"?: [name]}
     GET  /__gmail/sent     what the app sent: to, subject, threadId, inReplyTo, text
     GET  /__model/last     the last request the model received
+    POST /__ses/receive    {"to": address, "from", "subject", "text", "headers"?: {}, "attachments"?: [name], "verdicts"?: {"spam": "FAIL"…},
+                            "app"?: "http://127.0.0.1:8080"}   answers {"status": the app's HTTP status, "sesId"}
+    POST /__ses/subscribe  {"app"?}   posts SNS's subscription confirmation; GET /__ses/confirmed lists the links the app opened
+    GET  /__ses/sent       what the app sent through SES: from, to, cc, bcc, bccHeader, subject, inReplyTo, references, replyTo, text
 """
 import base64
 import email
 import email.policy
+import email.utils
 import json
+import os
 import re
+import subprocess
 import sys
+import tempfile
 import threading
 import time
-from datetime import date, timedelta
+import urllib.error
+import urllib.request
+from datetime import date, datetime, timedelta, timezone
+from email.message import EmailMessage
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 LOG = sys.argv[2] if len(sys.argv) > 2 else "/tmp/fake-email-services.jsonl"
@@ -243,9 +262,128 @@ def completion(request):
             "usage": {"prompt_tokens": 900, "completion_tokens": 120, "total_tokens": 1020}}
 
 
+# ---------- Amazon SES, S3 and SNS ----------
+
+TOPIC = "arn:aws:sns:eu-west-1:000000000000:inbound"
+BUCKET = "inbound"
+AWS = {"objects": {}, "sent": [], "confirmed": [], "seq": 0}
+KEYS = tempfile.mkdtemp(prefix="fake-sns-")
+
+
+def make_key():
+    """A throwaway RSA key and self-signed certificate for SNS's signatures, made for this run only."""
+    subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "2", "-subj", "/CN=fake-sns",
+                    "-keyout", os.path.join(KEYS, "key.pem"), "-out", os.path.join(KEYS, "cert.pem")],
+                   check=True, capture_output=True)
+
+
+def sns_sign(message):
+    """SNS's SignatureVersion 2: SHA256withRSA over its string to sign."""
+    fields = ["Message", "MessageId"] + (["Subject"] if "Subject" in message else [])
+    if message["Type"] == "Notification":
+        fields += ["Timestamp", "TopicArn", "Type"]
+    else:
+        fields = ["Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type"]
+    to_sign = "".join(f"{name}\n{message[name]}\n" for name in fields)
+    signed = subprocess.run(["openssl", "dgst", "-sha256", "-sign", os.path.join(KEYS, "key.pem")],
+                            input=to_sign.encode("utf-8"), capture_output=True, check=True).stdout
+    return {**message, "SignatureVersion": "2", "Signature": base64.b64encode(signed).decode("ascii")}
+
+
+def sns_post(app, message):
+    request = urllib.request.Request(f"{app}/integrations/email/ses", data=json.dumps(message).encode("utf-8"), method="POST",
+                                     headers={"Content-Type": "text/plain; charset=UTF-8", "x-amz-sns-message-type": message["Type"]})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            return response.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def sns_base(kind, port):
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    with LOCK:
+        AWS["seq"] += 1
+        n = AWS["seq"]
+    return {"Type": kind, "MessageId": f"sns-{n}", "TopicArn": TOPIC, "Timestamp": now,
+            "SigningCertURL": f"http://127.0.0.1:{port}/sns/cert.pem"}
+
+
+def ses_receive(body, port):
+    """What SES's receipt rule does for an email to a company's address: store it, then announce it over SNS."""
+    msg = EmailMessage()
+    msg["From"] = body.get("from", "Maria Silva <maria@cliente.test>")
+    msg["To"] = body.get("toHeader", "geral@empresa.test")
+    msg["Subject"] = body.get("subject", "Pedido de orçamento")
+    msg["Message-ID"] = body.get("messageId") or f"<{int(time.time() * 1000)}@cliente.test>"
+    msg["Date"] = email.utils.formatdate(localtime=False)
+    for name, value in (body.get("headers") or {}).items():
+        msg[name] = value
+    msg.set_content(body.get("text", "Olá"))
+    for name in body.get("attachments") or []:
+        msg.add_attachment(b"%PDF-1.4 fake", maintype="application", subtype="pdf", filename=name)
+    raw = msg.as_bytes(policy=email.policy.SMTP)
+    with LOCK:
+        AWS["seq"] += 1
+        ses_id = f"fake-inbound-{AWS['seq']}"
+        AWS["objects"][ses_id] = raw
+    verdicts = {"spam": "PASS", "virus": "PASS", "dkim": "PASS", "dmarc": "GRAY", **(body.get("verdicts") or {})}
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    notification = {
+        "notificationType": "Received",
+        "receipt": {"timestamp": now, "recipients": [body["to"]],
+                    "spamVerdict": {"status": verdicts["spam"]}, "virusVerdict": {"status": verdicts["virus"]},
+                    "spfVerdict": {"status": "GRAY"}, "dkimVerdict": {"status": verdicts["dkim"]}, "dmarcVerdict": {"status": verdicts["dmarc"]},
+                    "action": {"type": "S3", "topicArn": TOPIC, "bucketName": BUCKET, "objectKey": ses_id}},
+        "mail": {"timestamp": now, "source": body.get("envelopeFrom", "maria@cliente.test"), "messageId": ses_id, "destination": [body["to"]]},
+    }
+    message = sns_sign({**sns_base("Notification", port), "Message": json.dumps(notification)})
+    status = sns_post(body.get("app", "http://127.0.0.1:8080"), message)
+    log("ses.receive", {"sesId": ses_id, "status": status})
+    return {"status": status, "sesId": ses_id}
+
+
+def ses_subscribe(body, port):
+    token = f"tok-{int(time.time())}"
+    message = sns_sign({**sns_base("SubscriptionConfirmation", port), "Message": "You have chosen to subscribe to the topic.",
+                        "SubscribeURL": f"http://127.0.0.1:{port}/sns/confirm?Token={token}", "Token": token})
+    return {"status": sns_post(body.get("app", "http://127.0.0.1:8080"), message)}
+
+
+def ses_send(body):
+    raw = base64.b64decode(body["Content"]["Raw"]["Data"])
+    parsed = email.message_from_bytes(raw, policy=email.policy.default)
+    part = parsed.get_body(preferencelist=("plain",))
+    destination = body.get("Destination") or {}
+    sent = {"from": str(parsed["From"]), "to": destination.get("ToAddresses", []), "cc": destination.get("CcAddresses", []),
+            "bcc": destination.get("BccAddresses", []), "bccHeader": parsed["Bcc"] is not None, "subject": str(parsed["Subject"]),
+            "inReplyTo": parsed["In-Reply-To"], "references": parsed["References"], "replyTo": parsed["Reply-To"],
+            "text": part.get_content() if part else "", "attachments": [p.get_filename() for p in parsed.iter_attachments()]}
+    with LOCK:
+        AWS["seq"] += 1
+        sent["messageId"] = f"fake-ses-{AWS['seq']}"
+        AWS["sent"].append(sent)
+    log("ses.send", sent)
+    return {"MessageId": sent["messageId"]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
+
+    def raw(self, status, data, content_type="application/octet-stream"):
+        self.send_response(status)
+        self.send_header("Content-Type", content_type)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def do_DELETE(self):
+        if self.path.startswith(f"/s3/{BUCKET}/"):
+            with LOCK:
+                AWS["objects"].pop(self.path[len(f"/s3/{BUCKET}/"):], None)
+            return self.raw(204, b"")
+        self.reply(404, {"error": "not found"})
 
     def reply(self, status, body):
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
@@ -270,10 +408,34 @@ class Handler(BaseHTTPRequestHandler):
                 return self.reply(200, list(MAILBOX["sent"]))
         if path == "/__model/last":
             return self.reply(200, STATE["last"] or {})
+        if path.startswith(f"/s3/{BUCKET}/"):
+            with LOCK:
+                data = AWS["objects"].get(path[len(f"/s3/{BUCKET}/"):])
+            return self.raw(200, data) if data is not None else self.raw(404, b"<Error><Code>NoSuchKey</Code></Error>", "application/xml")
+        if path == "/sns/cert.pem":
+            with open(os.path.join(KEYS, "cert.pem"), "rb") as f:
+                return self.raw(200, f.read(), "application/x-pem-file")
+        if path == "/sns/confirm":
+            with LOCK:
+                AWS["confirmed"].append(self.path)
+            return self.raw(200, b"<ConfirmSubscriptionResponse/>", "application/xml")
+        if path == "/__ses/sent":
+            with LOCK:
+                return self.reply(200, list(AWS["sent"]))
+        if path == "/__ses/confirmed":
+            with LOCK:
+                return self.reply(200, list(AWS["confirmed"]))
         self.reply(404, {"error": "not found"})
 
     def do_POST(self):
         body = self.read()
+        port = self.server.server_address[1]
+        if self.path == "/ses/v2/email/outbound-emails":
+            return self.reply(200, ses_send(body))
+        if self.path == "/__ses/receive":
+            return self.reply(200, ses_receive(body, port))
+        if self.path == "/__ses/subscribe":
+            return self.reply(200, ses_subscribe(body, port))
         if self.path.startswith("/api/v1/chat/completions"):
             STATE["last"] = body
             answer = completion(body)
@@ -294,5 +456,6 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8099
-    print(f"Fake OpenRouter and Gmail on http://127.0.0.1:{port} (log: {LOG})", flush=True)
+    make_key()
+    print(f"Fake OpenRouter, Gmail and SES/S3/SNS on http://127.0.0.1:{port} (log: {LOG})", flush=True)
     ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

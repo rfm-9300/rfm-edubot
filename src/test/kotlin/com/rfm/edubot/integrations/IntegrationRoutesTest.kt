@@ -19,12 +19,16 @@ import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.dashboard.model.DashboardUserStatus
 import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.integrations.aws.FakeAws
+import com.rfm.edubot.integrations.aws.S3Client
+import com.rfm.edubot.integrations.aws.SesClient
 import com.rfm.edubot.integrations.email.EmailCopy
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.google.FakeGoogle
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.oauth.InstagramOAuthClient
 import com.rfm.edubot.oauth.OAuthState
@@ -144,16 +148,74 @@ class IntegrationRoutesTest {
         return Company(tenant, adminUser, dashboardToken(admin, adminUser, "tenant", 1), dashboardToken(admin, memberUser, "tenant", 1), operator)
     }
 
-    private fun emailFor(google: GoogleIntegration) =
-        EmailService(google, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), settings, AgentRunRepository(mongo), AgentApprovalRepository(mongo))
+    private fun emailFor(google: GoogleIntegration, mailbox: MailboxIntegration? = null) =
+        EmailService(google, EmailMessageRepository(mongo), OutboundLogRepository(mongo), DomainEventLog(mongo), settings, AgentRunRepository(mongo), AgentApprovalRepository(mongo), mailbox = mailbox)
 
-    private fun routes(google: GoogleIntegration, block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
+    private fun mailboxFor(google: GoogleIntegration, aws: FakeAws, config: AppConfig.MailboxConfig = aws.config) =
+        MailboxIntegration({ config }, google.connections, SesClient(aws.http, { config }), S3Client(aws.http, { config }))
+
+    private fun routes(google: GoogleIntegration, mailbox: MailboxIntegration? = null, block: suspend ApplicationTestBuilder.(HttpClient) -> Unit) = testApplication {
         application {
             configureSerialization()
             configureAdminAuth(runtimeConfig, tenants, users)
-            routing { integrationRoutes(google, emailFor(google), oauthState, tenants, users) }
+            routing { integrationRoutes(google, emailFor(google, mailbox), oauthState, tenants, users, mailbox = mailbox) }
         }
         block(createClient { followRedirects = false })
+    }
+
+    @Test
+    fun `a company gets its own address once, from an admin or an operator, and can send from it`() {
+        val google = integration(FakeGoogle(), configured = false)
+        val aws = FakeAws()
+        routes(google, mailboxFor(google, aws)) { http ->
+            val company = company()
+            val before = http.list(company.adminToken)
+            assertEquals(true, before["mailbox"]!!.jsonObject["configured"]!!.jsonPrimitive.boolean)
+            assertEquals(aws.domain, before["mailbox"]!!.jsonObject["domain"]!!.jsonPrimitive.content)
+
+            assertEquals(HttpStatusCode.Forbidden, http.post("/app/api/integrations/mailbox") { bearerAuth(company.memberToken) }.status)
+            val created = http.post("/app/api/integrations/mailbox") { bearerAuth(company.operatorToken) }
+            assertEquals(HttpStatusCode.Created, created.status)
+            val address = created.obj()
+            assertEquals(IntegrationProviders.MAILBOX, address["provider"]!!.jsonPrimitive.content)
+            assertTrue(address["accountEmail"]!!.jsonPrimitive.content.endsWith("@${aws.domain}"))
+            assertTrue(address.flag("canSend"))
+            val again = http.post("/app/api/integrations/mailbox") { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.OK, again.status)
+            assertEquals(address["id"], again.obj()["id"])
+
+            val listed = http.list(company.memberToken)["connections"]!!.jsonArray.single().jsonObject
+            assertEquals(address["accountEmail"], listed["accountEmail"])
+
+            val id = address["id"]!!.jsonPrimitive.content
+            val inbox = http.patchJson("/app/api/integrations/$id", company.adminToken, buildJsonObject { put("inboxSync", false) })
+            assertEquals(HttpStatusCode.BadRequest, inbox.status, "an address reads what's forwarded to it: nothing to turn off")
+            val named = http.patchJson("/app/api/integrations/$id", company.adminToken, buildJsonObject { put("senderName", "Obras Silva"); put("replyTo", "geral@obras.pt") })
+            assertEquals(HttpStatusCode.OK, named.status)
+            assertEquals("geral@obras.pt", named.obj()["replyTo"]!!.jsonPrimitive.content)
+
+            val test = http.post("/app/api/integrations/$id/test-email") { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.OK, test.status)
+            assertEquals(company.admin.email, aws.sends.single().to.single())
+            assertEquals("geral@obras.pt", (aws.sends.single().parsed().replyTo.single() as InternetAddress).address)
+
+            assertEquals(HttpStatusCode.NoContent, http.delete("/app/api/integrations/$id") { bearerAuth(company.adminToken) }.status)
+            assertEquals(0, http.list(company.adminToken)["connections"]!!.jsonArray.size)
+        }
+    }
+
+    @Test
+    fun `no address is offered while the platform has no mail domain`() {
+        val google = integration(FakeGoogle(), configured = false)
+        val aws = FakeAws()
+        routes(google, mailboxFor(google, aws, AppConfig.MailboxConfig())) { http ->
+            val company = company()
+            // All defaults, so the JSON leaves the object out (encodeDefaults is off).
+            assertFalse((http.list(company.adminToken)["mailbox"] as? JsonObject)?.flag("configured") ?: false)
+            val refused = http.post("/app/api/integrations/mailbox") { bearerAuth(company.adminToken) }
+            assertEquals(HttpStatusCode.ServiceUnavailable, refused.status)
+            assertEquals("mailbox_not_configured", refused.obj()["error"]!!.jsonPrimitive.content)
+        }
     }
 
     private suspend fun keptMail(connection: IntegrationConnection): Long =

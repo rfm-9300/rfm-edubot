@@ -15,6 +15,7 @@ import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.email.httpStatus
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.oauth.OAuthState
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.TenantRepository
@@ -39,14 +40,16 @@ import kotlin.time.Duration.Companion.seconds
 private val log = LoggerFactory.getLogger("IntegrationRoutes")
 
 /**
- * A company's connected accounts (docs/plan-agents-automations.md, "Google / Gmail integration"), under the
- * settings module:
- *  - GET    /app/api/integrations                 the connections, and whether Google can be connected
+ * A company's email accounts (docs/plan-agents-automations.md, "Google / Gmail integration"; docs/architecture.md,
+ * "Company email addresses"), under the settings module:
+ *  - GET    /app/api/integrations                 the accounts, whether the company can get its own address and whether Google can be connected
+ *  - POST   /app/api/integrations/mailbox         gives the company its own address (or answers the one it has), for an admin or an operator
  *  - GET    /app/api/integrations/google/connect  { authorizeUrl } for a company admin signed in as themselves; ?account= reconnects one,
  *                                                 ?inbox=1 also asks to read the inbox and turns inbox sync on
- *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender, inbox sync
+ *  - PATCH  /app/api/integrations/{id}            sender name, reply-to, signature, default sender, inbox sync (Google only)
  *  - POST   /app/api/integrations/{id}/test-email a test email to the admin asking (an operator: to the account itself)
- *  - DELETE /app/api/integrations/{id}            delete the tokens and the kept mail, revoking the grant when no company still uses it
+ *  - DELETE /app/api/integrations/{id}/confirmation  sets aside Gmail's forwarding code shown for the company's address
+ *  - DELETE /app/api/integrations/{id}            removes the account and the kept mail; a Google grant is revoked when no company still uses it
  *  - GET    /integrations/google/callback         public: Google redirects the browser here; the signed state is the auth
  */
 fun Route.integrationRoutes(
@@ -56,6 +59,7 @@ fun Route.integrationRoutes(
     tenants: TenantRepository,
     users: DashboardUserRepository,
     clock: () -> Instant = SystemClock::now,
+    mailbox: MailboxIntegration? = null,
 ) {
     val connections = google.connections
 
@@ -66,13 +70,41 @@ fun Route.integrationRoutes(
                     val ctx = call.moduleContext()
                     val today = email.today(ctx.tenant)
                     val limit = email.dailyLimit(ctx.tenant)
+                    val now = clock()
                     call.respond(
                         IntegrationsDto(
                             google = GoogleAvailabilityDto(configured = google.configured, canConnect = ctx.canConnect(), inbox = google.inboxAvailable),
-                            connections = connections.list(ctx.tenant.id).map { it.dto(today, limit) },
+                            connections = connections.list(ctx.tenant.id)
+                                // An address stays hidden while the platform's mail domain is off; its mail is kept meanwhile.
+                                .filter { it.provider != IntegrationProviders.MAILBOX || mailbox?.configured == true }
+                                .map { it.dto(today, limit, email.canSendFrom(it), now) },
                             canManage = ctx.canManageIntegrations(),
+                            mailbox = MailboxAvailabilityDto(configured = mailbox?.configured == true, domain = mailbox?.takeIf { it.configured }?.domain),
                         ),
                     )
+                }
+
+                // The company's own address: nothing is read until the company forwards its mail there, so an operator may set it up too.
+                post("/mailbox") {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageIntegrations()) return@post call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    if (mailbox?.configured != true) return@post call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "mailbox_not_configured"))
+                    val existing = connections.mailboxFor(ctx.tenant.id)
+                    val connection = existing ?: mailbox.create(ctx.tenant, ctx.user?.id?.toHexString(), ctx.user?.email ?: "operator")
+                        ?: return@post call.respond(HttpStatusCode.ServiceUnavailable, mapOf("error" to "mailbox_not_created"))
+                    if (existing == null) log.info("Company address created: tenant={} connection={}", ctx.tenant.slug, connection.id)
+                    call.respond(
+                        if (existing == null) HttpStatusCode.Created else HttpStatusCode.OK,
+                        connection.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant), email.canSendFrom(connection), clock()),
+                    )
+                }
+
+                delete("/{id}/confirmation") {
+                    val ctx = call.moduleContext()
+                    if (!ctx.canManageIntegrations()) return@delete call.respond(HttpStatusCode.Forbidden, mapOf("error" to "not_allowed"))
+                    val connection = call.connectionParam(connections, ctx) ?: return@delete
+                    val updated = connections.clearForwardingConfirmation(ctx.tenant.id, connection.id) ?: return@delete call.respond(HttpStatusCode.NotFound)
+                    call.respond(updated.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant), email.canSendFrom(updated), clock()))
                 }
 
                 // The operator would consent with their own Google account, so only the company's admins connect.
@@ -109,6 +141,10 @@ fun Route.integrationRoutes(
                     val connection = call.connectionParam(connections, ctx) ?: return@patch
                     val request = runCatching { call.receive<UpdateConnectionRequest>() }.getOrNull()
                         ?: return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "invalid_body"))
+                    // The company's address reads whatever is forwarded to it, and it is the sender while it exists.
+                    if (connection.provider == IntegrationProviders.MAILBOX && request.inboxSync != null) {
+                        return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "not_supported"))
+                    }
                     val settings = when (val update = request.applyTo(connection.settings)) {
                         is SettingsUpdate.Invalid -> return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to update.error))
                         is SettingsUpdate.Ok -> update.settings
@@ -127,7 +163,8 @@ fun Route.integrationRoutes(
                         updated = connections.setInboxSync(ctx.tenant.id, connection.id, inboxSync)
                         log.info("Inbox sync {}: tenant={} connection={}", if (inboxSync) "on" else "off", ctx.tenant.slug, connection.id)
                     }
-                    updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant))) } ?: call.respond(HttpStatusCode.NotFound)
+                    updated?.let { call.respond(it.dto(email.today(ctx.tenant), email.dailyLimit(ctx.tenant), email.canSendFrom(it), clock())) }
+                        ?: call.respond(HttpStatusCode.NotFound)
                 }
 
                 post("/{id}/test-email") {
@@ -148,7 +185,10 @@ fun Route.integrationRoutes(
                     val connection = call.connectionParam(connections, ctx) ?: return@delete
                     connections.delete(ctx.tenant.id, connection.id) ?: return@delete call.respond(HttpStatusCode.NotFound)
                     email.forget(connection)
-                    if (connections.countForAccount(connection.provider, connection.accountEmail) == 0L) {
+                    if (connection.provider == IntegrationProviders.MAILBOX) {
+                        // Mail still forwarded to the address is dropped from now on: it belongs to nobody.
+                        log.info("Company address removed: tenant={} connection={}", ctx.tenant.slug, connection.id)
+                    } else if (connections.countForAccount(connection.provider, connection.accountEmail) == 0L) {
                         val token = (connection.refreshToken ?: connection.accessToken)?.let { google.cipher?.open(it) }
                         val revoked = token != null && google.oauth.revoke(token)
                         log.info("Google account disconnected: tenant={} connection={} revoked={}", ctx.tenant.slug, connection.id, revoked)

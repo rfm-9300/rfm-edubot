@@ -110,6 +110,12 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
 
 ## Checking the UI locally
 
+- **`./gradlew run` can't be pointed elsewhere from the shell** (found 2026-11-04): the run task sets
+  every `.env` line after the inherited environment, so `MONGO_URI=… ./gradlew run` still uses the
+  `.env` database. To run a second, isolated instance (its own port and Mongo, say beside a dev app
+  already on 8080), build `./gradlew buildFatJar` and start `java -jar build/libs/app.jar` with the
+  `.env` values read literally plus the overrides (sourcing `.env` in a shell mangles the `$` of
+  bcrypt hashes). Variables `.env` doesn't set do pass through `./gradlew run`.
 - **Local UI check without a login:** sign an `operator-imp` JWT (`sub: operator`, `tenantId`,
   `typ: operator-imp`, issuer `wabot-platform`) with the local `ADMIN_JWT_SECRET`, then drive headless
   Chrome over CDP (Node 22+ has `WebSocket`) for screenshots. Seed docs with `costUsd: null`: mongosh

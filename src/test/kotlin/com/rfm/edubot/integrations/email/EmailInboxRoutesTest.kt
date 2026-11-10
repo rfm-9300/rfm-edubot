@@ -22,9 +22,13 @@ import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.IntegrationConnection
 import com.rfm.edubot.integrations.IntegrationProviders
 import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.aws.FakeAws
+import com.rfm.edubot.integrations.aws.S3Client
+import com.rfm.edubot.integrations.aws.SesClient
 import com.rfm.edubot.integrations.google.FakeGoogle
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.google.GoogleScopes
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.notifications.NotificationRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.plugins.configureSerialization
@@ -201,6 +205,56 @@ class EmailInboxRoutesTest {
         bearerAuth(company.token)
         contentType(ContentType.Application.Json)
         setBody(body.toString())
+    }
+
+    /** The page over a company's own address, sending through [aws]; Google isn't set up. */
+    private fun addressRoutes(aws: FakeAws, block: suspend (HttpClient, MailboxIntegration) -> Unit) = testApplication {
+        val noGoogle = GoogleIntegration.create(mongo, { AppConfig.GoogleConfig() }, null, google.http, NotificationRepository(mongo))
+        val mailbox = MailboxIntegration({ aws.config }, noGoogle.connections, SesClient(aws.http, { aws.config }), S3Client(aws.http, { aws.config }))
+        val withAddress = EmailService(
+            noGoogle, messages, OutboundLogRepository(mongo), DomainEventLog(mongo), AgentSettingsRepository(mongo), AgentRunRepository(mongo), AgentApprovalRepository(mongo),
+            mailbox = mailbox,
+        )
+        application {
+            configureSerialization()
+            configureAdminAuth(runtimeConfig, tenants, users)
+            routing { emailInboxRoutes(EmailInbox(mongo, withAddress, noGoogle, EmailInsightsService(model.client, mongo))) }
+        }
+        block(createClient { }, mailbox)
+    }
+
+    @Test
+    fun `with its own address, the page shows it, Gmail's code to confirm, and replies go out through SES`() {
+        val aws = FakeAws()
+        addressRoutes(aws) { http, mailbox ->
+            val company = company()
+            val before = http.get("/app/api/email/inbox") { bearerAuth(company.token) }.obj()
+            assertEquals(true, before["configured"]!!.jsonPrimitive.boolean)
+            assertEquals(true, before["mailboxAvailable"]!!.jsonPrimitive.boolean)
+            assertTrue(before["mailbox"] == null || before["mailbox"] is kotlinx.serialization.json.JsonNull)
+
+            val address = mailbox.create(company.tenant, null, "operator")!!
+            mailbox.connections.setForwardingConfirmation(address.id, com.rfm.edubot.integrations.ForwardingConfirmation("123456789", "https://mail-settings.google.com/mail/vf-x", "obras@gmail.com", now))
+            val status = http.get("/app/api/email/inbox") { bearerAuth(company.token) }.obj()
+            val shown = status["mailbox"]!!.jsonObject
+            assertEquals(address.accountEmail, shown.text("address"))
+            assertEquals("123456789", shown["confirmation"]!!.jsonObject.text("code"))
+            val account = status["accounts"]!!.jsonArray.single().jsonObject
+            assertEquals(IntegrationProviders.MAILBOX, account.text("provider"))
+            assertEquals(true, account["canSend"]!!.jsonPrimitive.boolean)
+            assertEquals(true, account["inboxSync"]!!.jsonPrimitive.boolean)
+
+            val question = received(company, address, "mb-thread-1")
+            val thread = http.thread(company, question.id)
+            assertEquals(true, thread["reply"]!!.jsonObject["canSend"]!!.jsonPrimitive.boolean)
+            val reply = http.postJson(company, "/app/api/email/inbox/threads/${question.id.toHexString()}/reply", buildJsonObject { put("text", "Claro, amanhã envio.") })
+            assertEquals(HttpStatusCode.OK, reply.status)
+            val out = aws.sends.single()
+            assertEquals(listOf("maria@cliente.pt"), out.to)
+            assertEquals(question.messageIdHeader, out.header("In-Reply-To"))
+            assertEquals(address.accountEmail, (out.parsed().from.single() as InternetAddress).address)
+            assertEquals(2, reply.obj()["messages"]!!.jsonArray.size, "the reply joins the thread it answers")
+        }
     }
 
     @Test
