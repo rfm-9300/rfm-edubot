@@ -286,6 +286,9 @@ class MongoModule(config: AppConfig.MongoConfig) {
             )
             crmStandardItems.createIndex(Document("tenantId", 1).append("type", 1).append("category", 1))
 
+            db.getCollection<Document>("crm.catalog_categories")
+                .createIndex(Document("tenantId", 1).append("key", 1), IndexOptions().unique(true))
+
             val bookingServices = db.getCollection<Document>("bookings.services")
             bookingServices.createIndex(Document("tenantId", 1).append("active", 1))
             bookingServices.createIndex(Document("tenantId", 1).append("name", 1))

@@ -66,7 +66,8 @@ let lineComboSeq = 0;
 
 // `preferred` returns the catalog ids to list first under their own heading (a client's usual items);
 // it runs on every open, so it can follow a client picked after the form was built.
-function lineItemsField(catalog, { preferred } = {}) {
+// `preferred()` lists the catalog item ids to show first; `onPick(item)` runs after a line takes its values from a catalog item.
+function lineItemsField(catalog, { preferred, onPick } = {}) {
   // Legacy items were stored as `servico`; group them with the services rather than dropping them.
   const options = (catalog || []).map(c => ({
     item: c,
@@ -162,6 +163,7 @@ function lineItemsField(catalog, { preferred } = {}) {
         $('[data-k="unitPriceEur"]', row).value = o.item.defaultUnitPriceEur ?? '';
         close();
         recalc();
+        onPick?.(o.item);
         desc.focus();
       };
       // Keep the caret in the field on mousedown so clicking an option never blurs it away first.

@@ -4,6 +4,7 @@ import com.mongodb.ErrorCategory
 import com.mongodb.MongoServerException
 import com.rfm.edubot.building.MeasurementRepository
 import com.rfm.edubot.building.ProjectRepository
+import com.rfm.edubot.crm.CatalogCategoryRepository
 import com.rfm.edubot.crm.ClientDirectory
 import com.rfm.edubot.crm.ClientFields
 import com.rfm.edubot.crm.ClientRepository
@@ -42,6 +43,7 @@ internal class TenantCrm(mongo: MongoModule, val tenant: Tenant) {
     val employees by lazy { EmployeeRepository(mongo, tenant.id) }
     val payments by lazy { PaymentRepository(mongo, tenant.id) }
     val standardItems by lazy { StandardItemRepository(mongo, tenant.id) }
+    val catalogCategories by lazy { CatalogCategoryRepository(mongo, tenant.id) }
     val clientServices by lazy { ClientServiceRepository(mongo, tenant.id) }
     val projects by lazy { ProjectRepository(mongo, tenant.id) }
     val measurements by lazy { MeasurementRepository(mongo, tenant.id) }

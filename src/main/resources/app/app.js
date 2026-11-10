@@ -230,12 +230,14 @@ async function loadModule(tab) {
     if (hasModule('payments')) state.fetched.payments = true;
   }
   if (tab === 'catalog') {
-    const [catalog, clients] = await Promise.all([
+    const [catalog, clients, categories] = await Promise.all([
       api('/app/api/crm/standard-items'),
       hasModule('clients') ? api('/app/api/crm/clients').catch(() => state.clients) : Promise.resolve(state.clients),
+      api('/app/api/crm/catalog-categories').catch(() => state.catalogCategories),
     ]);
     state.catalog = catalog;
     state.clients = clients;
+    state.catalogCategories = categories;
   }
   if (tab === 'persona') {
     state.persona = await api('/app/api/persona');

@@ -23,7 +23,8 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--ghost` for cancel, logout, secondary.
 - `.btn--danger` only for irreversible confirm. Pair with `.confirm`.
 - `.btn--sm` in table action cells and compact toolbars.
-- `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill).
+- `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill). A `:disabled` one is 40% opacity with no hover (the catalog's delete button on a category items still use; its `title` says why).
+- **Hidden amounts (Home):** `.money` wraps an amount; while `.dash.is-private` it is blurred (`filter: blur(0.42em)`, so it scales with the text) and not selectable. The eye (`.iconbtn.iconbtn--theme[data-money-toggle]` holding `svg.eye--on` and `svg.eye--off`, `aria-pressed` = hidden) sits first in `.dash__actions`. Titles and aria-labels carrying an amount read `•••` while hidden. Amounts are marked in `app/home.js` (`wholeCentsEUR`, `centsEUR`); how and why is in `wiki/dashboard-ui.md`.
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
 - `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
 - In the minimal skin (`html[data-layout="minimal"]`, `/app` and `/backoffice`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.

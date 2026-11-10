@@ -2,9 +2,55 @@
    offers. The list deletes them; a form adds or edits one. With Clients on, a second view manages the
    items each client usually buys (the same list as the client record's Items tab). */
 
-function openCatalogForm(itemId) {
+const CATEGORIES_PATH = '/app/api/crm/catalog-categories';
+const categoryName = text => String(text || '').trim().replace(/\s+/g, ' ');
+
+async function loadCatalogCategories() {
+  state.catalogCategories = await api(CATEGORIES_PATH).catch(() => state.catalogCategories || []);
+  return state.catalogCategories;
+}
+
+// The category's name as the company already spells it, creating it when it's new: typed "limpeza" under an
+// existing "Limpeza" is that category, so an item never ends up with a second spelling.
+async function ensureCatalogCategory(typed) {
+  const name = categoryName(typed);
+  try {
+    return (await api(CATEGORIES_PATH, { method: 'POST', body: JSON.stringify({ name }) })).name;
+  } catch (err) {
+    if (err?.code !== 'category_exists') throw err;
+    const known = (await loadCatalogCategories()).find(c => foldText(c.name) === foldText(name));
+    return known?.name || name;
+  }
+}
+
+// The category field: the company's categories, and "New category…" for one that isn't there yet (it shows a
+// text field and is created with the item). A category the item has but the list doesn't is kept as an option.
+function catalogCategoryField(current) {
+  const t = CRM.items;
+  const names = (state.catalogCategories || []).map(c => c.name);
+  if (current && !names.some(n => foldText(n) === foldText(current))) names.push(current);
+  const options = names.map(n => `<option value="${escapeHTML(n)}"${foldText(n) === foldText(current) ? ' selected' : ''}>${escapeHTML(n)}</option>`).join('');
+  const onlyNew = !names.length;
+  return `<div class="form__row form__row--full"><label class="lbl" for="cat-cat">${escapeHTML(t.categoryLabel)} <span class="req">●</span></label>
+    <select class="sel" id="cat-cat" required><option value="">${escapeHTML(t.categoryPick)}</option>${options}<option value="__new__" data-new${onlyNew ? ' selected' : ''}>${escapeHTML(t.categoryNew)}</option></select>
+    <input class="inp" id="cat-cat-new" maxlength="60" autocomplete="off" placeholder="${escapeHTML(t.categoryNewPh)}" aria-label="${escapeHTML(t.categoryNewPh)}" ${onlyNew ? 'required' : 'hidden'} /></div>`;
+}
+
+// New items can be tied to a client right away (the client's items, see the Clients' items view).
+function catalogClientField() {
+  const t = CRM.items;
+  const clients = [...(state.clients || [])].sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }));
+  return `<div class="form__row form__row--full"><label class="lbl" for="cat-client">${escapeHTML(t.linkClientLabel)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
+    <select class="sel" id="cat-client"><option value="">${escapeHTML(t.linkClientNone)}</option>${clients.map(c => `<option value="${escapeHTML(c.id)}">${escapeHTML(c.name)}</option>`).join('')}</select>
+    <p class="hint">${escapeHTML(t.linkClientHint)}</p></div>`;
+}
+
+async function openCatalogForm(itemId) {
   const editing = itemId ? state.catalog.find(c => c.id === itemId) : null;
   const t = CRM.items;
+  const linkClient = !editing && catalogClientsOn();
+  if (!state.catalogCategories) await loadCatalogCategories();
+  if (linkClient && !state.clients.length) state.clients = await api('/app/api/crm/clients').catch(() => state.clients);
   const form = document.createElement('form');
   form.className = 'form';
   const typeValue = editing?.type === 'material' ? 'material' : 'service';
@@ -22,8 +68,7 @@ function openCatalogForm(itemId) {
           <option value="service" ${typeValue === 'service' ? 'selected' : ''}>${escapeHTML(t.service)}</option>
           <option value="material" ${typeValue === 'material' ? 'selected' : ''}>${escapeHTML(t.material)}</option>
         </select></div>
-      <div class="form__row form__row--full"><label class="lbl" for="cat-cat">${escapeHTML(t.categoryLabel)} <span class="req">●</span></label>
-        <input class="inp" id="cat-cat" required placeholder="${escapeHTML(t.phCategory)}" value="${escapeHTML(editing?.category || '')}" /></div>
+      ${catalogCategoryField(editing?.category || '')}
       <div class="form__row form__row--full"><label class="lbl" for="cat-desc">${escapeHTML(t.descLabel)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
         <textarea class="txt" id="cat-desc" placeholder="${escapeHTML(t.phDesc)}">${escapeHTML(editing ? catalogDetails(editing) : '')}</textarea></div>
       <div class="form__row"><label class="lbl" for="cat-unit">${escapeHTML(t.unitLabel)} <span class="req">●</span></label>
@@ -35,6 +80,7 @@ function openCatalogForm(itemId) {
         <p class="hint">${escapeHTML(t.bookableHint)}</p></div>
       <div class="form__row" data-booking-fields ${typeValue === 'service' ? '' : 'hidden'}><label class="lbl" for="cat-duration">${escapeHTML(t.durationLabel)}</label>
         <input class="inp inp--mono" id="cat-duration" type="number" min="5" step="5" value="${editing?.durationMinutes ?? 30}" /></div>` : ''}
+      ${linkClient ? catalogClientField() : ''}
     </div>
     ${editing ? `<p class="hint">${escapeHTML(t.editingHint)}</p>` : ''}
     <div class="actions">
@@ -43,6 +89,13 @@ function openCatalogForm(itemId) {
     </div>`;
   $('[data-cat-cancel]', form).addEventListener('click', () => closeDrawer());
   const titleEl = $('#cat-title', form), codeEl = $('#cat-code', form), descEl = $('#cat-desc', form), typeEl = $('#cat-type', form);
+  const catEl = $('#cat-cat', form), newCatEl = $('#cat-cat-new', form);
+  const isNewCategory = () => catEl.selectedOptions[0]?.hasAttribute('data-new');
+  catEl.addEventListener('change', () => {
+    newCatEl.hidden = !isNewCategory();
+    newCatEl.required = isNewCategory();
+    if (isNewCategory()) newCatEl.focus();
+  });
   typeEl.addEventListener('change', () => {
     $$('[data-booking-fields]', form).forEach(row => { row.hidden = typeEl.value !== 'service'; });
     codeEl.placeholder = codePlaceholder(typeEl.value);
@@ -50,7 +103,9 @@ function openCatalogForm(itemId) {
   });
   form.addEventListener('submit', async e => {
     e.preventDefault();
-    const title = titleEl.value.trim(), code = codeEl.value.trim().toUpperCase(), category = $('#cat-cat', form).value.trim(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
+    const title = titleEl.value.trim(), code = codeEl.value.trim().toUpperCase(), description = descEl.value.trim(), unit = $('#cat-unit', form).value.trim();
+    const newCategory = isNewCategory();
+    let category = newCategory ? categoryName(newCatEl.value) : catEl.value;
     const type = typeEl.value, defaultUnitPriceEur = Number($('#cat-price', form).value || 0);
     if (!title || !category || !unit || (editing && !code)) return toast(t.fillRequired);
     if (code && !/^[A-Z]{3}-[0-9]+$/.test(code)) return toast(t.codeInvalid);
@@ -60,15 +115,25 @@ function openCatalogForm(itemId) {
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
+      if (newCategory) category = await ensureCatalogCategory(category);
       const path = editing ? `/app/api/crm/standard-items/${encodeURIComponent(editing.id)}` : '/app/api/crm/standard-items';
       const saved = await api(path, { method: 'POST', body: JSON.stringify({ code: code || undefined, type, title, category, description, unit, defaultUnitPriceEur, ...booking }) });
+      const ref = saved?.code || title;
+      // The item is saved; tying it to the chosen client is a second call that may fail on its own.
+      const client = linkClient ? (state.clients || []).find(c => c.id === $('#cat-client', form)?.value) : null;
+      let linked = !client;
+      if (client) {
+        try {
+          await api(`/app/api/crm/clients/${encodeURIComponent(client.id)}/catalog-items`, { method: 'PUT', body: JSON.stringify({ itemIds: [...(client.catalogItemIds || []), saved.id] }) });
+          linked = true;
+        } catch { /* reported below */ }
+      }
       // Reload first: closing goes back to the item's record when it was opened from there, and that reads the catalog.
-      await loadModule('catalog');
+      await Promise.all([loadModule('catalog'), loadCatalogCategories()]);
       render();
       closeDrawer();
-      const ref = saved?.code || title;
-      toast(editing ? t.updated({ code: ref }) : t.created({ code: ref }));
-    } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : err?.code === 'code_invalid' ? t.codeInvalid : STR.catalogCreateFailed); }
+      toast(editing ? t.updated({ code: ref }) : !client ? t.created({ code: ref }) : linked ? t.createdLinked({ code: ref, client: client.name }) : t.linkFailed({ code: ref, client: client.name }));
+    } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : err?.code === 'code_invalid' ? t.codeInvalid : err?.code === 'name_too_long' ? t.catTooLong : STR.catalogCreateFailed); }
   });
   openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form, false, { eyebrow: t.eyebrow });
 }
@@ -205,7 +270,7 @@ function renderCatalog(root) {
     title: t.catalogTitle,
     tag: t.tag({ n: state.catalog.length }),
     views: catalogClientsOn() ? catalogViewChips('') : '',
-    tools: columnOrderButton('catalog'),
+    tools: `<span class="panel__tools-end">${columnOrderButton('catalog')}<button type="button" class="btn btn--sm btn--ghost" data-cat-categories>${escapeHTML(t.manageCategories)}</button></span>`,
     head: columnsHead(columns, 'catalog'),
     rows,
     empty: t.emptyTitle,
@@ -219,6 +284,93 @@ function renderCatalog(root) {
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
   wireColumnOrder(root, 'catalog', catalogColumns());
   wireCatalogViews(root);
+  $('[data-cat-categories]', root)?.addEventListener('click', openCategoryManager);
+}
+
+// The categories items are sorted into: add one, rename one (its items follow), delete one no item uses.
+// Each change reloads the list, and a rename the catalog behind the drawer too.
+async function openCategoryManager() {
+  const t = CRM.items;
+  const body = document.createElement('div');
+  body.className = 'form';
+  body.innerHTML = `<p class="hint">${escapeHTML(t.catDesc)}</p>`;
+  const list = document.createElement('div');
+  list.className = 'form';
+  body.appendChild(list);
+  let renaming = null;
+  const errorText = err => ({ category_exists: t.catExists, name_required: t.catNameRequired, name_too_long: t.catTooLong, category_in_use: t.catInUseError })[err?.code] || t.catFailed;
+  const reload = async ({ items = false } = {}) => {
+    await loadCatalogCategories();
+    if (items) await loadModule('catalog').catch(() => {});
+    if (state.active === 'catalog') render();
+    draw();
+  };
+  const write = async (request, done, { items = false } = {}) => {
+    try {
+      const saved = await request();
+      renaming = null;
+      await reload({ items });
+      toast(done(saved));
+    } catch (err) { toast(errorText(err)); }
+  };
+  const pencil = '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M11 2 L14 5 L5 14 L2 14 L2 11 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>';
+  const bin = '<svg width="13" height="13" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5 L13 5 M6 5 L6 3 L10 3 L10 5 M5 5 L6 13 L10 13 L11 5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  const draw = () => {
+    const categories = state.catalogCategories || [];
+    const rows = categories.map((c, i) => {
+      const name = renaming === c.name
+        ? `<input class="inp" data-cat-rename-input="${i}" maxlength="60" autocomplete="off" value="${escapeHTML(c.name)}" aria-label="${escapeHTML(t.catRenameAria({ name: c.name }))}" />`
+        : `<span class="name">${escapeHTML(c.name)}</span>`;
+      const actions = renaming === c.name
+        ? `<button class="btn btn--sm btn--primary" type="button" data-cat-rename-save="${i}">${escapeHTML(t.saveChanges)}</button><button class="btn btn--sm btn--ghost" type="button" data-cat-rename-cancel>${escapeHTML(STR.cancel)}</button>`
+        : `<button class="iconbtn" type="button" title="${escapeHTML(t.catRename)}" aria-label="${escapeHTML(t.catRenameAria({ name: c.name }))}" data-cat-rename="${i}">${pencil}</button>
+           <button class="iconbtn iconbtn--danger" type="button" title="${escapeHTML(c.itemCount ? t.catInUse({ n: c.itemCount }) : t.deleteTitle)}" aria-label="${escapeHTML(t.catDeleteAria({ name: c.name }))}" data-cat-delete="${i}"${c.itemCount ? ' disabled' : ''}>${bin}</button>`;
+      return `<tr><td>${name}</td><td class="num">${c.itemCount}</td><td class="right"><div class="actions">${actions}</div></td></tr>`;
+    }).join('');
+    list.innerHTML = `
+      <form class="form__row form__row--full" data-cat-add-form>
+        <label class="lbl" for="cat-add">${escapeHTML(t.catAddLabel)}</label>
+        <div class="inp-row"><input class="inp" id="cat-add" maxlength="60" autocomplete="off" placeholder="${escapeHTML(t.catAddPh)}" />
+        <button class="btn btn--primary" type="submit">${escapeHTML(t.catAdd)}</button></div>
+      </form>
+      <div class="tbl-wrap"><table class="tbl"><thead><tr><th>${escapeHTML(t.catThName)}</th><th class="right">${escapeHTML(t.catThItems)}</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="3"><div class="empty"><p class="empty__title">${escapeHTML(t.catEmpty)}</p><p class="empty__desc">${escapeHTML(t.catEmptyDesc)}</p></div></td></tr>`}</tbody></table></div>`;
+    $('[data-cat-add-form]', list).addEventListener('submit', e => {
+      e.preventDefault();
+      const input = $('#cat-add', list);
+      if (!categoryName(input.value)) return toast(t.catNameRequired);
+      write(() => api(CATEGORIES_PATH, { method: 'POST', body: JSON.stringify({ name: categoryName(input.value) }) }), c => t.catCreated({ name: c.name }));
+    });
+    $$('[data-cat-rename]', list).forEach(btn => btn.addEventListener('click', () => {
+      renaming = categories[Number(btn.dataset.catRename)].name;
+      draw();
+      const input = $('[data-cat-rename-input]', list);
+      input.focus();
+      input.select();
+    }));
+    $('[data-cat-rename-cancel]', list)?.addEventListener('click', () => { renaming = null; draw(); });
+    const saveRename = () => {
+      const input = $('[data-cat-rename-input]', list);
+      const next = categoryName(input.value);
+      if (!next) return toast(t.catNameRequired);
+      if (next === renaming) { renaming = null; return draw(); }
+      write(() => api(`${CATEGORIES_PATH}?name=${encodeURIComponent(renaming)}`, { method: 'PUT', body: JSON.stringify({ name: next }) }), c => t.catRenamed({ name: c.name }), { items: true });
+    };
+    $('[data-cat-rename-save]', list)?.addEventListener('click', saveRename);
+    $('[data-cat-rename-input]', list)?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') { e.preventDefault(); saveRename(); }
+      if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); renaming = null; draw(); }
+    });
+    $$('[data-cat-delete]', list).forEach(btn => btn.addEventListener('click', async () => {
+      const category = categories[Number(btn.dataset.catDelete)];
+      const ok = await confirmDialog({ title: t.catConfirmTitle, body: t.catConfirmBody({ name: category.name }), okLabel: t.catConfirmOk });
+      if (!ok) return;
+      write(() => api(`${CATEGORIES_PATH}?name=${encodeURIComponent(category.name)}`, { method: 'DELETE' }), () => t.catDeleted({ name: category.name }));
+    }));
+  };
+  if (!state.catalogCategories) await loadCatalogCategories();
+  draw();
+  openDrawer(t.catTitle, body, false, { eyebrow: t.eyebrow });
 }
 
 // Without a client picked, every active client with how many items they have (most first); a row picks

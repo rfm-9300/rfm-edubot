@@ -147,6 +147,17 @@ function preferredClientItems(getForm, clients, fixedId = '') {
   };
 }
 
+// A catalog item tied to one client says who the work is for: when no client is chosen yet, picking it chooses
+// that client. An item several clients buy, or none, leaves the client alone, and so does a client already chosen.
+function fillClientFromItem(form, item) {
+  const select = $('#f-client', form);
+  if (!select || select.value) return;
+  const owners = (state.clients || []).filter(c => (c.catalogItemIds || []).includes(item.id));
+  if (owners.length !== 1 || ![...select.options].some(o => o.value === owners[0].id)) return;
+  select.value = owners[0].id;
+  toast(CRM.services.clientFromItem({ name: owners[0].name }));
+}
+
 function clientItemsHead() {
   const ti = CRM.items;
   return [[ti.thCode], [ti.thTitle], [ti.thType], [ti.thUnit], [ti.thPrice, 'right'], ['']];
@@ -271,8 +282,11 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
   if (hasModule('bookings') && !state.bookingServices.length) state.bookingServices = await api('/app/api/bookings/services').catch(() => []);
   const team = hasModule('employees');
   if (team && !state.employees.length) state.employees = await api('/app/api/crm/employees').catch(() => []);
-  // The picked client's usual items lead the catalog picker.
-  const li = lineItemsField(serviceCatalog(), { preferred: preferredClientItems(() => form, state.clients, editing?.clientId) });
+  // The picked client's usual items lead the catalog picker, and an item only one client buys picks that client.
+  const li = lineItemsField(serviceCatalog(), {
+    preferred: preferredClientItems(() => form, state.clients, editing?.clientId),
+    onPick: item => fillClientFromItem(form, item),
+  });
   const clientCell = editing
     ? `<div class="form__row"><span class="lbl">${escapeHTML(STR.lineClient)}</span><p class="hint">${escapeHTML(editing.clientName || '')}</p></div>`
     : clientSelect(state.clients, presetClientId || '');

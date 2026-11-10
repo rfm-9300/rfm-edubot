@@ -92,6 +92,10 @@ internal data class CreateLineItemRequest(
     fun toLineItem() = lineItem(description, quantity, unitPriceEur, unit)
 }
 
+/** Create and rename body of a catalog category. */
+@Serializable
+internal data class CatalogCategoryRequest(val name: String)
+
 /**
  * Create and update body of a catalog item. Clients that predate titles (the mobile app) send only a
  * description, which then is the title. A new item without an [id] gets one from its title.

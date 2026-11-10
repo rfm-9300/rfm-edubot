@@ -15,7 +15,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 ## Features
 
 - [crm-directories.md](crm-directories.md) — clients, suppliers and employees: record drawer, fields, delete or archive, client finances, per-company client fields, clients sharing a phone, importing into prod
-- [catalog-services-bookings.md](catalog-services-bookings.md) — catalog titles and codes, Serviços rows, an employee's services report, the line items editor, bookings as catalog services (and the setting that stops completed ones becoming Serviços rows), clients' items (Catalog tab), Home's Services and Service insights cards
+- [catalog-services-bookings.md](catalog-services-bookings.md) — catalog titles and codes, catalog categories, Serviços rows, an employee's services report, the line items editor, bookings as catalog services (and the setting that stops completed ones becoming Serviços rows), clients' items (Catalog tab), Home's Services and Service insights cards
 - [billing-and-pdfs.md](billing-and-pdfs.md) — quotes and turning them into an invoice or a service, invoices (ATCUD, installments, cancel and delete), payments, euro rounding, PDF generation
 - [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md) — employee sign-ins, service submissions, the opt-in time clock
 - [building-projects.md](building-projects.md) — the opt-in Building category: projects and progress against the plan, site diary, photos, issues, change orders, measurements billing the quote, the client's share page; phase 2's events for agents, change approval by link, retention release, PDFs, job costing, AI client updates, My sites
@@ -28,7 +28,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 - [backoffice-board.md](backoffice-board.md) — the backoffice's work board: boards and keys, columns, cards, ordering and dragging, the tenant link
 - [password-vault.md](password-vault.md) — the backoffice's password manager: encrypted in the browser, the master password, what the server checks, resetting a lost vault
 - [auth-and-access.md](auth-and-access.md) — Google sign-in for the backoffice and `/app`, admin emails, where the access rules live
-- [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker and column order, the company logo, the compact shell (folding sidebar, page bar, dense tables)
+- [dashboard-ui.md](dashboard-ui.md) — why the UI looks as it does: the Clean Ops skin, backoffice records, phones, the column picker and column order, the company logo, the compact shell (folding sidebar, page bar, dense tables), Home's blurred amounts
 - [dashboard-frontend.md](dashboard-frontend.md) — how `/app`'s and the backoffice's JavaScript is split: one script per page in one global scope, `admin/common.js`, the self-contained modules, where new code goes
 
 ## Mobile

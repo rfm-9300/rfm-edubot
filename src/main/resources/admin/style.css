@@ -521,6 +521,8 @@ html[data-theme="dark"] .btn--danger { color: #160607; }
 }
 .iconbtn:hover { background: var(--surface-2); color: var(--ink); transform: translateY(-1px); }
 .iconbtn--danger:hover { color: var(--bad-ink); border-color: color-mix(in srgb, var(--bad) 40%, var(--mix)); background: var(--bad-soft); }
+.iconbtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.iconbtn:disabled:hover { background: var(--surface); color: var(--ink-2); border-color: var(--line); transform: none; }
 .iconbtn--theme { width: 36px; height: 36px; border-radius: 999px; font-size: 16px; }
 /* The signed-in user's initials; opens their account. */
 .iconbtn--avatar {
@@ -3248,6 +3250,14 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash__status--watch .dash__dot { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
 .dash__status--urgent .dash__dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
 .dash__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+
+/* Home's amounts are blurred while .dash is private, as a bank's app hides a balance; the eye in .dash__actions toggles it. */
+.money { transition: filter 160ms; }
+.dash.is-private .money { filter: blur(0.42em); user-select: none; }
+.eye { display: block; }
+.dash:not(.is-private) .eye--off,
+.dash.is-private .eye--on { display: none; }
+@media (prefers-reduced-motion: reduce) { .money { transition: none; } }
 
 /* KPI strip: cells share hairlines via the 1px grid gap */
 .dash-kpis { display: grid; grid-auto-columns: minmax(0, 1fr); grid-auto-flow: column; gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; box-shadow: var(--shadow-sm); }

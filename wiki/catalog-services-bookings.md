@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-04
+updated: 2026-11-10
 ---
 
 # Catalog, Serviços and bookings
@@ -165,6 +165,38 @@ Catalog page too, as a tab. The Catalog panel now has two view chips, Items and 
   client's items. Stats: clients with items, without, and items linked.
 - The Items list gained a Clients column: how many clients have that item.
 - The Services page's By client view stays; both edit the same `PUT /crm/clients/{id}/catalog-items`.
+
+**Categories, a client on a new item, and the client from the item (2026-11-10):** Rodrigo asked for a
+dropdown for an item's category (with a way to manage them on the Catalog page), to pick a client when
+creating an item, and for a new service to fill the client from the catalog item it starts with.
+
+- **An item's category is still plain text** (`StandardItem.category`), so the mobile app, the backoffice,
+  the AI and `BookingCatalogMigration` keep working and any of them may save a category nobody created. The
+  category list is the names created in `crm.catalog_categories` (`{tenantId, name, key}`, unique
+  `(tenantId, key)`) **plus** the ones items already use, so a catalog that predates it needed no
+  migration. Two names are the same category when their `key` matches (`categoryKey`: no accents, lower
+  case, spaces collapsed): "Limpeza", "limpeza " and "Inspeção"/"inspecao" are one. A category only items
+  name is called after the spelling most of them use. Code: `crm/CatalogCategories.kt`.
+- **API** (`CatalogRoutes`, Catalog module): `GET /crm/catalog-categories` answers `[{name, itemCount}]`;
+  `POST` `{name}` creates; `PUT ?name=<current>` `{name}` renames and moves every item in the category,
+  whatever way it spells it; `DELETE ?name=` removes one. They go by name in the query because a name
+  isn't a safe path segment. Errors: `400 name_required` / `name_too_long` (60), `409 category_exists` (a
+  name another category has; changing only the case or accents of its own is fine), `409 category_in_use`
+  (`detail` is how many items use it; only an empty category is deleted) and `404 category_not_found`. The
+  backoffice's twin catalog routes don't have them yet.
+- **The item form** has a category select with the company's categories and "New category…", which shows a
+  text field; the category is created (`ensureCatalogCategory`) before the item is saved, and a typed name
+  that already exists in other letters takes the existing spelling, so an item never gets a second one. The
+  Catalog page has a Categories button: a drawer to add, rename (inline) and delete categories, with each
+  one's item count; the delete of one in use is disabled (its `title` says to move the items first).
+- **A client on a new item:** creating an item with Clients on shows an optional Client select. After the
+  item is saved it adds the item to that client's list (`PUT /crm/clients/{id}/catalog-items`, the same call
+  as the Clients' items view), a second request that can fail on its own (the toast says the item was created
+  but not linked). Editing an item doesn't show it; the Clients' items view handles later changes.
+- **The service form fills the client** when none is chosen yet and a catalog item is picked that exactly
+  one client has in its items (`lineItemsField`'s `onPick`, `fillClientFromItem` in `app/services.js`), with a
+  toast saying so. An item several clients buy, or none, leaves the client alone, and so does a client
+  already chosen or preset. Only the Services form does this; quotes and invoices don't.
 
 **Home's Services card (2026-10-25):** Rodrigo asked to see on Home how many services were done.
 `GET /overview?extended=1` answers `serviceStats` (`SalesOverview.serviceStats`), only with the

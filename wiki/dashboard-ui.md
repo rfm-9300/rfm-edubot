@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-04
+updated: 2026-11-10
 ---
 
 # Dashboard UI decisions
@@ -342,3 +342,22 @@ bookings are the orange cards, the List's Pending tab counts them, and List rows
 List lost its day group rows (When carries the day) and gained tick boxes, status tabs with counts, phone and
 duration columns. The booking drawer is a field list with its actions in the foot, Confirm, Mark done or
 Invoice last. The design's "Where" and "Assigned to" fields have no data behind them on a booking.
+
+## Home hides its amounts (2026-11-10)
+
+Rodrigo asked for Home's values (to receive, collected, pipeline…) to be blurred "like banks do". Decisions:
+
+- **Hidden until shown.** Amounts load blurred; an eye first in the header's actions shows them, and the
+  choice is kept per browser (`localStorage.homeHideAmounts`, `1` hidden, `0` shown; a first visit is hidden).
+  Counts, percentages and dates stay readable, only money is blurred. The eye is left out of a Home that has
+  no amounts. The blur is `filter: blur(0.42em)` on `.money` under `.dash.is-private` (design system:
+  `components.md`), and the text can't be selected while it applies.
+- **Amounts are marked where they are formatted, not found afterwards.** Every amount Home formats
+  (`centsEUR`, `wholeCentsEUR`, the chart scales) is wrapped in two private-use characters. When a card's
+  markup is built, `moneyMarkup` turns the pairs in text into `<span class="money">`, and `syncHomeMoney`
+  replaces the pairs in `title` and `aria-label` (bar and segment tooltips, chart descriptions) with `•••`
+  while hidden, and with the plain amount when shown, so a tooltip never gives the number away. Nothing
+  matches a currency format against the page, so a new locale or format can't slip an amount past it; a new
+  Home amount just has to come from those two helpers (or `moneyMark`). No mark reaches the DOM.
+- **The service insights card is covered too:** its body arrives later (`loadInsights`) and goes through
+  `moneyMarkup` and `syncHomeMoney` as well. Other pages show amounts as before.
