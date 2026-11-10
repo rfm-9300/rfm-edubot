@@ -38,6 +38,34 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
             Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("connectionId", connectionId), Filters.eq("providerMessageId", providerMessageId)),
         ).firstOrNull()?.toMessage()
 
+    /** A received email already kept in [connectionId] under its `Message-ID`, e.g. one forwarded twice. */
+    suspend fun findReceived(tenantId: ObjectId, connectionId: ObjectId, messageIdHeader: String): EmailMessage? =
+        collection.find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.eq("connectionId", connectionId),
+                Filters.eq("messageIdHeader", messageIdHeader),
+                Filters.eq("direction", EmailDirection.INBOUND.name),
+            ),
+        ).firstOrNull()?.toMessage()
+
+    /**
+     * The thread a received email answers in [connectionId]: the newest kept email whose `Message-ID` is
+     * one of [messageIds] (its In-Reply-To and References) or, for mail SES sent, whose SES id is one of
+     * [providerIds]. Null when it answers nothing kept here.
+     */
+    suspend fun threadAnswered(tenantId: ObjectId, connectionId: ObjectId, messageIds: Collection<String>, providerIds: Collection<String>): String? {
+        if (messageIds.isEmpty() && providerIds.isEmpty()) return null
+        val match = Filters.or(
+            listOfNotNull(
+                messageIds.takeIf { it.isNotEmpty() }?.let { Filters.`in`("messageIdHeader", it) },
+                providerIds.takeIf { it.isNotEmpty() }?.let { Filters.and(Filters.`in`("providerMessageId", it), Filters.eq("direction", EmailDirection.OUTBOUND.name)) },
+            ),
+        )
+        return collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("connectionId", connectionId), Filters.ne("threadId", null), match))
+            .sort(Document("date", -1)).limit(1).projection(Document("threadId", 1)).firstOrNull()?.getString("threadId")
+    }
+
     /** A client's emails, newest first. */
     suspend fun forClient(tenantId: ObjectId, clientId: ObjectId, limit: Int = 50): List<EmailMessage> =
         collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("clientId", clientId)))
@@ -262,6 +290,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
         .apply { if (bodyText != null) append("bodyText", bodyText.take(EmailMessage.MAX_BODY)) }
         .append("attachments", attachments.map { Document("filename", it.filename).append("mimeType", it.mimeType).append("size", it.size) })
         .apply { if (automated) append("automated", true) }
+        .apply { if (forwardedBy != null) append("forwardedBy", forwardedBy) }
         .append("clientId", clientId)
         .append("record", record?.toDocument())
         .append("sentByType", sentByType)
@@ -295,6 +324,7 @@ class EmailMessageRepository(mongo: MongoModule, private val clock: () -> Instan
             EmailAttachmentInfo(it.getString("filename").orEmpty(), it.getString("mimeType").orEmpty(), it.getInteger("size") ?: 0)
         },
         automated = getBoolean("automated", false),
+        forwardedBy = getString("forwardedBy"),
         clientId = get("clientId", ObjectId::class.java),
         record = get("record", Document::class.java)?.toSubjectRef()?.takeIf { it.type.isNotEmpty() && it.id.isNotEmpty() },
         sentByType = getString("sentByType"),

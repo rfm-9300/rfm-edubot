@@ -5,7 +5,25 @@ import org.bson.types.ObjectId
 
 object IntegrationProviders {
     const val GOOGLE = "google"
+
+    /**
+     * The company's own address on the platform's mail domain (Amazon SES): the mail the company forwards
+     * there comes in, and the company's email goes out from it. No tokens; one per company.
+     */
+    const val MAILBOX = "mailbox"
 }
+
+/** A Gmail forwarding request that reached the company's address: the code to type in Gmail, its link, and the Gmail account asking. */
+data class ForwardingConfirmation(val code: String?, val link: String?, val account: String?, val at: Instant)
+
+/** What reached a company's address: when last, how much, from which mailboxes, and a Gmail confirmation still to enter. */
+data class MailboxState(
+    val lastReceivedAt: Instant? = null,
+    val received: Int = 0,
+    /** Mailboxes seen forwarding here (Gmail says which), most recent first. */
+    val forwarders: List<String> = emptyList(),
+    val confirmation: ForwardingConfirmation? = null,
+)
 
 enum class ConnectionStatus { ACTIVE, NEEDS_RECONNECT, REVOKED }
 
@@ -34,8 +52,9 @@ data class InboxState(
 )
 
 /**
- * A company's account at an outside provider (`integration_connections`), one document per account.
- * The tokens are sealed with [TokenCipher] and never leave the server.
+ * A company's email account (`integration_connections`), one document per account: a Google account it
+ * connected, whose tokens are sealed with [TokenCipher] and never leave the server, or its own address
+ * on the platform's mail domain ([IntegrationProviders.MAILBOX]).
  */
 data class IntegrationConnection(
     val id: ObjectId = ObjectId(),
@@ -57,6 +76,8 @@ data class IntegrationConnection(
     val lastError: String? = null,
     val dailySends: DailySends? = null,
     val inbox: InboxState = InboxState(),
+    /** A company address's ([IntegrationProviders.MAILBOX]) received mail. */
+    val mailbox: MailboxState = MailboxState(),
     val createdAt: Instant,
     val updatedAt: Instant,
 ) {

@@ -53,6 +53,9 @@ const labels = I18N.section('common.nav');
 const STR = I18N.section('app');
 const CRM = I18N.section('admin');
 const GOOGLE = I18N.section('app.integrations.google');
+// The company's own email address (forwarded mail in, the company's email out); integrations.js draws it.
+const MAILBOX = I18N.section('app.integrations.mailbox');
+const mailboxText = (key, params) => I18N.t(`app.integrations.mailbox.${key}`, params);
 // An employee's own sign-in (EmployeePortal on the server) has only their own pages: the services they
 // register, with the time clock their hours, and with the site diary or issues the sites they run. `/me`
 // lists the ones the company has.

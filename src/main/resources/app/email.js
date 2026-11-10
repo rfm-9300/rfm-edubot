@@ -1,5 +1,6 @@
-/* The Email page (`email` module): the company's Gmail threads, read with the team and answered in their
-   thread, and for each received email the dashboard actions it calls for (add the sender as a client,
+/* The Email page (`email` module): the company's threads (the mail forwarded to its own address, or its
+   Gmail's), read with the team and answered in their thread, and for each received email the dashboard
+   actions it calls for (add the sender as a client,
    prepare a quote, mark an invoice paid, book them, register a supplier's bill, a follow-up task).
    Actions open the dashboard's own forms, started from what the email says; the page records what
    they led to. app.js mounts it as window.EmailUI and gives it its forms through init(). */
@@ -209,6 +210,7 @@
     const accounts = status.accounts || [];
     const admin = status.canConnect;
     if (!status.configured) return notice('warn', tr('setup.notConfiguredTitle'), tr('setup.notConfiguredDesc'));
+    if (status.mailboxAvailable) return mailboxSetupHtml(status, notice, button);
     if (!accounts.length) {
       return notice('info', tr('setup.noAccountTitle'), admin ? tr('setup.noAccountDesc') : `${tr('setup.noAccountDesc')} ${tr('setup.noAccountMember')}`, admin ? button('connect', tr('setup.connect')) : '');
     }
@@ -231,8 +233,34 @@
     return '';
   }
 
+  // The company's own address: set it up, forward to it (Gmail's code to confirm first), then nothing to show.
+  function mailboxSetupHtml(status, notice, button) {
+    const manage = status.canManage && d.hasModule('settings');
+    const mailbox = status.mailbox;
+    if (!mailbox) {
+      return notice('info', tr('setup.mailboxNoneTitle'), manage ? tr('setup.mailboxNoneDesc') : `${tr('setup.mailboxNoneDesc')} ${tr('setup.mailboxNoneMember')}`,
+        manage ? button('mailbox-setup', tr('setup.mailboxSetUp')) : '');
+    }
+    const howTo = manage ? button('mailbox-open', tr('setup.mailboxHowTo'), '', false) : '';
+    const code = mailbox.confirmation;
+    if (code) {
+      const open = code.link ? `<a class="btn btn--sm btn--primary" href="${esc(code.link)}" target="_blank" rel="noopener noreferrer">${esc(tr('setup.mailboxCodeOpen'))}</a>` : '';
+      const desc = code.code ? tr('setup.mailboxCodeDesc', { code: code.code }) : tr('setup.mailboxCodeLinkDesc');
+      return notice('info', tr('setup.mailboxCodeTitle'), desc, `${open}${howTo}`);
+    }
+    if (!mailbox.receivedAt) return notice('info', tr('setup.mailboxWaitingTitle'), tr('setup.mailboxWaitingDesc', { address: mailbox.address }), howTo);
+    return '';
+  }
+
   async function setupAction(action, account, button) {
     const status = data.status || {};
+    if (action === 'mailbox-setup') {
+      button.disabled = true;
+      await d.setupMailbox();
+      button.disabled = false;
+      return;
+    }
+    if (action === 'mailbox-open') return d.openMailbox();
     if (action === 'connect') return d.connectGoogle(null, { inbox: !!status.inboxAvailable });
     if (action === 'reconnect') {
       const match = (status.accounts || []).find(a => a.accountEmail === account);
@@ -477,6 +505,7 @@
         (m.to || []).length ? tr('to', { to: m.to.join(', ') }) : '',
         (m.cc || []).length ? tr('cc', { cc: m.cc.join(', ') }) : '',
         !out && m.replyTo ? tr('replyToNote', { address: m.replyTo }) : '',
+        !out && m.forwardedBy ? I18N.t('app.integrations.mailbox.forwardedBy', { name: m.forwardedBy }) : '',
         out && m.sentByType === 'USER' && m.sentBy ? tr('sentBy', { name: m.sentBy }) : '',
         out && m.sentByType === 'AGENT' ? tr('sentByAutomation', { name: m.sentBy || '' }) : '',
       ].filter(Boolean).join(' · ');

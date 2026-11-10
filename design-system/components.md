@@ -952,6 +952,16 @@ Quote/invoice PDF designer in Dashboard → Settings. One A4 page, not a second 
 
 Three columns (key and pills · field · buttons) on wide screens. Under 860px the key shares its line with its pills, and a lone button (Reveal, Clear override) sits beside the field; two buttons take their own line, and an empty `.settings-row__actions` takes none. The backoffice's Platform settings save every changed row at once from a `.savebar` at the end of the stack (Save, and Discard through `.confirm`); the hero keeps only Reload.
 
+## Email address (the company's own)
+
+The company's own address on the platform's mail domain ([patterns.md](patterns.md#email-address-the-companys-own)), which its mail is forwarded to and its email goes out from. Strings under `app.integrations.mailbox.*`; the sender fields reuse `app.integrations.google.*`.
+
+- **Settings → Channels**: one "Email" row while the platform has a mail domain (`integrations.mailbox.configured`): without an address, a muted "Not set up" and a `.btn--sm.btn--primary` Set up (admins and operators) or a muted "a company admin sets it up"; with one, the address in `.mono`, then "Receiving email" as text once mail arrived, `.pill--warn` "Waiting for email" until then, or `.pill--info` "Gmail code to enter" while Gmail's confirmation waits. Manage opens the drawer. A `.hint` under the table says what the address is for until there is one. Gmail's row is hidden then, except for an account a company already connected.
+- **Address drawer** (eyebrow "Email address", titled with the address): Gmail's confirmation as a `.notice--info` (the code in the text, an `a.btn.btn--sm.btn--primary` to Google's own page with `target="_blank" rel="noopener noreferrer"`, and a ghost Done), the address as a read-only `.inp.mono` in a `.inp-row` with Copy, a `dl.dash-facts` (last email, forwarded from, sent today of the daily limit), then a `.panel` "Forward your email here" whose head carries `.panel__tools--chips` (Gmail / Outlook / Other) and whose body is an `ol.plain-list.plain-list--steps` with two `.hint`s, and the sender form (name, replies go to, signature). `.actions`: Save, Send a test email (ghost), Remove address (ghost; the confirm carries `.btn--danger`).
+- **Email page**: the setup `.notice--info` for the address (set it up; Gmail's code with Open confirmation; waiting for the first email with How to forward), and "Forwarded by …" in a hand-forwarded message's `.email-msg__meta`.
+
+`.plain-list--steps` (on an `ol.plain-list`): numbered how-to steps, in body ink with room between them.
+
 ## Email (Google)
 
 Gmail shows up in five places, all built from existing parts ([patterns.md](patterns.md#email-google)); strings live under `app.integrations.google.*`, and the Email page's under `app.email.*` (its classes: [Email page](#email-page)).
@@ -1016,7 +1026,7 @@ Building blocks of `/app` → Agents ([patterns.md](patterns.md#agents-automatio
 | `.persona-agents` | Mount point at the end of the Persona page's Behavior tab: a `.panel` with a `.tbl` with a `td.check` "Follows it" column, `.agent-cell` and status pill; a `.hint--warn` while the Persona is empty |
 | `.inp-unit` (`__label`) · `.inp-range` | A number with its unit (localized with `Intl`), and a from–to pair of time inputs |
 | `.gallery` > `button.gallery__card` (`--blank`, `.is-unavailable`) with `__head` `__title` `__desc` `__recipe` `__meta` | Template cards; unavailable ones stay clickable so the setup drawer can say what's missing. `--blank` cards ("Describe it", "Start from scratch") come first and have no recipe |
-| `.plain-list` · `.agents-settings` · `.empty__actions` | A bulleted rules list, the Settings tab's two-panel stack, a button row inside `.empty` |
+| `.plain-list` (`--steps`) · `.agents-settings` · `.empty__actions` | A bulleted rules list (numbered how-to steps as an `ol` with `--steps`), the Settings tab's two-panel stack, a button row inside `.empty` |
 
 Rules: status pills use tones, not new colors (agent: `--ok` active, `--warn` paused; run: `--info` in progress, `--warn` awaiting approval, `--ok` done, `--bad` failed or needs review). Trigger, action, event, field and reason labels come from `app.agents.*` keys built from server keys (dots become underscores), never from server text; what a finished run did reads from `app.agents.did.*` ("Sent a WhatsApp message"), falling back to the action label. An approval shows the drafted message in a `.wa-preview` bubble and its details in `dl.dash-facts`; nothing is sent from the list. An AI task's fields are named by the user: their labels come from `app.agents.outputs.<name>` when there is one (summary, intent…), else the name as typed. Field names are normalized on change (accents dropped, anything else becomes `_`) so they stay usable as `{{steps.<id>.output.<name>}}`.
 

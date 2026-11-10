@@ -19,7 +19,7 @@ data class EmailMessage(
     val id: ObjectId = ObjectId(),
     val tenantId: ObjectId,
     val connectionId: ObjectId,
-    /** Gmail's message id. */
+    /** The provider's id for it: Gmail's message id, or SES's for a company address's mail. */
     val providerMessageId: String,
     val threadId: String? = null,
     /** The RFC 5322 Message-ID, which a reply's In-Reply-To names. */
@@ -38,6 +38,8 @@ data class EmailMessage(
     val attachments: List<EmailAttachmentInfo> = emptyList(),
     /** Received mail a machine sent (a newsletter, a notification, an automatic reply), which automations never answer. */
     val automated: Boolean = false,
+    /** Someone at the company forwarded this received email by hand to its address: who; [from] is who wrote it. */
+    val forwardedBy: String? = null,
     val clientId: ObjectId? = null,
     /** The CRM record it is about, e.g. the quote it carried. */
     val record: SubjectRef? = null,

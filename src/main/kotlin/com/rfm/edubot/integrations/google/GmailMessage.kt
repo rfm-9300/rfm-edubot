@@ -3,6 +3,7 @@ package com.rfm.edubot.integrations.google
 import com.rfm.edubot.integrations.email.EmailAddresses
 import com.rfm.edubot.integrations.email.EmailAttachmentInfo
 import com.rfm.edubot.integrations.email.EmailMessage
+import com.rfm.edubot.integrations.email.MailHeuristics
 import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -16,7 +17,8 @@ import java.nio.charset.Charset
 import java.nio.charset.CodingErrorAction
 import java.util.Base64
 
-data class MailAddress(val email: String, val name: String? = null)
+/** The decoded address type both inbox sources share; Gmail's parsing named it here first. */
+typealias MailAddress = com.rfm.edubot.integrations.email.MailAddress
 
 /** A Gmail message as inbox sync keeps it: decoded headers, its text (the HTML part as text when there's no plain one) and attachment names. */
 data class GmailMessage(
@@ -55,20 +57,7 @@ object GmailMessages {
         val text = (walk.plain?.let(::normalize)?.takeIf { it.isNotBlank() } ?: walk.html?.let(::htmlToText).orEmpty()).take(EmailMessage.MAX_BODY)
         val from = addresses(headers["from"]).firstOrNull()
         val subject = decodeHeader(headers["subject"].orEmpty())
-        val autoSubmitted = headers["auto-submitted"]?.trim()?.lowercase()
-        val precedence = headers["precedence"]?.trim()?.lowercase()
-        val local = from?.email?.substringBefore('@').orEmpty()
-        val bounce = payload.string("mimeType").equals("multipart/report", ignoreCase = true) || local in BOUNCE_SENDERS
-        val automated = bounce ||
-            (autoSubmitted != null && autoSubmitted != "no") ||
-            precedence in setOf("bulk", "list", "junk", "auto_reply") ||
-            "list-id" in headers || "list-unsubscribe" in headers ||
-            "x-autoreply" in headers || "x-autorespond" in headers ||
-            NO_REPLY.matches(local)
-        val autoReply = bounce ||
-            autoSubmitted?.startsWith("auto-replied") == true ||
-            "x-autoreply" in headers || "x-autorespond" in headers || precedence == "auto_reply" ||
-            (automated && OUT_OF_OFFICE.containsMatchIn(subject))
+        val kind = MailHeuristics.classify(headers, from?.email, subject, payload.string("mimeType"))
         return GmailMessage(
             id = id,
             threadId = json.string("threadId"),
@@ -83,10 +72,21 @@ object GmailMessages {
             text = text,
             snippet = EmailMessage.snippetOf(text.ifBlank { decodeEntities(json.string("snippet").orEmpty()) }),
             attachments = walk.attachments,
-            autoReply = autoReply,
-            automated = automated,
+            autoReply = kind.autoReply,
+            automated = kind.automated,
         )
     }
+
+    /**
+     * A text part's bytes as text: its declared charset ([contentType]'s `charset`), and text that claims
+     * UTF-8 or declares none but isn't valid UTF-8 read as Windows-1252. Mail forwarded to a company's
+     * address is read with it too.
+     */
+    fun decodeText(bytes: ByteArray, contentType: String?): String =
+        text(bytes, CHARSET_PARAM.find(contentType.orEmpty())?.groupValues?.get(1)?.let(::charsetOf))
+
+    /** Line breaks as `\n`, runs of spaces as one, at most one blank line in a row, trimmed. */
+    fun normalizeText(text: String): String = normalize(text)
 
     /** `"Maria" <maria@example.com>, joao@example.com` → the valid addresses, lower-cased, with their names. */
     fun addresses(raw: String?): List<MailAddress> {
@@ -302,12 +302,6 @@ object GmailMessages {
     private val LIST_ITEM = Regex("(?i)<li\\b[^>]*>")
     private val TAG = Regex("(?s)<[^>]*>")
     private val ENTITY = Regex("&(#[0-9]{1,7}|#[xX][0-9a-fA-F]{1,6}|[A-Za-z][A-Za-z0-9]{1,31});")
-    private val NO_REPLY = Regex("^(no[-_.]?reply|do[-_.]?not[-_.]?reply|notifications?|mailer[-_.]?daemon|postmaster|bounces?)([-+._].*)?$", RegexOption.IGNORE_CASE)
-    private val BOUNCE_SENDERS = setOf("mailer-daemon", "postmaster")
-    private val OUT_OF_OFFICE = Regex(
-        "^(auto(matic)?[ -]?(reply|response)|out of (the )?office|resposta autom[aá]tica|respuesta autom[aá]tica|fora do escrit[oó]rio|fuera de la oficina|ausente|r[ée]ponse automatique|abwesenheit)",
-        RegexOption.IGNORE_CASE,
-    )
 
     private val LATIN1_ENTITIES = (
         "nbsp iexcl cent pound curren yen brvbar sect uml copy ordf laquo not shy reg macr deg plusmn sup2 sup3 acute micro para " +

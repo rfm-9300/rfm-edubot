@@ -494,7 +494,16 @@ function emailDeps() {
     get state() { return state; },
     // A record made from an email changes the nav's counts (clients, quotes, payments…), which come from Home's figures.
     refreshCounts: async () => { state.overview = await api('/app/api/overview').catch(() => state.overview); renderNav(); },
-    googleTextOr, connectGoogle, openSettingsAccount: async id => { state.settingsSection = 'channels'; await setActive('settings'); if (id) openEmailAccount(id); },
+    googleTextOr, connectGoogle,
+    openSettingsAccount: async id => {
+      state.settingsSection = 'channels';
+      await setActive('settings');
+      if (id && mailboxAccount()?.id === id) openMailbox(id);
+      else if (id) openEmailAccount(id);
+    },
+    // The company's own address, from the Email page's setup notice: Settings' data first, then its drawer.
+    setupMailbox,
+    openMailbox: async () => { await refreshGoogle(); openMailbox(); },
     openClientForm, openClientDrawer, openQuoteForm, openQuoteDetail, openInvoiceDetail, openPaymentForm, openPaymentDetail, openSupplierForm,
     openBookingById, openBookingForm: async (opts) => { await ensureBookingData(); openBookingForm(null, opts); },
     openTask: (subject, opts) => window.AgentsUI?.openTask(null, subject, opts),

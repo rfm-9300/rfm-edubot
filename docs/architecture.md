@@ -2,7 +2,7 @@
 
 Multi-channel AI operations bot for a construction firm, built on Ktor 3.x (Netty), backed by MongoDB, calling OpenRouter for LLM inference and CRM tool calling. A tenant can bind WhatsApp and Instagram DM accounts to the same agent; the pipeline stays shared and channel-specific behavior is isolated at ingress and egress.
 
-Automations ("Agents") and the Google/Gmail integration follow [plan-agents-automations.md](plan-agents-automations.md) and are described under [Agents and automations](#agents-and-automations) and [Google and Gmail integration](#google-and-gmail-integration) below.
+Automations ("Agents") and the Google/Gmail integration follow [plan-agents-automations.md](plan-agents-automations.md) and are described under [Agents and automations](#agents-and-automations) and [Google and Gmail integration](#google-and-gmail-integration) below. A company's own email address, which its mail is forwarded to and its email goes out from through Amazon SES, is under [Company email addresses](#company-email-addresses).
 
 ## Request Flow
 
@@ -106,7 +106,9 @@ graph TD
 
     subgraph Integrations
         GI[GoogleIntegration<br/>OAuth + token refresh]
-        ES[EmailService<br/>Gmail send]
+        MB[MailboxIntegration<br/>company addresses]
+        MI[MailboxInbound<br/>SNS endpoint: forwarded mail]
+        ES[EmailService<br/>SES or Gmail send]
         GS[GmailSyncWorker<br/>inbox, on a lease]
         EI[EmailInbox<br/>Email page: threads,<br/>suggested actions, replies]
     end
@@ -116,6 +118,7 @@ graph TD
         OC[OutboundClient<br/>WhatsApp / Instagram]
         PDF[PdfGenerator<br/>PDFBox]
         GAPI[Google OAuth<br/>+ Gmail API]
+        AWS[Amazon SES + S3 + SNS<br/>eu-west-1]
     end
 
     subgraph Persistence
@@ -144,13 +147,17 @@ graph TD
     EV --> ADP
     ADP & ASC --> AEX
     AEX --> CRM & AI & OC & ES & NT
-    AGR --> AEX & GI & ES & EI
+    AGR --> AEX & GI & MB & ES & EI
     EI --> ES & AI & CRM
     ES & GS --> GI
+    ES --> MB
     GI --> GAPI
-    ES & GS --> EV
+    MB --> AWS
+    AWS -. SNS notification .-> MI
+    MI --> MB
+    ES & GS & MI --> EV
     UR & CR & MR & CRM & DS & CF --> Mongo
-    EV & AEX & NT & GI & ES & GS & EI & TC & BLD --> Mongo
+    EV & AEX & NT & GI & MB & MI & ES & GS & EI & TC & BLD --> Mongo
     Health --> Mongo
 ```
 
@@ -175,7 +182,7 @@ graph TD
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
 | `events/` | Domain event outbox (`DomainEventLog`): repositories append after their own write, the agent dispatcher claims events, record drawers read them as an activity timeline |
 | `agents/` | Agents module: models and stores, registry (triggers, actions, validator, catalog), runtime (dispatcher, scheduler, starter, executor, guardrails, context builder), actions, templates, AI drafting and assistant tools, dashboard and backoffice routes |
-| `integrations/` | Connected accounts (`integration_connections`, `TokenCipher`), Google OAuth and token refresh, Gmail client and inbox sync, `EmailService`, email retention, integration and email routes |
+| `integrations/` | Email accounts (`integration_connections`, `TokenCipher`): the company's own address (`mailbox/`: SES inbound over SNS, MIME reading, forwards) and Google OAuth with token refresh, Gmail client and inbox sync; `aws/` (SigV4, SES, S3, SNS signatures), `EmailService`, received mail (`ReceivedEmails`), email retention, integration and email routes |
 | `notifications/` | The dashboard bell: notifications per audience with read state, and their routes |
 | `timesheets/` | The time clock: shifts and punches with their rules (`ShiftRules`, `PunchPolicy`, `Geofence`), work sites, phone keys and signature checks (`DeviceKeys`), the employee's `/app/api/portal/time` and the team's `/app/api/timesheets` routes, CSV export, location retention |
 | `persistence/` | MongoDB wiring: the data, platform and runtime databases ([MongoDB Databases and Collections](#mongodb-databases-and-collections)), index creation at startup, and `DatabaseSplit`, which carried the platform and runtime collections out of the one database of before |
@@ -939,8 +946,8 @@ flowchart LR
 | `agent_settings` | A company's agent settings and the limits only the backoffice sets | `_id` = tenant id |
 | `notifications` | Dashboard bell entries for all, admins or one user | `tenantId+audience+userId+createdAt`; TTL 90 days |
 | `outbound_log` | Every message agents and email send outside the company, claimed before the provider call | unique `idempotencyKey`; `tenantId+recipient+at`; TTL 30 days |
-| `integration_connections` | Connected Google accounts: sealed tokens, scopes, status, sender settings, daily sends, inbox cursor | unique `(tenantId, provider, accountEmail)` |
-| `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record; for the Email page also the team's read state, the model's reading (dropped with the text) and the actions taken from it | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId`; `tenantId+date` |
+| `integration_connections` | A company's email accounts: its own address (`provider: mailbox`: what reached it, the mailboxes forwarding to it, Gmail's pending confirmation code) and connected Google accounts (sealed tokens, scopes, status, inbox cursor); sender settings and daily sends for both | unique `(tenantId, provider, accountEmail)`; for `mailbox`, unique `accountEmail` (`mailbox_address`) and unique `tenantId` (`mailbox_per_company`) |
+| `email_messages` | Emails sent and received (text kept 90 days, attachment metadata only), linked to a client and record; for the Email page also the team's read state, the model's reading (dropped with the text) and the actions taken from it | unique `(tenantId, connectionId, providerMessageId)`; `tenantId+clientId+date`; `tenantId+threadId`; `tenantId+date`; `tenantId+connectionId+messageIdHeader` (threading a company address's replies) |
 | `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
 | `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
 | `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
@@ -1180,12 +1187,102 @@ flowchart LR
   The backoffice has its own pause for a company's agents, and it alone sets the company's maximum
   active agents (25), runs per day (2,000) and email sends per day (300).
 
+## Company email addresses
+
+Each company can get its own address on the platform's mail domain (`MAILBOX_DOMAIN`, e.g.
+`mail.thebotslab.pt`): its slug, a dot and six random characters (`family-clean.k7p2x9@…`). The
+company forwards its own mailbox there (Gmail, Outlook, any provider), the mail shows on the Email
+page and wakes `email.received` agents, and its email goes out from that address with replies
+pointed back at its own (Reply-To). No Google consent or verification is involved; while the mail
+domain is on, **Connect Gmail** isn't offered. Setup: [DEPLOYMENT_RUNBOOK.md](../DEPLOYMENT_RUNBOOK.md),
+"Company email addresses (Amazon SES)".
+
+```mermaid
+sequenceDiagram
+    participant C as Company's mailbox
+    participant SES as Amazon SES (eu-west-1)
+    participant S3 as S3 bucket
+    participant SNS as SNS topic
+    participant R as POST /integrations/email/ses
+    participant I as MailboxInbound
+    participant M as email_messages
+    participant S as EmailService
+
+    C->>SES: forwards mail to slug.xxxxxx@MAILBOX_DOMAIN (MX)
+    SES->>S3: receipt rule stores the raw email
+    SES->>SNS: Received: recipients, S3 key, spam/virus/DKIM/DMARC verdicts
+    SNS->>R: HTTPS POST, signed
+    R->>R: platform topic only, SNS signature checked
+    R->>I: the notification
+    I->>S3: read the raw email
+    I->>I: route by recipient, drop virus/spam/forged, unwrap hand forwards, thread
+    I->>M: store once, match a client, email.received
+    I->>S3: delete SES's copy
+    Note over S,SES: replies, Send by email, agents
+    S->>SES: SendEmail (raw MIME, recipients and Bcc in Destination)
+    SES-->>S: MessageId, which names the Message-ID recipients see
+```
+
+- **Addresses.** `POST /app/api/integrations/mailbox` makes one per company
+  (`MailboxIntegration.create`; `integration_connections` with `provider: mailbox`, unique by
+  address and by company). A company admin or an operator may set it up: nothing is read until the
+  company turns forwarding on in its own mailbox. Replies start going to the address on its
+  documents. Removing it deletes the kept mail like disconnecting Gmail; mail still forwarded to it
+  is dropped as unknown.
+- **Receiving** (`MailboxInboundRoutes`, `MailboxInbound`). SNS posts to the public
+  `/integrations/email/ses` (Caddy routes `/integrations*` to the app). Only the topics in
+  `SES_INBOUND_TOPIC_ARN` count, and every message's signature is checked against SNS's
+  certificate, fetched over HTTPS from `sns.<region>.amazonaws.com` (`SnsVerifier`); a
+  subscription confirmation is answered by opening its `SubscribeURL` on that host. A notification
+  names the envelope recipients, which pick the company (the `To` of forwarded mail is the
+  company's own address, not ours), and the S3 object in `SES_INBOUND_BUCKET`. Mail with a virus or
+  spam verdict, or failing DMARC for a domain that asks receivers to reject (a forged sender), is
+  dropped; DMARC failing under `p=none` is kept, since forwarding can break SPF. Anything that can't
+  be done now (S3 unreachable, Mongo down) answers 503 so SNS retries; the rest answers 200.
+- **Reading the email** (`InboundMime`, Angus Mail) the way inbox sync reads Gmail's payload, with the
+  same address and header decoding, charset fallback, HTML to text, attachment names and
+  machine-mail heuristics (`MailHeuristics`). Storing is shared with inbox sync (`ReceivedEmails`):
+  once per account (SES's id, and the `Message-ID` for mail forwarded twice), matched to a client,
+  announced as `email.received` unless it is an automatic reply. The date is when SES received it.
+- **Hand forwards.** Mail its own people forward by hand (from the company's addresses, its
+  forwarding mailboxes or a team member's sign-in) is kept as from whoever wrote it: the email
+  attached whole (`message/rfc822`), or the sender in the quoted header block of Gmail, Outlook or
+  Apple Mail (`ForwardedMail.original`), with `forwardedBy` recording who forwarded it. Anything else
+  from the company's own addresses is its own mail and isn't kept.
+- **Threads.** A received email joins the thread of a kept email it names in `In-Reply-To` or
+  `References`; SES replaced the `Message-ID` of what it sent with `<SES id@region.amazonses.com>`,
+  so that is the `messageIdHeader` kept for sent mail, and a reference naming the SES id on another
+  of SES's domains still matches by `providerMessageId`. Otherwise it starts a thread (`mb-…`).
+- **Gmail's forwarding confirmation.** Gmail confirms a forwarding address by emailing it a code.
+  From `forwarding-noreply@google.com` with Google's DKIM signature valid, the code, the link (only on
+  Google's mail settings hosts) and the asking account are kept on the address (`mailbox.confirmation`)
+  and shown in Settings and on the Email page for 7 days; the email itself is kept as automatic mail.
+  Mail forwarded from that account clears it, and so does Done.
+- **Which mailbox forwards here** comes from Gmail's `X-Forwarded-For` or its envelope sender
+  (`geral+caf_=…@empresa.pt`); the last five are kept (`mailbox.forwarders`) and count as the
+  company's own addresses.
+- **Sending.** While the company has an address and SES is set up, it is the company's sender, ahead
+  of any Google account. `EmailService` builds the same branded MIME and sends it with SES's v2
+  `SendEmail` (`SesClient`, signed with SigV4 by `AwsSigV4`, no AWS SDK): the recipients, Bcc
+  included, go in `Destination`, and the message carries no Bcc header. The outbound log, the daily
+  allowance and `email.sent` work as for Gmail. A timeout after the request may have reached SES is
+  `send_in_doubt`, never retried; `recipient_not_verified` means SES is still in its sandbox.
+- **Retention.** SES's copy in S3 is deleted once kept or refused, and the bucket's lifecycle rule
+  expires anything left after a few days. The text in `email_messages` is dropped after 90 days as
+  for Gmail.
+- **Local end-to-end runs** point `SES_API_URL`, `SES_S3_URL` and `SNS_TRUSTED_CERT_URL` at
+  `scripts/email-e2e/fake-services.py`, whose `/__ses/receive` stores an email and posts SNS's signed
+  notification to the app.
+
 ## Google and Gmail integration
 
 A company admin connects the company's own Gmail or Google Workspace account in **Settings →
 Channels → Email (Google)**, so quotes, invoices and automation emails go out from the company's
 address. The scopes, Google's verification and its Limited Use rules are in
-[google-oauth-verification.md](google-oauth-verification.md).
+[google-oauth-verification.md](google-oauth-verification.md). While the platform gives companies
+their own addresses ([above](#company-email-addresses)), Settings no longer offers Connect Gmail:
+an account a company already connected is still listed so it can be managed or disconnected, and
+the code stays for when Gmail is offered again.
 
 ```mermaid
 sequenceDiagram
@@ -1277,8 +1374,8 @@ flowchart LR
     Reply --> Send
 ```
 
-- **Threads.** One aggregation groups a company's messages by account and Gmail thread (a message
-  without one is its own thread), newest activity first, with counts, unread received mail and the
+- **Threads.** One aggregation groups a company's messages by account and thread (Gmail's, or the
+  company address's `mb-…` ones; a message without one is its own thread), newest activity first, with counts, unread received mail and the
   client any message is filed under. Filters (unread, clients, new senders) apply to the grouped
   thread; a search first finds the threads with a matching subject, address, name or snippet, then
   shows them whole. Index `tenantId + date`.

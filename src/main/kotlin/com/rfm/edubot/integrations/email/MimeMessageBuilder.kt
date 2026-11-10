@@ -34,6 +34,11 @@ object MimeMessageBuilder {
         val date: Instant,
         /** An automatic answer (RFC 3834), which well-behaved auto-responders on the other side don't answer back. */
         val autoReplied: Boolean = false,
+        /**
+         * Write [bcc] as a header: Gmail's `messages.send` reads the recipients from it and drops it. A
+         * transport given the recipients apart (SES) must not, or every recipient would see them.
+         */
+        val bccHeader: Boolean = true,
     )
 
     private const val CRLF = "\r\n"
@@ -51,7 +56,10 @@ object MimeMessageBuilder {
         header(out, "From", address(message.from))
         header(out, "To", message.to.joinToString(",$CRLF ") { address(it) })
         if (message.cc.isNotEmpty()) header(out, "Cc", message.cc.joinToString(",$CRLF ") { address(it) })
-        if (message.bcc.isNotEmpty()) header(out, "Bcc", message.bcc.joinToString(",$CRLF ") { address(it) })
+        if (message.bcc.isNotEmpty()) {
+            val bcc = message.bcc.joinToString(",$CRLF ") { address(it) }
+            if (message.bccHeader) header(out, "Bcc", bcc)
+        }
         message.replyTo?.let { header(out, "Reply-To", address(it)) }
         header(out, "Subject", encodeText(message.subject))
         header(out, "Date", dateFormat.format(message.date.toJavaInstant().atOffset(ZoneOffset.UTC)))

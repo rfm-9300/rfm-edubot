@@ -33,11 +33,17 @@ import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.aws.S3Client
+import com.rfm.edubot.integrations.aws.SesClient
+import com.rfm.edubot.integrations.aws.SnsVerifier
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailRetention
 import com.rfm.edubot.integrations.email.EmailService
+import com.rfm.edubot.integrations.email.ReceivedEmails
 import com.rfm.edubot.integrations.google.GmailSyncWorker
 import com.rfm.edubot.integrations.google.GoogleIntegration
+import com.rfm.edubot.integrations.mailbox.MailboxInbound
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.messaging.ConversationLanes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
@@ -187,6 +193,29 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         httpClient = whatsappHttpClient,
         notifications = NotificationRepository(mongoModule),
     )
+    // SES, S3 and SNS: an email stored in S3 can be large, so these calls get more time than the others.
+    val awsHttpClient = HttpClient(CIO) {
+        install(HttpTimeout) {
+            requestTimeoutMillis = 60000
+            connectTimeoutMillis = 10000
+            socketTimeoutMillis = 60000
+        }
+    }
+    val mailboxConfig = { runtimeConfig.get().mailbox }
+    val mailbox = MailboxIntegration(
+        configProvider = mailboxConfig,
+        connections = google.connections,
+        ses = SesClient(awsHttpClient, mailboxConfig),
+        s3 = S3Client(awsHttpClient, mailboxConfig),
+    )
+    appConfig.mailbox.let { cfg ->
+        val set = listOf(cfg.domain, cfg.accessKeyId, cfg.secretAccessKey, cfg.bucket).count { it.isNotBlank() } + if (cfg.topicArns.isEmpty()) 0 else 1
+        if (set in 1..4) {
+            LoggerFactory.getLogger("Application").warn(
+                "Company email addresses are half set up: MAILBOX_DOMAIN, SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, SES_INBOUND_BUCKET and SES_INBOUND_TOPIC_ARN are all needed; companies get no address until then",
+            )
+        }
+    }
     val emailService = EmailService(
         google = google,
         messages = EmailMessageRepository(mongoModule),
@@ -195,7 +224,16 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
         agentSettings = AgentSettingsRepository(mongoModule),
         runs = AgentRunRepository(mongoModule),
         approvals = AgentApprovalRepository(mongoModule),
+        mailbox = mailbox,
     )
+    val mailboxInbound = MailboxInbound(
+        mailbox = mailbox,
+        messages = EmailMessageRepository(mongoModule),
+        received = ReceivedEmails(EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule),
+        tenants = { tenantRepository.findById(it) },
+        team = { tenantId -> dashboardUserRepository.listByTenant(tenantId).flatMap { listOfNotNull(it.email, it.googleEmail) }.map { it.trim().lowercase() }.toSet() },
+    )
+    val snsVerifier = SnsVerifier(awsHttpClient, trustedCertUrl = { runtimeConfig.get().mailbox.trustedCertUrl })
     EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
         .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
     TimesheetLocationRetention(mongoModule).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 3.minutes)
@@ -322,6 +360,10 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
                 instagramOAuth = instagramOAuthClient,
                 whatsAppSignup = whatsAppSignupClient,
                 webChannels = webChannelRegistry,
+                mailbox = mailbox,
+                mailboxInbound = mailboxInbound,
+                snsVerifier = snsVerifier,
+                awsHttpClient = awsHttpClient,
             ),
         )
     }

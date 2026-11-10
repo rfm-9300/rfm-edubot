@@ -34,10 +34,12 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
 import java.text.Normalizer
+import kotlin.time.Duration.Companion.days
 
 /**
- * The Email page: the company's Gmail threads (what inbox sync kept and what the dashboard and agents
- * sent), read state for the team, replies in thread, and for each received email the dashboard actions
+ * The Email page: the company's threads (the mail forwarded to its own address, or what Gmail's inbox
+ * sync kept, and what the dashboard and agents sent), read state for the team, replies in thread, and
+ * for each received email the dashboard actions
  * it calls for, from what can be read without a model ([EmailFacts]) and what the model read
  * ([EmailInsightsService]). Actions run through the dashboard's own forms and endpoints; the page only
  * records what they led to, and files the sender's mail under a client once one is created.
@@ -59,14 +61,24 @@ internal class EmailInbox(
     }
 
     suspend fun status(ctx: DashboardContext): EmailInboxStatusDto {
-        val accounts = google.connections.list(ctx.tenant.id, IntegrationProviders.GOOGLE)
+        val address = if (email.mailboxConfigured) google.connections.mailboxFor(ctx.tenant.id) else null
+        val accounts = listOfNotNull(address) + google.connections.list(ctx.tenant.id, IntegrationProviders.GOOGLE)
         return EmailInboxStatusDto(
-            configured = google.configured,
+            configured = email.configured,
             inboxAvailable = google.inboxAvailable,
             canConnect = ctx.canConnect(),
             canManage = ctx.canManageIntegrations(),
             accounts = accounts.map { it.accountDto() },
             unread = messages.unreadThreads(ctx.tenant.id),
+            mailboxAvailable = email.mailboxConfigured,
+            mailbox = address?.let { a ->
+                EmailMailboxDto(
+                    id = a.id.toHexString(),
+                    address = a.accountEmail,
+                    receivedAt = a.mailbox.lastReceivedAt?.toString(),
+                    confirmation = a.mailbox.confirmation?.takeIf { clock() - it.at < CONFIRMATION_SHOWN }?.let { ForwardingConfirmationDto(it.code, it.link, it.account, it.at.toString()) },
+                )
+            },
         )
     }
 
@@ -228,6 +240,7 @@ internal class EmailInbox(
             cc = cc,
             threadId = target.threadId,
             inReplyTo = target.messageIdHeader,
+            references = thread.mapNotNull { it.messageIdHeader },
             clientId = thread.lastOrNull { it.clientId != null }?.clientId,
         )
         // One composer sends once, however often its button is pressed.
@@ -331,13 +344,14 @@ internal class EmailInbox(
 
     private fun replyDto(thread: List<EmailMessage>, connection: IntegrationConnection?): EmailReplyDto {
         val target = thread.lastOrNull { it.direction == EmailDirection.INBOUND } ?: thread.lastOrNull()
-        val canSend = google.configured && connection != null && connection.status == ConnectionStatus.ACTIVE && GoogleScopes.canSend(connection.scopes)
+        val canSend = email.canSendFrom(connection)
         return EmailReplyDto(
             to = target?.let(::replyAddress),
             subject = EmailMessage.replySubject(target?.subject.orEmpty()),
             canSend = canSend,
             problem = when {
-                connection == null || !google.configured -> EmailService.NO_ACCOUNT
+                connection == null || !email.configured -> EmailService.NO_ACCOUNT
+                !canSend && connection.provider == IntegrationProviders.MAILBOX -> EmailService.NO_ACCOUNT
                 !canSend -> EmailService.NEEDS_RECONNECT
                 target?.direction == EmailDirection.INBOUND && target.automated -> AUTOMATED_SENDER
                 else -> null
@@ -357,17 +371,22 @@ internal class EmailInbox(
             to to to
         }
 
-    private fun IntegrationConnection.accountDto() = EmailInboxAccountDto(
-        id = id.toHexString(),
-        accountEmail = accountEmail,
-        status = status.name,
-        isDefault = isDefault,
-        canSend = status == ConnectionStatus.ACTIVE && GoogleScopes.canSend(scopes),
-        canRead = GoogleScopes.canRead(scopes),
-        inboxSync = settings.inboxSync,
-        inboxError = inbox.lastError,
-        inboxSyncedAt = inbox.lastSyncedAt?.toString(),
-    )
+    private fun IntegrationConnection.accountDto(): EmailInboxAccountDto {
+        val address = provider == IntegrationProviders.MAILBOX
+        return EmailInboxAccountDto(
+            id = id.toHexString(),
+            accountEmail = accountEmail,
+            status = status.name,
+            isDefault = isDefault,
+            canSend = email.canSendFrom(this),
+            // Whatever the company forwards to its own address arrives: nothing to allow or turn on.
+            canRead = address || GoogleScopes.canRead(scopes),
+            inboxSync = address || settings.inboxSync,
+            inboxError = if (address) null else inbox.lastError,
+            inboxSyncedAt = if (address) mailbox.lastReceivedAt?.toString() else inbox.lastSyncedAt?.toString(),
+            provider = provider,
+        )
+    }
 
     private fun EmailMessage.messageDto() = EmailThreadMessageDto(
         id = id.toHexString(),
@@ -383,6 +402,7 @@ internal class EmailInbox(
         snippet = snippet,
         attachments = attachments.map { it.filename },
         automated = automated,
+        forwardedBy = forwardedBy,
         date = date.toString(),
         unread = direction == EmailDirection.INBOUND && readAt == null,
         sentByType = sentByType,
@@ -421,6 +441,9 @@ internal class EmailInbox(
         private const val MAX_DOCUMENTS = 5
         private val REQUEST_ID = Regex("^[A-Za-z0-9_-]{8,64}$")
 
+        /** Gmail's forwarding codes stop working after a while; an old one is no use on the setup screen. */
+        val CONFIRMATION_SHOWN = 7.days
+
         /** The thread's identity in the page: its account and Gmail thread, or the message itself when it has none. */
         fun threadKey(message: EmailMessage): String = "${message.connectionId.toHexString()}:${message.threadId ?: message.id.toHexString()}"
 
@@ -433,18 +456,35 @@ internal class EmailInbox(
 
 @Serializable
 data class EmailInboxStatusDto(
-    /** The platform has a Google OAuth client; without one nobody can connect Gmail. */
+    /** The platform can give companies email: its mail domain, or a Google OAuth client. */
     val configured: Boolean,
-    /** The platform lets companies read their inboxes (Google verified the restricted scopes). */
+    /** The platform lets companies read their Gmail inboxes (Google verified the restricted scopes). */
     val inboxAvailable: Boolean,
     /** Signed in as a company admin, who can connect Gmail and allow reading. */
     val canConnect: Boolean,
-    /** A company admin or an operator, who can change an account's settings. */
+    /** A company admin or an operator, who can set up the company's address and change an account's settings. */
     val canManage: Boolean,
     val accounts: List<EmailInboxAccountDto>,
     /** Threads with received mail nobody opened yet. */
     val unread: Int,
+    /** The platform gives companies their own address to forward their mail to; Gmail isn't offered then. */
+    val mailboxAvailable: Boolean = false,
+    /** The company's own address, once it has one. */
+    val mailbox: EmailMailboxDto? = null,
 )
+
+@Serializable
+data class EmailMailboxDto(
+    val id: String,
+    val address: String,
+    /** When an email last reached it; null until the company's forwarding works. */
+    val receivedAt: String? = null,
+    /** Gmail asked to confirm forwarding to the address, recently. */
+    val confirmation: ForwardingConfirmationDto? = null,
+)
+
+@Serializable
+data class ForwardingConfirmationDto(val code: String?, val link: String?, val account: String?, val at: String)
 
 @Serializable
 data class EmailInboxAccountDto(
@@ -457,6 +497,8 @@ data class EmailInboxAccountDto(
     val inboxSync: Boolean,
     val inboxError: String?,
     val inboxSyncedAt: String?,
+    /** `google`, or `mailbox` for the company's own address. */
+    val provider: String = IntegrationProviders.GOOGLE,
 )
 
 @Serializable
@@ -522,6 +564,8 @@ data class EmailThreadMessageDto(
     val snippet: String,
     val attachments: List<String>,
     val automated: Boolean,
+    /** Someone at the company forwarded it by hand: who. */
+    val forwardedBy: String? = null,
     val date: String,
     val unread: Boolean,
     val sentByType: String?,

@@ -30,9 +30,15 @@ import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.installRoutes
 import com.rfm.edubot.instagram.InstagramSocialService
+import com.rfm.edubot.integrations.aws.S3Client
+import com.rfm.edubot.integrations.aws.SesClient
+import com.rfm.edubot.integrations.aws.SnsVerifier
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailService
+import com.rfm.edubot.integrations.email.ReceivedEmails
 import com.rfm.edubot.integrations.google.GoogleIntegration
+import com.rfm.edubot.integrations.mailbox.MailboxInbound
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
 import com.rfm.edubot.notifications.NotificationRepository
@@ -231,6 +237,8 @@ private fun testServices(
     val notifications = NotificationRepository(mongo)
     val agents = AgentsModule(mongo, AgentRegistry(AgentActions.builtIn, TriggerTypes.all), AgentServices(mongo, model.client))
     val google = GoogleIntegration.create(mongo, { AppConfig.GoogleConfig() }, null, offline, notifications)
+    val mailboxConfig = { AppConfig.MailboxConfig() }
+    val mailbox = MailboxIntegration(mailboxConfig, google.connections, SesClient(offline, mailboxConfig), S3Client(offline, mailboxConfig))
     val backups = Files.createTempDirectory("backups")
     return AppServices(
         mongo = mongo,
@@ -261,5 +269,14 @@ private fun testServices(
         instagramOAuth = InstagramOAuthClient(runtime.get().instagram, offline),
         whatsAppSignup = WhatsAppSignupClient(runtime.get().whatsapp, offline),
         webChannels = webChannels,
+        mailbox = mailbox,
+        mailboxInbound = MailboxInbound(
+            mailbox,
+            EmailMessageRepository(mongo),
+            ReceivedEmails(EmailMessageRepository(mongo), DomainEventLog(mongo), mongo),
+            tenants = { tenants.findById(it) },
+        ),
+        snsVerifier = SnsVerifier(offline),
+        awsHttpClient = offline,
     )
 }

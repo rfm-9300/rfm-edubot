@@ -1,5 +1,10 @@
 # Google OAuth verification - Gmail integration
 
+> **On hold since 2026-11-04.** Companies now get their own address and forward their mail to it
+> (Amazon SES; [architecture.md](architecture.md#company-email-addresses)), so Settings doesn't offer
+> Connect Gmail while `MAILBOX_DOMAIN` is set and nothing here needs submitting for that path. The
+> Gmail integration is kept as it was, for when it is offered again.
+
 ## What we ask Google for
 
 A company admin connects the company's own Gmail or Google Workspace account in the tenant

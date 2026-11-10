@@ -62,6 +62,80 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
         return collection.find(key).firstOrNull()!!.toConnection()
     }
 
+    /**
+     * Gives the company its address on the platform's mail domain: [address] (unused anywhere, as
+     * [MailboxAddresses] makes it), or the one it already has. [replyTo] starts as where replies go.
+     * Returns null when [address] belongs to another company, so the caller tries another.
+     */
+    suspend fun createMailbox(tenantId: ObjectId, address: String, replyTo: String?, createdByUserId: String?, createdByEmail: String?): IntegrationConnection? {
+        mailboxFor(tenantId)?.let { return it }
+        val now = clock().toDate()
+        val document = Document("_id", ObjectId())
+            .append("tenantId", tenantId)
+            .append("provider", IntegrationProviders.MAILBOX)
+            .append("accountEmail", address.trim().lowercase())
+            .append("scopes", emptyList<String>())
+            .append("status", ConnectionStatus.ACTIVE.name)
+            .append("connectedByUserId", createdByUserId)
+            .append("connectedByEmail", createdByEmail)
+            .append("isDefault", true)
+            .append("settings", Document().apply { if (replyTo != null) append("replyTo", replyTo) })
+            .append("createdAt", now)
+            .append("updatedAt", now)
+        try {
+            collection.insertOne(document)
+        } catch (e: MongoWriteException) {
+            if (e.error.category != ErrorCategory.DUPLICATE_KEY) throw e
+            // The company got one meanwhile (two clicks), or the address is someone else's.
+            return mailboxFor(tenantId)
+        }
+        return document.toConnection()
+    }
+
+    /** The company's own address, when it has one. */
+    suspend fun mailboxFor(tenantId: ObjectId): IntegrationConnection? =
+        collection.find(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("provider", IntegrationProviders.MAILBOX))).firstOrNull()?.toConnection()
+
+    /** Whichever company [address] belongs to. */
+    suspend fun findMailbox(address: String): IntegrationConnection? =
+        collection.find(Filters.and(Filters.eq("provider", IntegrationProviders.MAILBOX), Filters.eq("accountEmail", address.trim().lowercase()))).firstOrNull()?.toConnection()
+
+    /**
+     * An email reached the address at [at], forwarded by [forwarder] when Gmail said which mailbox. A
+     * pending Gmail confirmation from that mailbox is done with: its mail arriving means forwarding works.
+     */
+    suspend fun mailboxReceived(id: ObjectId, at: Instant, forwarder: String?) {
+        val current = findById(id) ?: return
+        val updates = mutableListOf(
+            Updates.set("mailbox.lastReceivedAt", at.toDate()),
+            Updates.inc("mailbox.received", 1),
+        )
+        if (forwarder != null) {
+            updates += Updates.set("mailbox.forwarders", (listOf(forwarder) + current.mailbox.forwarders.filter { it != forwarder }).take(MAX_FORWARDERS))
+            if (current.mailbox.confirmation?.account == forwarder) updates += Updates.unset("mailbox.confirmation")
+        }
+        collection.updateOne(Filters.eq("_id", id), Updates.combine(updates))
+    }
+
+    /** Gmail asked the address to confirm forwarding: the newest request replaces an older one. */
+    suspend fun setForwardingConfirmation(id: ObjectId, confirmation: ForwardingConfirmation) {
+        collection.updateOne(
+            Filters.eq("_id", id),
+            Updates.set(
+                "mailbox.confirmation",
+                Document("at", confirmation.at.toDate())
+                    .append("code", confirmation.code)
+                    .append("link", confirmation.link)
+                    .append("account", confirmation.account),
+            ),
+        )
+    }
+
+    suspend fun clearForwardingConfirmation(tenantId: ObjectId, id: ObjectId): IntegrationConnection? {
+        collection.updateOne(Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("_id", id)), Updates.unset("mailbox.confirmation"))
+        return find(tenantId, id)
+    }
+
     suspend fun list(tenantId: ObjectId, provider: String? = null): List<IntegrationConnection> =
         collection.find(scope(tenantId, provider)).sort(Document("createdAt", 1)).toList().map { it.toConnection() }
 
@@ -217,6 +291,8 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
         val settings = get("settings", Document::class.java)
         val sends = get("dailySends", Document::class.java)
         val inbox = get("inbox", Document::class.java)
+        val mailbox = get("mailbox", Document::class.java)
+        val confirmation = mailbox?.get("confirmation", Document::class.java)
         return IntegrationConnection(
             id = getObjectId("_id"),
             tenantId = getObjectId("tenantId"),
@@ -244,6 +320,14 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
                 lastSyncedAt = inbox?.instant("lastSyncedAt"),
                 lastError = inbox?.getString("lastError"),
             ),
+            mailbox = MailboxState(
+                lastReceivedAt = mailbox?.instant("lastReceivedAt"),
+                received = (mailbox?.get("received") as? Number)?.toInt() ?: 0,
+                forwarders = mailbox?.getList("forwarders", String::class.java).orEmpty(),
+                confirmation = confirmation?.instant("at")?.let { at ->
+                    ForwardingConfirmation(confirmation.getString("code"), confirmation.getString("link"), confirmation.getString("account"), at)
+                },
+            ),
             createdAt = instant("createdAt") ?: Instant.fromEpochMilliseconds(0),
             updatedAt = instant("updatedAt") ?: Instant.fromEpochMilliseconds(0),
         )
@@ -251,5 +335,6 @@ class IntegrationConnectionRepository(mongo: MongoModule, private val clock: () 
 
     companion object {
         const val COLLECTION = "integration_connections"
+        private const val MAX_FORWARDERS = 5
     }
 }

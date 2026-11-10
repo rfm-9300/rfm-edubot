@@ -32,6 +32,18 @@ class LegalRoutesTest {
     }
 
     @Test
+    fun `the privacy policy and the deletion page cover a company's own address and who receives its mail`() = testApplication {
+        application { routing { legalRoutes() } }
+
+        val privacy = client.get("/privacy").bodyAsText().replace(Regex("\\s+"), " ")
+        assertContains(privacy, "id=\"mailbox\"")
+        assertContains(privacy, "Amazon SES and Amazon S3, in the European Union (Ireland)")
+        assertContains(privacy, "removing the address from the dashboard deletes all the email kept from it")
+        val deletion = client.get("/data-deletion").bodyAsText()
+        assertContains(deletion, "Remove the business&rsquo;s email address")
+    }
+
+    @Test
     fun `the data deletion page says how to remove a Google account`() = testApplication {
         application { routing { legalRoutes() } }
 

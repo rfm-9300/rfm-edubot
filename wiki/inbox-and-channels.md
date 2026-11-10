@@ -1,10 +1,10 @@
 ---
-updated: 2026-10-13
+updated: 2026-11-04
 ---
 
 # Conversations inbox and channels
 
-Where customer chats and emails arrive and how the team answers them: the Conversations inbox, the Email page, WhatsApp templates and media, the website widget and Instagram. Connecting WhatsApp, and Meta's platform rules, are in [whatsapp-and-meta.md](whatsapp-and-meta.md); connecting Gmail and inbox sync in [agents-automations.md](agents-automations.md).
+Where customer chats and emails arrive and how the team answers them: the Conversations inbox, the Email page, WhatsApp templates and media, the website widget and Instagram. Connecting WhatsApp, and Meta's platform rules, are in [whatsapp-and-meta.md](whatsapp-and-meta.md); the company's own email address (forwarding in, sending out through SES) in [company-email-addresses.md](company-email-addresses.md); connecting Gmail and inbox sync in [agents-automations.md](agents-automations.md).
 
 ## Email page: the company's Gmail, turned into dashboard actions (PR #72, opened 2026-10-09)
 
@@ -17,8 +17,8 @@ Built by a Cursor cloud agent; `docs/architecture.md` → "Email page" has the f
   Gmail is dormant in prod and inbox reading waits for Google's restricted-scope review, so legacy
   tenants with a null module list must not get a page that can't work; and the page shows the
   company's mailbox to every team member with the module, a step past "automations read it".
-- **No new store.** The page reads `email_messages` (inbox sync plus what the dashboard and agents
-  send) grouped by account + Gmail thread in one aggregation. A row is opened by its newest message
+- **No new store.** The page reads `email_messages` (inbox sync, mail forwarded to the company's own
+  address since 2026-11-04, plus what the dashboard and agents send) grouped by account + thread in one aggregation. A row is opened by its newest message
   id; any message id of a thread works for the thread endpoints. Read state is the team's (`readAt`),
   never written to Gmail, so `gmail.modify` is still unused (mirroring "read" to Gmail would be its
   first real use).

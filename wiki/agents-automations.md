@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-04
 ---
 
 # Agents (automations) and Gmail
@@ -26,6 +26,10 @@ section the ops. Rodrigo asked to merge it the same day. What matters later:
   cancelled; unfinished messages and runs resume at the next boot.
 - **Token budget**: agent AI steps count against the company's monthly budget, and `tenant_usage`
   splits usage `bySource` (pipeline, assistant, agents); the persona test now counts as assistant use.
+- **Gmail is no longer the way in** (2026-11-04): companies get their own address and forward their mail
+  to it ([company-email-addresses.md](company-email-addresses.md)), and Settings doesn't offer Connect
+  Gmail while `MAILBOX_DOMAIN` is set. Agents read and send email through either; `EmailAvailability`
+  counts the company's address for both.
 - **Gmail is dormant in prod**: it needs a Google OAuth "Web application" client (VPS `.env` or
   Platform settings → Google) and `INTEGRATIONS_ENCRYPTION_KEY`, env-only and **not in the Mongo
   backups**, so a copy must live off the VPS or every account has to reconnect. Neither was set at

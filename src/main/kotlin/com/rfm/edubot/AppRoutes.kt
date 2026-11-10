@@ -34,6 +34,7 @@ import com.rfm.edubot.dashboard.dashboardRoutes
 import com.rfm.edubot.dashboard.dashboardStaticRoutes
 import com.rfm.edubot.dashboard.employeeWorkRoutes
 import com.rfm.edubot.instagram.InstagramSocialService
+import com.rfm.edubot.integrations.aws.SnsVerifier
 import com.rfm.edubot.integrations.email.EmailInbox
 import com.rfm.edubot.integrations.email.EmailInsightsService
 import com.rfm.edubot.integrations.email.EmailService
@@ -41,6 +42,9 @@ import com.rfm.edubot.integrations.email.emailInboxRoutes
 import com.rfm.edubot.integrations.email.emailRoutes
 import com.rfm.edubot.integrations.google.GoogleIntegration
 import com.rfm.edubot.integrations.integrationRoutes
+import com.rfm.edubot.integrations.mailbox.MailboxInbound
+import com.rfm.edubot.integrations.mailbox.MailboxIntegration
+import com.rfm.edubot.integrations.mailbox.mailboxInboundRoutes
 import com.rfm.edubot.legal.legalRoutes
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.messaging.MessageQueue
@@ -64,6 +68,7 @@ import com.rfm.edubot.web.widgetRoutes
 import com.rfm.edubot.webhook.webhookRoutes
 import com.rfm.edubot.whatsapp.signup.WhatsAppSignupClient
 import com.rfm.edubot.whatsapp.signup.whatsAppSignupRoutes
+import io.ktor.client.HttpClient
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Routing
@@ -97,6 +102,10 @@ internal class AppServices(
     val instagramOAuth: InstagramOAuthClient,
     val whatsAppSignup: WhatsAppSignupClient,
     val webChannels: WebChannelRegistry,
+    val mailbox: MailboxIntegration,
+    val mailboxInbound: MailboxInbound,
+    val snsVerifier: SnsVerifier,
+    val awsHttpClient: HttpClient,
 )
 
 /** Every route the server answers. */
@@ -193,7 +202,9 @@ internal fun Routing.installRoutes(s: AppServices) {
         oauthState = s.oauthState,
         tenants = s.tenants,
         users = s.dashboardUsers,
+        mailbox = s.mailbox,
     )
+    mailboxInboundRoutes(s.mailbox, s.mailboxInbound, s.snsVerifier, s.awsHttpClient)
     emailRoutes(s.email, s.mongo)
     emailInboxRoutes(EmailInbox(s.mongo, s.email, s.google, EmailInsightsService(s.aiClient, s.mongo)))
     whatsAppSignupRoutes(

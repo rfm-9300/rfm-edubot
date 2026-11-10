@@ -541,6 +541,56 @@ A routine deploy needs none of this.
 - After editing `.env`, recreate the app on the deployed tag:
   `cd ~/whatsapp-bot && TAG=$(cat .last-good-tag) docker compose -f docker-compose.prod.yml up -d app`.
 
+## Company email addresses (Amazon SES)
+
+Each company can get its own address on a mail subdomain, forward its mailbox there and send from it
+([docs/architecture.md](docs/architecture.md#company-email-addresses)). Off until the env below is set;
+a routine deploy needs none of this. Everything lives in SES's **eu-west-1** (Ireland), one of the
+regions that receive email. The apex domain's MX (Google Workspace) is left alone: the addresses live
+on a subdomain, `mail.thebotslab.pt` below.
+
+1. **Domain identity.** SES → Identities → Create identity → Domain `mail.thebotslab.pt`, Easy DKIM
+   (RSA 2048). Add its three DKIM CNAME records at the DNS host and wait for "Verified". Optional, for
+   SPF alignment: a custom MAIL FROM `bounce.mail.thebotslab.pt` (MX `10 feedback-smtp.eu-west-1.amazonses.com`,
+   TXT `v=spf1 include:amazonses.com ~all`).
+2. **Receiving MX.** `mail.thebotslab.pt` MX `10 inbound-smtp.eu-west-1.amazonaws.com`. Recommended
+   while at it: a DMARC record for the domain (`_dmarc.thebotslab.pt` TXT `v=DMARC1; p=none;
+   rua=mailto:…`); there is none today.
+3. **Bucket.** An S3 bucket in eu-west-1 (no dots in its name), public access blocked, a bucket policy
+   letting `ses.amazonaws.com` `s3:PutObject` (conditioned on the account and the receipt rule), and a
+   lifecycle rule expiring objects after 7 days: the app deletes each email once kept, this catches
+   the rest.
+4. **Topic.** An SNS topic in eu-west-1 with an HTTPS subscription to
+   `https://thebotslab.pt/integrations/email/ses` (Caddy already routes `/integrations*` to the app).
+   The app confirms the subscription itself once it runs with the env below; look for "SNS
+   subscription confirmed" in its log, or "Request confirmation" again in the console. Raise the
+   topic's HTTPS delivery retries (for example 18 retries from 20 s to 300 s, about 50 minutes) so a
+   deploy doesn't drop a notification; the email is in S3 meanwhile.
+5. **Receipt rule.** An active receipt rule set with one rule: recipient `mail.thebotslab.pt` (every
+   address on it), spam and virus scanning on, action **S3** with the bucket and the topic. SES allows
+   one active rule set per region.
+6. **IAM user** for the app, with only `ses:SendEmail` and `ses:SendRawEmail` on the region's SES
+   identities (`identity/*`: in the sandbox SES also checks the recipients' identities),
+   `s3:GetObject` and `s3:DeleteObject` on the bucket's objects, and `s3:ListBucket` on the bucket,
+   without which S3 answers a missing object with 403 rather than 404. Its access key goes in `.env`.
+7. **Leave the sandbox.** New SES accounts only send to verified addresses (200 a day): request
+   production access (Account dashboard). Until then a send to anyone else fails with
+   `recipient_not_verified`. Check that the account-level suppression list covers bounces and
+   complaints (on by default for new accounts); SES forwards bounces to the sending address, so they
+   show on the company's Email page as automatic mail.
+8. **Env** (VPS `.env`, env only): `MAILBOX_DOMAIN=mail.thebotslab.pt`, `SES_REGION` (default
+   `eu-west-1`), `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY`, `SES_INBOUND_BUCKET`,
+   `SES_INBOUND_TOPIC_ARN` (comma-separated if several topics post here). All five besides the
+   region are needed; with only some set the app logs a warning and offers no addresses. Recreate the
+   app on the deployed tag afterwards (command above). `SES_API_URL`, `SES_S3_URL` and
+   `SNS_TRUSTED_CERT_URL` are for local end-to-end runs only; never set them in production.
+9. **Check** with a test company: Settings → Channels → Email → Set up, Send a test email, then
+   forward a mailbox to the address (Gmail's confirmation code shows up in the drawer and on the
+   Email page) and watch the Email page.
+
+While `MAILBOX_DOMAIN` is set, Settings doesn't offer Connect Gmail. Removing a company's address
+deletes the mail kept from it; mail still forwarded to it afterwards is dropped.
+
 ## Failure Rules
 
 - If the image push fails, check `packages: write` permission and GHCR login.
