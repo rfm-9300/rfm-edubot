@@ -55,6 +55,9 @@ data class ClientDraft(
 
     companion object {
         const val MAX_EMAIL = 254
+
+        /** An address with something before and after one `@` and a dot in the domain, and no longer than an address may be. */
+        fun isEmail(mail: String): Boolean = mail.length <= MAX_EMAIL && EMAIL_SHAPE.matches(mail)
         const val MAX_TAX_ID = 32
         const val MAX_NOTES = 4000
         const val MAX_ADDRESS = 300

@@ -69,4 +69,16 @@ class EmployeeRepositoryTest {
         assertNull(cleared.role)
         assertEquals(cleared, employees.findById(created.id))
     }
+
+    @Test
+    fun `an email is stored trimmed, found by search, kept when omitted and cleared with a blank string`() = runBlocking {
+        val employees = repository()
+        val created = employees.create(name = "Rita Dias", phone = "+351 913 000 111", email = " rita@exemplo.pt ")
+        assertEquals("rita@exemplo.pt", created.email)
+        assertEquals(listOf(created.id), employees.search("rita@exemplo").map { it.id })
+        assertEquals("rita@exemplo.pt", employees.update(created.id, "Rita Dias", "+351 913 000 111", null)!!.email)
+        assertEquals("rita@novo.pt", employees.update(created.id, "Rita Dias", "+351 913 000 111", null, email = "rita@novo.pt")!!.email)
+        assertNull(employees.update(created.id, "Rita Dias", "+351 913 000 111", null, email = " ")!!.email)
+        assertNull(employees.create(name = "Sem Email", phone = "+351 913 000 222").email)
+    }
 }

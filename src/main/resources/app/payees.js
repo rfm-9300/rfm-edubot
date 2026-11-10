@@ -34,6 +34,7 @@ function employeeColumns() {
     { id: 'name', label: t.thName, fixed: true, cell: e => `<td class="name long">${nameWithInitials(e.name, true)}</td>` },
     { id: 'role', label: t.thRole, default: true, cell: e => `<td class="muted">${escapeHTML(e.role || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.phone)}</td>` },
+    { id: 'email', label: t.formEmail, default: true, cell: e => `<td class="muted">${escapeHTML(e.email || '')}</td>` },
     { id: 'status', label: t.thStatus, default: true, cell: e => `<td>${statusPill(e)}</td>` },
     { id: 'taxId', label: t.formTaxId, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.taxId || '')}</td>` },
     { id: 'birthDate', label: t.formBirthDate, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.birthDate ? fmtDay(e.birthDate) : '')}</td>` },
@@ -106,7 +107,7 @@ function renderEmployees(root) {
   const toApproveTab = !archived && state.filterEmployeeView === 'toApprove';
   const shown = toApproveTab ? source.filter(e => waiting.has(e.id)) : source;
   const rows = shown
-    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
+    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.email || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
     .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, e, ids)}</tr>`)
     .join('');
   const active = state.employees || [];
@@ -255,19 +256,28 @@ function renderPayeeRecord() {
     })),
   ];
   const inUse = r.payments.length > 0 || subs.length > 0 || (r.services || []).length > 0;
-  const rows = [...r.payments].sort((a, b) => String(b.dueDate).localeCompare(String(a.dueDate))).map(x => {
+  // An employee's Services and Payments tabs can show one month (payments by their due date).
+  const month = kind === 'employee' ? (r.month || '') : '';
+  const monthName = month ? capFirst(periodLabel(month, 'month')) : '';
+  const monthBar = kind === 'employee' && (hasModule('payments') || assigned) ? employeeMonthBarHtml(month) : '';
+  const listed = month ? r.payments.filter(x => String(x.dueDate).slice(0, 7) === month) : r.payments;
+  const rows = [...listed].sort((a, b) => String(b.dueDate).localeCompare(String(a.dueDate))).map(x => {
     const status = effectiveStatus(x);
     const marker = { PAID: ' is-paid', OVERDUE: ' is-overdue', CANCELLED: ' is-draft' }[status] || '';
     return `<tr class="conversation-row${marker}" data-record-open="payment:${escapeHTML(x.id)}">
       <td class="id">${escapeHTML(x.number)}</td><td class="mono muted">${escapeHTML(fmtDay(x.dueDate))}</td>
       <td>${paymentPill(status)}</td><td class="num right">${fmtEUR(x.totalEur)}</td></tr>`;
   }).join('');
+  const monthLive = listed.filter(x => x.status !== 'CANCELLED');
+  const monthNote = month && listed.length
+    ? `<p class="hint">${escapeHTML(t.monthPaymentsSummary({ month: monthName, n: monthLive.length, total: fmtEUR(sumBy(monthLive, 'totalEur')) }))}</p>` : '';
   const payments = !hasModule('payments') ? ''
-    : r.payments.length
-      ? recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: r.payments.length })
+    : listed.length
+      ? monthBar + monthNote + recordTable([[pt.thNumber], [pt.thDueDate], [pt.thStatus], [pt.thTotal, 'right']], rows, { title: labels.payments, count: listed.length })
+      : month ? monthBar + recordEmpty(t.monthPaymentsNone({ month: monthName }), null, '')
       : recordEmpty(STR.payeeNoPayments, p.archivedAt ? null : 'payment', t.addPayment);
   body.innerHTML = kind === 'employee'
-    ? employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today })
+    ? employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today, month: { key: month, name: monthName, bar: monthBar } })
     : supplierRecordHtml(r, { since, cells, attention, payments });
   const here = () => payeeTrailEntry(kind, p);
   $('[data-record-edit]', body)?.addEventListener('click', () => openFrom(here(), () => cfg.edit(p)));
@@ -300,6 +310,13 @@ function renderPayeeRecord() {
   })));
   $('[data-employee-access]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeAccessForm(p, r.access)));
   $('[data-employee-report]', body)?.addEventListener('click', () => openFrom(here(), () => openEmployeeReportForm(p)));
+  $$('[data-record-month-mode]', body).forEach(b => b.addEventListener('click', () => {
+    setRecordMonth(r, b.dataset.recordMonthMode === 'month' ? currentPeriodKey('month') : '', `[data-record-month-mode="${b.dataset.recordMonthMode}"]`);
+  }));
+  $$('[data-record-month-nav]', body).forEach(b => b.addEventListener('click', () => {
+    const dir = b.dataset.recordMonthNav;
+    setRecordMonth(r, dir === 'current' ? currentPeriodKey('month') : shiftPeriodKey(r.month, 'month', dir === 'prev' ? -1 : 1), `[data-record-month-nav="${dir}"]:not([disabled])`);
+  }));
   if (kind === 'employee' && r.time) {
     window.TimesheetsUI.wireRecord(body, p, here(), async () => {
       r.time = await window.TimesheetsUI.loadRecord(p.id);
@@ -311,7 +328,7 @@ function renderPayeeRecord() {
 // The employee's record, as the design draws it: a bar (call, edit, deactivate), then tabs: Profile (the fields,
 // the app sign-in and what needs attention), then services, timesheet, registered services and payments, as the
 // company's modules have them.
-function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today }) {
+function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendingSubs, work, assigned, today, month }) {
   const p = r.payee;
   const t = CRM.employees;
   const tabs = [['profile', t.recordProfile, 0]];
@@ -328,6 +345,7 @@ function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendi
       [t.thStatus, status],
       p.role ? [t.thRole, escapeHTML(p.role)] : null,
       [t.thPhone, `<span class="mono">${escapeHTML(p.phone)}</span>`],
+      p.email ? [t.formEmail, `<a href="mailto:${escapeHTML(p.email)}">${escapeHTML(p.email)}</a>`] : null,
       p.birthDate ? [t.formBirthDate, escapeHTML(STR.employeeBorn({ date: fmtDayKey(p.birthDate.slice(0, 10), { dateStyle: 'medium' }), age: ageOn(p.birthDate) }))] : null,
       p.address ? [t.formAddress, `<a href="${escapeHTML(mapsHref(p.address))}" target="_blank" rel="noopener">${escapeHTML(p.address)}</a>`] : null,
       p.taxId ? [t.formTaxId, `<span class="mono">${escapeHTML(p.taxId)}</span>`] : null,
@@ -338,7 +356,7 @@ function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendi
     ${recordAttentionHtml(attention)}
   </div>`;
   const pane = {
-    services: () => employeeServicesHtml(r.services, today, !p.archivedAt),
+    services: () => employeeServicesHtml(r.services, today, !p.archivedAt, { month: month.key, monthName: month.name, rows: r.monthRows, bar: month.bar }),
     time: () => window.TimesheetsUI.recordHtml(p, r.time),
     // With nothing registered and no sign-in yet, that section draws nothing; its tab says so instead.
     work: () => employeeWorkHtml(r.submissions, r.access) || recordEmpty(SUB.noneYet, null, ''),
@@ -349,7 +367,7 @@ function employeeRecordHtml(r, { since, cells, attention, inUse, payments, pendi
   return `
     ${recordBarHtml({
       name: p.name,
-      contact: contactButtons(p.phone),
+      contact: contactButtons(p.phone, p.email ? `<a class="btn btn--sm" href="mailto:${escapeHTML(p.email)}">${escapeHTML(t.formEmail)}</a>` : ''),
       end: `<button class="btn btn--sm btn--ghost" type="button" data-record-edit>${escapeHTML(STR.clientEditAction)}</button>${employeeStateButtons(p, inUse)}`,
     })}
     ${p.archivedAt ? `<p class="hint hint--warn">${escapeHTML(t.inactiveSince({ date: fmtDay(p.archivedAt) }))}</p>` : ''}
@@ -404,9 +422,17 @@ function employeeServiceSplit(services, today) {
   return { live, toDo, done };
 }
 
-function employeeServicesHtml(services, today, canAdd) {
+// `view` is the month filter: its key ('' for all), its name, the month's rows (null while they load) and the bar.
+function employeeServicesHtml(all, today, canAdd, view = {}) {
   const t = CRM.employees;
-  if (!services.length) return recordEmpty(t.servicesNone, canAdd ? 'employee-service' : null, t.addService);
+  if (!all.length) return recordEmpty(t.servicesNone, canAdd ? 'employee-service' : null, t.addService);
+  const month = view.month || '';
+  const services = month ? (view.rows || []) : all;
+  const s = CRM.services;
+  const add = canAdd ? `<button class="btn btn--sm" type="button" data-record-act="employee-service"><span class="btn__plus">+</span> ${escapeHTML(t.addService)}</button>` : '';
+  const foot = `<div class="drawer__foot record__foot">${add}<button class="btn btn--sm btn--ghost" type="button" data-employee-report>${escapeHTML(t.report)}</button></div>`;
+  if (month && !view.rows) return `${view.bar}<p class="hint">${escapeHTML(CRM.loading)}</p>${foot}`;
+  if (month && !services.length) return `${view.bar}${recordEmpty(t.monthServicesNone({ month: view.monthName }), null, '')}${foot}`;
   const { toDo, done } = employeeServiceSplit(services, today);
   const cancelled = services.filter(s => s.status === 'CANCELLED');
   const row = (s, pill) => `<tr class="conversation-row${s.status === 'INVOICED' ? ' is-paid' : s.status === 'CANCELLED' ? ' is-draft' : ''}" data-record-open="service:${escapeHTML(s.id)}">
@@ -416,10 +442,41 @@ function employeeServicesHtml(services, today, canAdd) {
     ...toDo.map(s => row(s, `<span class="pill pill--info">${escapeHTML(t.scheduled)}</span>`)),
     ...[...done, ...cancelled].map(s => row(s, servicePill(s.status))),
   ].join('');
+  const live = services.filter(x => x.status !== 'CANCELLED');
+  const note = month ? `<p class="hint">${escapeHTML(t.monthServicesSummary({ month: view.monthName, n: live.length, total: fmtEUR(sumBy(live, 'totalEur')) }))}</p>` : '';
+  return (view.bar || '') + note
+    + recordTable([[s.thWhen], [s.thClient], [s.thService], [s.thStatus], [s.thTotal, 'right']], rows, { title: t.servicesTitle, count: services.length })
+    + foot;
+}
+
+// All or one month, for the Services and Payments tabs. Unlike the lists' period arrows these go past the current
+// month, because an employee has work scheduled and payments falling due ahead (CRM.services has the arrows' labels).
+function employeeMonthBarHtml(month) {
+  const t = CRM.employees;
   const s = CRM.services;
-  const add = canAdd ? `<button class="btn btn--sm" type="button" data-record-act="employee-service"><span class="btn__plus">+</span> ${escapeHTML(t.addService)}</button>` : '';
-  return recordTable([[s.thWhen], [s.thClient], [s.thService], [s.thStatus], [s.thTotal, 'right']], rows, { title: t.servicesTitle, count: services.length })
-    + `<div class="drawer__foot record__foot">${add}<button class="btn btn--sm btn--ghost" type="button" data-employee-report>${escapeHTML(t.report)}</button></div>`;
+  const chip = (mode, label, on) => `<button class="chip${on ? ' is-on' : ''}" type="button" aria-pressed="${on}" data-record-month-mode="${mode}">${escapeHTML(label)}</button>`;
+  const nav = month ? `<div class="period-nav">
+      <button class="btn btn--sm" type="button" aria-label="${escapeHTML(s.periodPrev)}" data-record-month-nav="prev">‹</button>
+      <span class="period-nav__label mono">${escapeHTML(periodLabel(month, 'month'))}</span>
+      <button class="btn btn--sm" type="button" aria-label="${escapeHTML(s.periodNext)}" data-record-month-nav="next">›</button>
+      ${month === currentPeriodKey('month') ? '' : `<button class="btn btn--sm" type="button" data-record-month-nav="current">${escapeHTML(s.periodCurrent)}</button>`}
+    </div>` : '';
+  return `<div class="record__filter" role="group" aria-label="${escapeHTML(t.monthFilterAria)}">${chip('all', t.monthAll, !month)}${chip('month', t.monthMonthly, !!month)}${nav}</div>`;
+}
+
+// Picks the month ('' for all). Only the newest services load with the record, so a month's are read from the server.
+function setRecordMonth(r, month, focus) {
+  r.month = month;
+  r.monthRows = null;
+  renderPayeeRecord();
+  $(focus, r.el)?.focus();
+  if (!month || !r.services) return;
+  const [year, mon] = month.split('-').map(Number);
+  const last = String(new Date(Date.UTC(year, mon, 0)).getUTCDate()).padStart(2, '0');
+  const stale = () => payeeRecord !== r || r.month !== month;
+  api(`/app/api/crm/services?employeeId=${encodeURIComponent(r.payee.id)}&from=${month}-01&to=${month}-${last}`)
+    .then(rows => { if (!stale()) { r.monthRows = rows || []; renderPayeeRecord(); $(focus, r.el)?.focus(); } })
+    .catch(() => { if (!stale()) { r.monthRows = []; renderPayeeRecord(); toast(CRM.employees.monthLoadFailed); } });
 }
 
 // ── An employee's services report ───────────────────────────────────────────────
@@ -456,33 +513,62 @@ function openEmployeeReportForm(p) {
     </div>
     <label class="form__check"><input type="checkbox" id="er-todo" /> ${escapeHTML(t.reportScheduled)}</label>
     <label class="form__check"><input type="checkbox" id="er-values" checked /> ${escapeHTML(t.reportValues)}</label>
-    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(STR.cancel)}</button><button class="btn btn--accent" type="submit">${escapeHTML(t.reportPrint)}</button></div>`;
+    <div class="report-preview">
+      <p class="lbl">${escapeHTML(t.reportPreview)}</p>
+      <iframe class="report-preview__frame" title="${escapeHTML(t.reportPreview)}" sandbox></iframe>
+      <p class="hint report-preview__status" role="status" aria-live="polite"></p>
+    </div>
+    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(STR.cancel)}</button><button class="btn btn--accent" type="submit" disabled>${escapeHTML(t.reportPrint)}</button></div>`;
   bindDrawerClose(form);
   const period = $('#er-period', form);
+  const frame = $('.report-preview__frame', form);
+  const status = $('.report-preview__status', form);
+  const printBtn = $('button[type=submit]', form);
+  let shown = null;      // the document in the preview, which is what Print prints
+  let loaded = null;     // { start, end, rows }: the last range read, so the options redraw without asking again
+  let latest = 0;
+  const say = text => { status.textContent = text; status.hidden = !text; };
+  // The preview follows the options: the services of a new range are read, the checkboxes redraw what was read.
+  const refresh = async () => {
+    const start = $('#er-from', form).value;
+    const end = $('#er-to', form).value;
+    const mine = ++latest;
+    shown = null;
+    printBtn.disabled = true;
+    if (!start || !end || end < start) return say(t.reportBadRange);
+    if ((dayKeyDate(end) - dayKeyDate(start)) / 86400000 >= EMPLOYEE_REPORT_MAX_DAYS) return say(t.reportTooLong);
+    if (!loaded || loaded.start !== start || loaded.end !== end) {
+      say(t.reportPreparing);
+      try {
+        const rows = await api(`/app/api/crm/services?employeeId=${encodeURIComponent(p.id)}&from=${start}&to=${end}`);
+        if (mine !== latest) return;
+        loaded = { start, end, rows: rows || [] };
+      } catch {
+        if (mine === latest) say(t.reportFailed);
+        return;
+      }
+    }
+    shown = employeeReportHtml(p, loaded.rows, start, end, { toDo: $('#er-todo', form).checked, values: $('#er-values', form).checked });
+    frame.srcdoc = shown;
+    say('');
+    printBtn.disabled = false;
+  };
+  let wait = 0;
+  const refreshSoon = () => { clearTimeout(wait); wait = setTimeout(refresh, 300); };
   period.addEventListener('change', () => {
     const range = employeeReportRange(period.value);
     if (!range) return;
     [$('#er-from', form).value, $('#er-to', form).value] = range;
+    refresh();
   });
-  ['#er-from', '#er-to'].forEach(sel => $(sel, form).addEventListener('input', () => { period.value = 'custom'; }));
-  form.addEventListener('submit', async e => {
+  ['#er-from', '#er-to'].forEach(sel => $(sel, form).addEventListener('input', () => { period.value = 'custom'; refreshSoon(); }));
+  ['#er-todo', '#er-values'].forEach(sel => $(sel, form).addEventListener('change', refresh));
+  form.addEventListener('submit', e => {
     e.preventDefault();
-    const start = $('#er-from', form).value;
-    const end = $('#er-to', form).value;
-    if (!start || !end || end < start) return toast(t.reportBadRange);
-    if ((dayKeyDate(end) - dayKeyDate(start)) / 86400000 >= EMPLOYEE_REPORT_MAX_DAYS) return toast(t.reportTooLong);
-    const btn = $('button[type=submit]', form);
-    btn.disabled = true;
-    try {
-      const rows = await api(`/app/api/crm/services?employeeId=${encodeURIComponent(p.id)}&from=${start}&to=${end}`);
-      printHtmlDocument(employeeReportHtml(p, rows || [], start, end, { toDo: $('#er-todo', form).checked, values: $('#er-values', form).checked }));
-    } catch {
-      toast(t.reportFailed);
-    } finally {
-      btn.disabled = false;
-    }
+    if (shown) printHtmlDocument(shown);
   });
-  openDrawer(t.reportTitle, form, false, { eyebrow: p.name });
+  openDrawer(t.reportTitle, form, true, { eyebrow: p.name });
+  refresh();
 }
 
 // The printable page: who, when, the figures, the services by title, and every service day by day.
@@ -533,6 +619,7 @@ function employeeReportHtml(p, services, from, to, opts) {
     <style>
       :root { --ink: #111318; --soft: #475467; --muted: #667085; --rule: #e4e7ec; --surface: #f4f6f8; }
       @page { size: A4; margin: 16mm 14mm; }
+      @media screen { body { padding: 10mm 12mm; } }
       * { box-sizing: border-box; }
       body { margin: 0; font: 10pt/1.45 system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: var(--ink); background: #fff; }
       header { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1.5pt solid var(--ink); padding-bottom: 8px; }
@@ -739,6 +826,8 @@ async function openEmployeeForm(employee) {
         <input class="inp inp--mono" id="ef-phone" required placeholder="${escapeHTML(t.phPhone)}" value="${escapeHTML(editing?.phone || '')}" /></div>
       <div class="form__row"><label class="lbl" for="ef-role">${escapeHTML(t.formRole)}</label>
         <input class="inp" id="ef-role" placeholder="${escapeHTML(t.phRole)}" value="${escapeHTML(editing?.role || '')}" /></div>
+      <div class="form__row form__row--full"><label class="lbl" for="ef-email">${escapeHTML(t.formEmail)}</label>
+        <input class="inp" id="ef-email" type="email" maxlength="254" autocomplete="off" spellcheck="false" placeholder="${escapeHTML(t.phEmail)}" value="${escapeHTML(editing?.email || '')}" /></div>
       <div class="form__row"><label class="lbl" for="ef-birth">${escapeHTML(t.formBirthDate)}</label>
         <input class="inp inp--mono" id="ef-birth" type="date" min="1900-01-01" max="${todayKey()}" value="${escapeHTML((editing?.birthDate || '').slice(0, 10))}" /></div>
       <div class="form__row"><label class="lbl" for="ef-tax">${escapeHTML(t.formTaxId)}</label>
@@ -756,9 +845,10 @@ async function openEmployeeForm(employee) {
     const val = sel => $(sel, form).value.trim();
     const payload = {
       name: val('#ef-name'), phone: val('#ef-phone'), role: val('#ef-role') || undefined,
-      birthDate: val('#ef-birth'), taxId: val('#ef-tax'), address: val('#ef-address'),
+      birthDate: val('#ef-birth'), taxId: val('#ef-tax'), address: val('#ef-address'), email: val('#ef-email'),
     };
     if (!payload.name || !payload.phone) return toast(t.validate);
+    if (payload.email && !EMAIL_SHAPE.test(payload.email)) return toast(t.invalidEmail);
     const btn = $('button[type=submit]', form);
     btn.disabled = true;
     try {
@@ -772,7 +862,7 @@ async function openEmployeeForm(employee) {
       if (!editing) openPayeeDrawer('employee', saved);
     } catch (err) {
       btn.disabled = false;
-      toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : err?.code === 'invalid_birth_date' ? t.invalidBirthDate : t.saveFailed);
+      toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : err?.code === 'invalid_birth_date' ? t.invalidBirthDate : err?.code === 'invalid_email' ? t.invalidEmail : t.saveFailed);
     }
   });
   openDrawer(editing ? t.editTitle : t.formTitle, form);

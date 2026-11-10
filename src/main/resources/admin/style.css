@@ -936,6 +936,13 @@ html[data-theme="dark"] a.record-card__line:hover { color: var(--accent); }
 .record .tbl thead th { padding: 9px 12px; }
 .record .tbl tbody td { padding: 10px 12px; }
 .record .tbl tbody tr.is-day td { padding: 7px 12px; }
+/* All / by month for an employee's Services and Payments tabs: the chips, then the month's arrows. */
+.record__filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 10px; }
+.record__filter .period-nav { margin-left: auto; }
+/* The services report as it will print, in a frame, under the options that shape it. */
+.report-preview { display: grid; gap: 6px; }
+.report-preview__frame { display: block; width: 100%; height: 52vh; min-height: 320px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.report-preview__status:empty { display: none; }
 .record__pane-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 10px; }
 .record__stack { display: grid; gap: 12px; }
 .record__stack > .record__pane-foot { margin-top: 0; }

@@ -122,6 +122,7 @@ internal data class EmployeeDto(
     val birthDate: String? = null,
     val address: String? = null,
     val taxId: String? = null,
+    val email: String? = null,
     val createdAt: String,
     val archivedAt: String? = null,
 )
@@ -272,6 +273,7 @@ internal fun Employee.dto() = EmployeeDto(
     birthDate = birthDate?.toString(),
     address = address,
     taxId = taxId,
+    email = email,
     createdAt = createdAt.toString(),
     archivedAt = archivedAt?.toString(),
 )

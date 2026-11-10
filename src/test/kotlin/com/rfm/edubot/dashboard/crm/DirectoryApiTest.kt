@@ -11,6 +11,7 @@ import org.junit.jupiter.api.AfterAll
 import org.junit.jupiter.api.BeforeAll
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNull
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
@@ -96,5 +97,23 @@ class DirectoryApiTest {
         }
         assertEquals("type_too_long", a.post("/app/api/crm/suppliers") { put("name", "X"); put("phone", phone()); put("type", "t".repeat(61)) }.error)
         assertEquals("invalid_birth_date", a.post("/app/api/crm/employees") { put("name", "X"); put("phone", phone()); put("birthDate", "31/12/1990") }.error)
+    }
+
+    @Test
+    fun `an employee's email is checked, kept when omitted and cleared with an empty string`() = dashboardApiTest(mongo) {
+        val a = company()
+        val employees = "/app/api/crm/employees"
+        assertEquals("invalid_email", a.post(employees) { put("name", "X"); put("phone", phone()); put("email", "not an email") }.error)
+        assertEquals("invalid_email", a.post(employees) { put("name", "X"); put("phone", phone()); put("email", "a@b") }.error)
+        val created = a.post(employees) { put("name", "Rita Dias"); put("phone", phone()); put("email", " rita@exemplo.pt ") }
+        assertEquals(HttpStatusCode.Created, created.status, created.toString())
+        assertEquals("rita@exemplo.pt", created.text("email"))
+        val id = created.text("id")!!
+        assertEquals("rita@exemplo.pt", a.patch("$employees/$id") { put("name", "Rita Dias"); put("phone", created.text("phone")!!) }.text("email"), "omitted: kept")
+        assertEquals("invalid_email", a.patch("$employees/$id") { put("name", "Rita Dias"); put("phone", created.text("phone")!!); put("email", "x@") }.error)
+        assertEquals("rita@exemplo.pt", a.get("$employees/$id").text("email"), "a refused change leaves it")
+        assertNull(a.patch("$employees/$id") { put("name", "Rita Dias"); put("phone", created.text("phone")!!); put("email", "") }.text("email"), "empty: cleared")
+        val other = a.post(employees) { put("name", "Outra"); put("phone", phone()); put("email", "outra@exemplo.pt") }.text("id")!!
+        assertEquals(listOf(other), a.get("$employees?q=outra@").ids(), "search finds an employee by email")
     }
 }

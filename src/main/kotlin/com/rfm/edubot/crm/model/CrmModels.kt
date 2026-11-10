@@ -92,6 +92,8 @@ data class Employee(
     val address: String? = null,
     /** Tax number (NIF in Portugal). Staff-only, like the rest of the directory. */
     val taxId: String? = null,
+    /** Where to write to them. Not their sign-in, which has its own address (see the employee portal). */
+    val email: String? = null,
     val createdAt: Instant,
     val updatedAt: Instant,
     /** Set on an employee who has payments and was removed: hidden from lists and pickers, restorable. */

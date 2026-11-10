@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-27
+updated: 2026-11-10
 ---
 
 # Clients, suppliers and employees
@@ -130,6 +130,15 @@ Decisions that matter later (the first and the invoicing one were chosen without
 - **Employee profile**: `birthDate` (stored as a `yyyy-MM-dd` string like the other CRM dates),
   `address`, `taxId`, kept when omitted and cleared on ""; a future or pre-1900 date answers
   `400 invalid_birth_date`. The record card shows the age. No bot tool reads employees.
+- **Employee email (2026-11-10):** Rodrigo asked for an email on employees. `crm.employees.email` is
+  optional and follows the same rule as the other profile fields (kept when omitted, cleared on `""`);
+  a malformed one answers `400 invalid_email` (the client's shape and 254-character limit,
+  `ClientDraft.isEmail`). It is a contact address and **not the employee's sign-in**, which keeps its own
+  address (`dashboard_users`, the Access panel): the "Give access" form starts with the employee's email
+  filled in when there is no sign-in yet, and the two can differ. The employees list has an Email column
+  (on by default, so a user who saved their own column choice adds it in the column picker), search
+  finds an employee by it, and the record shows it as a link with an Email button in the bar. The mobile
+  app doesn't read it yet.
 
 (The same change let a Serviços row hold several lines and fixed euro-to-cents rounding: see [catalog-services-bookings.md](catalog-services-bookings.md) and [billing-and-pdfs.md](billing-and-pdfs.md).)
 

@@ -38,6 +38,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
                 Filters.regex("phone", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("role", ".*${Regex.escape(trimmed)}.*", "i"),
                 Filters.regex("taxId", ".*${Regex.escape(trimmed)}.*", "i"),
+                Filters.regex("email", ".*${Regex.escape(trimmed)}.*", "i"),
             )
         }
         val filter = Filters.and(listOfNotNull(Filters.eq("tenantId", tenantId), archivedFilter(archived), text))
@@ -57,8 +58,8 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
     suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
 
     /**
-     * [role] is replaced as given (null clears it). [birthDate] (`yyyy-MM-dd`), [address] and [taxId] are
-     * only written when not null, so callers that don't send them keep the stored values; a blank string
+     * [role] is replaced as given (null clears it). [birthDate] (`yyyy-MM-dd`), [address], [taxId] and [email]
+     * are only written when not null, so callers that don't send them keep the stored values; a blank string
      * clears them.
      */
     suspend fun update(
@@ -69,6 +70,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         birthDate: String? = null,
         address: String? = null,
         taxId: String? = null,
+        email: String? = null,
     ): Employee? {
         val now = SystemClock.now()
         val updates = mutableListOf(
@@ -80,6 +82,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         birthDate?.let { updates += Updates.set("birthDate", it.isoDate()?.toString()) }
         address?.let { updates += Updates.set("address", it.cleaned()) }
         taxId?.let { updates += Updates.set("taxId", it.cleaned()) }
+        email?.let { updates += Updates.set("email", it.cleaned()) }
         val doc = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(updates),
@@ -95,6 +98,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         birthDate: String? = null,
         address: String? = null,
         taxId: String? = null,
+        email: String? = null,
     ): Employee {
         val now = SystemClock.now()
         val number = "COL-${sequences.next("employee_number").toString().padStart(3, '0')}"
@@ -107,6 +111,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
             birthDate = birthDate.isoDate(),
             address = address.cleaned(),
             taxId = taxId.cleaned(),
+            email = email.cleaned(),
             createdAt = now,
             updatedAt = now,
         )
@@ -129,6 +134,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         birthDate = getString("birthDate")?.let { runCatching { LocalDate.parse(it) }.getOrNull() },
         address = getString("address"),
         taxId = getString("taxId"),
+        email = getString("email"),
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
         archivedAt = getDate("archivedAt")?.toInstantValue(),
@@ -143,6 +149,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         .append("birthDate", birthDate?.toString())
         .append("address", address)
         .append("taxId", taxId)
+        .append("email", email)
         .append("createdAt", createdAt.toDate())
         .append("updatedAt", updatedAt.toDate())
 

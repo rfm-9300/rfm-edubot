@@ -72,7 +72,7 @@ function openEmployeeAccessForm(employee, access) {
   form.innerHTML = `
     <p class="hint">${escapeHTML(has ? SUB.accessEditIntro : signInPurpose('accessIntro', SUB.accessGiveIntro, employee.name))}</p>
     <div class="form__row form__row--full"><label class="lbl" for="ea-email">${escapeHTML(SUB.accessEmail)} <span class="req">●</span></label>
-      <input class="inp" id="ea-email" type="email" autocomplete="off" maxlength="254" required value="${escapeHTML(access?.email || '')}" /></div>
+      <input class="inp" id="ea-email" type="email" autocomplete="off" maxlength="254" required value="${escapeHTML(access?.email || employee.email || '')}" /></div>
     <div class="form__row form__row--full"><label class="lbl" for="ea-password">${escapeHTML(has ? SUB.accessNewPassword : STR.accountNewPassword)}${has ? ` <span class="opt">${escapeHTML(STR.optional)}</span>` : ' <span class="req">●</span>'}</label>
       <input class="inp inp--mono" id="ea-password" type="text" autocomplete="off" spellcheck="false" maxlength="72"${has ? '' : ' required'} />
       <p class="hint">${escapeHTML(has ? SUB.accessNewPasswordHint : SUB.accessPasswordHint)}</p>

@@ -36,7 +36,7 @@ internal object EmployeeRoutes : DashboardFeature(DashboardModules.EMPLOYEES) {
                 if (request.name.isBlank() || request.phone.isBlank()) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                 request.detailsError()?.let { return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val employee = call.uniquePhone {
-                    crm.employees.create(request.name, request.phone, request.role, request.birthDate, request.address, request.taxId)
+                    crm.employees.create(request.name, request.phone, request.role, request.birthDate, request.address, request.taxId, request.email)
                 } ?: return@post
                 call.respond(HttpStatusCode.Created, employee.value.dto())
             }
@@ -47,7 +47,7 @@ internal object EmployeeRoutes : DashboardFeature(DashboardModules.EMPLOYEES) {
                 if (request.name.isBlank() || request.phone.isBlank()) return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to "name and phone are required"))
                 request.detailsError()?.let { return@patch call.respond(HttpStatusCode.BadRequest, mapOf("error" to it)) }
                 val employee = (call.uniquePhone {
-                    crm.employees.update(id, request.name, request.phone, request.role, request.birthDate, request.address, request.taxId)
+                    crm.employees.update(id, request.name, request.phone, request.role, request.birthDate, request.address, request.taxId, request.email)
                 } ?: return@patch).value ?: return@patch call.respond(HttpStatusCode.NotFound)
                 call.respond(employee.dto())
             }

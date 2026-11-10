@@ -182,7 +182,7 @@ internal data class CreateSupplierRequest(
 @Serializable
 internal data class SupplierServiceRequest(val description: String, val unit: String = "", val unitPriceEur: Double? = null)
 
-/** Also the PATCH body: omitted [birthDate], [address] and [taxId] keep what is stored; an empty string clears them. */
+/** Also the PATCH body: omitted [birthDate], [address], [taxId] and [email] keep what is stored; an empty string clears them. */
 @Serializable
 internal data class CreateEmployeeRequest(
     val name: String,
@@ -192,12 +192,14 @@ internal data class CreateEmployeeRequest(
     val birthDate: String? = null,
     val address: String? = null,
     val taxId: String? = null,
+    val email: String? = null,
 ) {
     /** Stable error code for the first invalid optional field, or null. */
     fun detailsError(today: LocalDate = SystemClock.now().toLocalDateTime(TimeZone.UTC).date): String? {
         val born = birthDate?.trim()?.takeIf { it.isNotEmpty() }
         return when {
             born != null && !plausibleBirthDate(born, today) -> "invalid_birth_date"
+            email?.trim()?.takeIf { it.isNotEmpty() }?.let { !ClientDraft.isEmail(it) } == true -> "invalid_email"
             (address?.trim()?.length ?: 0) > ClientDraft.MAX_ADDRESS -> "address_too_long"
             (taxId?.trim()?.length ?: 0) > ClientDraft.MAX_TAX_ID -> "tax_id_too_long"
             else -> null

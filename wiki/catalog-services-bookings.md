@@ -130,6 +130,23 @@ dates), Include scheduled (to do) and Show values (on; off for a copy to hand th
   (`ServiceDays`). With a range the list answers up to 2,000 rows instead of 200, so a busy employee's
   month isn't cut by the newest-200 cap.
 
+**Report preview and a month filter on the employee record (2026-11-10):** Rodrigo asked that the report
+be seen before it goes out (it only printed), and for a monthly view of an employee's services and payments.
+
+- **The report drawer previews what it will print.** It is wide and shows the document in a sandboxed
+  `iframe` (`srcdoc`, the same HTML `printHtmlDocument` prints) under the options. The preview follows
+  them: a new period or dates read the services again (dates after 300 ms, so typing doesn't ask for every
+  keystroke), the two checkboxes only redraw what was read. Print stays disabled while it prepares or the
+  range is wrong, and prints exactly the document on show. `@media screen` gives the page padding in the
+  frame; the printed page keeps the `@page` margins. Not built: sending the report (by email or anything
+  else), which the employee's new email would allow.
+- **The Services and Payments tabs take All or By month** (shared, kept while the record is open;
+  `r.month`). The arrows go past the current month on purpose, unlike the lists' period arrows, because
+  scheduled work and payments falling due lie ahead. Services of a month are read from the server with
+  `from`/`to` (the record only loads the newest 200), payments are filtered in the browser **by due date**
+  (the Due column), and each shows a one-line count and total (cancelled rows left out of the total).
+  Reopening the record starts at All.
+
 **A client's catalog items (2026-10-24):** Rodrigo asked to tie clients to the catalog items they
 buy, and to see those first when adding a service for that client.
 
