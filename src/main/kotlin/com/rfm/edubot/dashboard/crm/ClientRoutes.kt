@@ -8,7 +8,9 @@ import com.rfm.edubot.crm.api.dto
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.dashboard.requireModules
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -53,6 +55,7 @@ internal object ClientRoutes : DashboardFeature(DashboardModules.CLIENTS) {
             call.respondClientWrite(crm.clientDirectory.update(id, request.toDraft()), HttpStatusCode.OK)
         }
         clientFieldRoutes(deps.tenants)
+        recordTagRoutes(TagKind.CLIENT, "clients", deps)
         get("/clients/{id}") {
             val crm = deps.crm(call)
             val id = runCatching { ObjectId(call.parameters["id"]) }.getOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest)

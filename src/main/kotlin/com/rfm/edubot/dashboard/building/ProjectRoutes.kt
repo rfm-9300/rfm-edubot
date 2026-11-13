@@ -14,12 +14,14 @@ import com.rfm.edubot.building.model.ProjectStatus
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.dashboard.isAdmin
 import com.rfm.edubot.dashboard.requireModule
 import com.rfm.edubot.http.ApiErrors
 import com.rfm.edubot.http.ErrorBody
 import com.rfm.edubot.http.idParam
 import com.rfm.edubot.http.idValue
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
@@ -49,6 +51,7 @@ import kotlinx.io.readByteArray
 internal object ProjectRoutes : DashboardFeature(DashboardModules.PROJECTS) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/building") {
+            recordTagRoutes(TagKind.PROJECT, "projects", deps)
             get("/projects") {
                 val b = deps.building(call)
                 val quoteId = call.request.queryParameters["quoteId"]?.takeIf { it.isNotBlank() }?.let { idValue(it, "quoteId") }

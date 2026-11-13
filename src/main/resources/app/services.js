@@ -14,6 +14,7 @@ function serviceColumns() {
     ...(hasModule('employees') ? [{ id: 'employee', label: t.thEmployee, cell: s => `<td>${s.employeeName ? nameWithInitials(s.employeeName) : ''}</td>` }] : []),
     { id: 'when', label: t.thWhen, cell: s => `<td class="mono muted">${escapeHTML(fmtDay(s.performedAt || s.createdAt))}</td>` },
     { id: 'qty', label: t.thQty, cell: s => `<td class="mono muted">${(s.items || []).length > 1 ? escapeHTML(t.lineCount({ n: s.items.length })) : `${s.quantity}${s.unit ? ` ${escapeHTML(s.unit)}` : ''}`}</td>` },
+    ...tagsColumnIfUsed('services'),
     { id: 'status', label: t.thStatus, cell: s => `<td>${servicePill(s.status)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: s => `<td class="num">${fmtEUR(s.totalEur)}</td>` },
   ];
@@ -48,11 +49,11 @@ function renderServices(root) {
   if (hasModule('employees')) for (const s of all) if (s.employeeId) employeeNames.set(s.employeeId, s.employeeName || s.employeeId);
   if (state.filterServiceEmployee && !employeeNames.has(state.filterServiceEmployee)) state.filterServiceEmployee = '';
   const employeeId = state.filterServiceEmployee || '';
-  const scoped = all.filter(s => (!clientId || s.clientId === clientId) && (!employeeId || s.employeeId === employeeId));
+  const scoped = all.filter(s => (!clientId || s.clientId === clientId) && (!employeeId || s.employeeId === employeeId) && matchesTagFilter('services', s.id));
   const columns = orderedColumns('services', serviceColumns());
   const rows = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
-    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q))
+    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)} ${tagsText('services', s.id)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row ${s.status === 'INVOICED' ? 'is-paid' : ''}" data-service="${escapeHTML(s.id)}">${columnCells(columns, s)}</tr>`)
     .join('');
   const clientOptions = [...clientNames.entries()].sort((a, b) => String(a[1]).localeCompare(String(b[1]), uiLocale()));
@@ -66,7 +67,7 @@ function renderServices(root) {
   const period = state.filterServicePeriod || '';
   const listed = scoped
     .filter(s => !state.filterServiceStatus || s.status === state.filterServiceStatus)
-    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)}`.toLowerCase().includes(q));
+    .filter(s => !q || `${s.name || ''} ${s.clientName || ''} ${serviceStatusLabel(s.status)} ${tagsText('services', s.id)}`.toLowerCase().includes(q));
   const serviceGroups = period ? groupByPeriod(listed, period, s => s.performedAt || s.createdAt) : [];
   const nowKey = period ? (state.filterServicePeriodKey || currentPeriodKey(period)) : '';
   const nowRoll = serviceRollup(groupItems(serviceGroups, nowKey));
@@ -85,11 +86,12 @@ function renderServices(root) {
   // The counts follow the client and employee picked, so each tab's number is the rows it shows.
   const statusTabs = `<button class="chip ${!state.filterServiceStatus ? 'is-on' : ''}" data-filter-svc="">${escapeHTML(period ? t.filterAll : t.tabAll)}${chipCount(scoped.length)}</button>`
     + ['OPEN', 'INVOICED', 'CANCELLED'].map(s => `<button class="chip ${state.filterServiceStatus === s ? 'is-on' : ''}" data-filter-svc="${s}">${escapeHTML(serviceStatusLabel(s))}${chipCount(scoped.filter(x => x.status === s).length)}</button>`).join('');
+  const tagFilter = tagFilterHtml('services');
   const tools = period
-    ? clientFilter + employeeFilter + statusTabs
-    : `${statusTabs}<span class="panel__tools-end">${clientFilter}${employeeFilter}${views}${columnOrderButton('services')}</span>`;
+    ? clientFilter + employeeFilter + tagFilter + statusTabs
+    : `${statusTabs}<span class="panel__tools-end">${clientFilter}${employeeFilter}${tagFilter}${views}${columnOrderButton('services')}</span>`;
   const invoiceAction = hasModule('invoices') ? `<button class="btn btn--sm btn--primary" type="button" data-invoice-services>${escapeHTML(t.invoiceSelected)}</button>` : '';
-  const filtered = Boolean(clientId || employeeId || state.filterServiceStatus || q);
+  const filtered = Boolean(clientId || employeeId || tagFilterOf('services') || state.filterServiceStatus || q);
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.open)}</th><th class="right">${escapeHTML(t.invoiced)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'services');
   const serviceNav = periodNav(nowKey, period, 'data-svc-period-nav', t);
@@ -122,6 +124,7 @@ function renderServices(root) {
   $$('[data-filter-svc]', root).forEach(btn => btn.addEventListener('click', () => { state.filterServiceStatus = btn.dataset.filterSvc; render(); }));
   $('[data-filter-svc-client]', root)?.addEventListener('change', e => { state.filterServiceClient = e.target.value; render(); });
   $('[data-filter-svc-employee]', root)?.addEventListener('change', e => { state.filterServiceEmployee = e.target.value; render(); });
+  wireTagFilter(root, 'services');
   if (!period) wireSelection(root, 'services', listed.map(s => s.id));
   $$('[data-service]', root).forEach(r => r.addEventListener('click', () => {
     openServiceDetail(state.clientServices.find(s => s.id === r.dataset.service) || r.dataset.service);
@@ -489,7 +492,7 @@ async function openServiceDetail(ref) {
       openServiceDetail(service.id);
     } catch (err) { btn.disabled = false; toast(err?.code === 'quote_billed' ? t.reopenQuoteBilled : t.reopenFailed); }
   });
-  openDrawer(service.name, body, false, { eyebrow: STR.eyebrowService });
+  openDrawer(service.name, body, false, { eyebrow: STR.eyebrowService, tags: { kind: 'services', id: service.id } });
 }
 
 async function invoiceSelectedServices() {

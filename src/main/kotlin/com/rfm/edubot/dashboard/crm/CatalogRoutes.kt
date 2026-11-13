@@ -7,7 +7,9 @@ import com.rfm.edubot.crm.api.updateStandardItem
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.http.ErrorBody
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -26,6 +28,7 @@ import io.ktor.server.routing.route
 internal object CatalogRoutes : DashboardFeature(DashboardModules.CATALOG) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
+            recordTagRoutes(TagKind.CATALOG_ITEM, "standard-items", deps)
             get("/standard-items") {
                 val crm = deps.crm(call)
                 call.respond(crm.standardItems.search(call.request.queryParameters["q"], call.request.queryParameters["type"]))

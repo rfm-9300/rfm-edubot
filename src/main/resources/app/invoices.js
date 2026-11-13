@@ -65,6 +65,7 @@ function invoiceColumns() {
     { id: 'number', label: t.thNumber, cell: inv => `<td class="id"><button class="tbl__open" type="button">${escapeHTML(inv.number)}</button></td>` },
     { id: 'client', label: t.thClient, cell: inv => `<td class="name">${nameWithInitials(inv.clientName)}</td>` },
     { id: 'status', label: t.thStatus, cell: inv => `<td>${invoicePill(inv.status)}</td>` },
+    ...tagsColumnIfUsed('invoices'),
     { id: 'issued', label: t.thIssued, cell: inv => `<td class="mono muted nowrap">${fmtDay(inv.createdAt)}</td>` },
     { id: 'dueDate', label: t.thDueDate, cell: inv => `<td class="mono muted">${fmtDay(inv.dueDate)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: inv => `<td class="num">${invoiceTotalCell(inv)}</td>` },
@@ -76,7 +77,10 @@ function invoiceColumns() {
 function renderInvoices(root) {
   const t = CRM.invoices;
   const q = state.search.toLowerCase();
-  const matches = inv => !q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)} ${inv.taxOfficeCode || ''}`.toLowerCase().includes(q);
+  const matches = inv => matchesTagFilter('invoices', inv.id)
+    && (!q || `${inv.number} ${inv.clientName || ''} ${invoiceStatusLabel(inv.status)} ${inv.taxOfficeCode || ''} ${tagsText('invoices', inv.id)}`.toLowerCase().includes(q));
+  // The counts follow the tag picked, so each tab's number is the rows it shows.
+  const tagged = state.invoices.filter(inv => matchesTagFilter('invoices', inv.id));
   const columns = orderedColumns('invoices', invoiceColumns());
   const rowClass = inv => (inv.status === 'PAID' ? 'is-paid' : inv.status === 'OVERDUE' ? 'is-overdue' : inv.status === 'CANCELLED' ? 'is-draft' : '');
   const rows = state.invoices
@@ -103,11 +107,12 @@ function renderInvoices(root) {
       }).join('')
     : '';
   const views = periodChips(period, 'data-inv-period', { '': t.viewList, week: t.byWeek, month: t.byMonth });
-  const statusTabs = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(period ? t.filterAll : t.tabAll)}${chipCount(state.invoices.length)}</button>`
-    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}${chipCount(state.invoices.filter(i => i.status === s).length)}</button>`).join('');
+  const statusTabs = `<button class="chip ${!state.filterInvoiceStatus ? 'is-on' : ''}" data-filter-inv="">${escapeHTML(period ? t.filterAll : t.tabAll)}${chipCount(tagged.length)}</button>`
+    + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterInvoiceStatus === s ? 'is-on' : ''}" data-filter-inv="${s}">${escapeHTML(invoiceStatusLabel(s))}${chipCount(tagged.filter(i => i.status === s).length)}</button>`).join('');
   // The list is the design's grid: status tabs, then the views and column reset at the end. The week and month
   // wrap-ups keep their title, figures and view switch.
-  const tools = period ? statusTabs : `${statusTabs}<span class="panel__tools-end">${views}${columnOrderButton('invoices')}</span>`;
+  const tagFilter = tagFilterHtml('invoices');
+  const tools = period ? statusTabs + tagFilter : `${statusTabs}<span class="panel__tools-end">${tagFilter}${views}${columnOrderButton('invoices')}</span>`;
   const summaryHead = `<tr><th>${escapeHTML(t.thPeriod)}</th><th class="right">${escapeHTML(t.thCount)}</th><th class="right">${escapeHTML(t.paid)}</th><th class="right">${escapeHTML(t.pending)}</th><th class="right">${escapeHTML(t.overdue)}</th><th class="right">${escapeHTML(t.thTotal)}</th></tr>`;
   const listHead = columnsHead(columns, 'invoices');
   const invoiceNav = periodNav(nowKey, period, 'data-inv-period-nav', t);
@@ -132,6 +137,7 @@ function renderInvoices(root) {
     emptyDesc: period ? t.summaryEmptyDesc : t.emptyDesc,
   });
   wirePdfButtons(root);
+  wireTagFilter(root, 'invoices');
   wireColumnOrder(root, 'invoices', invoiceColumns());
   if (!period) wireSelection(root, 'invoices', listed.map(i => i.id));
   $$('[data-inv-period]', root).forEach(btn => btn.addEventListener('click', () => { state.filterInvoicePeriod = btn.dataset.invPeriod; state.filterInvoicePeriodKey = ''; render(); }));
@@ -311,7 +317,7 @@ async function openInvoiceDetail(id) {
   $('[data-inv-delete]', form)?.addEventListener('click', () => deleteInvoice(inv));
   $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
-  openDrawer(inv.number, form, false, { eyebrow: STR.eyebrowInvoice });
+  openDrawer(inv.number, form, false, { eyebrow: STR.eyebrowInvoice, tags: { kind: 'invoices', id: inv.id } });
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
 }
 

@@ -13,10 +13,12 @@ import com.rfm.edubot.crm.model.InvoiceStatus
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.http.dateValue
 import com.rfm.edubot.http.enumValue
 import com.rfm.edubot.http.idParam
 import com.rfm.edubot.http.idValue
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -34,6 +36,7 @@ import org.bson.types.ObjectId
 internal object InvoiceRoutes : DashboardFeature(DashboardModules.INVOICES) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
+            recordTagRoutes(TagKind.INVOICE, "invoices", deps)
             get("/invoices") {
                 val crm = deps.crm(call)
                 val clientId = call.request.queryParameters["clientId"]?.let { idValue(it, "clientId") }

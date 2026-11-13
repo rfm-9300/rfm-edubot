@@ -1738,6 +1738,18 @@ window.__I18N_CATALOGS['en'] = {
       resetOrder: 'Restore the column order',
       selectAll: 'Select all rows', selectRow: 'Select this row', selected: p => `${p.n} selected`, exportCsv: 'Export CSV', clearSelection: 'Clear',
     },
+    tags: {
+      title: 'Tags', add: 'Add tag', addAria: 'Add a tag', newPlaceholder: 'New tag',
+      remove: p => `Remove the tag ${p.tag}`,
+      hint: 'Only your team sees tags. Press Enter to add one.',
+      filterAll: 'All tags', filterAria: 'Filter by tag', filterNone: 'No tags',
+      saveFailed: 'Could not save the tags',
+      errors: {
+        too_many_tags: 'A record can have up to 10 tags.',
+        tag_too_long: 'A tag can have up to 30 characters.',
+        record_not_found: 'This record no longer exists.',
+      },
+    },
     notifications: {
       title: 'Notifications', aria: 'Notifications', ariaUnread: 'Notifications, {n} unread',
       unreadGroup: 'New', earlierGroup: 'Earlier', markAllRead: 'Mark all as read',

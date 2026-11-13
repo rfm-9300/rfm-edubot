@@ -875,6 +875,18 @@ html[data-theme="dark"] .lbl .req { color: var(--accent); }
 .hint--warn { color: var(--warn-ink); }
 .hint--bad { color: var(--bad-ink); }
 
+/* Tags (app/tags.js): free-text labels on a record. `.tags` lists them in a table cell; `.tags-strip` sits above a drawer's body. */
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill--tag { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); text-transform: none; letter-spacing: 0; }
+.pill--tag::before { content: none; }
+.pill__x { appearance: none; border: 0; background: none; color: inherit; font: inherit; line-height: 1; padding: 0 0 0 4px; cursor: pointer; opacity: 0.6; border-radius: 50%; }
+.pill__x:hover { opacity: 1; }
+.pill__x:focus-visible { opacity: 1; outline: none; box-shadow: var(--focus-ring); }
+.tags-strip { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 16px; }
+.tags-strip[hidden] { display: none; }
+.tags-strip__label { margin-right: 2px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-mute); }
+.tags-strip__input { width: 160px; max-width: 100%; height: 28px; padding: 0 10px; }
+
 /* Read-only record summary (quote / invoice detail drawer) */
 .detail__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line-soft); }
 .detail__client { font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--ink); }
@@ -3773,6 +3785,9 @@ html[data-shell="compact"] .inbox { gap: 8px; height: calc(100vh - 110px); }
 @media (max-width: 560px) and (pointer: coarse) {
   html[data-shell="compact"] :is(.btn--sm, .chip, .panel__tools .sel, .panel__filters .sel, .panel__search),
   html[data-shell="compact"] :is(.panel__tools, .panel__filters, .panel__views) .chip { height: 36px; }
+  html[data-shell="compact"] .tags-strip__input { height: 36px; font-size: 16px; }
+  /* A tag's × is a thumb target without making the tag taller. */
+  html[data-shell="compact"] .pill__x { padding: 9px 10px 9px 8px; margin: -9px -8px -9px -2px; }
   html[data-shell="compact"] .btn,
   html[data-shell="compact"] .iconbtn,
   html[data-shell="compact"] .iconbtn--theme { min-height: 36px; min-width: 36px; }

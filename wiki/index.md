@@ -15,6 +15,7 @@ wiki works, and what must never go in it: [README.md](README.md).
 ## Features
 
 - [crm-directories.md](crm-directories.md) — clients, suppliers and employees: record drawer, fields, delete or archive, client finances, per-company client fields, clients sharing a phone, importing into prod
+- [record-tags.md](record-tags.md) — free-text tags on clients, suppliers, employees, Serviços, catalog items, quotes, invoices, payments and projects: stored in `record_tags` beside the records, one script and one route helper for every list, column, filter, drawer strip, why not custom fields everywhere
 - [catalog-services-bookings.md](catalog-services-bookings.md) — catalog titles and codes, catalog categories, Serviços rows, an employee's services report, the line items editor, bookings as catalog services (and the setting that stops completed ones becoming Serviços rows), clients' items (Catalog tab), Home's Services and Service insights cards
 - [billing-and-pdfs.md](billing-and-pdfs.md) — quotes and turning them into an invoice or a service, invoices (ATCUD, installments, cancel and delete), payments, euro rounding, PDF generation
 - [employee-portal-and-time-clock.md](employee-portal-and-time-clock.md) — employee sign-ins, service submissions, the opt-in time clock

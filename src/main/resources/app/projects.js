@@ -30,6 +30,7 @@ function projectColumns() {
     },
     { id: 'contract', label: BLD.thContract, head: 'right', cell: p => `<td class="num nowrap"${cellLabel(BLD.thContract)}>${fmtEUR(p.currentContractEur)}</td>` },
     { id: 'status', label: BLD.thStatus, cell: p => `<td class="tbl__stack-hide"${cellLabel(BLD.thStatus)}>${projectStatePill(p)}</td>` },
+    ...tagsColumnIfUsed('projects'),
   ];
 }
 
@@ -37,8 +38,10 @@ function renderProjects(root) {
   const all = state.projects;
   const filter = PROJECT_FILTERS[state.projectsFilter] ? state.projectsFilter : 'active';
   const q = foldText(state.search);
-  const shown = all.filter(PROJECT_FILTERS[filter])
-    .filter(p => !q || foldText(`${p.number} ${p.name} ${p.clientName || ''} ${p.address || ''} ${p.managerName || ''}`).includes(q));
+  // The filter chips' counts follow the tag picked; the figures above and the empty state read every project.
+  const tagged = all.filter(p => matchesTagFilter('projects', p.id));
+  const shown = tagged.filter(PROJECT_FILTERS[filter])
+    .filter(p => !q || foldText(`${p.number} ${p.name} ${p.clientName || ''} ${p.address || ''} ${p.managerName || ''} ${tagsText('projects', p.id)}`).includes(q));
   const active = all.filter(p => p.status === 'ACTIVE');
   const behind = active.filter(p => p.health === 'AT_RISK' || p.health === 'DELAYED');
   const stats = [
@@ -52,9 +55,9 @@ function renderProjects(root) {
   const view = state.projectsView === 'timeline' ? 'timeline' : 'list';
   const views = ['list', 'timeline'].map(v => `<button class="btn btn--sm${view === v ? ' btn--primary' : ''}" type="button" data-projects-view="${v}">${escapeHTML(bt(`view.${v}`))}</button>`).join('');
   const chips = Object.keys(PROJECT_FILTERS).map(f => {
-    const n = all.filter(PROJECT_FILTERS[f]).length;
+    const n = tagged.filter(PROJECT_FILTERS[f]).length;
     return `<button class="chip${filter === f ? ' is-on' : ''}" type="button" data-projects-filter="${f}">${escapeHTML(bt(`filter.${f}`))}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`;
-  }).join('') + (view === 'list' ? columnOrderButton('projects') : '');
+  }).join('') + tagFilterHtml('projects') + (view === 'list' ? columnOrderButton('projects') : '');
   let panel;
   if (view === 'timeline') {
     // A bar is the plan, moved by approved changes, which the progress and today are read against; a finished
@@ -88,6 +91,7 @@ function renderProjects(root) {
   }
   root.innerHTML = hero(labels.projects, BLD.desc, statCards(stats)) + panel;
   if (view === 'list') wireColumnOrder(root, 'projects', projectColumns());
+  wireTagFilter(root, 'projects');
   $$('[data-projects-view]', root).forEach(b => b.addEventListener('click', () => { state.projectsView = b.dataset.projectsView; render(); }));
   $$('[data-projects-filter]', root).forEach(b => b.addEventListener('click', () => { state.projectsFilter = b.dataset.projectsFilter; render(); }));
   $$('[data-project]', root).forEach(row => {
@@ -126,7 +130,7 @@ async function openProjectDrawer(id, tab) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = p => [BLD.eyebrow, p?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, true, { eyebrow: eyebrow(known) });
+  const gen = openDrawer(known?.name || CRM.loading, body, true, { eyebrow: eyebrow(known), tags: { kind: 'projects', id } });
   let record;
   try { record = await loadProjectRecord(id); } catch { record = null; }
   if (gen !== drawerGen) return;

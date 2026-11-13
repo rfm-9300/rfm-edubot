@@ -29,6 +29,8 @@ let state = {
   // Column choices of the directory lists and the column order of every list as read from this browser, by
   // storage key (columnChoicesKey, columnOrderKey).
   columnChoices: {}, columnOrders: {},
+  // Tags by list ('clients', 'quotes'…): each one's `id → tags` as the server answers it, and the tag its list is filtered by.
+  tags: {}, tagFilter: {},
   filterQuoteStatus: '', filterInvoiceStatus: '',
   selectedConversation: null, threadMessages: [],
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
@@ -321,6 +323,9 @@ const bookingErrorText = err => {
 function signOut() {
   localStorage.removeItem('dashboardToken');
   token = '';
+  // The next sign-in may be another company's: nothing of this one's tags stays.
+  state.tags = {};
+  state.tagFilter = {};
   renderLogin();
 }
 

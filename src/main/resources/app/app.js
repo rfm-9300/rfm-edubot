@@ -148,6 +148,8 @@ async function setActive(tab) {
 }
 
 async function loadModule(tab) {
+  // The tags of the records this page lists load beside them (a list's tab is its tag kind); loadTags never fails.
+  const tags = TAG_PATHS[tab] && hasModule(tab) ? loadTags(tab) : null;
   if (tab === 'overview') state.overview = await api('/app/api/overview?extended=1');
   if (tab === 'contacts') state.contacts = await api('/app/api/contacts');
   if (tab === 'conversations') {
@@ -293,6 +295,7 @@ async function loadModule(tab) {
     catch { toast(STR.instagramSyncFailed); state.instagram = await api('/app/api/instagram').catch(() => state.instagram); }
     state.fetched.instagram = true;
   }
+  await tags;
 }
 
 function render() {

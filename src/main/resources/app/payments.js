@@ -165,6 +165,7 @@ function paymentColumns() {
     { id: 'number', label: t.thNumber, cell: p => `<td class="id">${escapeHTML(p.number)}</td>` },
     { id: 'payee', label: t.thPayee, cell: p => `<td class="name">${escapeHTML(payeeName(p))}${p.clientName ? ` <span class="muted">· ${escapeHTML(p.clientName)}</span>` : ''}</td>` },
     { id: 'status', label: t.thStatus, cell: p => `<td>${paymentPill(p.status)}</td>` },
+    ...tagsColumnIfUsed('payments'),
     { id: 'dueDate', label: t.thDueDate, cell: p => `<td class="mono muted">${fmtDay(p.dueDate)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: p => `<td class="num">${fmtEUR(p.totalEur)}</td>` },
     { id: 'actions', label: '', pin: 'end', cell: p => `<td class="right"><div class="actions">${canMarkPaid(p) ? `<button class="btn btn--sm btn--accent" type="button" data-mark-payment="${escapeHTML(p.id)}">${escapeHTML(t.markPaid)}</button>` : ''}</div></td>` },
@@ -184,12 +185,12 @@ function renderPayments(root) {
   }
   if (state.filterPaymentSupplier && !names.has(state.filterPaymentSupplier)) state.filterPaymentSupplier = '';
   const supplierId = state.filterPaymentSupplier || '';
-  const scoped = supplierId ? all.filter(p => payeeId(p) === supplierId) : all;
+  const scoped = (supplierId ? all.filter(p => payeeId(p) === supplierId) : all).filter(p => matchesTagFilter('payments', p.id));
   const columns = orderedColumns('payments', paymentColumns());
   const rowClass = p => (p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '');
   const rows = scoped
     .filter(p => !state.filterPaymentStatus || p.status === state.filterPaymentStatus)
-    .filter(p => !q || `${p.number} ${payeeName(p)} ${p.clientName || ''} ${paymentStatusLabel(p.status)}`.toLowerCase().includes(q))
+    .filter(p => !q || `${p.number} ${payeeName(p)} ${p.clientName || ''} ${paymentStatusLabel(p.status)} ${tagsText('payments', p.id)}`.toLowerCase().includes(q))
     .map(p => `<tr class="conversation-row ${rowClass(p)}" data-payment="${escapeHTML(p.id)}">${columnCells(columns, p)}</tr>`)
     .join('');
   const paid = scoped.filter(p => p.status === 'PAID').reduce((sum, p) => sum + Number(p.totalEur || 0), 0);
@@ -199,11 +200,11 @@ function renderPayments(root) {
   const supplierFilter = supplierOptions.length
     ? `<select class="sel" data-filter-pay-supplier aria-label="${escapeHTML(t.thPayee)}"><option value="">${escapeHTML(t.filterPayeeAll)}</option>${supplierOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === supplierId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
-  const tools = supplierFilter
+  const tools = supplierFilter + tagFilterHtml('payments')
     + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(paymentStatusLabel(s))}</button>`).join('')
     + columnOrderButton('payments');
-  const filtered = Boolean(supplierId || state.filterPaymentStatus || q);
+  const filtered = Boolean(supplierId || tagFilterOf('payments') || state.filterPaymentStatus || q);
   root.innerHTML = hero(labels.payments, CRM.tabs.pagamentos.desc, statCards([
     { label: t.paid, value: fmtEUR(paid) },
     { label: t.pending, value: fmtEUR(pending) },
@@ -218,6 +219,7 @@ function renderPayments(root) {
     emptyDesc: filtered ? t.emptyFilteredDesc : t.emptyDesc,
   });
   wireColumnOrder(root, 'payments', paymentColumns());
+  wireTagFilter(root, 'payments');
   $$('[data-filter-pay]', root).forEach(btn => btn.addEventListener('click', () => { state.filterPaymentStatus = btn.dataset.filterPay; render(); }));
   $('[data-filter-pay-supplier]', root)?.addEventListener('change', e => { state.filterPaymentSupplier = e.target.value; render(); });
   $$('[data-mark-payment]', root).forEach(btn => btn.addEventListener('click', e => {
@@ -330,7 +332,7 @@ async function openPaymentDetail(id) {
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
   $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
-  openDrawer(pay.number, form);
+  openDrawer(pay.number, form, false, { tags: { kind: 'payments', id: pay.id } });
 }
 
 // Links a payment to the client it was for, or unlinks it.
