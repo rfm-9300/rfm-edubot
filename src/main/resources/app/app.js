@@ -564,6 +564,7 @@ async function init(relayed = false) {
   window.EmailUI?.init(emailDeps());
   window.MenusUI?.init(menusDeps());
   I18N.applyDom(document);
+  startAmounts();
   wireSidebarToggle();
   $('#btn-logout').addEventListener('click', () => signOut());
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });

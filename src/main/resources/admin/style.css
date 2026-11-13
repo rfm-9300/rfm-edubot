@@ -3258,12 +3258,13 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash__status--urgent .dash__dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
 .dash__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-/* Home's amounts are blurred while .dash is private, as a bank's app hides a balance; the eye in .dash__actions toggles it. */
+/* Every amount in /app is a .money span (amounts.js), blurred while <html data-amounts="hidden">, as a bank's app hides a
+   balance; the eye in the top bar next to the theme toggle switches it. */
 .money { transition: filter 160ms; }
-.dash.is-private .money { filter: blur(0.42em); user-select: none; }
+html[data-amounts="hidden"] .money { filter: blur(0.42em); user-select: none; }
 .eye { display: block; }
-.dash:not(.is-private) .eye--off,
-.dash.is-private .eye--on { display: none; }
+html[data-amounts="shown"] .eye--off,
+html[data-amounts="hidden"] .eye--on { display: none; }
 @media (prefers-reduced-motion: reduce) { .money { transition: none; } }
 
 /* KPI strip: cells share hairlines via the 1px grid gap */

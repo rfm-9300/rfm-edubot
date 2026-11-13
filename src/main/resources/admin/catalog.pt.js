@@ -294,6 +294,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     overviewEmptyDesc: 'Active módulos no backoffice para ver dinheiro, inbox e agenda aqui.',
     customizeHome: 'Escolher cartões',
     hideAmounts: 'Ocultar valores',
+    showAmounts: 'Mostrar valores',
     settingsHome: 'Início',
     homeLayoutTitle: 'Cartões do Início',
     homeLayoutDesc: 'Escolha quais os resumos que aparecem no Início. Só entram os módulos ativos neste espaço.',

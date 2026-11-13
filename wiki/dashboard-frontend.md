@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-12
 ---
 
 # Dashboard frontend: how the dashboards' scripts are split
@@ -75,6 +75,7 @@ Signup (`loadFacebookSdk()`, `waitForWhatsAppSignupMessage()`, `facebookLoginFor
 | Script | Holds |
 |---|---|
 | `core.js` | `state`, the session token, `api()` and `signOut()`, catalog sections (`STR`, `CRM`…), formatting (money, dates, periods, `relTime`), what invoices received and owe (`invoicePaidEur`…), status labels and pills |
+| `amounts.js` | The amounts switch: turns the marked amounts `fmtEUR*` return into `.money` spans and masks marked titles, `startAmounts()` from `init()` ([dashboard-ui.md](dashboard-ui.md)) |
 | `drawer.js` | `openDrawer()`, `closeDrawer()`, the drawer trail (`openFrom()`, `linksBackTo()`) |
 | `components.js` | Shared markup: `hero()`, `statCards()`, `crmPanel()`, `panelTable()`, `periodNav()`, `dashFacts()`, `detailHead()` / `detailMeta()` / `itemsTable()` |
 | `records.js` | The client, supplier and employee records' blocks: contact links, record card, KPIs, worklist rows, delete / archive / restore |
