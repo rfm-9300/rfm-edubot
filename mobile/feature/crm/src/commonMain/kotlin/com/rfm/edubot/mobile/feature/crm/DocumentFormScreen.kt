@@ -40,6 +40,7 @@ import com.rfm.edubot.mobile.core.ui.ScreenHeader
 import com.rfm.edubot.mobile.core.ui.SecondaryButton
 import com.rfm.edubot.mobile.core.ui.SectionLabel
 import com.rfm.edubot.mobile.core.ui.Tone
+import com.rfm.edubot.mobile.core.ui.rememberFormKey
 
 /**
  * Creating a quote or an invoice from the phone, with a client picked from the directory and as
@@ -55,7 +56,7 @@ fun DocumentFormScreen(
     onCancel: () -> Unit,
 ) {
     val vm = viewModel<DocumentFormViewModel>(
-        key = "document-form:$kind",
+        key = rememberFormKey("document-form:$kind"),
         factory = viewModelFactory { initializer { DocumentFormViewModel(repository, kind) } },
     )
     val state by vm.state.collectAsState()
@@ -178,7 +179,7 @@ fun DocumentFormScreen(
 }
 
 @Composable
-private fun LineEditor(
+internal fun LineEditor(
     line: LineDraft,
     strings: Strings,
     catalogLabels: List<String>,

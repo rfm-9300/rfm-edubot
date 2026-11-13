@@ -55,7 +55,7 @@ Suppliers have an optional `contactPerson` ("Point of contact" in the form), lik
 the same name: at most 120 characters (`contact_person_too_long`), searchable, shown on the record
 card as "Contact: …" and as an optional list column. A write that leaves it out keeps the stored value,
 an empty string clears it, as with `type`. The assistant's `list_suppliers` returns it as
-`contact_person`. Mobile doesn't show it yet.
+`contact_person`. Mobile shows it on the supplier list and record (2026-11-10, [mobile](mobile.md)).
 
 ## Deleting clients, suppliers and employees (shipped 2026-09-29, `8a0ec5a`)
 
@@ -183,9 +183,9 @@ in the code when it merged.
   the NIF rule before. Custom values are staff-only like notes: they are not in the employee portal
   (`PortalClientDto`), the bot's CRM tools or event payloads. The directory search matches text and
   choice values.
-- **Not done:** suppliers and employees, PDFs, agent templates and mobile. The mobile client form
-  still requires NIF and address on its own and can't fill the other fields, see
-  [mobile](mobile.md).
+- **Not done:** suppliers and employees, PDFs and agent templates. Mobile builds its client form from
+  `GET …/clients/fields` since 2026-11-10 and fills the custom fields too, but can't change the
+  definitions ([mobile](mobile.md)).
 
 Merging it: the only conflict with `17425b5` was the imports of `AdminRoutes.kt`. `main` was merged
 into the branch twice (`930968b`, then `e9eacdc` once #51 had landed), 604 tests passed locally and in

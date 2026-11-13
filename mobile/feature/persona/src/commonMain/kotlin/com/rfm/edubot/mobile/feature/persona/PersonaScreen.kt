@@ -84,6 +84,9 @@ fun PersonaScreen(
             item { if (state.loading) LoadingScreen() else ErrorPanel(strings[Txt.ERROR_OFFLINE]) }
             return@LazyColumn
         }
+        // Only admins change the persona; the backend answers 403 to anyone else, so members read it and test it.
+        val canEdit = persona.canEdit
+        if (!canEdit) item { InfoPanel(strings[Txt.PERSONA_READ_ONLY], tone = Tone.Info) }
 
         item {
             Panel(Modifier.padding(horizontal = BotSpace.xl, vertical = BotSpace.sm)) {
@@ -102,13 +105,15 @@ fun PersonaScreen(
                     style = MaterialTheme.typography.bodySmall,
                     color = BotColors.inkFaint,
                 )
-                Spacer(Modifier.height(BotSpace.md))
-                Row(horizontalArrangement = Arrangement.spacedBy(BotSpace.sm)) {
-                    SecondaryButton(
-                        text = strings[Txt.PERSONA_REBUILD],
-                        onClick = vm::rebuild,
-                        enabled = !editor.busy && !persona.compiling,
-                    )
+                if (canEdit) {
+                    Spacer(Modifier.height(BotSpace.md))
+                    Row(horizontalArrangement = Arrangement.spacedBy(BotSpace.sm)) {
+                        SecondaryButton(
+                            text = strings[Txt.PERSONA_REBUILD],
+                            onClick = vm::rebuild,
+                            enabled = !editor.busy && !persona.compiling,
+                        )
+                    }
                 }
             }
         }
@@ -125,13 +130,13 @@ fun PersonaScreen(
                     title = source.label.ifBlank { source.kind },
                     detail = if (source.compiled) source.kind else strings[Txt.PERSONA_SOURCE_PENDING],
                     leading = source.kind,
-                    actionLabel = strings[Txt.ACTION_CLOSE],
+                    actionLabel = strings[Txt.ACTION_CLOSE].takeIf { canEdit },
                     actionTone = Tone.Bad,
-                    onAction = if (editor.busy) null else ({ vm.deleteSource(source.id); Unit }),
+                    onAction = if (editor.busy || !canEdit) null else ({ vm.deleteSource(source.id); Unit }),
                 )
             }
         }
-        item {
+        if (canEdit) item {
             Panel(Modifier.padding(horizontal = BotSpace.xl, vertical = BotSpace.sm)) {
                 BotField(
                     value = editor.noteDraft,
@@ -178,21 +183,25 @@ fun PersonaScreen(
         item { SectionLabel(strings[Txt.PERSONA_INSTRUCTIONS]) }
         item {
             Panel(Modifier.padding(horizontal = BotSpace.xl, vertical = BotSpace.sm)) {
-                BotField(
-                    value = instructions,
-                    onValueChange = { instructions = it },
-                    label = strings[Txt.PERSONA_INSTRUCTIONS],
-                    modifier = Modifier.fillMaxWidth().height(220.dp),
-                    singleLine = false,
-                )
-                Spacer(Modifier.height(BotSpace.sm))
-                PrimaryButton(
-                    text = strings[Txt.ACTION_SAVE],
-                    onClick = { vm.save(instructions) },
-                    modifier = Modifier.fillMaxWidth(),
-                    enabled = instructions != persona.compiledInstructions,
-                    busy = editor.busy,
-                )
+                if (canEdit) {
+                    BotField(
+                        value = instructions,
+                        onValueChange = { instructions = it },
+                        label = strings[Txt.PERSONA_INSTRUCTIONS],
+                        modifier = Modifier.fillMaxWidth().height(220.dp),
+                        singleLine = false,
+                    )
+                    Spacer(Modifier.height(BotSpace.sm))
+                    PrimaryButton(
+                        text = strings[Txt.ACTION_SAVE],
+                        onClick = { vm.save(instructions) },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = instructions != persona.compiledInstructions,
+                        busy = editor.busy,
+                    )
+                } else {
+                    Text(persona.compiledInstructions, style = MaterialTheme.typography.bodySmall, color = BotColors.inkSecondary)
+                }
             }
         }
     }

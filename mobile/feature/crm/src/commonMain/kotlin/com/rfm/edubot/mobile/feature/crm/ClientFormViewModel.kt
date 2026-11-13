@@ -5,6 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.rfm.edubot.mobile.core.common.AppError
 import com.rfm.edubot.mobile.core.common.Outcome
 import com.rfm.edubot.mobile.core.data.CrmRepository
+import com.rfm.edubot.mobile.core.model.CrmClient
+import com.rfm.edubot.mobile.core.model.CustomField
+import com.rfm.edubot.mobile.core.model.DirectoryFields
 import com.rfm.edubot.mobile.core.model.SaveClient
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,28 +15,58 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 
-enum class ClientField { Name, Phone, TaxId, Address, Email }
+/** Not one of the company's fields: staff-only notes, which every form offers. */
+internal const val NOTES_KEY = "notes"
 
 data class ClientFormState(
-    val name: String = "",
-    val phone: String = "",
-    val taxId: String = "",
-    val address: String = "",
-    val postalCode: String = "",
-    val city: String = "",
-    val email: String = "",
+    /** The company's choice of fields. [DirectoryFields.DEFAULT] until its own arrive. */
+    val fields: DirectoryFields = DirectoryFields.DEFAULT,
+    /** Standard fields by key ([DirectoryFields.NAME]…), plus [NOTES_KEY]. */
+    val values: Map<String, String> = emptyMap(),
+    /** The company's own fields by key; a yes/no field holds `"true"` or nothing. */
+    val custom: Map<String, String> = emptyMap(),
     val loading: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
     val error: AppError? = null,
-    /** Fields the backend named in its rejection, so the form can mark them. */
-    val invalidFields: Set<ClientField> = emptySet(),
+    /** Field keys (standard or custom) the backend named in its rejection. */
+    val invalid: Set<String> = emptySet(),
 ) {
-    val canSave: Boolean
-        get() = !saving && name.isNotBlank() && phone.isNotBlank() && taxId.isNotBlank() && address.isNotBlank()
+    fun value(key: String): String = values[key].orEmpty()
+
+    fun customValue(key: String): String = custom[key].orEmpty()
+
+    /** The standard fields after name and phone, in the company's order. */
+    val detailFields: List<String>
+        get() = fields.standard.map { it.key }.filterNot { it == DirectoryFields.NAME || it == DirectoryFields.PHONE }
+            .ifEmpty { DirectoryFields.DEFAULT.standard.map { it.key }.drop(2) }
+
+    /** What the company requires that is still empty. A yes/no field is never required (unticked is an answer). */
+    val missing: Set<String>
+        get() = buildSet {
+            fields.standard.filter { it.required }.map { it.key }
+                .plus(listOf(DirectoryFields.NAME, DirectoryFields.PHONE))
+                .filter { value(it).isBlank() }
+                .forEach(::add)
+            fields.custom.filter { it.required && it.type != CustomField.CHECKBOX && customValue(it.key).isBlank() }
+                .forEach { add(it.key) }
+        }
+
+    val canSave: Boolean get() = !saving && !loading && missing.isEmpty()
 }
 
+/**
+ * Create or edit a client, with the fields the company asks for.
+ *
+ * Each company picks which standard fields are required and adds its own (`GET …/clients/fields`).
+ * The form used to require NIF and address whatever the company chose, which blocked saves a company
+ * had made optional and failed with `email_required` or `custom_field_required` where it had asked
+ * for more.
+ */
 class ClientFormViewModel(
     private val repository: CrmRepository,
     private val clientId: String?,
@@ -44,73 +77,106 @@ class ClientFormViewModel(
     val state: StateFlow<ClientFormState> = mutable.asStateFlow()
 
     fun load() = scope.launch {
-        val id = clientId ?: return@launch
         mutable.update { it.copy(loading = true, error = null) }
+        repository.clientFields.load()
+        val fields = repository.clientFields.state.value.value ?: DirectoryFields.DEFAULT
+        val id = clientId
+        if (id == null) {
+            mutable.update { it.copy(fields = fields, loading = false) }
+            return@launch
+        }
         when (val client = repository.client(id)) {
             is Outcome.Success -> mutable.value = ClientFormState(
-                name = client.value.name,
-                phone = client.value.phone,
-                taxId = client.value.taxId.orEmpty(),
-                address = client.value.address.orEmpty(),
-                postalCode = client.value.postalCode.orEmpty(),
-                city = client.value.city.orEmpty(),
-                email = client.value.email.orEmpty(),
+                fields = fields,
+                values = client.value.standardValues(),
+                custom = client.value.customFields.mapValues { (_, value) -> value.asText() },
             )
-            is Outcome.Failure -> mutable.update { it.copy(loading = false, error = client.error) }
+            is Outcome.Failure -> mutable.update { it.copy(fields = fields, loading = false, error = client.error) }
         }
     }
 
-    fun setName(value: String) = edit(ClientField.Name) { copy(name = value) }
+    fun set(key: String, value: String) = mutable.update {
+        it.copy(values = it.values + (key to value), error = null, invalid = it.invalid - key)
+    }
 
-    fun setPhone(value: String) = edit(ClientField.Phone) { copy(phone = value) }
-
-    fun setTaxId(value: String) = edit(ClientField.TaxId) { copy(taxId = value) }
-
-    fun setAddress(value: String) = edit(ClientField.Address) { copy(address = value) }
-
-    fun setPostalCode(value: String) = edit(null) { copy(postalCode = value) }
-
-    fun setCity(value: String) = edit(null) { copy(city = value) }
-
-    fun setEmail(value: String) = edit(ClientField.Email) { copy(email = value) }
+    fun setCustom(key: String, value: String) = mutable.update {
+        it.copy(custom = it.custom + (key to value), error = null, invalid = it.invalid - key)
+    }
 
     fun save() = scope.launch {
         val current = mutable.value
         if (!current.canSave) return@launch
-        mutable.value = current.copy(saving = true, error = null, invalidFields = emptySet())
-        val request = SaveClient(
-            name = current.name.trim(),
-            phone = current.phone.trim(),
-            taxId = current.taxId.trim(),
-            address = current.address.trim(),
-            postalCode = current.postalCode.trim().ifBlank { null },
-            city = current.city.trim().ifBlank { null },
-            email = current.email.trim().ifBlank { null },
-        )
-        when (val saved = repository.saveClient(request, clientId)) {
+        mutable.value = current.copy(saving = true, error = null, invalid = emptySet())
+        when (val saved = repository.saveClient(current.toRequest(), clientId)) {
             is Outcome.Success -> mutable.update { it.copy(saving = false, saved = true) }
             is Outcome.Failure -> mutable.update {
-                it.copy(saving = false, error = saved.error, invalidFields = fieldsFor(saved.error))
+                it.copy(saving = false, error = saved.error, invalid = fieldsFor(saved.error))
             }
         }
     }
 
-    private fun edit(field: ClientField?, transform: ClientFormState.() -> ClientFormState) {
-        mutable.update { current ->
-            current.transform().copy(
-                error = null,
-                invalidFields = if (field == null) current.invalidFields else current.invalidFields - field,
-            )
-        }
+    /** Maps the backend's stable error codes onto the fields they are about. */
+    private fun fieldsFor(error: AppError): Set<String> {
+        if (error !is AppError.Rejected) return emptySet()
+        if (error.code.startsWith("custom_field_")) return setOfNotNull(error.details["detail"])
+        return FIELD_ERRORS.entries.firstOrNull { (_, codes) -> error.code in codes }?.let { setOf(it.key) }.orEmpty()
     }
 
-    /** Maps the backend's stable error codes onto the fields they are about. */
-    private fun fieldsFor(error: AppError): Set<ClientField> = when {
-        error !is AppError.Rejected -> emptySet()
-        error.code == "tax_id_required" || error.code == "tax_id_too_long" -> setOf(ClientField.TaxId)
-        error.code == "address_required" || error.code == "address_too_long" -> setOf(ClientField.Address)
-        error.code == "invalid_email" -> setOf(ClientField.Email)
-        error.code == "phone_taken" -> setOf(ClientField.Phone)
-        else -> emptySet()
+    private companion object {
+        val FIELD_ERRORS = mapOf(
+            DirectoryFields.NAME to setOf("name_required"),
+            DirectoryFields.PHONE to setOf("phone_taken", "phone_required"),
+            DirectoryFields.TAX_ID to setOf("tax_id_required", "tax_id_too_long"),
+            DirectoryFields.EMAIL to setOf("email_required", "invalid_email"),
+            DirectoryFields.CONTACT_PERSON to setOf("contact_person_required", "contact_person_too_long"),
+            DirectoryFields.ADDRESS to setOf("address_required", "address_too_long"),
+            DirectoryFields.POSTAL_CODE to setOf("postal_code_required", "postal_code_too_long"),
+            DirectoryFields.CITY to setOf("city_required", "city_too_long"),
+            NOTES_KEY to setOf("notes_too_long"),
+        )
     }
+}
+
+private fun CrmClient.standardValues(): Map<String, String> = mapOf(
+    DirectoryFields.NAME to name,
+    DirectoryFields.PHONE to phone,
+    DirectoryFields.TAX_ID to taxId.orEmpty(),
+    DirectoryFields.EMAIL to email.orEmpty(),
+    DirectoryFields.CONTACT_PERSON to contactPerson.orEmpty(),
+    DirectoryFields.ADDRESS to address.orEmpty(),
+    DirectoryFields.POSTAL_CODE to postalCode.orEmpty(),
+    DirectoryFields.CITY to city.orEmpty(),
+    NOTES_KEY to notes.orEmpty(),
+)
+
+/** A stored custom value as the form edits it. */
+internal fun JsonPrimitive.asText(): String = when {
+    isString -> content
+    booleanOrNull == true -> "true"
+    booleanOrNull == false -> ""
+    else -> content.removeSuffix(".0")
+}
+
+/**
+ * Every field the form shows is sent, an empty one as `""`: on an edit the backend keeps an omitted
+ * field and clears an empty one, so leaving one out would keep a value the person just erased.
+ */
+internal fun ClientFormState.toRequest(): SaveClient = SaveClient(
+    name = value(DirectoryFields.NAME).trim(),
+    phone = value(DirectoryFields.PHONE).trim(),
+    taxId = value(DirectoryFields.TAX_ID).trim(),
+    address = value(DirectoryFields.ADDRESS).trim(),
+    email = value(DirectoryFields.EMAIL).trim(),
+    postalCode = value(DirectoryFields.POSTAL_CODE).trim(),
+    city = value(DirectoryFields.CITY).trim(),
+    contactPerson = value(DirectoryFields.CONTACT_PERSON).trim(),
+    notes = value(NOTES_KEY).trim(),
+    customFields = fields.custom.associate { field -> field.key to customJson(field, customValue(field.key)) }
+        .takeIf { it.isNotEmpty() },
+)
+
+private fun customJson(field: CustomField, text: String): JsonElement = when (field.type) {
+    CustomField.CHECKBOX -> JsonPrimitive(text == "true")
+    // A number goes as typed: the backend reads a comma as the decimal point, as a Portuguese keyboard types it.
+    else -> JsonPrimitive(text.trim())
 }

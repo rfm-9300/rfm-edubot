@@ -1,9 +1,12 @@
 package com.rfm.edubot.mobile.core.common
 
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.LocalDateTime
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 
 /**
@@ -48,6 +51,15 @@ class TenantClock(
         return if (moment.date == today()) timeOfDay(iso) ?: iso else dayAndMonth(iso) ?: iso
     }
 
+    /**
+     * `30/09/2026` from a plain `yyyy-MM-dd` day (due dates, a diary's day) or an instant; [value]
+     * unchanged when it is neither, so a new format degrades to the raw text.
+     */
+    fun day(value: String): String {
+        val date = localDateTime(value)?.date ?: parseDay(value) ?: return value
+        return "${date.dayOfMonth.pad()}/${date.monthNumber.pad()}/${date.year}"
+    }
+
     /** Whole days from [iso] until now; negative while [iso] is in the future. */
     fun daysSince(iso: String): Int? {
         val then = parse(iso) ?: return null
@@ -65,6 +77,16 @@ class TenantClock(
     private companion object {
         const val MILLIS_PER_DAY = 86_400_000L
     }
+}
+
+/** A `yyyy-MM-dd` day (or the date part of an instant), or null. */
+fun parseDay(value: String): LocalDate? = runCatching { LocalDate.parse(value.trim().take(10)) }.getOrNull()
+
+/** The first and last day of the month [offset] months from [today]'s (0 this month, -1 the last). */
+fun monthBounds(today: LocalDate, offset: Int = 0): Pair<LocalDate, LocalDate> {
+    val first = LocalDate(today.year, today.monthNumber, 1).plus(offset, DateTimeUnit.MONTH)
+    val last = first.plus(1, DateTimeUnit.MONTH).minus(1, DateTimeUnit.DAY)
+    return first to last
 }
 
 /**

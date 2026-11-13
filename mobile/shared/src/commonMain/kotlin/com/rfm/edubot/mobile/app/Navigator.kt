@@ -1,5 +1,7 @@
 package com.rfm.edubot.mobile.app
 
+import com.rfm.edubot.mobile.feature.building.BuildingRoute
+import com.rfm.edubot.mobile.feature.crm.CrmRoute
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -10,15 +12,14 @@ sealed interface Destination {
 
     data class Conversation(val conversationId: String) : Destination
 
-    data class Client(val clientId: String) : Destination
+    /** A CRM record or form: a client, a quote, an invoice, a service, an employee… */
+    data class Crm(val route: CrmRoute) : Destination
 
-    data object NewClient : Destination
+    /** A Building record or form, the team's or a site manager's. */
+    data class Building(val route: BuildingRoute) : Destination
 
-    data object NewQuote : Destination
-
-    data object NewInvoice : Destination
-
-    data object NewCatalogItem : Destination
+    /** An employee registering a service ([submissionId] null) or changing a pending one. */
+    data class MyService(val submissionId: String?) : Destination
 
     data object Notifications : Destination
 

@@ -113,4 +113,20 @@ class MoneyTest {
         assertEquals("0,07", formatEuros(0.07))
         assertEquals("8,15", formatEuros(8.15))
     }
+
+    @Test
+    fun `a plain day and an instant both read as a full date`() {
+        val clock = TenantClock("Europe/Lisbon") { kotlinx.datetime.Instant.parse("2026-11-10T10:00:00Z") }
+        kotlin.test.assertEquals("01/12/2026", clock.day("2026-12-01"))
+        kotlin.test.assertEquals("10/11/2026", clock.day("2026-11-10T09:00:00Z"))
+        kotlin.test.assertEquals("soon", clock.day("soon"))
+    }
+
+    @Test
+    fun `month bounds cover the whole month also across a year`() {
+        val today = kotlinx.datetime.LocalDate(2026, 1, 20)
+        kotlin.test.assertEquals(kotlinx.datetime.LocalDate(2026, 1, 1) to kotlinx.datetime.LocalDate(2026, 1, 31), monthBounds(today))
+        kotlin.test.assertEquals(kotlinx.datetime.LocalDate(2025, 12, 1) to kotlinx.datetime.LocalDate(2025, 12, 31), monthBounds(today, -1))
+        kotlin.test.assertEquals(kotlinx.datetime.LocalDate(2026, 2, 1) to kotlinx.datetime.LocalDate(2026, 2, 28), monthBounds(today, 1))
+    }
 }

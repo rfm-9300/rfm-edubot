@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-10
 ---
 
 # Building: projects and their progress
@@ -251,6 +251,7 @@ handover, an extra still to sign.
 
 ## Not done yet
 
-The mobile app's Building screens; costs by cost code and per-employee labour rates; the measurement
+On mobile: photos, PDFs and creating projects, changes and measurements (the app has the five pages
+and My sites since 2026-11-10, [mobile](mobile.md)); costs by cost code and per-employee labour rates; the measurement
 PDF's look under the company's document template. Phase 3: drawings with pins, checklists, offline
 capture, BC3 import.

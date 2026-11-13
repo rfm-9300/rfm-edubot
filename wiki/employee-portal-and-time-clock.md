@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-10
 ---
 
 # Employee portal and time clock
@@ -44,7 +44,9 @@ Decisions that matter later:
 - An employee with registered or done services is archived instead of deleted (the history rule in
   "Deleting clients, suppliers and employees" on [crm-directories.md](crm-directories.md)); deleting one also deletes their sign-in. Agents no
   longer offer employee sign-ins as task assignees.
-- **Mobile has no employee page:** an employee signing in to [mobile](mobile.md) is signed out at
+- **Mobile:** My services is a screen of its own since 2026-11-10 (register, change or withdraw
+  while pending, the rejection reason), and the team approves or rejects from the employee record
+  ([mobile](mobile.md)). Before the time clock, an employee signing in to the app was signed out at
   its first call outside `/me`.
 - `create-mocks` seeds an employee sign-in (Ana Costa, `COL-001`) with two pending, one approved and
   one rejected service; the credentials are in `mocks/mongo/README.md`.
