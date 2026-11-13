@@ -167,17 +167,16 @@ async function openIssueDetail(id) {
   const draw = () => {
     const projectLink = !linksBackTo(`project:${issue.projectId}`);
     body.innerHTML = `
-      <div class="detail__head">
-        ${projectLink ? `<button class="detail__client detail__client--link" type="button" data-issue-project>${escapeHTML(issue.projectName)}</button>` : `<div class="detail__client">${escapeHTML(issue.projectName)}</div>`}
-        <div class="detail__amount">${issuePriorityPill(issue.priority)}${issueStatusPill(issue.status, issue.overdue)}</div>
-      </div>
-      ${detailMeta([
-        { label: BLD.thKind, value: issueKindLabel(issue.kind) },
-        issue.location ? { label: BLD.issueLocation, value: issue.location } : null,
-        issue.phaseName ? { label: BLD.thPhase, value: issue.phaseName } : null,
-        { label: BLD.thAssignee, value: issue.assigneeName || BLD.issueNobody },
-        issue.dueDate ? { label: BLD.thDue, value: `${fmtDay(issue.dueDate)}${issue.status === 'OPEN' || issue.status === 'IN_PROGRESS' ? ` · ${relDay(issue.dueDate)}` : ''}` } : null,
-        { label: STR.detailCreated, value: `${fmtDay(issue.createdAt)} · ${issue.createdBy}` },
+      ${recordFieldsHtml([
+        [BLD.thStatus, issueStatusPill(issue.status, issue.overdue)],
+        [BLD.thPriority, issuePriorityPill(issue.priority)],
+        [BLD.project, docClientHtml(issue.projectName, projectLink)],
+        [BLD.thKind, escapeHTML(issueKindLabel(issue.kind))],
+        issue.location ? [BLD.issueLocation, escapeHTML(issue.location)] : null,
+        issue.phaseName ? [BLD.thPhase, escapeHTML(issue.phaseName)] : null,
+        [BLD.thAssignee, escapeHTML(issue.assigneeName || BLD.issueNobody)],
+        issue.dueDate ? [BLD.thDue, escapeHTML(`${fmtDay(issue.dueDate)}${issue.status === 'OPEN' || issue.status === 'IN_PROGRESS' ? ` · ${relDay(issue.dueDate)}` : ''}`)] : null,
+        [STR.detailCreated, escapeHTML(`${fmtDay(issue.createdAt)} · ${issue.createdBy}`)],
       ])}
       ${textPanel(BLD.formDescription, issue.description)}
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('tab.photos'))} <span class="tag">${issue.photos.length}</span></h2>
@@ -187,12 +186,11 @@ async function openIssueDetail(id) {
         <ul class="worklist worklist--wrap">${[...issue.history].reverse().map(h => `<li><button class="worklist__item" type="button" disabled data-tone="${{ CLOSED: 'ok', RESOLVED: 'accent', IN_PROGRESS: 'info' }[h.to] || 'warn'}"><span class="worklist__dot"></span>
           <span class="worklist__main"><span class="worklist__title">${escapeHTML(h.from ? bt('issueMoved', { from: issueStatusLabel(h.from), to: issueStatusLabel(h.to) }) : BLD.issueCreated)}</span><span class="worklist__detail">${escapeHTML([h.by, h.note].filter(Boolean).join(' · '))}</span></span>
           <span class="worklist__side"><span class="worklist__when">${escapeHTML(fmtDate(h.at))}</span></span></button></li>`).join('')}</ul></section>
-      <div class="detail__foot">
-        ${(ISSUE_NEXT[issue.status] || []).map(([to, key, cls]) => `<button class="btn btn--sm ${cls}" type="button" data-issue-status="${to}">${escapeHTML(BLD[key])}</button>`).join('')}
-        <button class="btn btn--sm" type="button" data-issue-edit>${escapeHTML(BLD.edit)}</button>
+      ${docFootHtml(`
         <button class="btn btn--sm btn--ghost" type="button" data-issue-delete>${escapeHTML(BLD.delete)}</button>
-      </div>`;
-    $('[data-issue-project]', body)?.addEventListener('click', async () => {
+        <button class="btn btn--sm btn--ghost" type="button" data-issue-edit>${escapeHTML(BLD.edit)}</button>
+        ${[...(ISSUE_NEXT[issue.status] || [])].reverse().map(([to, key, cls]) => `<button class="btn btn--sm${cls === 'btn--accent' ? ' btn--primary' : ''}" type="button" data-issue-status="${to}">${escapeHTML(BLD[key])}</button>`).join('')}`)}`;
+    $('[data-detail-link]', body)?.addEventListener('click', async () => {
       await ensureBuildingProjects().catch(() => {});
       openFrom(here, () => openProjectDrawer(issue.projectId, 'issues'));
     });

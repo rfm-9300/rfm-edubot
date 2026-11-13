@@ -925,24 +925,21 @@
     const retryable = ['FAILED', 'NEEDS_REVIEW'].includes(run.status) && canManage() && !run.dryRun;
     const trigger = run.trigger?.eventType ? eventLabel(run.trigger.eventType) : triggerLabel(run.trigger?.type);
     const outcome = run.error || (run.outcome && !['completed'].includes(run.outcome) ? run.outcome : '');
-    body.innerHTML = `<div class="detail__head">
-        <div class="detail__client">${esc(run.subjectLabel || tr('run.noRecord'))}</div>
-        <div class="detail__amount">${runPill(run.status)}${run.dryRun ? ` ${pill('accent', A.test)}` : ''}</div>
-      </div>
-      ${d.detailMeta([
-        { label: tr('run.trigger'), value: `${trigger} · ${d.fmtDate(run.trigger?.firedAt)}` },
-        run.finishedAt ? { label: tr('run.finished'), value: d.fmtDate(run.finishedAt) } : null,
-        run.resumeAt && open ? { label: tr('run.continues'), value: d.fmtDate(run.resumeAt) } : null,
-        run.tokens ? { label: tr('run.ai'), value: tr('run.tokens', { n: run.tokens }) } : null,
+    body.innerHTML = `${d.recordFieldsHtml([
+        [A.thStatus, `${runPill(run.status)}${run.dryRun ? ` ${pill('accent', A.test)}` : ''}`],
+        [tr('run.record'), esc(run.subjectLabel || tr('run.noRecord'))],
+        [tr('run.trigger'), esc(`${trigger} · ${d.fmtDate(run.trigger?.firedAt)}`)],
+        run.finishedAt ? [tr('run.finished'), esc(d.fmtDate(run.finishedAt))] : null,
+        run.resumeAt && open ? [tr('run.continues'), esc(d.fmtDate(run.resumeAt))] : null,
+        run.tokens ? [tr('run.ai'), esc(tr('run.tokens', { n: run.tokens }))] : null,
       ])}
       ${run.dryRun ? `<p class="hint">${esc(A.testDesc)}</p>` : ''}
       ${outcome ? `<div class="notice ${run.error ? 'notice--warn' : 'notice--info'}"><div class="notice__text"><span>${esc(reasonText(outcome))}</span></div></div>` : ''}
       <ol class="flow">${steps || `<li class="flow__step"><span class="flow__index">–</span><div class="flow__main"><div class="flow__detail">${esc(A.noSteps)}</div></div></li>`}</ol>
-      <div class="detail__foot">
+      ${d.docFootHtml(`
         ${run.subject && d.canOpenSubject(run.subject) ? `<button class="btn btn--sm btn--ghost" type="button" data-run-act="record">${esc(tr('run.openRecord'))}</button>` : ''}
         ${open && !run.dryRun ? `<button class="btn btn--sm btn--ghost" type="button" data-run-act="cancel">${esc(tr('run.cancel'))}</button>` : ''}
-        ${retryable ? `<button class="btn btn--sm btn--primary" type="button" data-run-act="retry">${esc(tr('run.retry'))}</button>` : ''}
-      </div>`;
+        ${retryable ? `<button class="btn btn--sm btn--primary" type="button" data-run-act="retry">${esc(tr('run.retry'))}</button>` : ''}`)}`;
     $$('[data-run-act]', body).forEach(b => b.addEventListener('click', async () => {
       const act = b.dataset.runAct;
       if (act === 'record') return d.openSubject(run.subject, here);
@@ -1734,13 +1731,13 @@
       preview = `<div class="wa-preview"><div class="bubble bubble--out bubble--ai"><div class="bubble__text">${esc(p.body)}</div></div></div>`;
     }
     const fields = Object.entries(p.fields || {});
-    form.innerHTML = `<div class="detail__head"><div class="detail__client">${esc(actionLabel(approval.action))}</div><div class="detail__amount">${pill(decided ? (approval.status === 'APPROVED' ? 'ok' : '') : 'warn', tr(`approvalStatus.${approval.status}`, null, approval.status))}</div></div>
-      ${d.detailMeta([
-        approval.subjectLabel ? { label: tr('run.record'), value: approval.subjectLabel } : null,
-        p.channel ? { label: tr('inbox.channel'), value: tr(`channels.${p.channel}`, null, p.channel) } : null,
-        (p.recipients || []).length ? { label: tr('inbox.recipients'), value: p.recipients.map(r => tr(`enum.audience.${r}`, null, personName(r) || r)).join(', ') } : null,
-        { label: tr('inbox.requested'), value: d.fmtDate(approval.createdAt) },
-        decided ? { label: tr('inbox.decided'), value: [approval.decidedByName, d.fmtDate(approval.decidedAt)].filter(Boolean).join(' · ') } : { label: tr('inbox.expiresLabel'), value: d.fmtDate(approval.expiresAt) },
+    form.innerHTML = `${d.recordFieldsHtml([
+        [A.thStatus, pill(decided ? (approval.status === 'APPROVED' ? 'ok' : '') : 'warn', tr(`approvalStatus.${approval.status}`, null, approval.status))],
+        approval.subjectLabel ? [tr('run.record'), esc(approval.subjectLabel)] : null,
+        p.channel ? [tr('inbox.channel'), esc(tr(`channels.${p.channel}`, null, p.channel))] : null,
+        (p.recipients || []).length ? [tr('inbox.recipients'), esc(p.recipients.map(r => tr(`enum.audience.${r}`, null, personName(r) || r)).join(', '))] : null,
+        [tr('inbox.requested'), esc(d.fmtDate(approval.createdAt))],
+        decided ? [tr('inbox.decided'), esc([approval.decidedByName, d.fmtDate(approval.decidedAt)].filter(Boolean).join(' · '))] : [tr('inbox.expiresLabel'), esc(d.fmtDate(approval.expiresAt))],
       ])}
       ${(p.warnings || []).map(w => `<p class="hint hint--warn">${esc(tr(`warnings.${w}`, null, w))}</p>`).join('')}
       ${preview}
@@ -1749,11 +1746,10 @@
       ${approval.reason ? `<p class="hint">${esc(approval.reason)}</p>` : ''}
       ${!approval.canDecide && !decided ? `<p class="hint hint--warn">${esc(tr('inbox.adminsOnly'))}</p>` : ''}
       ${can ? `<div class="form__row"><label class="lbl" for="ag-reject-reason">${esc(tr('inbox.rejectReason'))} <span class="opt">${esc(A.optional)}</span></label><input class="inp" id="ag-reject-reason" maxlength="300" /></div>` : ''}
-      <div class="detail__foot">
+      ${d.docFootHtml(`
         ${approval.subject && d.canOpenSubject(approval.subject) ? `<button class="btn btn--sm btn--ghost" type="button" data-appr="record">${esc(tr('run.openRecord'))}</button>` : ''}
         <button class="btn btn--sm btn--ghost" type="button" data-appr="run">${esc(tr('inbox.openRun'))}</button>
-        ${can ? `<button class="btn btn--sm btn--ghost" type="button" data-appr="reject">${esc(tr('inbox.reject'))}</button><button class="btn btn--sm btn--primary" type="submit">${esc(tr('inbox.approve'))}</button>` : ''}
-      </div>`;
+        ${can ? `<button class="btn btn--sm btn--ghost" type="button" data-appr="reject">${esc(tr('inbox.reject'))}</button><button class="btn btn--sm btn--primary" type="submit">${esc(tr('inbox.approve'))}</button>` : ''}`)}`;
     d.openDrawer(approval.agentName, form, false, { eyebrow: tr('inbox.approvalEyebrow') });
     const edits = () => {
       const out = {};
@@ -1809,12 +1805,11 @@
       </div>
       ${t.subjectLabel ? `<p class="hint">${esc(tr('inbox.taskFor', { record: t.subjectLabel }))}</p>` : ''}
       ${t.agentName ? `<p class="hint">${esc(tr('inbox.fromAgent', { agent: t.agentName }))}</p>` : ''}
-      <div class="detail__foot">
+      ${d.docFootHtml(`
         ${t.subject && d.canOpenSubject(t.subject) && here ? `<button class="btn btn--sm btn--ghost" type="button" data-task-act="record">${esc(tr('run.openRecord'))}</button>` : ''}
         ${!isNew && open ? `<button class="btn btn--sm btn--ghost" type="button" data-task-act="DISMISSED">${esc(tr('inbox.dismiss'))}</button><button class="btn btn--sm" type="button" data-task-act="DONE">${esc(tr('inbox.markDone'))}</button>` : ''}
         ${!isNew && !open ? `<button class="btn btn--sm" type="button" data-task-act="OPEN">${esc(tr('inbox.reopen'))}</button>` : ''}
-        <button class="btn btn--sm btn--primary" type="submit">${esc(isNew ? tr('inbox.createTask') : A.save)}</button>
-      </div>`;
+        <button class="btn btn--sm btn--primary" type="submit">${esc(isNew ? tr('inbox.createTask') : A.save)}</button>`)}`;
     d.openDrawer(isNew ? tr('inbox.newTask') : t.title, form, false, { eyebrow: tr('inbox.tasks') });
     const values = () => {
       const day = $('#ag-task-due', form).value;

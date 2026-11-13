@@ -389,17 +389,16 @@ function openReportDetail(project, report) {
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    ${detailMeta([
-      { label: bt('reports.periodLabel'), value: reportPeriod(report) },
-      { label: bt('reports.postedOn'), value: fmtDay(report.postedAt) },
+    ${recordFieldsHtml([
+      [bt('reports.periodLabel'), escapeHTML(reportPeriod(report))],
+      [bt('reports.postedOn'), escapeHTML(fmtDay(report.postedAt))],
     ])}
     ${report.text.split(/\n\s*\n/).map(part => part.trim()).filter(Boolean).map(part => `<p class="panel__text">${part.split('\n').map(escapeHTML).join('<br />')}</p>`).join('')}
-    <div class="detail__foot">
-      <button class="btn btn--sm btn--primary" type="button" data-report-copy>${escapeHTML(bt('reports.copy'))}</button>
-      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(project.clientName ? bt('share.whatsappTo', { name: project.clientName }) : bt('share.whatsapp'))}</a>
-      <button class="btn btn--sm btn--ghost" type="button" data-report-edit>${escapeHTML(BLD.edit)}</button>
+    ${docFootHtml(`
       <button class="btn btn--sm btn--ghost" type="button" data-report-delete>${escapeHTML(BLD.delete)}</button>
-    </div>`;
+      <button class="btn btn--sm btn--ghost" type="button" data-report-edit>${escapeHTML(BLD.edit)}</button>
+      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(project.clientName ? bt('share.whatsappTo', { name: project.clientName }) : bt('share.whatsapp'))}</a>
+      <button class="btn btn--sm btn--primary" type="button" data-report-copy>${escapeHTML(bt('reports.copy'))}</button>`)}`;
   $('[data-report-copy]', body).addEventListener('click', async () => {
     try { await navigator.clipboard.writeText(message); toast(bt('reports.copied')); } catch { toast(BLD.saveFailed); }
   });

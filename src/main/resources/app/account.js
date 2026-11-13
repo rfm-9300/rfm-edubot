@@ -156,7 +156,7 @@ function openAccountGoogle() {
   const a = state.account;
   const form = document.createElement('form');
   form.className = 'form';
-  const linkedMeta = `<div class="detail__meta"><div class="detail__meta-item"><span class="detail__meta-label">${escapeHTML(STR.accountGoogleEmail)}</span><span class="detail__meta-value">${escapeHTML(a.googleEmail || '')}</span></div></div>`;
+  const linkedMeta = recordFieldsHtml([[STR.accountGoogleEmail, escapeHTML(a.googleEmail || '')]]);
   if (!a.googleEmail) {
     form.innerHTML = `<p class="hint">${escapeHTML(STR.accountGoogleLinkIntro)}</p>
       ${accountPasswordField('acc-current', STR.accountCurrentPassword, 'current-password')}

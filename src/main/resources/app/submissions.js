@@ -264,33 +264,36 @@ async function openSubmissionDetail(ref) {
   const outcome = s.status === 'REJECTED'
     ? `<div class="notice notice--warn" role="status"><span>${escapeHTML(s.rejectionReason ? SUB.rejectedBecause({ reason: s.rejectionReason }) : SUB.rejectedNoReason)}</span></div>`
     : `<p class="hint">${escapeHTML(s.status === 'APPROVED' ? (s.adjusted ? SUB.approvedAdjusted : SUB.approvedHint) : portal ? PORTAL.pendingHint : SUB.pendingHint({ name: s.employeeName }))}</p>`;
+  // Links and removal first, the step that moves it on last (as in an invoice's drawer).
   const actions = portal
     ? [
-      pending ? `<button class="btn btn--sm" type="button" data-sub-edit>${escapeHTML(STR.clientEditAction)}</button>` : '',
       pending ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-withdraw>${escapeHTML(PORTAL.withdraw)}</button>` : '',
+      pending ? `<button class="btn btn--sm btn--primary" type="button" data-sub-edit>${escapeHTML(STR.clientEditAction)}</button>` : '',
     ]
     : [
-      pending ? `<button class="btn btn--sm btn--accent" type="button" data-sub-approve>${escapeHTML(SUB.approve)}</button>` : '',
-      pending ? `<button class="btn btn--sm" type="button" data-sub-change>${escapeHTML(SUB.changeAndApprove)}</button>` : '',
       s.serviceId && hasModule('services') && !linksBackTo(`service:${s.serviceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-service>${escapeHTML(SUB.openService)}</button>` : '',
       !linksBackTo(`employee:${s.employeeId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-employee>${escapeHTML(SUB.openEmployee({ name: s.employeeName }))}</button>` : '',
       pending ? `<button class="btn btn--sm btn--ghost" type="button" data-sub-reject>${escapeHTML(SUB.reject)}</button>` : '',
+      pending ? `<button class="btn btn--sm" type="button" data-sub-change>${escapeHTML(SUB.changeAndApprove)}</button>` : '',
+      pending ? `<button class="btn btn--sm btn--primary" type="button" data-sub-approve>${escapeHTML(SUB.approve)}</button>` : '',
     ];
   const tone = submissionTone(s.status);
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    ${detailHead(s.clientName, submissionPill(s.status), s.totalEur, tone === 'bad' ? '' : tone, clientLink)}
-    ${detailMeta([
-      portal ? null : { label: SUB.doneBy, value: s.employeeName },
-      { label: CRM.services.when, value: fmtDay(s.performedAt) },
-      { label: SUB.submittedOn, value: fmtDate(s.createdAt) },
-      reviewed,
+    ${recordFieldsHtml([
+      [SUB.thStatus, submissionPill(s.status)],
+      [SUB.thClient, docClientHtml(s.clientName, clientLink)],
+      portal ? null : [SUB.doneBy, escapeHTML(s.employeeName)],
+      [CRM.services.when, escapeHTML(fmtDay(s.performedAt))],
+      [SUB.submittedOn, escapeHTML(fmtDate(s.createdAt))],
+      reviewed ? [reviewed.label, escapeHTML(reviewed.value)] : null,
+      [SUB.thTotal, recordFigureHtml(fmtEUR(s.totalEur)), tone === 'bad' ? '' : tone],
     ])}
-    ${itemsTable(s.items)}
+    ${docLinesHtml(s.items, s.totalEur)}
     ${s.notes ? `<p class="hint">${escapeHTML(s.notes)}</p>` : ''}
     ${outcome}
-    ${actions.some(Boolean) ? `<div class="detail__foot">${actions.join('')}</div>` : ''}`;
+    ${docFootHtml(actions.join(''))}`;
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(s.clientId)));
   $('[data-sub-edit]', body)?.addEventListener('click', () => openFrom(here, () => openSubmissionForm(s)));
   $('[data-sub-withdraw]', body)?.addEventListener('click', async () => {

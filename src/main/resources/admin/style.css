@@ -875,26 +875,7 @@ html[data-theme="dark"] .lbl .req { color: var(--accent); }
 .hint--warn { color: var(--warn-ink); }
 .hint--bad { color: var(--bad-ink); }
 
-/* Read-only record summary (quote / invoice detail drawer) */
-.detail__head { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-bottom: 16px; border-bottom: 1px solid var(--line-soft); }
-.detail__client { font-family: var(--display); font-size: 15px; font-weight: 700; color: var(--ink); }
-/* The name opens that client's or payee's record. */
-.detail__client--link { padding: 0; border: 0; background: none; text-align: left; cursor: pointer; color: var(--accent-deep); }
-.detail__client--link::after { content: " →"; }
-.detail__client--link:hover { text-decoration: underline; }
-.detail__client--link:focus-visible { outline: none; border-radius: 6px; box-shadow: var(--focus-ring); }
-html[data-theme="dark"] .detail__client--link { color: var(--accent); }
-.detail__amount { display: flex; align-items: center; gap: 10px; }
-.detail__figure { font-family: var(--display); font-size: 26px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; color: var(--ink); }
-.detail__figure--ok { color: var(--ok-ink); }
-.detail__figure--warn { color: var(--warn-ink); }
-.detail__figure--bad { color: var(--bad-ink); }
-.detail__figure--info { color: var(--info-ink); }
-.detail__meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.detail__meta-item { display: flex; flex-direction: column; gap: 2px; padding: 8px 10px; border-radius: var(--r-md); background: var(--surface-2); border: 1px solid var(--line-soft); }
-.detail__meta-item:last-child:nth-child(odd) { grid-column: 1 / -1; }
-.detail__meta-label { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 800; color: var(--ink-mute); }
-.detail__meta-value { font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; }
+/* The actions at the foot of a record or document drawer (docFootHtml). */
 .detail__foot { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--line-soft); }
 
 /* Record drawer (client, supplier, employee): profile card, money strip, needs-attention list, section tabs */
@@ -3177,7 +3158,6 @@ html[data-layout="minimal"] .drawer__eyebrow,
 html[data-layout="minimal"][data-theme="dark"] .drawer__eyebrow { color: var(--ink-mute); font-size: 12px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 html[data-layout="minimal"] .drawer__title { font-size: 18px; font-weight: 600; }
 html[data-layout="minimal"] .drawer__foot { background: var(--surface); }
-html[data-layout="minimal"] .detail__meta-label,
 html[data-layout="minimal"] .record-kpi__label,
 html[data-layout="minimal"] .record-card__notes-label,
 html[data-layout="minimal"] .snapshot__metric-label,

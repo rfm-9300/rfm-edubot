@@ -90,21 +90,6 @@ function docLinesHtml(items, totalEur) {
 // The actions (trusted html), pinned to the drawer's foot; nothing when there are none.
 const docFootHtml = buttons => (String(buttons).trim() ? `<div class="drawer__foot detail__foot">${buttons}</div>` : '');
 
-// With `link`, the name opens that client's or payee's record (wire [data-detail-link]).
-function detailHead(clientName, pillHtml, totalEur, tone, link = false) {
-  const name = escapeHTML(clientName || '');
-  return `<div class="detail__head">
-    ${link
-      ? `<button class="detail__client detail__client--link" type="button" data-detail-link aria-label="${escapeHTML(STR.detailOpenRecordAria({ name: clientName || '' }))}">${name}</button>`
-      : `<div class="detail__client">${name}</div>`}
-    <div class="detail__amount">${pillHtml}<span class="detail__figure${tone ? ` detail__figure--${tone}` : ''}">${fmtEUR(totalEur)}</span></div>
-  </div>`;
-}
-function detailMeta(items) {
-  const rows = items.filter(Boolean);
-  if (!rows.length) return '';
-  return `<div class="detail__meta">${rows.map(m => `<div class="detail__meta-item"><span class="detail__meta-label">${escapeHTML(m.label)}</span><span class="detail__meta-value">${escapeHTML(m.value)}</span></div>`).join('')}</div>`;
-}
 function itemsTable(items) {
   if (!items || !items.length) return '';
   const rows = items.map(it => `<tr><td class="name">${escapeHTML(it.description)}</td><td class="num muted">${it.quantity}${it.unit ? ` ${escapeHTML(it.unit)}` : ''}</td><td class="num muted">${fmtEUR(it.unitPriceEur)}</td><td class="num">${fmtEUR(it.quantity * it.unitPriceEur)}</td></tr>`).join('');

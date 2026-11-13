@@ -170,32 +170,30 @@ async function openChangeDetail(id) {
   const body = document.createElement('div');
   body.className = 'form';
   body.innerHTML = `
-    <div class="detail__head">
-      ${projectLink ? `<button class="detail__client detail__client--link" type="button" data-change-project>${escapeHTML(c.projectName)}</button>` : `<div class="detail__client">${escapeHTML(c.projectName)}</div>`}
-      <div class="detail__amount">${changeStatusPill(c.status)}<span class="detail__figure">${fmtEUR(c.signedEur)}</span></div>
-    </div>
-    ${detailMeta([
-      { label: BLD.thKind, value: changeKindLabel(c.kind) },
-      { label: BLD.changeDays, value: c.daysImpact ? bt('changeDaysN', { n: c.daysImpact }) : '—' },
-      { label: STR.detailCreated, value: fmtDay(c.createdAt) },
-      c.sentAt ? { label: BLD.changeSentOn, value: fmtDay(c.sentAt) } : null,
-      decided ? { label: c.status === 'REJECTED' ? BLD.changeRejectedOn : BLD.changeApprovedOn, value: decided } : null,
+    ${recordFieldsHtml([
+      [BLD.thStatus, changeStatusPill(c.status)],
+      [BLD.project, docClientHtml(c.projectName, projectLink)],
+      [BLD.thKind, escapeHTML(changeKindLabel(c.kind))],
+      [BLD.changeDays, escapeHTML(c.daysImpact ? bt('changeDaysN', { n: c.daysImpact }) : '—')],
+      [STR.detailCreated, escapeHTML(fmtDay(c.createdAt))],
+      c.sentAt ? [BLD.changeSentOn, escapeHTML(fmtDay(c.sentAt))] : null,
+      decided ? [c.status === 'REJECTED' ? BLD.changeRejectedOn : BLD.changeApprovedOn, escapeHTML(decided)] : null,
+      [BLD.thValue, recordFigureHtml(fmtEUR(c.signedEur))],
     ])}
     ${link ? changeLinkPanel(c, link) : ''}
     ${c.description ? `<p class="panel__text">${escapeHTML(c.description)}</p>` : ''}
-    ${itemsTable(c.items)}
+    ${docLinesHtml(c.items, c.totalEur)}
     ${c.decisionNote ? `<p class="hint">${escapeHTML(c.decisionNote)}</p>` : ''}
     ${c.status === 'APPROVED' ? `<p class="hint">${escapeHTML(c.kind === 'ADDITION' ? BLD.changeApprovedHint : BLD.changeOmittedHint)}</p>` : ''}
     ${c.status === 'APPROVED' && c.measured ? `<p class="hint">${escapeHTML(BLD.changeMeasuredHint)}</p>` : ''}
-    <div class="detail__foot">
-      ${c.status === 'DRAFT' ? `<button class="btn btn--sm btn--accent" type="button" data-change-send>${escapeHTML(BLD.changeMarkSent)}</button>` : ''}
-      ${c.status === 'SENT' && wa ? `<a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(BLD.changeWhatsApp)}</a>` : ''}
-      ${open ? `<button class="btn btn--sm${c.status === 'SENT' ? ' btn--accent' : ''}" type="button" data-change-decide="APPROVED">${escapeHTML(BLD.changeRecordApproval)}</button>
-        <button class="btn btn--sm" type="button" data-change-decide="REJECTED">${escapeHTML(BLD.changeRecordRejection)}</button>
-        <button class="btn btn--sm btn--ghost" type="button" data-change-edit>${escapeHTML(BLD.edit)}</button>` : ''}
-      ${c.status === 'SENT' || c.status === 'REJECTED' || (c.status === 'APPROVED' && !c.measured) ? `<button class="btn btn--sm btn--ghost" type="button" data-change-draft>${escapeHTML(BLD.changeBackToDraft)}</button>` : ''}
+    ${docFootHtml(`
       ${c.status !== 'APPROVED' ? `<button class="btn btn--sm btn--ghost" type="button" data-change-delete>${escapeHTML(BLD.delete)}</button>` : ''}
-    </div>`;
+      ${c.status === 'SENT' || c.status === 'REJECTED' || (c.status === 'APPROVED' && !c.measured) ? `<button class="btn btn--sm btn--ghost" type="button" data-change-draft>${escapeHTML(BLD.changeBackToDraft)}</button>` : ''}
+      ${c.status === 'SENT' && wa ? `<a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(BLD.changeWhatsApp)}</a>` : ''}
+      ${open ? `<button class="btn btn--sm btn--ghost" type="button" data-change-edit>${escapeHTML(BLD.edit)}</button>
+        <button class="btn btn--sm" type="button" data-change-decide="REJECTED">${escapeHTML(BLD.changeRecordRejection)}</button>
+        <button class="btn btn--sm${c.status === 'SENT' ? ' btn--primary' : ''}" type="button" data-change-decide="APPROVED">${escapeHTML(BLD.changeRecordApproval)}</button>` : ''}
+      ${c.status === 'DRAFT' ? `<button class="btn btn--sm btn--primary" type="button" data-change-send>${escapeHTML(BLD.changeMarkSent)}</button>` : ''}`)}`;
   const setStatus = async (status, done) => {
     try {
       await api(`/app/api/building/changes/${encodeURIComponent(c.id)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
@@ -204,7 +202,7 @@ async function openChangeDetail(id) {
       openChangeDetail(c.id);
     } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   };
-  $('[data-change-project]', body)?.addEventListener('click', async () => {
+  $('[data-detail-link]', body)?.addEventListener('click', async () => {
     await ensureBuildingProjects().catch(() => {});
     openFrom(here, () => openProjectDrawer(c.projectId, 'changes'));
   });

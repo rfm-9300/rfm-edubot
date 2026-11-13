@@ -342,37 +342,35 @@
     const name = forTeam ? s.employeeName || '' : dayText(s.day);
     const link = forTeam && !d.linksBackTo(`employee:${s.employeeId}`);
     const reviewed = s.reviewedAt ? { label: T.metaReviewed, value: [d.fmtDate(s.reviewedAt), forTeam ? s.reviewedBy : ''].filter(Boolean).join(' · ') } : null;
+    // Links first, the step that moves the shift on (Approve) last, as in the other record drawers.
     const actions = forTeam ? [
-      isPendingClosed(s) ? `<button class="btn btn--sm btn--accent" type="button" data-shift-approve>${esc(T.approve)}</button>` : '',
+      link ? `<button class="btn btn--sm btn--ghost" type="button" data-shift-employee-open>${esc(tr('openEmployee', { name }))}</button>` : '',
       s.status === 'CLOSED' ? `<button class="btn btn--sm" type="button" data-shift-correct>${esc(T.correct)}</button>` : '',
       s.status === 'OPEN' ? `<button class="btn btn--sm" type="button" data-shift-close>${esc(T.closeShift)}</button>` : '',
-      link ? `<button class="btn btn--sm btn--ghost" type="button" data-shift-employee-open>${esc(tr('openEmployee', { name }))}</button>` : '',
+      isPendingClosed(s) ? `<button class="btn btn--sm btn--primary" type="button" data-shift-approve>${esc(T.approve)}</button>` : '',
     ] : [];
     const body = document.createElement('div');
     body.className = 'form';
     body.innerHTML = `
-      <div class="detail__head">
-        ${link
-          ? `<button class="detail__client detail__client--link" type="button" data-shift-employee aria-label="${esc(tr('openEmployee', { name }))}">${esc(name)}</button>`
-          : `<div class="detail__client">${esc(name)}</div>`}
-        <div class="detail__amount">${reviewPill(s)}<span class="detail__figure">${esc(hm(workedNow(s, now)))}</span></div>
-      </div>
-      ${d.detailMeta([
-        { label: T.metaDay, value: dayText(s.day) },
-        { label: T.metaStart, value: s.startTime },
-        { label: T.metaEnd, value: s.endTime ? `${s.endTime}${s.endsNextDay ? ` (${T.nextDay})` : ''}` : '…' },
-        { label: T.metaBreaks, value: s.breaks.length ? `${hm(s.breakMinutes)} · ${s.breaks.map(breakRange).join(', ')}` : '—' },
-        s.siteName ? { label: T.metaSite, value: s.siteName } : null,
-        reviewed,
+      ${d.recordFieldsHtml([
+        [T.thStatus, reviewPill(s)],
+        forTeam ? [T.thEmployee, d.docClientHtml(name, link)] : null,
+        [T.metaDay, esc(dayText(s.day))],
+        [T.metaStart, esc(s.startTime)],
+        [T.metaEnd, esc(s.endTime ? `${s.endTime}${s.endsNextDay ? ` (${T.nextDay})` : ''}` : '…')],
+        [T.metaBreaks, esc(s.breaks.length ? `${hm(s.breakMinutes)} · ${s.breaks.map(breakRange).join(', ')}` : '—')],
+        s.siteName ? [T.metaSite, esc(s.siteName)] : null,
+        [T.thWorked, d.recordFigureHtml(hm(workedNow(s, now)))],
+        s.flags.length ? [T.thFlags, `<span class="actions">${flagPills(s.flags)}</span>`] : null,
+        reviewed ? [reviewed.label, esc(reviewed.value)] : null,
       ])}
-      ${s.flags.length ? `<div class="actions">${flagPills(s.flags)}</div>` : ''}
       ${punchesHtml(s)}
       ${editsHtml(s)}
       ${noteHtml(s, forTeam)}
-      ${actions.some(Boolean) ? `<div class="detail__foot">${actions.join('')}</div>` : ''}`;
+      ${d.docFootHtml(actions.join(''))}`;
     $$('[data-map]', body).forEach(a => a.addEventListener('click', e => e.stopPropagation()));
     const openEmployee = () => d.openFrom(here, () => d.openPayeeDrawer('employee', s.employeeId));
-    $('[data-shift-employee]', body)?.addEventListener('click', openEmployee);
+    $('[data-detail-link]', body)?.addEventListener('click', openEmployee);
     $('[data-shift-employee-open]', body)?.addEventListener('click', openEmployee);
     $('[data-shift-approve]', body)?.addEventListener('click', async e => {
       if (await approve([s.id], e.currentTarget)) openShift(s.id);

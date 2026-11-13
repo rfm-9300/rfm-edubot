@@ -118,13 +118,13 @@ function measurementLinesHtml(m, editable) {
 }
 
 function measurementTotalsHtml(t, retentionPct) {
-  return dashFacts([
-    [BLD.thContract, fmtEUR(t.contract)],
-    [BLD.measuredBefore, fmtEUR(t.previous)],
-    [BLD.measuredToDate, fmtEUR(t.toDate)],
-    [BLD.thThisPeriod, fmtEUR(t.gross)],
-    retentionPct ? [bt('retentionPct', { pct: fmtPct(retentionPct) }), `− ${fmtEUR(t.retention)}`] : null,
-    [BLD.measurementNet, fmtEUR(t.net)],
+  return recordFieldsHtml([
+    [BLD.thContract, escapeHTML(fmtEUR(t.contract))],
+    [BLD.measuredBefore, escapeHTML(fmtEUR(t.previous))],
+    [BLD.measuredToDate, escapeHTML(fmtEUR(t.toDate))],
+    [BLD.thThisPeriod, escapeHTML(fmtEUR(t.gross))],
+    retentionPct ? [bt('retentionPct', { pct: fmtPct(retentionPct) }), escapeHTML(`− ${fmtEUR(t.retention)}`)] : null,
+    [BLD.measurementNet, recordFigureHtml(fmtEUR(t.net))],
   ]);
 }
 
@@ -140,16 +140,14 @@ async function openMeasurementDetail(id) {
   const canInvoice = m.status === 'APPROVED' && hasModule('invoices');
   const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
   body.innerHTML = `
-    <div class="detail__head">
-      ${projectLink ? `<button class="detail__client detail__client--link" type="button" data-ms-project>${escapeHTML(m.projectName)}</button>` : `<div class="detail__client">${escapeHTML(m.projectName)}</div>`}
-      <div class="detail__amount">${measurementStatusPill(m.status)}<span class="detail__figure" data-ms-net>${fmtEUR(m.netEur)}</span></div>
-    </div>
-    ${detailMeta([
-      { label: BLD.thPeriodEnd, value: fmtDay(m.periodEnd) },
-      { label: BLD.thRetention, value: `${fmtPct(m.retentionPct)}%` },
-      m.clientName ? { label: STR.lineClient, value: m.clientName } : null,
-      m.approvedAt ? { label: BLD.measurementApprovedBy, value: `${fmtDay(m.approvedAt)} · ${m.approvedBy || ''}` } : null,
-      m.invoiceNumber ? { label: STR.detailInvoice, value: `${m.invoiceNumber} · ${invoiceStatusLabel(m.invoiceStatus)}` } : null,
+    ${recordFieldsHtml([
+      [BLD.thStatus, measurementStatusPill(m.status)],
+      [BLD.project, docClientHtml(m.projectName, projectLink)],
+      editable ? null : [BLD.thPeriodEnd, escapeHTML(fmtDay(m.periodEnd))],
+      [BLD.thRetention, escapeHTML(`${fmtPct(m.retentionPct)}%`)],
+      m.clientName ? [STR.lineClient, escapeHTML(m.clientName)] : null,
+      m.approvedAt ? [BLD.measurementApprovedBy, escapeHTML(`${fmtDay(m.approvedAt)} · ${m.approvedBy || ''}`)] : null,
+      m.invoiceNumber ? [STR.detailInvoice, escapeHTML(`${m.invoiceNumber} · ${invoiceStatusLabel(m.invoiceStatus)}`)] : null,
     ])}
     ${editable ? `<div class="form__row"><label class="lbl" for="ms-period">${escapeHTML(BLD.thPeriodEnd)}</label><input class="inp inp--mono" id="ms-period" type="date" value="${escapeHTML(m.periodEnd)}" /></div>
       <p class="hint">${escapeHTML(BLD.measurementEditHint)}</p>` : ''}
@@ -159,14 +157,13 @@ async function openMeasurementDetail(id) {
     ${editable ? `<div class="form__row"><label class="lbl" for="ms-notes">${escapeHTML(BLD.measurementNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label><textarea class="txt" id="ms-notes" maxlength="4000">${escapeHTML(m.notes || '')}</textarea></div>` : (m.notes ? `<p class="panel__text">${escapeHTML(m.notes)}</p>` : '')}
     ${canInvoice ? `<div class="form__row"><label class="lbl" for="ms-due">${escapeHTML(STR.quoteConvertDue)}</label><input class="inp inp--mono" id="ms-due" type="date" value="${due}" /></div>` : ''}
     ${m.status === 'APPROVED' && !m.clientId ? `<p class="hint hint--warn">${escapeHTML(BLD.measurementNoClient)}</p>` : ''}
-    <div class="detail__foot">
-      ${editable ? `<button class="btn btn--sm btn--accent" type="button" data-ms-save>${escapeHTML(BLD.save)}</button><button class="btn btn--sm btn--primary" type="button" data-ms-approve>${escapeHTML(BLD.measurementApprove)}</button>` : ''}
-      ${canInvoice && m.clientId ? `<button class="btn btn--sm btn--accent" type="button" data-ms-invoice>${escapeHTML(bt('measurementInvoice', { amount: fmtEUR(m.netEur) }))}</button>` : ''}
-      ${m.status === 'INVOICED' && m.invoiceId && hasModule('invoices') && !linksBackTo(`invoice:${m.invoiceId}`) ? `<button class="btn btn--sm" type="button" data-ms-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: m.invoiceNumber || '' }))}</button>` : ''}
-      ${m.status === 'APPROVED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-reopen>${escapeHTML(BLD.measurementReopen)}</button>` : ''}
+    ${docFootHtml(`
       ${pdfUrlButton(`/app/api/building/measurements/${encodeURIComponent(m.id)}/pdf`, '', `${m.projectNumber} ${bt('measurementN', { n: m.number })}`)}
+      ${m.status === 'INVOICED' && m.invoiceId && hasModule('invoices') && !linksBackTo(`invoice:${m.invoiceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: m.invoiceNumber || '' }))}</button>` : ''}
+      ${m.status === 'APPROVED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-reopen>${escapeHTML(BLD.measurementReopen)}</button>` : ''}
       ${m.status !== 'INVOICED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-delete>${escapeHTML(BLD.delete)}</button>` : ''}
-    </div>`;
+      ${editable ? `<button class="btn btn--sm" type="button" data-ms-save>${escapeHTML(BLD.save)}</button><button class="btn btn--sm btn--primary" type="button" data-ms-approve>${escapeHTML(BLD.measurementApprove)}</button>` : ''}
+      ${canInvoice && m.clientId ? `<button class="btn btn--sm btn--primary" type="button" data-ms-invoice>${escapeHTML(bt('measurementInvoice', { amount: fmtEUR(m.netEur) }))}</button>` : ''}`)}`;
   wirePdfButtons(body);
   const problem = $('[data-ms-problem]', body);
   // The quantities typed, the problems with them, and the totals they make, drawn as they change.
@@ -189,7 +186,6 @@ async function openMeasurementDetail(id) {
     });
     const retention = gross > 0 && m.retentionPct > 0 ? Math.round(gross * m.retentionPct / 100) : 0;
     $('[data-ms-totals]', body).innerHTML = measurementTotalsHtml({ contract: m.contractEur, previous: m.previousEur, toDate: toDate / 100, gross: gross / 100, retention: retention / 100, net: (gross - retention) / 100 }, m.retentionPct);
-    $('[data-ms-net]', body).textContent = fmtEUR((gross - retention) / 100);
     problem.hidden = !bad;
     problem.textContent = bad || '';
     return !bad;
@@ -214,7 +210,7 @@ async function openMeasurementDetail(id) {
     }
   };
   const after = (text, next) => { toast(text); refreshBuildingPage(); openMeasurementDetail(next.id); };
-  $('[data-ms-project]', body)?.addEventListener('click', async () => {
+  $('[data-detail-link]', body)?.addEventListener('click', async () => {
     await ensureBuildingProjects().catch(() => {});
     openFrom(here, () => openProjectDrawer(m.projectId, 'measurements'));
   });

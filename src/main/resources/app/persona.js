@@ -315,16 +315,17 @@ const pm = (key, params) => I18N.t(`app.personaStudio.menus.${key}`, params);
 
 function personaBehaviorFacts(b = {}) {
   const choice = field => (b[field] ? ps(`options.${field}.${b[field]}`) : null);
-  return dashFacts([
-    [PS.botName, b.botName || PS.optionUnset],
-    [PS.language, b.language ? `${personaLanguageLabel(b.language)}${b.languageStrict ? ` · ${PS.languageStrictShort}` : ''}` : PS.languageAuto],
-    [PS.tone, choice('tone') || PS.optionUnset],
-    [PS.addressForm, choice('addressForm') || PS.optionUnset],
-    [PS.replyLength, choice('replyLength') || PS.optionUnset],
-    [PS.emoji, choice('emoji') || PS.optionUnset],
-    b.greeting && [PS.greeting, b.greeting],
-    (b.rules || []).length && [PS.rulesTitle, b.rules.join(' · ')],
-    [PS.handoffTitle, b.handoff?.enabled ? [PS.handoffOn, b.handoff.message].filter(Boolean).join(' · ') : PS.handoffOff],
+  const row = (label, value) => (value ? [label, escapeHTML(String(value))] : null);
+  return recordFieldsHtml([
+    row(PS.botName, b.botName || PS.optionUnset),
+    row(PS.language, b.language ? `${personaLanguageLabel(b.language)}${b.languageStrict ? ` · ${PS.languageStrictShort}` : ''}` : PS.languageAuto),
+    row(PS.tone, choice('tone') || PS.optionUnset),
+    row(PS.addressForm, choice('addressForm') || PS.optionUnset),
+    row(PS.replyLength, choice('replyLength') || PS.optionUnset),
+    row(PS.emoji, choice('emoji') || PS.optionUnset),
+    b.greeting ? row(PS.greeting, b.greeting) : null,
+    (b.rules || []).length ? row(PS.rulesTitle, b.rules.join(' · ')) : null,
+    row(PS.handoffTitle, b.handoff?.enabled ? [PS.handoffOn, b.handoff.message].filter(Boolean).join(' · ') : PS.handoffOff),
   ]);
 }
 
@@ -334,11 +335,11 @@ async function openPersonaVersion(n) {
   const canRestore = state.persona?.canEdit && !v.live;
   const body = document.createElement('div');
   body.className = 'form';
-  body.innerHTML = `${dashFacts([[PS.thChange, personaChangeText(v)], [PS.thBy, v.author ? personaAuthor(v.author) : PS.byAutomatic], [PS.thWhen, fmtDate(v.createdAt)]])}
+  body.innerHTML = `${recordFieldsHtml([[PS.thChange, escapeHTML(personaChangeText(v))], [PS.thBy, escapeHTML(v.author ? personaAuthor(v.author) : PS.byAutomatic)], [PS.thWhen, escapeHTML(fmtDate(v.createdAt))]])}
     <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(PS.versionSettings)}</h2></header><div class="panel__body">${personaBehaviorFacts(v.behavior)}</div></section>
     <div class="form__row form__row--full"><label class="lbl" for="pv-text">${escapeHTML(PS.instructionsTitle)}</label>
       <textarea class="txt" id="pv-text" rows="14" readonly>${escapeHTML(v.compiledInstructions || '')}</textarea></div>
-    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button>${canRestore ? `<button class="btn btn--accent" type="button" data-restore-version>${escapeHTML(PS.restoreThis)}</button>` : ''}</div>`;
+    ${docFootHtml(`<button class="btn btn--sm btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button>${canRestore ? `<button class="btn btn--sm btn--primary" type="button" data-restore-version>${escapeHTML(PS.restoreThis)}</button>` : ''}`)}`;
   openDrawer(ps('versionTitle', { n: v.version }), body, true, { eyebrow: labels.persona });
   $('[data-restore-version]', body)?.addEventListener('click', () => restorePersonaVersion(v.version));
 }
@@ -362,16 +363,16 @@ async function openPersonaSource(id) {
   try { s = await api(`/app/api/persona/sources/${encodeURIComponent(id)}`); } catch (err) { return personaFail(err); }
   const body = document.createElement('div');
   body.className = 'form';
-  body.innerHTML = `${dashFacts([
-      [PS.thState, s.compiled ? PS.sourceSynced : PS.sourcePending],
-      [PS.thAdded, fmtDate(s.createdAt)],
-      s.addedBy && [PS.thBy, personaAuthor(s.addedBy)],
-      [PS.size, ps('chars', { n: fmtCount(s.chars) })],
+  body.innerHTML = `${recordFieldsHtml([
+      [PS.thState, escapeHTML(s.compiled ? PS.sourceSynced : PS.sourcePending)],
+      [PS.thAdded, escapeHTML(fmtDate(s.createdAt))],
+      s.addedBy ? [PS.thBy, escapeHTML(personaAuthor(s.addedBy))] : null,
+      [PS.size, escapeHTML(ps('chars', { n: fmtCount(s.chars) }))],
     ])}
     ${s.truncated ? `<p class="hint hint--warn">${escapeHTML(PS.truncated)}</p>` : ''}
     <div class="form__row form__row--full"><label class="lbl" for="ps-text">${escapeHTML(PS.sourceText)}</label>
       <textarea class="txt" id="ps-text" rows="18" readonly>${escapeHTML(s.content)}</textarea></div>
-    <div class="drawer__foot"><button class="btn btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button></div>`;
+    ${docFootHtml(`<button class="btn btn--sm btn--ghost" type="button" data-close>${escapeHTML(PS.close)}</button>`)}`;
   openDrawer(s.label, body, true, { eyebrow: ps(`kind.${s.kind}`) });
 }
 
