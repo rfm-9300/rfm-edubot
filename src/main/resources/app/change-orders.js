@@ -143,7 +143,7 @@ const changeApprovalUrl = token => `${location.origin}/app/share/change/${encode
 
 // While a change is sent, the link its client approves or rejects it from, to copy or send by WhatsApp.
 function changeLinkPanel(c, url) {
-  const text = bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: fmtEUR(c.signedEur), days: c.daysImpact, url });
+  const text = bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: plainMoney(fmtEUR(c.signedEur)), days: c.daysImpact, url });
   const wa = c.clientPhone ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
   return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.changeLinkTitle)}</h2></header><div class="panel__body">
     <p class="hint">${escapeHTML(BLD.changeLinkIntro)}</p>
@@ -164,7 +164,7 @@ async function openChangeDetail(id) {
   const projectLink = !linksBackTo(`project:${c.projectId}`);
   const link = c.status === 'SENT' && c.approvalToken ? changeApprovalUrl(c.approvalToken) : '';
   // A change sent before the links existed has none: the message asks the client to confirm by reply.
-  const message = bt('changeMessage', { number: c.number, title: c.title, project: c.projectName, amount: fmtEUR(c.signedEur), days: c.daysImpact });
+  const message = bt('changeMessage', { number: c.number, title: c.title, project: c.projectName, amount: plainMoney(fmtEUR(c.signedEur)), days: c.daysImpact });
   const wa = c.clientPhone && !link ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(message)}` : '';
   const decided = c.decidedAt ? [fmtDay(c.decidedAt), c.decidedBy, c.decidedVia === 'CLIENT_LINK' ? BLD.changeViaLink : ''].filter(Boolean).join(' · ') : '';
   const body = document.createElement('div');

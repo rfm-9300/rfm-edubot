@@ -2,54 +2,7 @@
    what needs you, today's agenda, cash flow, receivables, the quote pipeline, services done, inbox activity, top
    clients, recent events, service insights and module tiles. Cards hidden in Settings → Home are left out. */
 
-// Home hides its amounts behind a blur, as a bank's app does; the eye in the header shows them. Every amount
-// Home formats is wrapped in two private-use marks. `moneyMarkup` turns the ones in text into `.money` spans,
-// and `syncHomeMoney` masks the ones in titles and aria-labels, so no mark is left in the page.
-const MONEY_OPEN = '';
-const MONEY_CLOSE = '';
-const MONEY_RE = new RegExp(`${MONEY_OPEN}(.*?)${MONEY_CLOSE}`, 'gs');
-const MONEY_ATTRS = ['title', 'aria-label'];
-const MONEY_KEY = 'homeHideAmounts';
-const moneyMark = text => `${MONEY_OPEN}${text}${MONEY_CLOSE}`;
-const moneyAttrSource = new WeakMap();
-// Hidden until the person shows them, and then as they left it (this browser only).
-let homeMoneyHidden = (() => { try { return localStorage.getItem(MONEY_KEY) !== '0'; } catch { return true; } })();
-
-function moneyMarkup(html) {
-  return html.replace(/<[^>]*>|[^<]+/g, part => (part[0] === '<' ? part : part.replace(MONEY_RE, '<span class="money">$1</span>')));
-}
-
-// `root` is the page's container, or `.dash` itself.
-function syncHomeMoney(root) {
-  const dash = root?.classList?.contains('dash') ? root : $('.dash', root);
-  if (!dash) return;
-  dash.classList.toggle('is-private', homeMoneyHidden);
-  $('[data-money-toggle]', dash)?.setAttribute('aria-pressed', String(homeMoneyHidden));
-  for (const attr of MONEY_ATTRS) {
-    $$(`[${attr}]`, dash).forEach(el => {
-      const known = moneyAttrSource.get(el) || {};
-      const raw = known[attr] ?? el.getAttribute(attr);
-      if (!raw.includes(MONEY_OPEN)) return;
-      moneyAttrSource.set(el, { ...known, [attr]: raw });
-      el.setAttribute(attr, raw.replace(MONEY_RE, homeMoneyHidden ? '•••' : '$1'));
-    });
-  }
-}
-
-function wireHomeMoney(root) {
-  const toggle = $('[data-money-toggle]', root);
-  if (!toggle) return;
-  // A Home with no amounts (and no insights, which carry them) has nothing to hide.
-  if (!$('.money', root) && !$('[data-insights]', root)) return toggle.remove();
-  toggle.addEventListener('click', () => {
-    homeMoneyHidden = !homeMoneyHidden;
-    try { localStorage.setItem(MONEY_KEY, homeMoneyHidden ? '1' : '0'); } catch { /* storage blocked: the choice lasts this visit */ }
-    syncHomeMoney(root);
-  });
-  syncHomeMoney(root);
-}
-
-function centsEUR(n) { return moneyMark(fmtEUR(Number(n || 0) / 100)); }
+function centsEUR(n) { return fmtEUR(Number(n || 0) / 100); }
 function deltaHint(deltaPct, vs) {
   if (deltaPct == null || typeof STR.deltaUp !== 'function') return '';
   if (deltaPct > 0) return STR.deltaUp({ pct: deltaPct, vs });
@@ -130,7 +83,7 @@ function homeCardCopy(id) {
   return { title: titles[id] || id, detail: descs[id] || '' };
 }
 
-const wholeCentsEUR = c => moneyMark(fmtEURWhole(Number(c || 0) / 100));
+const wholeCentsEUR = c => fmtEURWhole(Number(c || 0) / 100);
 const RECENT_TONES = { invoice_paid: 'ok', invoice_issued: 'info', payment_paid: 'neutral', quote_accepted: 'ok', quote_created: 'accent', client_created: 'accent', booking_created: 'info' };
 function pctChange(current, previous) {
   if (!previous) return null;
@@ -270,7 +223,7 @@ function dashCashFlowCard(o) {
     const cols = flow.map(m => `<div class="bars__pair" title="${escapeHTML(describe(m))}">${showIn ? `<span class="bars__bar" data-tone="accent" style="height:${height((m.inCents || 0) / 100)}%"></span>` : ''}${showOut ? `<span class="bars__bar" data-tone="muted" style="height:${height((m.outCents || 0) / 100)}%"></span>` : ''}</div>`).join('');
     const labels = flow.map((m, i) => `<span class="bars__label${i === flow.length - 1 ? ' is-current' : ''}">${escapeHTML(monthLabel(m.month))}</span>`).join('');
     const quiet = flow.every(m => !(m.inCents || m.outCents)) ? `<p class="dash-empty">${escapeHTML(STR.dashCashEmpty)}</p>` : '';
-    body = `${legend}${quiet}<div class="bars" role="img" aria-label="${escapeHTML(flow.map(describe).join('; '))}"><div class="bars__scale"><span>${escapeHTML(max ? moneyMark(fmtEURCompact(max)) : '')}</span></div><div class="bars__plot">${cols}</div><div class="bars__labels">${labels}</div></div>`;
+    body = `${legend}${quiet}<div class="bars" role="img" aria-label="${escapeHTML(flow.map(describe).join('; '))}"><div class="bars__scale"><span>${escapeHTML(max ? fmtEURCompact(max) : '')}</span></div><div class="bars__plot">${cols}</div><div class="bars__labels">${labels}</div></div>`;
   }
   const months = flow.length || 1;
   const avg = key => flow.reduce((sum, m) => sum + (m[key] || 0), 0) / months;
@@ -573,8 +526,7 @@ async function loadInsights(card) {
     }
     if (!card.isConnected || months !== homeInsights.months) return;
   }
-  body.innerHTML = moneyMarkup(insightBody(hit.data));
-  syncHomeMoney(card.closest('.dash'));
+  body.innerHTML = insightBody(hit.data);
   $$('[data-go]', body).forEach(b => b.addEventListener('click', () => dashGo(b)));
 }
 
@@ -693,7 +645,7 @@ function insightPatterns(d) {
     : '';
   const perClient = cur.clients ? (cur.count / cur.clients).toLocaleString(uiLocale(), { maximumFractionDigits: 1 }) : '0';
   return `<div class="insights__split">
-      <div><p class="dash-sub">${escapeHTML(money ? STR.siTrendValue : STR.siTrend)}</p>${insightColumns(months, STR.siTrend, money ? max => moneyMark(fmtEURCompact(max / 100)) : String)}</div>
+      <div><p class="dash-sub">${escapeHTML(money ? STR.siTrendValue : STR.siTrend)}</p>${insightColumns(months, STR.siTrend, money ? max => fmtEURCompact(max / 100) : String)}</div>
       <div><p class="dash-sub">${escapeHTML(STR.siWeekdays)}</p>${insightColumns(weekdays, STR.siWeekdays)}</div>
     </div>
     ${dashFacts([
@@ -728,11 +680,7 @@ function renderOverview(root) {
   const status = hidden.has('pulse') ? '' : `<p class="dash__status dash__status--${escapeHTML(health)}"><span class="dash__dot" aria-hidden="true"></span><strong>${escapeHTML(healthLabel(health))}</strong><span class="dash__sep" aria-hidden="true">·</span><span>${escapeHTML(pulseLine(o))}</span></p>`;
   const creators = [['invoices', STR.invoiceFormTitle], ['quotes', STR.quoteFormTitle], ['clients', STR.clientFormTitle], ['bookings', STR.bookingsNew]]
     .filter(([m]) => hasModule(m)).slice(0, 3);
-  const eyeOpen = '<path d="M1.5 8 C3 5 5.3 3.5 8 3.5 S13 5 14.5 8 C13 11 10.7 12.5 8 12.5 S3 11 1.5 8 Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="8" cy="8" r="2" fill="none" stroke="currentColor" stroke-width="1.4"/>';
-  const eye = `<svg class="eye eye--on" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${eyeOpen}</svg>`
-    + `<svg class="eye eye--off" width="16" height="16" viewBox="0 0 16 16" aria-hidden="true">${eyeOpen}<path d="M2.5 13.5 L13.5 2.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>`;
-  const actions = `<button type="button" class="iconbtn iconbtn--theme" data-money-toggle aria-pressed="${homeMoneyHidden}" title="${escapeHTML(STR.hideAmounts)}" aria-label="${escapeHTML(STR.hideAmounts)}">${eye}</button>`
-    + (hasModule('settings') ? `<button type="button" class="btn btn--sm btn--ghost" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>` : '')
+  const actions = (hasModule('settings') ? `<button type="button" class="btn btn--sm btn--ghost" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>` : '')
     + creators.map(([m, label], i) => `<button type="button" class="btn btn--sm${i === 0 ? ' btn--primary' : ''}" data-create="${m}"><span class="btn__plus" aria-hidden="true">+</span>${escapeHTML(label)}</button>`).join('');
   const today = new Date().toLocaleDateString(uiLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: tenantTz() });
   const head = `<header class="dash__head"><div><p class="dash__date">${escapeHTML(capFirst(today))}</p><h1 class="dash__title">${escapeHTML(dashGreeting())}</h1>${status}</div>${actions ? `<div class="dash__actions">${actions}</div>` : ''}</header>`;
@@ -822,8 +770,7 @@ function renderOverview(root) {
   const emptyHtml = !kpiHtml && !setupHtml && !gridHtml && !insightsHtml && !tilesHtml
     ? `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(STR.overviewEmptyTitle)}</p><p class="empty__desc">${escapeHTML(STR.overviewEmptyDesc)}</p></div></div>`
     : '';
-  root.innerHTML = moneyMarkup(`<div class="dash">${head}${kpiHtml}${setupHtml}${gridHtml}${insightsHtml}${tilesHtml}${emptyHtml}</div>`);
-  wireHomeMoney(root);
+  root.innerHTML = `<div class="dash">${head}${kpiHtml}${setupHtml}${gridHtml}${insightsHtml}${tilesHtml}${emptyHtml}</div>`;
   balanceDashColumns(root);
   document.fonts?.ready.then(() => balanceDashColumns(root));
   $$('[data-go]', root).forEach(b => b.addEventListener('click', () => dashGo(b)));

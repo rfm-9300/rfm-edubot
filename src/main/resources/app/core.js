@@ -91,9 +91,17 @@ const renderChatText = (s = '') => escapeHTML(s).replace(/\*\*(.+?)\*\*/g, '<str
 const foldText = (s = '') => String(s).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 const capFirst = s => (s ? s.charAt(0).toUpperCase() + s.slice(1) : s);
 const uiLocale = () => (window.I18N && I18N.locale()) || 'pt-PT';
-const fmtEUR = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0));
-const fmtEURWhole = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(n || 0));
-const fmtEURCompact = n => new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', notation: 'compact', minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(Number(n || 0));
+// Every amount of money is wrapped in two private-use marks where it is formatted, so the page can hide
+// them all without matching currency formats (amounts.js). A page never sees a mark: what it renders is
+// turned into `.money` spans and masked titles. Text that leaves the page as a string (a message to send)
+// goes through `plainMoney`.
+const MONEY_OPEN = '';
+const MONEY_CLOSE = '';
+const moneyMark = text => `${MONEY_OPEN}${text}${MONEY_CLOSE}`;
+const plainMoney = text => String(text ?? '').replace(/[]/g, '');
+const fmtEUR = n => moneyMark(new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR' }).format(Number(n || 0)));
+const fmtEURWhole = n => moneyMark(new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', minimumFractionDigits: 0, maximumFractionDigits: 0 }).format(Number(n || 0)));
+const fmtEURCompact = n => moneyMark(new Intl.NumberFormat(uiLocale(), { style: 'currency', currency: 'EUR', notation: 'compact', minimumFractionDigits: 0, maximumFractionDigits: 1 }).format(Number(n || 0)));
 const fmtMinutes = n => new Intl.NumberFormat(uiLocale(), { style: 'unit', unit: 'minute', unitDisplay: 'short' }).format(n);
 const tenantTz = () => state.me?.tenant?.timezone || 'Europe/Lisbon';
 const fmtDate = iso => iso ? new Date(iso).toLocaleString(uiLocale(), { dateStyle: 'short', timeStyle: 'short', timeZone: tenantTz() }) : '—';

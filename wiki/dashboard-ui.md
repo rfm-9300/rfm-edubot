@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-12
 ---
 
 # Dashboard UI decisions
@@ -343,21 +343,37 @@ List lost its day group rows (When carries the day) and gained tick boxes, statu
 duration columns. The booking drawer is a field list with its actions in the foot, Confirm, Mark done or
 Invoice last. The design's "Where" and "Assigned to" fields have no data behind them on a booking.
 
-## Home hides its amounts (2026-11-10)
+## Amounts are hidden everywhere in /app, from a switch in the top bar (2026-11-10, 2026-11-12)
 
-Rodrigo asked for Home's values (to receive, collected, pipeline…) to be blurred "like banks do". Decisions:
+Rodrigo asked for Home's values (to receive, collected, pipeline…) to be blurred "like banks do" (2026-11-10),
+then for the same on every money value in the dashboard, with a switch at the top of the page next to the
+dark/light toggle (2026-11-12). Decisions:
 
-- **Hidden until shown.** Amounts load blurred; an eye first in the header's actions shows them, and the
-  choice is kept per browser (`localStorage.homeHideAmounts`, `1` hidden, `0` shown; a first visit is hidden).
-  Counts, percentages and dates stay readable, only money is blurred. The eye is left out of a Home that has
-  no amounts. The blur is `filter: blur(0.42em)` on `.money` under `.dash.is-private` (design system:
-  `components.md`), and the text can't be selected while it applies.
-- **Amounts are marked where they are formatted, not found afterwards.** Every amount Home formats
-  (`centsEUR`, `wholeCentsEUR`, the chart scales) is wrapped in two private-use characters. When a card's
-  markup is built, `moneyMarkup` turns the pairs in text into `<span class="money">`, and `syncHomeMoney`
-  replaces the pairs in `title` and `aria-label` (bar and segment tooltips, chart descriptions) with `•••`
-  while hidden, and with the plain amount when shown, so a tooltip never gives the number away. Nothing
-  matches a currency format against the page, so a new locale or format can't slip an amount past it; a new
-  Home amount just has to come from those two helpers (or `moneyMark`). No mark reaches the DOM.
-- **The service insights card is covered too:** its body arrives later (`loadInsights`) and goes through
-  `moneyMarkup` and `syncHomeMoney` as well. Other pages show amounts as before.
+- **One switch for the whole dashboard.** The eye (`#btn-amounts`) sits in the top bar after the theme toggle;
+  Home no longer has its own. Amounts load blurred and the choice is kept per browser
+  (`localStorage.hideAmounts`, `1` hidden, `0` shown; a first visit is hidden). What people had chosen on
+  Home's eye (`homeHideAmounts`) is read when `hideAmounts` isn't set yet, so nobody's choice was lost. The
+  state is `<html data-amounts="hidden|shown">` (hidden in the markup, so nothing flashes), and the blur is
+  `filter: blur(0.42em)` on `.money` under it (design system: `components.md`); the text can't be selected
+  while it applies. Counts, percentages and dates stay readable, only money is blurred. The button's label
+  says what a click does ("Show amounts" while hidden), as the theme button's does.
+- **Amounts are marked where they are formatted, not found afterwards.** `fmtEUR`, `fmtEURWhole` and
+  `fmtEURCompact` (`core.js`) wrap what they return in two private-use characters, so every amount on every
+  page is marked without its page knowing, and a new amount only has to come from one of them (or
+  `moneyMark`). Nothing matches a currency format against the page, so a new locale or format can't slip
+  an amount past it.
+- **The page never keeps a mark.** `amounts.js` runs a `MutationObserver` over the document (started by
+  `init()`; microtasks, so the spans exist before anything is painted): marked text becomes
+  `<span class="money">`, and a marked `title` or `aria-label` (bar tooltips, chart descriptions, a row's
+  hint) reads `•••` while hidden and the plain amount when shown, rewritten when the switch moves. Where a
+  span can't go (a select's `<option>`, a textarea, a `placeholder` or `value`) the marks are dropped and the
+  amount stays plain. Drawers, dialogs and toasts are covered like pages, since the observer watches the
+  whole document.
+- **Text that leaves the page needs `plainMoney()`.** A marked string put in a message to send, a link or a
+  field's `.value` would carry the invisible characters with it. The change-order messages (WhatsApp link,
+  copy) wrap their amount in `plainMoney`; do the same for any new text that doesn't go through the DOM.
+- **What isn't blurred:** the editable price and amount fields in forms (a number someone is typing), the
+  prices inside a dropdown's options (a `<select>` can't hold a span), free text (chat messages, the AI
+  Assistant's answers, notes) and the exported CSV of ticked rows, which is a file the person chose to make. Bar heights and chart shapes still show proportions, as on Home before.
+- **Home's service insights card** has its body built later (`loadInsights`); the observer covers it with
+  the rest.

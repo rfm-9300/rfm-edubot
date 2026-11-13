@@ -293,6 +293,7 @@ window.__I18N_CATALOGS['es'] = {
     overviewEmptyDesc: 'Activa módulos en el backoffice para ver dinero, bandeja y agenda aquí.',
     customizeHome: 'Elegir tarjetas',
     hideAmounts: 'Ocultar importes',
+    showAmounts: 'Mostrar importes',
     settingsHome: 'Inicio',
     homeLayoutTitle: 'Tarjetas de Inicio',
     homeLayoutDesc: 'Elige qué resúmenes aparecen en Inicio. Solo se listan los módulos activos de este espacio.',

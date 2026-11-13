@@ -294,6 +294,7 @@ window.__I18N_CATALOGS['en'] = {
     overviewEmptyDesc: 'Turn on modules in the backoffice to see money, inbox and calendar here.',
     customizeHome: 'Choose cards',
     hideAmounts: 'Hide amounts',
+    showAmounts: 'Show amounts',
     settingsHome: 'Home',
     homeLayoutTitle: 'Home cards',
     homeLayoutDesc: 'Pick which snapshots appear on Home. Only modules enabled for this workspace are listed.',
