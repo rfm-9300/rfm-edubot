@@ -45,7 +45,11 @@ function setView(view) {
   if (location.hash !== `#${currentView}`) location.hash = currentView;
   $$('.nav__item').forEach(a => a.classList.toggle('is-active', a.dataset.view === currentView));
   const leaf = $('.crumb__leaf');
-  if (leaf) leaf.textContent = { settings: T.platformSettings.nav, admins: T.admins.nav, board: T.board.nav, vault: T.vault.nav, backups: T.backups.nav }[currentView] || T.heroTitle;
+  if (leaf) {
+    leaf.textContent = { settings: T.platformSettings.nav, admins: T.admins.nav, board: T.board.nav, vault: T.vault.nav, backups: T.backups.nav }[currentView] || T.heroTitle;
+    const icon = getComputedStyle($(`.nav__item[data-view="${currentView}"]`)).getPropertyValue('--nav-icon');
+    if (icon) leaf.style.setProperty('--nav-icon', icon);
+  }
   const search = $('.topbar__search');
   if (search) search.hidden = currentView !== 'tenants';
   const btnNew = $('#btn-new');
@@ -58,9 +62,36 @@ function setView(view) {
   else renderTenants();
 }
 
+// The desktop platform shell folds to the same compact icon rail as /app. Its state stays separate
+// so an operator can keep the data-rich dashboard open while using a narrow backoffice rail.
+const BACKOFFICE_SIDEBAR_COLLAPSED_KEY = 'ui:backofficeSidebarCollapsed';
+function paintSidebarCollapsed(collapsed) {
+  document.body.classList.toggle('sidebar-collapsed', collapsed);
+  const button = $('#btn-sidebar');
+  const label = collapsed ? T.sidebarExpand : T.sidebarCollapse;
+  button.setAttribute('aria-expanded', String(!collapsed));
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  $$('.nav__item').forEach(item => {
+    const navLabel = $('.nav__label', item)?.textContent?.trim();
+    if (navLabel) item.title = navLabel;
+  });
+}
+function wireSidebarToggle() {
+  let collapsed = false;
+  try { collapsed = localStorage.getItem(BACKOFFICE_SIDEBAR_COLLAPSED_KEY) === '1'; } catch { /* storage blocked: start open */ }
+  paintSidebarCollapsed(collapsed);
+  $('#btn-sidebar').addEventListener('click', () => {
+    collapsed = !collapsed;
+    try { localStorage.setItem(BACKOFFICE_SIDEBAR_COLLAPSED_KEY, collapsed ? '1' : '0'); } catch { /* keep it for this page only */ }
+    paintSidebarCollapsed(collapsed);
+  });
+}
+
 async function init() {
   if (handleOAuthPopup()) return;
   I18N.applyDom(document);
+  wireSidebarToggle();
   $('#btn-new').addEventListener('click', () => tenantForm());
   // Phones log out from the menu (#nav-logout); the top bar's button is for wider screens.
   $('#btn-logout').addEventListener('click', () => signOut());

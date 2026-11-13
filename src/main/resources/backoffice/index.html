@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="pt-PT" data-layout="minimal">
+<html lang="pt-PT" data-layout="minimal" data-shell="compact" data-surface="backoffice">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -16,12 +16,17 @@
 </head>
 <body>
   <aside class="sidebar" id="app-sidebar">
-    <div class="brand">
-      <div class="brand__mark" aria-hidden="true">BO</div>
-      <div class="brand__text">
-        <div class="brand__name" data-i18n="backoffice.brandName">Backoffice</div>
-        <div class="brand__sub" data-i18n="backoffice.brandSub">Platform · Tenants</div>
+    <div class="sidebar__head">
+      <div class="brand">
+        <div class="brand__mark" aria-hidden="true">BO</div>
+        <div class="brand__text">
+          <div class="brand__name" data-i18n="backoffice.brandName">Backoffice</div>
+          <div class="brand__sub" data-i18n="backoffice.brandSub">Platform · Tenants</div>
+        </div>
       </div>
+      <button class="iconbtn sidebar__toggle" id="btn-sidebar" type="button" aria-controls="app-sidebar" aria-expanded="true" data-i18n-aria-label="backoffice.sidebarCollapse">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M9.5 4.5v15"/></svg>
+      </button>
     </div>
     <nav class="nav">
       <a class="nav__item is-active" href="#tenants" data-view="tenants">

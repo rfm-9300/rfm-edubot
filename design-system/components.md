@@ -73,7 +73,7 @@ In the minimal skin the active item is a `--accent-soft` fill with a 3px `--acce
 
 ### Compact shell: sidebar head and folding
 
-On `/app` (`html[data-shell="compact"]`) the brand shares a `.sidebar__head` with `.sidebar__toggle` (`#btn-sidebar`), which folds the desktop sidebar to a 56px rail of icons: `body.sidebar-collapsed`, kept per browser in `localStorage` `ui:sidebarCollapsed`. Folded, group labels become 1px rules, counts and the foot hide, and each `.nav__label` stays for screen readers (visually hidden) while the link's `title` names it on hover; `renderNav()` sets that `title`. The toggle's label (`app.sidebarCollapse` / `app.sidebarExpand`) and `aria-expanded` are set by `paintSidebarCollapsed()`. Under 920px the toggle hides and the slide-in menu works as before. The sidebar sits on the gray `--bg` with 28px items, a `--nav-active` gray fill for the active one (no yellow bar), and group labels 24px tall.
+On the compact dashboards (`html[data-shell="compact"]`) the brand shares a `.sidebar__head` with `.sidebar__toggle` (`#btn-sidebar`), which folds the desktop sidebar to a 56px rail of icons: `body.sidebar-collapsed`, kept per browser in `localStorage` (`ui:sidebarCollapsed` in `/app`, `ui:backofficeSidebarCollapsed` in `/backoffice`). Folded, group labels become 1px rules, counts and the foot hide, and each `.nav__label` stays for screen readers (visually hidden) while the link's `title` names it on hover. The toggle's localized label and `aria-expanded` are set by `paintSidebarCollapsed()`. Under 920px the toggle hides and the slide-in menu works as before. The sidebar sits on the gray `--bg` with 28px items, a `--nav-active` gray fill for the active one (no yellow bar), and group labels 24px tall.
 
 ## Topbar
 
@@ -106,7 +106,7 @@ The backoffice's bar is `.topbar.topbar--one-row`: under 920px its search stays 
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
-In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon (`render()` sets its `data-tab`, which the `--nav-icon` rules key on, as for `.nav__item`) and name. Its buttons are 28px. Under 560px the icon hides.
+In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon and name. `/app` keys that icon through the crumb's active `data-tab`; the backoffice copies the active nav item's computed `--nav-icon` in `setView()` because its nav is keyed by `href`. Its buttons are 28px. Under 560px the icon hides.
 
 ## View hero + stats
 
