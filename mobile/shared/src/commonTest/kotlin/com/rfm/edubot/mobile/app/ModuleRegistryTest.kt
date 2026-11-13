@@ -34,8 +34,9 @@ class ModuleRegistryTest {
             DashboardModules.OVERVIEW, DashboardModules.CONVERSATIONS, DashboardModules.CONTACTS,
             DashboardModules.AI_ASSISTANT, DashboardModules.AGENTS, DashboardModules.BOOKINGS,
             DashboardModules.PERSONA, DashboardModules.SETTINGS, DashboardModules.MY_HOURS,
+            DashboardModules.MY_SERVICES, DashboardModules.MY_SITES,
         )
-        val routable = crmSections + handledDirectly
+        val routable = crmSections + handledDirectly + ModuleRegistry.buildingPages
         (ModuleRegistry.available(fullPlan) + ModuleRegistry.available(fullPlan, employee = true)).forEach { module ->
             assertTrue(module.id in routable, "${module.id} is offered but the shell has no screen for it")
         }
@@ -44,7 +45,7 @@ class ModuleRegistryTest {
     @Test
     fun `a module the tenant pays for but the app cannot render is named rather than faked`() {
         val webOnly = ModuleRegistry.webOnly(fullPlan).map { it.id }
-        assertEquals(listOf(DashboardModules.INSTAGRAM, DashboardModules.TIMESHEETS), webOnly)
+        assertEquals(listOf(DashboardModules.EMAIL, DashboardModules.INSTAGRAM, DashboardModules.TIMESHEETS), webOnly)
         assertFalse(
             ModuleRegistry.available(fullPlan).any { it.id in webOnly },
             "it must not also appear as something tappable",
@@ -52,23 +53,44 @@ class ModuleRegistryTest {
     }
 
     @Test
-    fun `an employee gets their clock and settings and nothing of the company's`() {
-        val plan = listOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES)
+    fun `an employee gets their own pages and settings and nothing of the company's`() {
+        val plan = listOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES, DashboardModules.MY_SITES)
         assertEquals(
-            listOf(DashboardModules.MY_HOURS, DashboardModules.SETTINGS),
+            listOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES, DashboardModules.MY_SITES, DashboardModules.SETTINGS),
             ModuleRegistry.available(plan, employee = true).map { it.id },
             "their token is refused by every company endpoint, so a company screen would sign them out",
         )
-        assertEquals(listOf(DashboardModules.MY_HOURS), ModuleRegistry.bottomBar(plan, employee = true).map { it.id })
+        assertEquals(
+            listOf(DashboardModules.MY_HOURS, DashboardModules.MY_SITES, DashboardModules.MY_SERVICES),
+            ModuleRegistry.bottomBar(plan, employee = true).map { it.id },
+        )
         assertEquals(DashboardModules.MY_HOURS, ModuleRegistry.startModule(plan, employee = true))
-        assertEquals(listOf(DashboardModules.MY_SERVICES), ModuleRegistry.webOnly(plan, employee = true).map { it.id })
+        assertEquals(emptyList(), ModuleRegistry.webOnly(plan, employee = true).map { it.id })
     }
 
     @Test
-    fun `an employee without the time clock lands on settings rather than the company's home`() {
+    fun `an employee without the time clock lands on their services rather than settings`() {
         val plan = listOf(DashboardModules.MY_SERVICES)
-        assertEquals(DashboardModules.SETTINGS, ModuleRegistry.startModule(plan, employee = true))
+        assertEquals(DashboardModules.MY_SERVICES, ModuleRegistry.startModule(plan, employee = true))
         assertFalse(ModuleRegistry.available(plan, employee = true).any { it.id == DashboardModules.OVERVIEW })
+    }
+
+    @Test
+    fun `a site manager without the time clock lands on their sites`() {
+        val plan = listOf(DashboardModules.MY_SITES)
+        assertEquals(DashboardModules.MY_SITES, ModuleRegistry.startModule(plan, employee = true))
+    }
+
+    @Test
+    fun `a construction company gets its projects on the bar and the Building pages under their own heading`() {
+        val plan = listOf(DashboardModules.OVERVIEW, DashboardModules.CLIENTS) + ModuleRegistry.buildingPages
+        val bar = ModuleRegistry.bottomBar(plan).map { it.id }
+        assertEquals(listOf(DashboardModules.OVERVIEW, DashboardModules.PROJECTS), bar)
+        val building = ModuleRegistry.sections(plan, excluding = bar).single { it.group == ModuleGroup.Building }
+        assertEquals(
+            listOf(DashboardModules.SITE_DIARY, DashboardModules.SITE_ISSUES, DashboardModules.CHANGE_ORDERS, DashboardModules.MEASUREMENTS),
+            building.modules.map { it.id },
+        )
     }
 
     @Test

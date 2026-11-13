@@ -34,6 +34,68 @@ data class Overview(
     val agents: OverviewAgents? = null,
     val agenda: List<OverviewAgendaItem> = emptyList(),
     val recent: List<OverviewRecentItem> = emptyList(),
+    /** Home's Services card: the work done, filled with `extended=1`. */
+    val serviceStats: OverviewServiceStats? = null,
+    /** Home's Projects card, for a company with the Building category. */
+    val projects: OverviewProjects? = null,
+    /** Cards this company hid from Home on the web; the app hides them too. */
+    val hiddenCards: List<String> = emptyList(),
+)
+
+/**
+ * A row is to do while it is open and dated today or later; every other row that isn't cancelled is
+ * done. Read like the employee record reads it.
+ */
+@Serializable
+data class OverviewServiceStats(
+    val doneThisWeek: Int = 0,
+    val doneThisMonth: Int = 0,
+    val doneThisMonthCents: Long = 0,
+    val doneLastMonth: Int = 0,
+    val doneLastMonthCents: Long = 0,
+    val doneThisYear: Int = 0,
+    val doneThisYearCents: Long = 0,
+    val toDo: Int = 0,
+    val toDoToday: Int = 0,
+    /** The lines done most often lately, by catalog title. */
+    val top: List<OverviewServiceTop> = emptyList(),
+    /** Who did the most this month; empty without the Employees module. */
+    val employees: List<OverviewServiceEmployee> = emptyList(),
+)
+
+@Serializable
+data class OverviewServiceTop(val name: String, val count: Int = 0, val cents: Long = 0)
+
+@Serializable
+data class OverviewServiceEmployee(val id: String, val name: String, val count: Int = 0, val cents: Long = 0)
+
+@Serializable
+data class OverviewProjects(
+    val active: Int = 0,
+    val planning: Int = 0,
+    val atRisk: Int = 0,
+    val delayed: Int = 0,
+    val openIssues: Int = 0,
+    val overdueIssues: Int = 0,
+    val diariesToday: Int = 0,
+    val activeWithoutDiary: Int = 0,
+    val pendingChanges: Int = 0,
+    val pendingChangesCents: Long = 0,
+    val toInvoiceCount: Int = 0,
+    val toInvoiceCents: Long = 0,
+    /** The active projects furthest behind their plan. */
+    val behind: List<OverviewProjectRow> = emptyList(),
+)
+
+@Serializable
+data class OverviewProjectRow(
+    val id: String,
+    val number: String = "",
+    val name: String = "",
+    val health: String = "",
+    val progressPct: Int = 0,
+    val plannedPct: Int? = null,
+    val scheduleDays: Int? = null,
 )
 
 @Serializable

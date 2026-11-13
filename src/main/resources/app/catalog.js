@@ -168,7 +168,7 @@ function openCatalogDetail(id) {
       <button class="btn btn--sm btn--primary" type="button" data-cat-edit>${escapeHTML(STR.clientEditAction)}</button>`)}`;
   $('[data-cat-edit]', body).addEventListener('click', () => openFrom(here, () => openCatalogForm(item.id)));
   $('[data-cat-delete]', body).addEventListener('click', () => deleteCatalogItem(item.id));
-  openDrawer(item.title, body, false, { eyebrow: service ? t.service : t.material });
+  openDrawer(item.title, body, false, { eyebrow: service ? t.service : t.material, tags: { kind: 'catalog', id: item.id } });
   // The drawer focuses its first button, which here is Delete; Edit is the safer start (after the drawer's own frame).
   requestAnimationFrame(() => $('[data-cat-edit]', body)?.focus());
 }
@@ -220,6 +220,7 @@ function catalogColumns() {
     { id: 'title', label: t.thTitle, cell: title },
     { id: 'type', label: t.thType, cell: i => `<td>${catalogTypePill(i.type)}${i.bookable && i.durationMinutes && hasModule('bookings') ? ` <span class="pill pill--ok">${escapeHTML(t.bookablePill({ min: i.durationMinutes }))}</span>` : ''}</td>` },
     { id: 'category', label: t.thCategory, cell: i => `<td class="muted">${escapeHTML(i.category)}</td>` },
+    ...tagsColumnIfUsed('catalog'),
     { id: 'unit', label: t.thUnit, cell: i => `<td class="mono muted">${escapeHTML(i.unit)}</td>` },
     { id: 'price', label: t.thPrice, head: 'right', cell: i => `<td class="num">${fmtEUR(i.defaultUnitPriceEur)}</td>` },
     ...(catalogClientsOn() ? [{ id: 'clients', label: t.thClients, head: 'right', cell: i => `<td class="num muted">${catalogItemClientCount(i.id) || ''}</td>` }] : []),
@@ -257,8 +258,9 @@ function renderCatalog(root) {
   }
   const q = state.search.toLowerCase();
   const columns = orderedColumns('catalog', catalogColumns());
-  const rows = state.catalog
-    .filter(i => !q || `${i.code || ''} ${i.title || ''} ${i.description || ''} ${i.category || ''}`.toLowerCase().includes(q))
+  const listed = state.catalog.filter(i => matchesTagFilter('catalog', i.id));
+  const rows = listed
+    .filter(i => !q || `${i.code || ''} ${i.title || ''} ${i.description || ''} ${i.category || ''} ${tagsText('catalog', i.id)}`.toLowerCase().includes(q))
     .map(i => `<tr class="conversation-row" data-cat-item="${escapeHTML(i.id)}">${columnCells(columns, i)}</tr>`)
     .join('');
   const nSrv = state.catalog.filter(i => i.type === 'service' || i.type === 'servico').length;
@@ -268,9 +270,9 @@ function renderCatalog(root) {
     { label: t.materials, value: nMat },
   ])) + crmPanel({
     title: t.catalogTitle,
-    tag: t.tag({ n: state.catalog.length }),
+    tag: t.tag({ n: listed.length }),
     views: catalogClientsOn() ? catalogViewChips('') : '',
-    tools: `<span class="panel__tools-end">${columnOrderButton('catalog')}<button type="button" class="btn btn--sm btn--ghost" data-cat-categories>${escapeHTML(t.manageCategories)}</button></span>`,
+    tools: `<span class="panel__tools-end">${tagFilterHtml('catalog')}${columnOrderButton('catalog')}<button type="button" class="btn btn--sm btn--ghost" data-cat-categories>${escapeHTML(t.manageCategories)}</button></span>`,
     head: columnsHead(columns, 'catalog'),
     rows,
     empty: t.emptyTitle,
@@ -283,6 +285,7 @@ function renderCatalog(root) {
   $$('[data-edit-item]', root).forEach(btn => btn.addEventListener('click', () => openCatalogForm(btn.dataset.editItem)));
   $$('[data-delete-item]', root).forEach(btn => btn.addEventListener('click', () => deleteCatalogItem(btn.dataset.deleteItem)));
   wireColumnOrder(root, 'catalog', catalogColumns());
+  wireTagFilter(root, 'catalog');
   wireCatalogViews(root);
   $('[data-cat-categories]', root)?.addEventListener('click', openCategoryManager);
 }

@@ -75,11 +75,13 @@ Signup (`loadFacebookSdk()`, `waitForWhatsAppSignupMessage()`, `facebookLoginFor
 | Script | Holds |
 |---|---|
 | `core.js` | `state`, the session token, `api()` and `signOut()`, catalog sections (`STR`, `CRM`…), formatting (money, dates, periods, `relTime`), what invoices received and owe (`invoicePaidEur`…), status labels and pills |
+| `amounts.js` | The amounts switch: turns the marked amounts `fmtEUR*` return into `.money` spans and masks marked titles, `startAmounts()` from `init()` ([dashboard-ui.md](dashboard-ui.md)) |
 | `drawer.js` | `openDrawer()`, `closeDrawer()`, the drawer trail (`openFrom()`, `linksBackTo()`) |
 | `components.js` | Shared markup: `hero()`, `statCards()`, `crmPanel()`, `panelTable()`, `periodNav()`, `dashFacts()`, `docClientHtml()` / `docLinesHtml()` / `docFootHtml()` / `itemsTable()` (`recordFieldsHtml()` is in `records.js`) |
 | `records.js` | The client, supplier and employee records' blocks: contact links, record card, KPIs, worklist rows, delete / archive / restore |
 | `columns.js` | The list tables' columns: head and cells from each list's column definitions, the order each person drags them into, the drag ([dashboard-ui.md](dashboard-ui.md)) |
 | `directories.js` | The three directories' Active / Archived switch and column picker (which columns show) |
+| `tags.js` | Tags on records ([record-tags.md](record-tags.md)): loading them per list, the Tags column, the filter, and the strip `openDrawer`'s `tags` option puts above a record |
 | `account.js`, `notifications.js`, `companies.js` | Sign-in screen and account drawer; the bell; the company switcher and Settings → Companies |
 | `home.js` | Home |
 | `inbox.js`, `whatsapp-templates.js`, `instagram.js` | Contacts, Conversations and the template drawer; Settings → WhatsApp templates; Instagram |

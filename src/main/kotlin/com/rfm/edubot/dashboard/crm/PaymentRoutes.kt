@@ -10,8 +10,10 @@ import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.dashboard.moduleContext
 import com.rfm.edubot.dashboard.requireModule
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -30,6 +32,7 @@ import org.bson.types.ObjectId
 internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
+            recordTagRoutes(TagKind.PAYMENT, "payments", deps)
             get("/payments") {
                 val crm = deps.crm(call)
                 val supplierId = call.request.queryParameters["supplierId"]?.takeIf { it.isNotBlank() }?.let { runCatching { ObjectId(it) }.getOrNull() }

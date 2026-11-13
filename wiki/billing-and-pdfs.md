@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-22
+updated: 2026-11-10
 ---
 
 # Quotes, invoices, payments and PDFs
@@ -55,8 +55,8 @@ Rodrigo asked that a quote can also be converted to a service, besides an invoic
 - API: `POST /app/api/crm/quotes/{id}/service` (`performedAt`, `name`, both optional; needs the Quotes
   and Serviços modules), `GET /app/api/crm/services?quoteId=`, `quoteId` on the row's DTO, and the
   `service.created` event's payload and related records.
-- Not done: the dashboard assistant has no tool to turn a quote into a service, and the mobile app
-  shows a generic error for `already_serviced`.
+- Not done: the dashboard assistant has no tool to turn a quote into a service. The mobile app turns
+  an accepted quote into a service from its record and names `already_serviced` since 2026-11-10.
 
 Verified with route, assistant and agent tests and in headless Chrome (pt-PT), both conversions
 included.

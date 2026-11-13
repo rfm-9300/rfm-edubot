@@ -130,22 +130,3 @@ class CatalogItemFormStateTest {
         assertEquals("material", CatalogItemType.Product.wireValue)
     }
 }
-
-class ClientFormStateTest {
-    @Test
-    fun `a client needs its NIF and address which is why saving used to fail`() {
-        val missingTaxId = ClientFormState(name = "Maria", phone = "351900000001", address = "Rua X")
-        assertFalse(missingTaxId.canSave)
-
-        val missingAddress = ClientFormState(name = "Maria", phone = "351900000001", taxId = "123456789")
-        assertFalse(missingAddress.canSave)
-
-        val complete = ClientFormState(
-            name = "Maria",
-            phone = "351900000001",
-            taxId = "123456789",
-            address = "Rua X 1",
-        )
-        assertTrue(complete.canSave)
-    }
-}

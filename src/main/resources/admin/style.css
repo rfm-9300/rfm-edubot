@@ -875,6 +875,18 @@ html[data-theme="dark"] .lbl .req { color: var(--accent); }
 .hint--warn { color: var(--warn-ink); }
 .hint--bad { color: var(--bad-ink); }
 
+/* Tags (app/tags.js): free-text labels on a record. `.tags` lists them in a table cell; `.tags-strip` sits above a drawer's body. */
+.tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.pill--tag { background: var(--surface-2); color: var(--ink-2); border-color: var(--line); text-transform: none; letter-spacing: 0; }
+.pill--tag::before { content: none; }
+.pill__x { appearance: none; border: 0; background: none; color: inherit; font: inherit; line-height: 1; padding: 0 0 0 4px; cursor: pointer; opacity: 0.6; border-radius: 50%; }
+.pill__x:hover { opacity: 1; }
+.pill__x:focus-visible { opacity: 1; outline: none; box-shadow: var(--focus-ring); }
+.tags-strip { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 0 0 16px; }
+.tags-strip[hidden] { display: none; }
+.tags-strip__label { margin-right: 2px; font-size: 11.5px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; color: var(--ink-mute); }
+.tags-strip__input { width: 160px; max-width: 100%; height: 28px; padding: 0 10px; }
+
 /* The actions at the foot of a record or document drawer (docFootHtml). */
 .detail__foot { display: flex; gap: 8px; flex-wrap: wrap; padding-top: 4px; border-top: 1px solid var(--line-soft); }
 
@@ -3238,12 +3250,13 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
 .dash__status--urgent .dash__dot { background: var(--bad); box-shadow: 0 0 0 3px var(--bad-soft); }
 .dash__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 
-/* Home's amounts are blurred while .dash is private, as a bank's app hides a balance; the eye in .dash__actions toggles it. */
+/* Every amount in /app is a .money span (amounts.js), blurred while <html data-amounts="hidden">, as a bank's app hides a
+   balance; the eye in the top bar next to the theme toggle switches it. */
 .money { transition: filter 160ms; }
-.dash.is-private .money { filter: blur(0.42em); user-select: none; }
+html[data-amounts="hidden"] .money { filter: blur(0.42em); user-select: none; }
 .eye { display: block; }
-.dash:not(.is-private) .eye--off,
-.dash.is-private .eye--on { display: none; }
+html[data-amounts="shown"] .eye--off,
+html[data-amounts="hidden"] .eye--on { display: none; }
 @media (prefers-reduced-motion: reduce) { .money { transition: none; } }
 
 /* KPI strip: cells share hairlines via the 1px grid gap */
@@ -3471,12 +3484,12 @@ html[data-layout="minimal"] .panel__search { height: 28px; }
 }
 
 /* ============================================================
-   SHELL · compact — html[data-shell="compact"], on /app only
+   SHELL · compact — html[data-shell="compact"], on /app and /backoffice
    The 2026-10-27 "Tenant Dashboard" design over the minimal skin: the sidebar
    sits on the gray page and folds to a rail of icons, the main area is one
    white card inset 8px, the top bar is a 40px page bar (page icon and name),
    tables are dense 32px grids, filters are flat tabs, drawers float inset.
-   Fonts and colors stay the skin's; only size, density and radius change.
+   Colors stay the skin's; /app switches to Inter while the backoffice keeps Outfit + Nunito.
    ============================================================ */
 html[data-shell="compact"] {
   --bg:        #f1f2f4;
@@ -3492,12 +3505,17 @@ html[data-shell="compact"] {
   --nav-hover:  color-mix(in srgb, var(--ink) 5%, transparent);
   --nav-active: color-mix(in srgb, var(--ink) 8%, transparent);
 }
+/* The platform surface uses the compact geometry without changing its established typography. */
+html[data-shell="compact"][data-surface="backoffice"] {
+  --sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --display: "Outfit", var(--sans);
+}
 html[data-shell="compact"][data-theme="dark"] {
   --bg:        #08090c;
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50);
 }
 html[data-shell="compact"] body { font-size: 13px; letter-spacing: -0.003em; }
-/* Inter reads a weight heavier than Nunito: names, nav, buttons and tabs at 500, titles and figures at 600. */
+/* Compact density keeps names, nav, buttons and tabs at 500, titles and figures at 600. */
 html[data-shell="compact"] :is(.btn, .chip, .nav__item, .nav__group-label, .tbl thead th, .tbl .name, .tbl__open, .pill, .kpi__label, .stat__label, .dash-kpi__label, .lbl, .worklist__title, .rank__name, .agenda__who, .inbox-row__name, .record-fields__value, .tag) { font-weight: 500; }
 html[data-shell="compact"] :is(.nav__item.is-active, .brand__name, .crumb__leaf, .panel__title, .drawer__title, .view__title, .dash__title, .stat__value, .dash-kpi__value, .dash-figure__value, .empty__title, .kpi__value) { font-weight: 600; }
 html[data-shell="compact"] .tbl tbody td { font-weight: 400; }
@@ -3752,6 +3770,9 @@ html[data-shell="compact"] .inbox { gap: 8px; height: calc(100vh - 110px); }
 @media (max-width: 560px) and (pointer: coarse) {
   html[data-shell="compact"] :is(.btn--sm, .chip, .panel__tools .sel, .panel__filters .sel, .panel__search),
   html[data-shell="compact"] :is(.panel__tools, .panel__filters, .panel__views) .chip { height: 36px; }
+  html[data-shell="compact"] .tags-strip__input { height: 36px; font-size: 16px; }
+  /* A tag's × is a thumb target without making the tag taller. */
+  html[data-shell="compact"] .pill__x { padding: 9px 10px 9px 8px; margin: -9px -8px -9px -2px; }
   html[data-shell="compact"] .btn,
   html[data-shell="compact"] .iconbtn,
   html[data-shell="compact"] .iconbtn--theme { min-height: 36px; min-width: 36px; }

@@ -25,7 +25,7 @@ Strings in examples are placeholders — real copy goes through i18n.
 - `.btn--sm` in table action cells and compact toolbars.
 - `.iconbtn` is 30×30, radius 10px. Theme toggle uses `.iconbtn--theme` (36×36 pill). A `:disabled` one is 40% opacity with no hover (the catalog's delete button on a category items still use; its `title` says why).
 - **Record filter row:** `.record__filter` above a record tab's table holds `.chip`s (`aria-pressed`) and, pushed right, a `.period-nav` (an employee's All / By month). **Report preview:** `.report-preview` is a label, an `iframe.report-preview__frame` (52vh, `--line` border, `--r-md`) that shows a printable document, and a `.hint` status line that hides when empty; give the frame `sandbox`.
-- **Hidden amounts (Home):** `.money` wraps an amount; while `.dash.is-private` it is blurred (`filter: blur(0.42em)`, so it scales with the text) and not selectable. The eye (`.iconbtn.iconbtn--theme[data-money-toggle]` holding `svg.eye--on` and `svg.eye--off`, `aria-pressed` = hidden) sits first in `.dash__actions`. Titles and aria-labels carrying an amount read `•••` while hidden. Amounts are marked in `app/home.js` (`wholeCentsEUR`, `centsEUR`); how and why is in `wiki/dashboard-ui.md`.
+- **Hidden amounts (every `/app` page):** `.money` wraps an amount; while `<html data-amounts="hidden">` it is blurred (`filter: blur(0.42em)`, so it scales with the text) and not selectable. You never write `.money`: `fmtEUR`, `fmtEURWhole` and `fmtEURCompact` mark each amount and `app/amounts.js` makes the spans. The eye (`.iconbtn.iconbtn--theme#btn-amounts` holding `svg.eye--on` and `svg.eye--off`) sits in the top bar right after the theme toggle, and its label names the next click. Titles and aria-labels carrying an amount read `•••` while hidden. Text that is sent or put in a field goes through `plainMoney()`; how and why is in `wiki/dashboard-ui.md`.
 - `.iconbtn--avatar` (with `--theme`) shows the signed-in user's initials on `--accent-soft`; `/app` uses it for the account button.
 - `.iconbtn--bell` (with `--theme`) is `/app`'s notifications button: a 16px line bell and an `.iconbtn__count` on its top-right corner (`--bad-soft` / `--bad-ink` like `.nav__count.is-alert`, ringed in `--surface`, "9+" past nine, `hidden` at zero). The count is `aria-hidden`; the button's `aria-label` and `title` carry it ("Notifications, 3 unread").
 - In the minimal skin (`html[data-layout="minimal"]`, `/app` and `/backoffice`) buttons are 36px with a 9px radius and semibold text: `--primary` / `--accent` is solid yellow with near-black `--accent-ink` text and darkens to `--accent-hover`; `--ghost` is white with a hairline border; `.iconbtn--theme` is a 36×36 rounded square.
@@ -73,7 +73,7 @@ In the minimal skin the active item is a `--accent-soft` fill with a 3px `--acce
 
 ### Compact shell: sidebar head and folding
 
-On `/app` (`html[data-shell="compact"]`) the brand shares a `.sidebar__head` with `.sidebar__toggle` (`#btn-sidebar`), which folds the desktop sidebar to a 56px rail of icons: `body.sidebar-collapsed`, kept per browser in `localStorage` `ui:sidebarCollapsed`. Folded, group labels become 1px rules, counts and the foot hide, and each `.nav__label` stays for screen readers (visually hidden) while the link's `title` names it on hover; `renderNav()` sets that `title`. The toggle's label (`app.sidebarCollapse` / `app.sidebarExpand`) and `aria-expanded` are set by `paintSidebarCollapsed()`. Under 920px the toggle hides and the slide-in menu works as before. The sidebar sits on the gray `--bg` with 28px items, a `--nav-active` gray fill for the active one (no yellow bar), and group labels 24px tall.
+On the compact dashboards (`html[data-shell="compact"]`) the brand shares a `.sidebar__head` with `.sidebar__toggle` (`#btn-sidebar`), which folds the desktop sidebar to a 56px rail of icons: `body.sidebar-collapsed`, kept per browser in `localStorage` (`ui:sidebarCollapsed` in `/app`, `ui:backofficeSidebarCollapsed` in `/backoffice`). Folded, group labels become 1px rules, counts and the foot hide, and each `.nav__label` stays for screen readers (visually hidden) while the link's `title` names it on hover. The toggle's localized label and `aria-expanded` are set by `paintSidebarCollapsed()`. Under 920px the toggle hides and the slide-in menu works as before. The sidebar sits on the gray `--bg` with 28px items, a `--nav-active` gray fill for the active one (no yellow bar), and group labels 24px tall.
 
 ## Topbar
 
@@ -106,7 +106,7 @@ The backoffice's bar is `.topbar.topbar--one-row`: under 920px its search stays 
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
-In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon (`render()` sets its `data-tab`, which the `--nav-icon` rules key on, as for `.nav__item`) and name. Its buttons are 28px. Under 560px the icon hides.
+In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon and name. `/app` keys that icon through the crumb's active `data-tab`; the backoffice copies the active nav item's computed `--nav-icon` in `setView()` because its nav is keyed by `href`. Its buttons are 28px. Under 560px the icon hides.
 
 ## View hero + stats
 
@@ -297,6 +297,8 @@ Used by Services, Invoices, and Financeiro (`design-system/patterns.md`). Don't 
 ```
 
 Cell helpers: `.name` `.id` `.muted` `.num` `.mono` `.right` `.actions` `.nowrap` `.long`.
+
+**Tags** (`app/tags.js`, [wiki/record-tags.md](../wiki/record-tags.md)): a tag is `.pill.pill--tag`, a neutral pill with no status dot and its own case, so it never reads as a status. In a table cell `.tags` wraps them (the cell takes `.long`); the list's filter is a compact `.sel` in `.panel__tools` (`[data-tag-filter]`). In a record drawer `.tags-strip` is the first row of `#drawer-body`: `.tags-strip__label`, the pills each ending in a `button.pill__x` (×), then a ghost `.btn--sm` "Add tag" that turns into `input.inp.tags-strip__input` with a `datalist` of suggestions. Open it with `openDrawer(…, { tags: { kind, id } })`. On touch phones the input is 36px tall and 16px type, and a × grows its hit area with negative margins, not the pill.
 
 A table can have more columns than its panel fits, as the `/app` directory lists can once someone adds columns; it then scrolls inside `.tbl-wrap`, and the browser squeezes every cell that may wrap down to its longest word. So values that must stay whole take `.nowrap` (phone numbers, NIFs, postal codes, dates, numbers), and text that wraps takes `.long`, an 11em minimum, so a name or an address breaks over a few lines rather than one word per line. `.id` codes take neither (they still break at the hyphen on a phone).
 
@@ -661,6 +663,7 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 ```html
 <form class="form flow-menus">
   <section class="panel"><!-- head: title + count .tag, saved-by .panel__meta; body: hint, .record-kpis, .form__grid (fallback .sel, "Check a message" .inp + result .hint) --></section>
+  <section class="panel" id="pm-start"><!-- "Start words": hint, then a .form__grid with one .form__row per channel (Instagram, WhatsApp): .form__check to switch it on and, when on, its words as .tokens with a count and a note for a repeat; same draft, problems and savebar as the menus --></section>
   <section class="panel flow-menu is-open">
     <header class="panel__head flow-menu__head">
       <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Welcome menu</span></button></h2>

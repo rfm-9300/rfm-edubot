@@ -25,6 +25,7 @@ import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
 import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.flows.ChatFlowUsage
+import com.rfm.edubot.flows.StartGate
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.Checked
 import com.rfm.edubot.persona.PersonaBehavior
@@ -247,9 +248,11 @@ private fun Route.personaRoutes(
         }
         put("/menus") {
             val ctx = call.personaEditor() ?: return@put
-            val flows = call.body<MenusInput>()?.toChatFlows() ?: return@put
+            val input = call.body<MenusInput>() ?: return@put
+            val repository = ChatFlowRepository(mongo, ctx.tenant.id)
+            val flows = input.toChatFlows(keepGates = repository.load()?.startGates.orEmpty())
             flows.saveProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
-            val saved = ChatFlowRepository(mongo, ctx.tenant.id).save(flows, ctx.author())
+            val saved = repository.save(flows, ctx.author())
             call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
         }
         post("/preview") {
@@ -268,8 +271,12 @@ private fun Route.personaRoutes(
                 .map { it.copy(content = it.content.take(PersonaLimits.MAX_TEST_MESSAGE_CHARS)) }
             if (history.isEmpty()) return@post call.problem(PersonaProblem("messages_required", "messages"))
             // Menus answer before the AI, as they do on Instagram; unsaved ones are tried as they are.
-            val menus = request.flows?.toChatFlows() ?: ChatFlowRepository(mongo, ctx.tenant.id).find()
+            val menuRepository = ChatFlowRepository(mongo, ctx.tenant.id)
+            val menus = request.flows?.toChatFlows(keepGates = menuRepository.load()?.startGates.orEmpty()) ?: menuRepository.find()
             if (request.flows != null) menus?.saveProblem()?.let { return@post call.respond(HttpStatusCode.BadRequest, it.dto()) }
+            // Channels where this test chat, as a new chat, would get no reply because its first message holds no start word.
+            val opener = request.messages.firstOrNull { it.role == "user" }?.content.orEmpty()
+            val gatedChannels = StartGate.CHANNELS.filter { menus?.startGate(it)?.opens(opener) == false }.map { it.name }.sorted()
             val last = history.last()
             val menuReply = if (last.role == "assistant") null else menus?.replyTo(Platform.INSTAGRAM, last.content, request.payload)
             if (menuReply != null) {
@@ -283,6 +290,7 @@ private fun Route.personaRoutes(
                         menu = menuReply.flow.name,
                         quickReplies = menuReply.quickReplies.map { it.dto() },
                         teamOnly = false,
+                        gatedChannels = gatedChannels,
                     ),
                 )
             }
@@ -310,6 +318,7 @@ private fun Route.personaRoutes(
                     menu = null,
                     quickReplies = emptyList(),
                     teamOnly = menus?.teamOnlyChannels?.contains(Platform.INSTAGRAM) == true,
+                    gatedChannels = gatedChannels,
                 ),
             )
         }
@@ -454,7 +463,10 @@ private class PlaygroundHandoff : ToolPack {
     val payload: String? = null,
 )
 
-/** [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram. */
+/**
+ * [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram;
+ * [gatedChannels] are the channels where a chat like this one, whose first message holds no start word, gets no reply.
+ */
 @Serializable private data class PersonaTestResponse(
     val reply: String,
     val handoff: Boolean,
@@ -464,6 +476,7 @@ private class PlaygroundHandoff : ToolPack {
     val menu: String?,
     val quickReplies: List<QuickReplyDto>,
     val teamOnly: Boolean,
+    val gatedChannels: List<String>,
 )
 @Serializable private data class PersonaPreviewRequest(val draft: PersonaDraftInput? = null)
 @Serializable private data class PersonaPreviewDto(val block: String?, val chars: Int, val tokenEstimate: Int)

@@ -8,11 +8,14 @@ import com.rfm.edubot.mobile.core.common.VoiceInput
 import com.rfm.edubot.mobile.core.data.AgentsRepository
 import com.rfm.edubot.mobile.core.data.AssistantRepository
 import com.rfm.edubot.mobile.core.data.BookingsRepository
+import com.rfm.edubot.mobile.core.data.BuildingRepository
 import com.rfm.edubot.mobile.core.data.CrmRepository
 import com.rfm.edubot.mobile.core.data.InboxRepository
+import com.rfm.edubot.mobile.core.data.MySitesRepository
 import com.rfm.edubot.mobile.core.data.NotificationsRepository
 import com.rfm.edubot.mobile.core.data.OverviewRepository
 import com.rfm.edubot.mobile.core.data.PersonaRepository
+import com.rfm.edubot.mobile.core.data.PortalRepository
 import com.rfm.edubot.mobile.core.data.SessionRepository
 import com.rfm.edubot.mobile.core.data.SettingsRepository
 import com.rfm.edubot.mobile.core.data.SnapshotCache
@@ -21,11 +24,14 @@ import com.rfm.edubot.mobile.core.network.DashboardHttpClient
 import com.rfm.edubot.mobile.core.network.KtorAgentsApi
 import com.rfm.edubot.mobile.core.network.KtorAssistantApi
 import com.rfm.edubot.mobile.core.network.KtorBookingsApi
+import com.rfm.edubot.mobile.core.network.KtorBuildingApi
 import com.rfm.edubot.mobile.core.network.KtorCrmApi
 import com.rfm.edubot.mobile.core.network.KtorInboxApi
+import com.rfm.edubot.mobile.core.network.KtorMySitesApi
 import com.rfm.edubot.mobile.core.network.KtorNotificationsApi
 import com.rfm.edubot.mobile.core.network.KtorOverviewApi
 import com.rfm.edubot.mobile.core.network.KtorPersonaApi
+import com.rfm.edubot.mobile.core.network.KtorPortalApi
 import com.rfm.edubot.mobile.core.network.KtorSessionApi
 import com.rfm.edubot.mobile.core.network.KtorSettingsApi
 import com.rfm.edubot.mobile.core.network.KtorTimeClockApi
@@ -63,13 +69,26 @@ class MobileGraph(
     val persona = PersonaRepository(KtorPersonaApi(http), cache)
     val notifications = NotificationsRepository(KtorNotificationsApi(http), cache)
     val settings = SettingsRepository(KtorSettingsApi(http))
+    val building = BuildingRepository(KtorBuildingApi(http), cache)
 
     private var timeClock: TimeClockRepository? = null
+    private var portal: PortalRepository? = null
+    private var mySites: MySitesRepository? = null
 
     /** The signed-in employee's clock; whoever signs in next on the same phone gets a fresh one. */
     fun timeClock(employeeId: String): TimeClockRepository =
         timeClock?.takeIf { it.employeeId == employeeId }
             ?: TimeClockRepository(KtorTimeClockApi(http), cache, employeeId).also { timeClock = it }
+
+    /** The signed-in employee's My services, fresh for whoever signs in next, like [timeClock]. */
+    fun portal(employeeId: String): PortalRepository =
+        portal?.takeIf { it.employeeId == employeeId }
+            ?: PortalRepository(KtorPortalApi(http), cache, employeeId).also { portal = it }
+
+    /** The signed-in site manager's My sites. */
+    fun mySites(employeeId: String): MySitesRepository =
+        mySites?.takeIf { it.employeeId == employeeId }
+            ?: MySitesRepository(KtorMySitesApi(http), cache, employeeId).also { mySites = it }
 
     fun close() = http.close()
 }

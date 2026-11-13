@@ -77,6 +77,9 @@ data class Conversation(
     companion object {
         /** [autoReplyPausedBy] when the bot handed the conversation to the team. Not an email, so no person matches it. */
         const val BOT_HANDOFF = "bot:handoff"
+
+        /** [autoReplyPausedBy] when the chat began without a start word the company asks for, so nobody answered it yet. */
+        const val START_GATE = "bot:start-gate"
     }
 }
 

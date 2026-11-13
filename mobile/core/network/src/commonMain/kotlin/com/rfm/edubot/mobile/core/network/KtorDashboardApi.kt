@@ -1,6 +1,29 @@
 package com.rfm.edubot.mobile.core.network
 
 import com.rfm.edubot.mobile.core.model.Account
+import com.rfm.edubot.mobile.core.model.CatalogCategory
+import com.rfm.edubot.mobile.core.model.ChangeOrder
+import com.rfm.edubot.mobile.core.model.ChangeStatus
+import com.rfm.edubot.mobile.core.model.CreateService
+import com.rfm.edubot.mobile.core.model.DirectoryFields
+import com.rfm.edubot.mobile.core.model.DueDate
+import com.rfm.edubot.mobile.core.model.Measurement
+import com.rfm.edubot.mobile.core.model.MeasurementInvoiced
+import com.rfm.edubot.mobile.core.model.MySite
+import com.rfm.edubot.mobile.core.model.MySiteDetail
+import com.rfm.edubot.mobile.core.model.PhaseProgressChange
+import com.rfm.edubot.mobile.core.model.PortalClient
+import com.rfm.edubot.mobile.core.model.Project
+import com.rfm.edubot.mobile.core.model.ProjectStatusChange
+import com.rfm.edubot.mobile.core.model.QuoteToService
+import com.rfm.edubot.mobile.core.model.RejectSubmission
+import com.rfm.edubot.mobile.core.model.SaveIssue
+import com.rfm.edubot.mobile.core.model.SaveSiteLog
+import com.rfm.edubot.mobile.core.model.ServiceSubmission
+import com.rfm.edubot.mobile.core.model.SiteIssue
+import com.rfm.edubot.mobile.core.model.SiteLog
+import com.rfm.edubot.mobile.core.model.SubmitService
+import com.rfm.edubot.mobile.core.model.UpdateService
 import com.rfm.edubot.mobile.core.model.Agent
 import com.rfm.edubot.mobile.core.model.AgentApproval
 import com.rfm.edubot.mobile.core.model.AgentRun
@@ -64,6 +87,7 @@ import io.ktor.http.HttpMethod
 import kotlinx.serialization.Serializable
 
 private const val APP = "app/api"
+private const val BUILDING = "$APP/building"
 
 class KtorSessionApi(private val http: DashboardHttpClient) : SessionApi {
     override suspend fun login(email: String, password: String): Session =
@@ -136,6 +160,8 @@ class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
 
     override suspend fun client(id: String): CrmClient = http.get("$APP/crm/clients/$id")
 
+    override suspend fun clientFields(): DirectoryFields = http.get("$APP/crm/clients/fields")
+
     override suspend fun createClient(request: SaveClient): CrmClient = http.post("$APP/crm/clients", request)
 
     override suspend fun updateClient(id: String, request: SaveClient): CrmClient =
@@ -158,6 +184,13 @@ class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
     override suspend fun convertQuote(id: String, request: ConvertQuote): Invoice =
         http.post("$APP/crm/quotes/$id/invoice", request)
 
+    override suspend fun quoteToService(id: String, request: QuoteToService): ClientService =
+        http.post("$APP/crm/quotes/$id/service", request)
+
+    override suspend fun deleteQuote(id: String) {
+        http.send(HttpMethod.Delete, "$APP/crm/quotes/$id")
+    }
+
     override suspend fun invoices(clientId: String?, status: String?): List<Invoice> =
         http.get("$APP/crm/invoices", "clientId" to clientId, "status" to status)
 
@@ -167,8 +200,19 @@ class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
 
     override suspend fun markInvoicePaid(id: String): Invoice = http.patch("$APP/crm/invoices/$id/paid")
 
+    override suspend fun receiveInstallment(id: String, index: Int): Invoice =
+        http.patch("$APP/crm/invoices/$id/installments/$index/paid")
+
+    override suspend fun cancelInvoice(id: String): Invoice = http.post("$APP/crm/invoices/$id/cancel")
+
+    override suspend fun deleteInvoice(id: String) {
+        http.send(HttpMethod.Delete, "$APP/crm/invoices/$id")
+    }
+
     override suspend fun catalog(query: String?): List<CatalogItem> =
         http.get("$APP/crm/standard-items", "q" to query?.takeIf { it.isNotBlank() })
+
+    override suspend fun catalogCategories(): List<CatalogCategory> = http.get("$APP/crm/catalog-categories")
 
     override suspend fun saveCatalogItem(request: SaveCatalogItem, id: String?): CatalogItem =
         http.post(if (id == null) "$APP/crm/standard-items" else "$APP/crm/standard-items/$id", request)
@@ -177,8 +221,31 @@ class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
         http.send(HttpMethod.Delete, "$APP/crm/standard-items/$id")
     }
 
-    override suspend fun services(clientId: String?, status: String?): List<ClientService> =
-        http.get("$APP/crm/services", "clientId" to clientId, "status" to status)
+    override suspend fun services(
+        clientId: String?,
+        status: String?,
+        employeeId: String?,
+        from: String?,
+        to: String?,
+    ): List<ClientService> = http.get(
+        "$APP/crm/services",
+        "clientId" to clientId,
+        "status" to status,
+        "employeeId" to employeeId,
+        "from" to from,
+        "to" to to,
+    )
+
+    override suspend fun service(id: String): ClientService = http.get("$APP/crm/services/$id")
+
+    override suspend fun createService(request: CreateService): ClientService = http.post("$APP/crm/services", request)
+
+    override suspend fun updateService(id: String, request: UpdateService): ClientService =
+        http.patch("$APP/crm/services/$id", request)
+
+    override suspend fun deleteService(id: String) {
+        http.send(HttpMethod.Delete, "$APP/crm/services/$id")
+    }
 
     override suspend fun invoiceServices(request: InvoiceClientServices): Invoice =
         http.post("$APP/crm/services/invoice", request)
@@ -186,13 +253,112 @@ class KtorCrmApi(private val http: DashboardHttpClient) : CrmApi {
     override suspend fun suppliers(archived: Boolean): List<Supplier> =
         http.get("$APP/crm/suppliers", "archived" to if (archived) "1" else null)
 
+    override suspend fun supplier(id: String): Supplier = http.get("$APP/crm/suppliers/$id")
+
     override suspend fun employees(archived: Boolean): List<Employee> =
         http.get("$APP/crm/employees", "archived" to if (archived) "1" else null)
 
-    override suspend fun payments(status: String?): List<Payment> =
-        http.get("$APP/crm/payments", "status" to status)
+    override suspend fun employee(id: String): Employee = http.get("$APP/crm/employees/$id")
+
+    override suspend fun payments(status: String?, supplierId: String?, employeeId: String?): List<Payment> =
+        http.get("$APP/crm/payments", "status" to status, "supplierId" to supplierId, "employeeId" to employeeId)
 
     override suspend fun markPaymentPaid(id: String): Payment = http.patch("$APP/crm/payments/$id/paid")
+
+    override suspend fun serviceSubmissions(employeeId: String?, status: String?): List<ServiceSubmission> =
+        http.get("$APP/crm/service-submissions", "employeeId" to employeeId, "status" to status)
+
+    // The response also carries the Serviços row the approval made; the review screen only needs the submission.
+    override suspend fun approveSubmission(id: String): ServiceSubmission =
+        http.post<ApprovedSubmission>("$APP/crm/service-submissions/$id/approve", ApproveSubmission()).submission
+
+    override suspend fun rejectSubmission(id: String, reason: String?): ServiceSubmission =
+        http.post("$APP/crm/service-submissions/$id/reject", RejectSubmission(reason?.takeIf { it.isNotBlank() }))
+}
+
+class KtorPortalApi(private val http: DashboardHttpClient) : PortalApi {
+    override suspend fun clients(): List<PortalClient> = http.get("$APP/portal/clients")
+
+    override suspend fun catalog(): List<CatalogItem> = http.get("$APP/portal/catalog")
+
+    override suspend fun myServices(): List<ServiceSubmission> = http.get("$APP/portal/services")
+
+    override suspend fun submit(request: SubmitService): ServiceSubmission = http.post("$APP/portal/services", request)
+
+    override suspend fun update(id: String, request: SubmitService): ServiceSubmission =
+        http.patch("$APP/portal/services/$id", request)
+
+    override suspend fun withdraw(id: String) {
+        http.send(HttpMethod.Delete, "$APP/portal/services/$id")
+    }
+}
+
+class KtorMySitesApi(private val http: DashboardHttpClient) : MySitesApi {
+    override suspend fun sites(): List<MySite> = http.get("$APP/portal/sites")
+
+    override suspend fun site(id: String): MySiteDetail = http.get("$APP/portal/sites/$id")
+
+    override suspend fun writeDiary(siteId: String, request: SaveSiteLog): SiteLog =
+        http.post("$APP/portal/sites/$siteId/diary", request)
+
+    override suspend fun editDiary(siteId: String, entryId: String, request: SaveSiteLog): SiteLog =
+        http.patch("$APP/portal/sites/$siteId/diary/$entryId", request)
+
+    override suspend fun logIssue(siteId: String, request: SaveIssue): SiteIssue =
+        http.post("$APP/portal/sites/$siteId/issues", request)
+
+    override suspend fun editIssue(siteId: String, issueId: String, request: SaveIssue): SiteIssue =
+        http.patch("$APP/portal/sites/$siteId/issues/$issueId", request)
+}
+
+class KtorBuildingApi(private val http: DashboardHttpClient) : BuildingApi {
+    override suspend fun projects(status: String?): List<Project> = http.get("$BUILDING/projects", "status" to status)
+
+    override suspend fun project(id: String): Project = http.get("$BUILDING/projects/$id")
+
+    override suspend fun setProjectStatus(id: String, status: String): Project =
+        http.patch("$BUILDING/projects/$id", ProjectStatusChange(status))
+
+    override suspend fun setPhaseProgress(projectId: String, phaseId: String, progressPct: Int): Project =
+        http.patch("$BUILDING/projects/$projectId/phases/$phaseId", PhaseProgressChange(progressPct))
+
+    override suspend fun diary(projectId: String?, from: String?, to: String?): List<SiteLog> =
+        http.get("$BUILDING/diary", "projectId" to projectId, "from" to from, "to" to to)
+
+    override suspend fun diaryEntry(id: String): SiteLog = http.get("$BUILDING/diary/$id")
+
+    override suspend fun writeDiary(request: SaveSiteLog): SiteLog = http.post("$BUILDING/diary", request)
+
+    override suspend fun editDiary(id: String, request: SaveSiteLog): SiteLog = http.patch("$BUILDING/diary/$id", request)
+
+    override suspend fun issues(projectId: String?, status: String?): List<SiteIssue> =
+        http.get("$BUILDING/issues", "projectId" to projectId, "status" to status)
+
+    override suspend fun issue(id: String): SiteIssue = http.get("$BUILDING/issues/$id")
+
+    override suspend fun logIssue(request: SaveIssue): SiteIssue = http.post("$BUILDING/issues", request)
+
+    override suspend fun editIssue(id: String, request: SaveIssue): SiteIssue = http.patch("$BUILDING/issues/$id", request)
+
+    override suspend fun changes(projectId: String?, status: String?): List<ChangeOrder> =
+        http.get("$BUILDING/changes", "projectId" to projectId, "status" to status)
+
+    override suspend fun change(id: String): ChangeOrder = http.get("$BUILDING/changes/$id")
+
+    override suspend fun setChangeStatus(id: String, request: ChangeStatus): ChangeOrder =
+        http.post("$BUILDING/changes/$id/status", request)
+
+    override suspend fun measurements(projectId: String?, status: String?): List<Measurement> =
+        http.get("$BUILDING/measurements", "projectId" to projectId, "status" to status)
+
+    override suspend fun measurement(id: String): Measurement = http.get("$BUILDING/measurements/$id")
+
+    override suspend fun approveMeasurement(id: String): Measurement = http.post("$BUILDING/measurements/$id/approve")
+
+    override suspend fun reopenMeasurement(id: String): Measurement = http.post("$BUILDING/measurements/$id/reopen")
+
+    override suspend fun invoiceMeasurement(id: String, dueDate: String): MeasurementInvoiced =
+        http.post("$BUILDING/measurements/$id/invoice", DueDate(dueDate))
 }
 
 class KtorBookingsApi(private val http: DashboardHttpClient) : BookingsApi {
@@ -322,6 +488,13 @@ class KtorSettingsApi(private val http: DashboardHttpClient) : SettingsApi {
 
     override suspend fun account(): Account = http.get("$APP/account")
 }
+
+/** Approve as the employee sent it; the team's changes go through the web's form. */
+@Serializable
+private data class ApproveSubmission(val changes: SubmitService? = null)
+
+@Serializable
+private data class ApprovedSubmission(val submission: ServiceSubmission)
 
 @Serializable
 private data class LoginRequest(val email: String, val password: String)

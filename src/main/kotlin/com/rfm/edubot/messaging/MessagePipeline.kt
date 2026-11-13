@@ -31,6 +31,7 @@ import com.rfm.edubot.conversation.model.MessageStatus
 import com.rfm.edubot.conversation.model.TokenUsage
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.ChatFlows
 import com.rfm.edubot.flows.FlowReply
 import com.rfm.edubot.persona.PersonaHandoff
 import com.rfm.edubot.persona.PersonaPrompt
@@ -96,7 +97,8 @@ class MessagePipeline(
 
             // The AI can't see photos or hear voice notes: store them for the inbox, where they show as waiting.
             inbound.media?.let { media ->
-                val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
+                val conversation = conversations.findByWaId(inbound.waId, inbound.platform)
+                    ?: conversations.findOrCreate(user.id, inbound.waId, inbound.platform, pausedBy = startGatePause(inbound, chatFlows?.find()))
                 val caption = inbound.messageText.takeIf { it.isNotBlank() }
                 val content = when (media.kind) {
                     "audio" -> MessageContent.Audio(media.mediaId)
@@ -150,11 +152,16 @@ class MessagePipeline(
             }
 
             val existingConversation = conversations.findByWaId(inbound.waId, inbound.platform)
-            if (existingConversation != null && !existingConversation.autoReplyEnabled) {
+            val paused = existingConversation != null && !existingConversation.autoReplyEnabled
+            val flows = if (paused) null else chatFlows?.find()
+            // A chat that begins without a start word the company asks for is kept for the team, paused from its first message.
+            val gatePause = if (existingConversation == null) startGatePause(inbound, flows) else null
+            if (paused || gatePause != null) {
+                val conversation = existingConversation ?: conversations.findOrCreate(user.id, inbound.waId, inbound.platform, pausedBy = gatePause)
                 val stored = messages.insertIfAbsent(
                     Message(
                         tenantId = inbound.tenantId,
-                        conversationId = existingConversation.id,
+                        conversationId = conversation.id,
                         channel = inbound.platform,
                         waId = user.waId,
                         role = UserRole.USER,
@@ -164,14 +171,17 @@ class MessagePipeline(
                         createdAt = SystemClock.now(),
                     )
                 )
-                if (stored) conversations.recordInbound(existingConversation.id)
-                conversations.bumpActivity(existingConversation.id)
+                if (stored) conversations.recordInbound(conversation.id)
+                conversations.bumpActivity(conversation.id)
                 deduplicationService.markProcessed(inbound.eventId)
-                log.info("Automatic reply paused for conversation; stored inbound message only: platform={}, waId={}", inbound.platform, inbound.waId)
+                if (paused) {
+                    log.info("Automatic reply paused for conversation; stored inbound message only: platform={}, waId={}", inbound.platform, inbound.waId)
+                } else {
+                    log.info("New chat began without a start word; stored for the team, paused: platform={}, waId={}", inbound.platform, inbound.waId)
+                }
                 return
             }
 
-            val flows = chatFlows?.find()
             val flowReply = flows?.replyTo(inbound.platform, inbound.messageText, inbound.quickReplyPayload)
             if (flowReply == null && flows != null && inbound.platform in flows.teamOnlyChannels) {
                 val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
@@ -558,6 +568,13 @@ class MessagePipeline(
         }
         return "[The customer sent a $kind you cannot open${caption?.takeIf { it.isNotBlank() }?.let { ": \"$it\"" }.orEmpty()}]"
     }
+
+    /**
+     * [Conversation.START_GATE] when [inbound] opens a chat on a channel whose company asks for a start word and
+     * the message holds none, else null. Only for a chat that doesn't exist yet: the caller checks that.
+     */
+    private fun startGatePause(inbound: InboundMessage, flows: ChatFlows?): String? =
+        if (flows?.startGate(inbound.platform)?.opens(inbound.messageText) == false) Conversation.START_GATE else null
 
     /** Answers with a flow's step instead of the AI, stored for the inbox as an automation's message. */
     private suspend fun replyWithFlow(reply: FlowReply, conversation: Conversation, inbound: InboundMessage, waId: String, responder: OutboundClient) {

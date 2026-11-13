@@ -162,6 +162,7 @@ WhatsApp AI Bot — Ktor 3.x server receives Meta webhooks, enqueues messages to
 - `http/` — the error contract (`ErrorBody`, `ApiException`, `idParam`/`dateValue`/`enumValue`); depends on no feature
 - `crm/` — CRM services (`ClientDirectory`, `QuoteService`, `InvoiceService`) and repositories; `crm/api/` holds their HTTP request/response types
 - `building/` — the opt-in Building category (projects, site diary, photos, issues, change orders, measurements): services, drafts, progress and billing math, repositories; `building/api/` holds its requests, DTOs and views ([wiki/building-projects.md](wiki/building-projects.md))
+- `tags/` — free-text tags on records (clients, quotes, invoices, projects…), kept in `record_tags` beside the records; `dashboard/RecordTagRoutes.kt` mounts their routes in each module ([wiki/record-tags.md](wiki/record-tags.md))
 - `dashboard/` — the `/app/api` feature registry (`DashboardFeature`), module gate (`requireModules`) and one route file per area
 
 Layering is route → service → repository: routes parse and answer HTTP, services take domain types, repositories own the queries. `ArchitectureBoundariesTest` checks it and `DashboardRouteAuditTest` fails for an ungated `/app/api` route ([wiki/dashboard-api.md](wiki/dashboard-api.md)).

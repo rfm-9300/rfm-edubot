@@ -68,6 +68,8 @@ function openDrawer(title, body, wide = false, opts = {}) {
   renderDrawerEyebrow(opts.eyebrow);
   $('#drawer-title').textContent = title;
   $('#drawer-body').innerHTML = '';
+  // A record's tags sit above its body, so they stay while the body redraws itself.
+  if (opts.tags) $('#drawer-body').appendChild(tagStrip(opts.tags.kind, opts.tags.id));
   $('#drawer-body').appendChild(body);
   root.hidden = false;
   $$('[data-close]', root).forEach(b => { b.onclick = () => closeDrawer({ dismissed: true }); });

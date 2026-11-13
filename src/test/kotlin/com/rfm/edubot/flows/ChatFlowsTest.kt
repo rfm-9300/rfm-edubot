@@ -102,4 +102,47 @@ class ChatFlowsTest {
         assertEquals(FlowProblem("invalid"), problem(flow, flow))
         assertEquals(FlowProblem("invalid", 0), problem(flow.copy(id = "Serviços")))
     }
+
+    @Test
+    fun `a start gate opens on a start word as whole words, ignoring case, accents and punctuation`() {
+        val gate = StartGate(words = listOf("Quero marcar", "Orçamento", "oi"))
+
+        assertEquals(true, gate.opens("Oi!"))
+        assertEquals(true, gate.opens("Boa tarde, queria um ORCAMENTO, por favor"))
+        assertEquals(true, gate.opens("Quero   marcar uma consulta"))
+        assertEquals(false, gate.opens("Depois falo convosco"))
+        assertEquals(false, gate.opens("Quero ver, marcar fica para depois"))
+        assertEquals(false, gate.opens("Olá"), "menu keywords are a different list: the gate only looks at its own words")
+        assertEquals(false, gate.opens(""))
+    }
+
+    @Test
+    fun `a channel has a gate only when it is on and has a word to look for`() {
+        fun gates(gate: StartGate) = ChatFlows(startGates = mapOf(Platform.INSTAGRAM to gate))
+
+        assertEquals(StartGate(words = listOf("oi")), gates(StartGate(words = listOf("oi"))).startGate(Platform.INSTAGRAM))
+        assertNull(gates(StartGate(enabled = false, words = listOf("oi"))).startGate(Platform.INSTAGRAM))
+        assertNull(gates(StartGate(words = listOf("?!", " "))).startGate(Platform.INSTAGRAM), "a gate nothing can open is skipped, not obeyed")
+        assertNull(gates(StartGate(words = listOf("oi"))).startGate(Platform.WHATSAPP), "another channel has no gate")
+        assertNull(ChatFlows().startGate(Platform.INSTAGRAM))
+    }
+
+    @Test
+    fun `saving checks start gates by channel`() {
+        fun problem(platform: Platform, gate: StartGate) = ChatFlows(flows = listOf(flow), startGates = mapOf(platform to gate)).saveProblem()
+
+        assertNull(problem(Platform.WHATSAPP, StartGate(words = listOf("oi"))))
+        assertNull(problem(Platform.INSTAGRAM, StartGate(enabled = false)), "a gate that is off needs no words")
+        assertEquals(FlowProblem("start_words", channel = "INSTAGRAM"), problem(Platform.INSTAGRAM, StartGate(words = emptyList())))
+        assertEquals(FlowProblem("start_words", channel = "WHATSAPP"), problem(Platform.WHATSAPP, StartGate(words = listOf("?!"))))
+        assertEquals(
+            FlowProblem("start_words_limit", channel = "INSTAGRAM", limit = ChatFlowLimits.MAX_START_WORDS),
+            problem(Platform.INSTAGRAM, StartGate(words = List(51) { "palavra $it" })),
+        )
+        assertEquals(
+            FlowProblem("start_word", channel = "WHATSAPP", limit = ChatFlowLimits.MAX_KEYWORD_CHARS),
+            problem(Platform.WHATSAPP, StartGate(words = listOf("x".repeat(61)))),
+        )
+        assertEquals(FlowProblem("invalid", channel = "WEB"), problem(Platform.WEB, StartGate(words = listOf("oi"))), "the website's visitors would wait at a silent widget")
+    }
 }

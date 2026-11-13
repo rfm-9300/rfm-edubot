@@ -16,14 +16,39 @@ import com.rfm.edubot.mobile.core.network.NotificationsApi
 import com.rfm.edubot.mobile.core.network.OverviewApi
 import com.rfm.edubot.mobile.core.network.PersonaApi
 import com.rfm.edubot.mobile.core.network.SettingsApi
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.serialization.builtins.serializer
 
-class OverviewRepository(api: OverviewApi, cache: SnapshotCache) {
+class OverviewRepository(api: OverviewApi, private val cache: SnapshotCache) {
     val overview = CachedResource(
         key = "overview",
         serializer = Overview.serializer(),
         cache = cache,
         fetch = { api.overview(extended = true) },
     )
+
+    private val mutableAmountsHidden = MutableStateFlow(true)
+
+    /**
+     * Home hides its amounts until they are shown, as a bank's app does and as the web's Home does.
+     * The choice is kept on this phone until someone signs out, which clears the cache.
+     */
+    val amountsHidden: StateFlow<Boolean> = mutableAmountsHidden.asStateFlow()
+
+    suspend fun restoreAmounts() {
+        cache.read(AMOUNTS_SHOWN, Boolean.serializer())?.let { shown -> mutableAmountsHidden.value = !shown }
+    }
+
+    suspend fun setAmountsHidden(hidden: Boolean) {
+        mutableAmountsHidden.value = hidden
+        cache.write(AMOUNTS_SHOWN, Boolean.serializer(), !hidden)
+    }
+
+    private companion object {
+        const val AMOUNTS_SHOWN = "overview.amountsShown"
+    }
 }
 
 class NotificationsRepository(

@@ -13,6 +13,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -27,6 +30,7 @@ import com.rfm.edubot.mobile.core.localization.Txt
 import com.rfm.edubot.mobile.core.model.DashboardModules
 import com.rfm.edubot.mobile.core.ui.BotColors
 import com.rfm.edubot.mobile.core.ui.BotSpace
+import com.rfm.edubot.mobile.core.ui.ChipRow
 import com.rfm.edubot.mobile.core.ui.EmptyState
 import com.rfm.edubot.mobile.core.ui.ErrorPanel
 import com.rfm.edubot.mobile.core.ui.InfoPanel
@@ -37,10 +41,9 @@ import com.rfm.edubot.mobile.core.ui.ScreenHeader
 import com.rfm.edubot.mobile.core.ui.Tone
 
 /**
- * Every CRM list: clients, quotes, invoices, the catalog, jobs, payments, suppliers and employees.
- *
- * The last four had no screen at all. Invoices and payments can be marked paid, and a quote moved
- * along its pipeline, from the phone.
+ * Every CRM list: clients, quotes, invoices, the catalog, services, payments, suppliers and
+ * employees. A row opens its record, as on the web; invoices and payments can still be marked paid,
+ * and a quote moved along its pipeline, from the list.
  */
 @Composable
 fun CrmScreen(
@@ -49,9 +52,9 @@ fun CrmScreen(
     strings: Strings,
     clock: TenantClock,
     padding: PaddingValues,
-    onNew: (() -> Unit)?,
-    onOpenClient: (String) -> Unit,
+    onOpen: (CrmRoute) -> Unit,
 ) {
+    val onNew: (() -> Unit)? = newRecordFor(section)?.let { route -> { onOpen(route) } }
     val vm = viewModel<CrmViewModel>(
         key = "crm:$section",
         factory = viewModelFactory { initializer { CrmViewModel(repository, section) } },
@@ -95,7 +98,7 @@ fun CrmScreen(
                 ).joinToString(" · "),
                 leading = client.name,
                 trailingLabel = client.number.takeIf { it.isNotBlank() },
-                onClick = { onOpenClient(client.id) },
+                onClick = { onOpen(CrmRoute.Client(client.id)) },
             )
         }
 
@@ -114,7 +117,7 @@ fun CrmScreen(
                 title = quote.clientName.ifBlank { quote.number },
                 detail = listOfNotNull(
                     quote.number.takeIf { it.isNotBlank() },
-                    quote.validUntil?.let { "${strings[Txt.CRM_QUOTE_VALID_UNTIL]} ${clock.fullDate(it) ?: it}" },
+                    quote.validUntil?.let { "${strings[Txt.CRM_QUOTE_VALID_UNTIL]} ${clock.day(it)}" },
                 ).joinToString(" · "),
                 leading = quote.clientName.ifBlank { quote.number },
                 trailingLabel = "€ ${formatEuros(quote.totalEur)}",
@@ -122,6 +125,7 @@ fun CrmScreen(
                 statusLabel = strings.status(quote.status),
                 actionLabel = next?.let(strings::status),
                 onAction = if (next == null || pending != null) null else ({ vm.setQuoteStatus(quote, next); Unit }),
+                onClick = { onOpen(CrmRoute.Quote(quote.id)) },
             )
         }
 
@@ -135,20 +139,23 @@ fun CrmScreen(
             onRetry = { vm.refresh() },
             key = { it.id },
         ) { invoice ->
-            val overdue = !invoice.paid && clock.isOverdue(invoice.dueDate)
+            // A cancelled invoice is closed: nothing to receive, never late.
+            val overdue = !invoice.closed && clock.isOverdue(invoice.dueDate)
+            val payable = !invoice.closed && invoice.installments.isEmpty()
             ListRow(
                 title = invoice.clientName.ifBlank { invoice.number },
                 detail = listOfNotNull(
                     invoice.number.takeIf { it.isNotBlank() },
-                    clock.fullDate(invoice.dueDate) ?: invoice.dueDate.takeIf { it.isNotBlank() },
+                    invoice.dueDate.takeIf { it.isNotBlank() }?.let(clock::day),
                 ).joinToString(" · "),
                 leading = invoice.clientName.ifBlank { invoice.number },
                 trailingLabel = "€ ${formatEuros(invoice.totalEur)}",
                 status = if (overdue) OVERDUE else invoice.status,
                 statusLabel = strings.status(if (overdue) OVERDUE else invoice.status),
                 emphasised = overdue,
-                actionLabel = strings[Txt.ACTION_MARK_PAID].takeIf { !invoice.paid },
-                onAction = if (invoice.paid || pending != null) null else ({ vm.markInvoicePaid(invoice); Unit }),
+                actionLabel = strings[Txt.ACTION_MARK_PAID].takeIf { payable },
+                onAction = if (!payable || pending != null) null else ({ vm.markInvoicePaid(invoice); Unit }),
+                onClick = { onOpen(CrmRoute.Invoice(invoice.id)) },
             )
         }
 
@@ -171,30 +178,30 @@ fun CrmScreen(
                 ).joinToString(" · "),
                 leading = item.label,
                 trailingLabel = "€ ${formatEuros(item.defaultUnitPriceEur)}",
+                onClick = item.id.takeIf { it.isNotBlank() }?.let { id -> { onOpen(CrmRoute.CatalogItem(id)) } },
             )
         }
 
-        DashboardModules.SERVICES -> CrmList(
-            resource = repository.services,
-            strings = strings,
-            emptyKey = Txt.CRM_SERVICES_EMPTY,
-            padding = padding,
-            header = header,
-            actionError = failure?.let(strings::error),
-            onRetry = { vm.refresh() },
-            key = { it.id },
-        ) { service ->
-            ListRow(
-                title = service.name,
-                detail = listOfNotNull(
-                    service.clientName.takeIf { it.isNotBlank() },
-                    service.performedAt?.let { clock.fullDate(it) ?: it },
-                ).joinToString(" · "),
-                leading = service.name,
-                trailingLabel = "€ ${formatEuros(service.totalEur)}",
-                status = service.status.takeIf { it.isNotBlank() },
-                statusLabel = service.status.takeIf { it.isNotBlank() }?.let(strings::status),
-            )
+        DashboardModules.SERVICES -> {
+            var filter by rememberSaveable { mutableStateOf(ALL) }
+            CrmList(
+                resource = repository.services,
+                strings = strings,
+                emptyKey = Txt.CRM_SERVICES_EMPTY,
+                padding = padding,
+                header = {
+                    header()
+                    ChipRow(
+                        options = listOf(ALL to strings[Txt.LABEL_ALL]) + SERVICE_STATUSES.map { it to strings.status(it) },
+                        selected = filter,
+                        onSelect = { filter = it },
+                    )
+                },
+                actionError = failure?.let(strings::error),
+                onRetry = { vm.refresh() },
+                key = { it.id },
+                filter = { service -> filter == ALL || service.status.equals(filter, ignoreCase = true) },
+            ) { service -> ServiceRow(service, strings, clock) { onOpen(CrmRoute.Service(service.id)) } }
         }
 
         DashboardModules.PAYMENTS -> CrmList(
@@ -207,20 +214,27 @@ fun CrmScreen(
             onRetry = { vm.refresh() },
             key = { it.id },
         ) { payment ->
-            val overdue = !payment.paid && clock.isOverdue(payment.dueDate)
+            val payable = !payment.paid && !payment.cancelled
+            val overdue = payable && clock.isOverdue(payment.dueDate)
             ListRow(
                 title = payment.payeeName.ifBlank { payment.number },
                 detail = listOfNotNull(
                     payment.number.takeIf { it.isNotBlank() },
-                    clock.fullDate(payment.dueDate) ?: payment.dueDate.takeIf { it.isNotBlank() },
+                    payment.projectLabel.takeIf { it.isNotBlank() },
+                    payment.dueDate.takeIf { it.isNotBlank() }?.let(clock::day),
                 ).joinToString(" · "),
                 leading = payment.payeeName.ifBlank { payment.number },
                 trailingLabel = "€ ${formatEuros(payment.totalEur)}",
                 status = if (overdue) OVERDUE else payment.status,
                 statusLabel = strings.status(if (overdue) OVERDUE else payment.status),
                 emphasised = overdue,
-                actionLabel = strings[Txt.ACTION_MARK_PAID].takeIf { !payment.paid },
-                onAction = if (payment.paid || pending != null) null else ({ vm.markPaymentPaid(payment); Unit }),
+                actionLabel = strings[Txt.ACTION_MARK_PAID].takeIf { payable },
+                onAction = if (!payable || pending != null) null else ({ vm.markPaymentPaid(payment); Unit }),
+                onClick = when {
+                    payment.supplierId != null -> ({ onOpen(CrmRoute.Supplier(payment.supplierId!!)) })
+                    payment.employeeId != null -> ({ onOpen(CrmRoute.Employee(payment.employeeId!!)) })
+                    else -> null
+                },
             )
         }
 
@@ -236,9 +250,14 @@ fun CrmScreen(
         ) { supplier ->
             ListRow(
                 title = supplier.name,
-                detail = listOfNotNull(supplier.phone.takeIf { it.isNotBlank() }, supplier.type).joinToString(" · "),
+                detail = listOfNotNull(
+                    supplier.contactPerson?.takeIf { it.isNotBlank() },
+                    supplier.phone.takeIf { it.isNotBlank() },
+                    supplier.type?.takeIf { it.isNotBlank() },
+                ).joinToString(" · "),
                 leading = supplier.name,
                 trailingLabel = supplier.number.takeIf { it.isNotBlank() },
+                onClick = { onOpen(CrmRoute.Supplier(supplier.id)) },
             )
         }
 
@@ -258,6 +277,7 @@ fun CrmScreen(
                     .joinToString(" · "),
                 leading = employee.name,
                 trailingLabel = employee.number.takeIf { it.isNotBlank() },
+                onClick = { onOpen(CrmRoute.Employee(employee.id)) },
             )
         }
 
@@ -282,10 +302,12 @@ private fun <T> CrmList(
     actionError: String?,
     onRetry: () -> Unit,
     key: (T) -> Any,
+    filter: (T) -> Boolean = { true },
     row: @Composable (T) -> Unit,
 ) {
     val state by resource.state.collectAsState()
-    val rows = state.value.orEmpty()
+    val all = state.value.orEmpty()
+    val rows = all.filter(filter)
     val loadError = state.error
     LazyColumn(Modifier.fillMaxSize().padding(padding), contentPadding = PaddingValues(bottom = 20.dp)) {
         item {
@@ -300,22 +322,23 @@ private fun <T> CrmList(
             item { InfoPanel(strings[Txt.OFFLINE_SNAPSHOT], tone = Tone.Info) }
         }
         when {
-            rows.isEmpty() && state.loading -> item { LoadingScreen() }
+            all.isEmpty() && state.loading -> item { LoadingScreen() }
             rows.isEmpty() -> item { EmptyState(strings[Txt.EMPTY_TITLE], strings[emptyKey]) }
             else -> items(rows, key = key) { row(it) }
         }
     }
 }
 
-/**
- * The next step along the backend's quote pipeline (`QuoteStatus`: PENDENTE, SENT, ACEITO), or null
- * once a quote is accepted and there is nothing to advance it to.
- */
-private fun nextQuoteStatus(current: String): String? = when (current.uppercase()) {
-    "PENDENTE" -> "SENT"
-    "SENT" -> "ACEITO"
+/** What the list's "New" button creates, or null for the lists the app cannot add to yet. */
+private fun newRecordFor(section: String): CrmRoute? = when (section) {
+    DashboardModules.CLIENTS -> CrmRoute.EditClient(null)
+    DashboardModules.QUOTES -> CrmRoute.NewDocument(DocumentKind.Quote)
+    DashboardModules.INVOICES -> CrmRoute.NewDocument(DocumentKind.Invoice)
+    DashboardModules.CATALOG -> CrmRoute.CatalogItem(null)
+    DashboardModules.SERVICES -> CrmRoute.NewService()
     else -> null
 }
 
-/** Not a stored status: the backend keeps an unpaid invoice PENDING and the date makes it late. */
-private const val OVERDUE = "OVERDUE"
+private const val ALL = "ALL"
+
+private val SERVICE_STATUSES = listOf("OPEN", "INVOICED", "CANCELLED")

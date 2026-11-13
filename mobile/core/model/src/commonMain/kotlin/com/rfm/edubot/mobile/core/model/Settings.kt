@@ -43,8 +43,19 @@ object DashboardModules {
     const val AGENTS = "agents"
     const val SETTINGS = "settings"
     const val TIMESHEETS = "timesheets"
+    const val EMAIL = "email"
+
+    // The opt-in Building category; each page brings [PROJECTS] with it.
+    const val PROJECTS = "projects"
+    const val SITE_DIARY = "site-diary"
+    const val SITE_ISSUES = "site-issues"
+    const val CHANGE_ORDERS = "change-orders"
+    const val MEASUREMENTS = "measurements"
 
     /** An employee's own pages, the only modules their sign-in has. */
     const val MY_HOURS = "my-hours"
     const val MY_SERVICES = "my-services"
+
+    /** A site manager's projects: their diary, photos and issues. */
+    const val MY_SITES = "my-sites"
 }

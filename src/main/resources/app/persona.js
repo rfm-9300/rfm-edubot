@@ -444,6 +444,7 @@ function renderPersonaChatLog(busy = false) {
       m.handoff && (m.reason ? ps('handoffNoteReason', { reason: m.reason }) : PS.handoffNote),
       m.menu && pm('testMenu', { name: m.menu }),
       m.teamOnly && PM.testTeamOnly,
+      m.gatedChannels?.length && pm('testGated', { channels: m.gatedChannels.map(c => pm(`startChannel.${c}`)).join(' / ') }),
     ].filter(Boolean);
     return bubble + replies + notes.map(n => `<div class="chat__note">${escapeHTML(n)}</div>`).join('');
   }).join('') + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
@@ -465,7 +466,7 @@ async function sendPersonaTest(text, payload) {
     const messages = state.personaChat.filter(m => m.role === 'user' || m.role === 'assistant').map(({ role, content: c }) => ({ role, content: c }));
     const body = { messages, ...(draft && { draft }), ...(flows && { flows }), ...(payload && { payload }) };
     const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify(body) });
-    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason, menu: res.menu, quickReplies: res.quickReplies || [], teamOnly: !!res.teamOnly });
+    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason, menu: res.menu, quickReplies: res.quickReplies || [], teamOnly: !!res.teamOnly, gatedChannels: res.gatedChannels || [] });
   } catch (err) {
     if (err?.message !== 'unauthorized') {
       state.personaChat.push({ role: 'note', content: err?.code === 'menu_problem' ? window.MenusUI.errorText(err.body) : personaErrorText(err?.code, err) });

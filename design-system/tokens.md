@@ -89,9 +89,9 @@ A second axis next to the theme. `classic` is everything above: the base layer. 
 
 Yellow is a fill. On white it is far below text contrast, so never color text or thin lines with `--accent` in the light skin: text on tints uses `--accent-deep` (or `--ink`, as the active nav item and selected chips do), and trend lines use `--accent-deep`. `--ink-faint` is decorative in minimal (bars); text uses `--ink-mute` or darker (≥ 4.5:1 on `--bg` and `--surface`). Components that read tokens restyle for free; add a `html[data-layout="minimal"]` rule only for what tokens can't express (uppercase labels, emoji, literal `999px` radii, heavy font weights).
 
-### Compact shell (`html[data-shell="compact"]`, `/app` only)
+### Compact shell (`html[data-shell="compact"]`, `/app` and `/backoffice`)
 
-`/app/index.html` also declares `data-shell="compact"`: the dense workspace layout from the 2026-10-27 "Tenant Dashboard" design, on top of the minimal skin. It changes size, density, radius and the font (Inter, see [Type](#type)), not the palette. The backoffice does not carry it; it adopts the layout by adding the attribute (and the `.sidebar__head` markup) once its own views are checked.
+`/app/index.html` and `/backoffice/index.html` declare `data-shell="compact"`: the dense workspace layout from the 2026-10-27 "Tenant Dashboard" design, on top of the minimal skin. It changes size, density and radius, not the palette. Both have a `.sidebar__head` with the desktop rail toggle. `/app` uses Inter; `/backoffice` identifies itself with `data-surface="backoffice"` so it keeps Outfit + Nunito.
 
 | Token | Compact light | Compact dark |
 |---|---|---|

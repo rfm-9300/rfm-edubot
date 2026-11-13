@@ -128,7 +128,7 @@ class DocumentFormViewModel(
         copy(
             description = item.label,
             unit = item.unit,
-            unitPrice = item.defaultUnitPriceEur.toString(),
+            unitPrice = formatQuantity(item.defaultUnitPriceEur),
         )
     }
 

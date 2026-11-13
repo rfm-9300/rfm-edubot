@@ -174,7 +174,11 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
         return doc?.toConversation()
     }
 
-    suspend fun findOrCreate(userId: ObjectId, waId: String, channel: Platform = Platform.WHATSAPP): Conversation {
+    /**
+     * The chat with [waId], created when it is new. [pausedBy] is applied to a new chat only: it starts with
+     * automatic replies off, without the handoff event [setAutoReplyEnabled] raises, since nothing was handed over.
+     */
+    suspend fun findOrCreate(userId: ObjectId, waId: String, channel: Platform = Platform.WHATSAPP, pausedBy: String? = null): Conversation {
         val existing = findByWaId(waId, channel)
         if (existing != null) {
             return existing
@@ -188,6 +192,9 @@ class ConversationRepository(mongoModule: MongoModule, private val tenantId: Obj
             waId = waId,
             lastMessageAt = now,
             createdAt = now,
+            autoReplyEnabled = pausedBy == null,
+            autoReplyPausedAt = if (pausedBy != null) now else null,
+            autoReplyPausedBy = pausedBy,
         )
         collection.insertOne(conversation.toDocument())
         log.info("Created new conversation: waId={}", waId)

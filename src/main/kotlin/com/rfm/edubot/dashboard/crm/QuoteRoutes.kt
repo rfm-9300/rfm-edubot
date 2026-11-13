@@ -11,6 +11,7 @@ import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
 import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.http.dateValue
 import com.rfm.edubot.http.enumValue
@@ -18,6 +19,7 @@ import com.rfm.edubot.http.idParam
 import com.rfm.edubot.http.idValue
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.timesheets.zone
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
 import io.ktor.server.request.receive
@@ -39,6 +41,7 @@ import kotlinx.serialization.Serializable
 internal object QuoteRoutes : DashboardFeature(DashboardModules.QUOTES) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
+            recordTagRoutes(TagKind.QUOTE, "quotes", deps)
             get("/quotes") {
                 val crm = deps.crm(call)
                 val clientId = call.request.queryParameters["clientId"]?.let { idValue(it, "clientId") }

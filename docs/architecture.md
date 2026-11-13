@@ -171,6 +171,7 @@ graph TD
 | `crm/` | Client, quote, invoice, supplier, payment models/repositories; the write services every caller shares (`ClientDirectory`, `QuoteService`, `InvoiceService`, with `ClientDraft` validation); CRM tool executor; PDF generation (`PdfGenerator` branded via per-tenant `DocumentTemplate`, including optional A4 `layout` blocks from the dashboard studio). `crm/api/` holds the HTTP request and response types and the helpers the dashboard and backoffice routes share |
 | `bookings/` | Appointments on catalog services, opening hours, slot engine, CRM links (clients, Serviços billing), booking tools, legacy `bookings.services` migration |
 | `building/` | The Building category ([Building](#building)): projects with phases and contract, site diary, photos on disk (`PhotoStore`), issues, change orders and measurements; the progress math (`ProjectProgress`) and the billing math (`MeasurementMath`); drafts and the services every page writes through, which return an `Outcome` and never HTTP. `building/api/` holds the requests, DTOs and views |
+| `tags/` | Free-text tags on records ([wiki/record-tags.md](../wiki/record-tags.md)): `TagKind` names each taggable record, `RecordTags` cleans a list, `RecordTagRepository` keeps one document per tagged record in `record_tags`, beside the records. The routes are `recordTagRoutes` in `dashboard/`, mounted by each module that owns a record |
 | `dashboard/` | The tenant dashboard's API (`/app/api`): sessions and tokens (`DashboardAccess`), the module gate (`ModuleGate.kt`) and the feature registry (`DashboardFeature.kt`); one route file per area in `crm/`, `inbox/`, `settings/` and `building/` (with the client's share page), plus Home, persona and the assistant; the assistant's tool groups in `assistant/` and Home's card queries in `overview/` ([Dashboard API](#dashboard-api)) |
 | `http/` | The error contract: `ErrorBody`, `ApiException`, the `ApiErrors` codes, and `idParam` / `idValue` / `dateValue` / `enumValue` for values a handler can't use. Depends on no feature |
 | `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing; the team's work board in `admin/board/` and its password vault in `admin/vault/` ([Backoffice board and password vault](#backoffice-board-and-password-vault)) |
@@ -1502,7 +1503,9 @@ so a saved change applies at once.
 
 ```mermaid
 flowchart TD
-    IN[Customer message] --> TAP{"Tapped a quick reply<br/>whose step exists?"}
+    IN[Customer message] --> GATE{"New chat, and its channel asks<br/>for start words the message lacks?"}
+    GATE -->|yes| HOLD["Create the chat paused,<br/>store for the team, no reply"]
+    GATE -->|no| TAP{"Tapped a quick reply<br/>whose step exists?"}
     TAP -->|yes| STEP[Send that step]
     TAP -->|no| KW{"Text holds a<br/>flow keyword?"}
     KW -->|yes| FIRST["Send the flow's first step"]
@@ -1527,6 +1530,17 @@ flowchart TD
   flow with problems is skipped and logged on every message.
 - **Team-only channels.** `teamOnlyChannels` turns the AI off on a channel: a message no flow
   answers is stored without a reply, before the rate limiter, and waits in the inbox.
+- **Start gates.** `ChatFlows.startGates` (Instagram and WhatsApp) holds, per channel, words a new
+  chat's first message must contain. Where no conversation exists yet and the message holds none
+  (`StartGate.opens`, the menus' whole-word matching), `MessagePipeline` creates the conversation
+  already paused (`findOrCreate(…, pausedBy = Conversation.START_GATE)`, which raises no handoff
+  event), stores the message and sends nothing, so later messages fall under the paused-conversation
+  check until a person resumes the AI. The media branch applies the same gate to a first photo's
+  caption. Existing conversations are never gated; a gate that is off, or has no usable word, is
+  ignored. `PUT /app/api/persona/menus` takes `startGates: [{channel, enabled, words}]` (left out
+  keeps the saved ones) and refuses `start_words`, `start_words_limit` and `start_word`, with the
+  gate's `channel` in the error; the test chat answers `gatedChannels` for a first message that
+  holds no start word.
 
 ## Context Building
 
@@ -1626,7 +1640,7 @@ on `core:network` — that boundary is what keeps HTTP and bearer tokens out of 
 flowchart TD
   android[androidApp] --> shared
   ios[iosApp] --> shared
-  shared --> features["feature:* (12 modules)"]
+  shared --> features["feature:* (13 modules)"]
   features --> data["core:data — repositories + cache"]
   features --> ui["core:ui — tokens, theme, components"]
   features --> l10n["core:localization — Txt + 3 catalogs"]
@@ -1653,11 +1667,15 @@ flowchart TD
 - `mobile/core/data` — the repositories, plus `CachedResource` and `SnapshotCache`.
 - `mobile/core/localization` — compile-checked keys in `Txt` and three catalogs (en, pt-PT, es),
   with tests asserting the key sets match and placeholders are preserved.
-- `mobile/core/ui` — the design tokens, light and dark themes, and the shared components.
+- `mobile/core/ui` — the design tokens, light and dark themes, the shared components, the record
+  pieces (`FieldRow`, `RecordCard`, `ProgressBar`, `ChipRow`, `ActionRow`, the confirm and prompt
+  dialogs) and `RecordViewModel`, the load / act / remove view model every record screen shares.
 - `mobile/core/testing` — `Samples` (representative records) and `FakeVoiceInput`.
 - `mobile/feature/*` — one module per area: `auth`, `overview`, `inbox`, `contacts`, `crm`,
-  `bookings`, `agents`, `notifications`, `assistant`, `persona`, `settings`, `timeclock`. Each pairs a
-  stateless composable with a KMP `ViewModel` exposing an immutable `StateFlow`.
+  `bookings`, `building`, `agents`, `notifications`, `assistant`, `persona`, `settings`, `timeclock`.
+  Each pairs a stateless composable with a KMP `ViewModel` exposing an immutable `StateFlow`. `crm`
+  and `building` expose a route type (`CrmRoute`, `BuildingRoute`) and one composable that renders
+  it, so the shell pushes a record without knowing its screens.
 - `mobile/shared` — the shell: `MobileGraph` (the object graph), `Navigator` (the back stack),
   `ModuleRegistry` (the nav model), `DashboardSessionViewModel`, `SessionViewModels` (the signed-in
   screens' view models, cleared when a different session starts), and `DashboardApp`. It is also the
@@ -1693,8 +1711,8 @@ other plain fields (`outside_sites` names the nearest site and how far it is).
 
 An employee's sign-in (`DashboardIdentity.employee`) is refused with a 401 everywhere but `/me`,
 `/account…` and `/portal/…`, so for any other call the app would sign them out. `ModuleRegistry` takes
-`employee` and offers only their pages (`my-hours` lands; `my-services` is named as web-only) plus
-Settings; the shell shows no bell and polls no notifications for them; Settings skips the company's
+`employee` and offers only their pages (`my-hours`, `my-services` and `my-sites`, landing on the first
+the company gives them) plus Settings; the shell shows no bell and polls no notifications for them; Settings skips the company's
 widget, channels and companies, and changes the language on the phone only. The signed-in screens'
 view models live in `SessionViewModels`, which is cleared when a different session starts: several
 of them poll, and one left from an admin's session would call with the next employee's token.
@@ -1710,7 +1728,9 @@ one account never sees another's data.
 The time clock is the exception: a punch's time is the backend's, so nothing is queued offline and
 the buttons need a connection. Its status and shifts are cached per employee
 (`timeclock.{employeeId}.…`), and `MobileGraph.timeClock(employeeId)` hands a new repository to
-whoever signs in next, so a phone shared at a site never shows one person's clock to another.
+whoever signs in next, so a phone shared at a site never shows one person's clock to another. My
+services and My sites follow the same rule (`portal.services.{employeeId}`,
+`portal.sites.{employeeId}`, `MobileGraph.portal(…)` and `mySites(…)`).
 
 ### Freshness
 
@@ -1725,14 +1745,18 @@ notification badge every 60s; persona every 3s while a prompt is compiling.
 marks whether the app has a screen for a module: `/app/api/me` lists every module the tenant pays
 for, and modules the app cannot render are shown under a "on the web dashboard" heading rather than
 as taps that go nowhere. `Navigator` holds the back stack; Android wires its `back()` to the
-activity's `OnBackPressedDispatcher`.
+activity's `OnBackPressedDispatcher`, and every pushed screen has its own Back button for iOS. A
+list row pushes `Destination.Crm(CrmRoute…)` or `Destination.Building(BuildingRoute…)`; records pass
+the company's modules down so they only link into modules it has (any other call answers 403).
 
 ### Not on mobile
 
 The agent builder, the document-template studio, the website-widget customiser, WhatsApp template
-CRUD, Instagram, the Google/Gmail integrations, persona file uploads, the team's Timesheets (review,
-corrections, approvals, export, work sites and rules) and an employee's My services stay on the web
-dashboard. The app names them rather than hiding them.
+CRUD, Instagram, the Email page, the Google/Gmail integrations, persona file uploads and the Menus
+tab, the team's Timesheets (review, corrections, approvals, export, work sites and rules), PDFs
+(quotes, invoices, measurements, an employee's services report), Building photos, creating projects,
+change orders and measurements, and editing a company's client fields stay on the web dashboard.
+The app names the modules rather than hiding them, and says so on the records that have photos.
 
 ### Time clock on the phone
 

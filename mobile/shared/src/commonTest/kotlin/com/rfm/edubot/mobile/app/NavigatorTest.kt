@@ -1,6 +1,7 @@
 package com.rfm.edubot.mobile.app
 
 import com.rfm.edubot.mobile.core.model.DashboardModules
+import com.rfm.edubot.mobile.feature.crm.CrmRoute
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -81,7 +82,7 @@ class NavigatorTest {
     fun `a new client form pops back to the list once saved`() {
         val navigator = navigator()
         navigator.selectModule(DashboardModules.CLIENTS)
-        navigator.open(Destination.NewClient)
+        navigator.open(Destination.Crm(CrmRoute.EditClient(null)))
 
         assertTrue(navigator.back())
         assertEquals(Destination.Module(DashboardModules.CLIENTS), navigator.state.value.current)
@@ -91,7 +92,7 @@ class NavigatorTest {
     fun `resetting after a company switch drops the previous company's screens`() {
         val navigator = navigator()
         navigator.selectModule(DashboardModules.CLIENTS)
-        navigator.open(Destination.Client("cl1"))
+        navigator.open(Destination.Crm(CrmRoute.Client("cl1")))
 
         navigator.reset(DashboardModules.OVERVIEW)
 
@@ -107,5 +108,20 @@ class NavigatorTest {
 
         assertTrue(navigator.back())
         assertEquals(Destination.Module(DashboardModules.BOOKINGS), navigator.state.value.current)
+    }
+
+    @Test
+    fun `a record opened from a record walks back one step at a time`() {
+        val navigator = navigator()
+        navigator.selectModule(DashboardModules.CLIENTS)
+        navigator.open(Destination.Crm(CrmRoute.Client("cl1")))
+        navigator.open(Destination.Crm(CrmRoute.Invoice("inv1")))
+        navigator.open(Destination.Crm(CrmRoute.Quote("q1")))
+
+        assertTrue(navigator.back())
+        assertEquals(Destination.Crm(CrmRoute.Invoice("inv1")), navigator.state.value.current)
+        assertTrue(navigator.back())
+        assertEquals(Destination.Crm(CrmRoute.Client("cl1")), navigator.state.value.current)
+        assertEquals(DashboardModules.CLIENTS, navigator.state.value.activeModule)
     }
 }

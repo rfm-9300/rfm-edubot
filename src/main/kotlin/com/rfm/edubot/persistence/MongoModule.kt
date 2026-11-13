@@ -286,6 +286,10 @@ class MongoModule(config: AppConfig.MongoConfig) {
             )
             crmStandardItems.createIndex(Document("tenantId", 1).append("type", 1).append("category", 1))
 
+            // One document per tagged record (RecordTagRepository).
+            db.getCollection<Document>("record_tags")
+                .createIndex(Document("tenantId", 1).append("kind", 1).append("recordId", 1), IndexOptions().unique(true))
+
             db.getCollection<Document>("crm.catalog_categories")
                 .createIndex(Document("tenantId", 1).append("key", 1), IndexOptions().unique(true))
 
