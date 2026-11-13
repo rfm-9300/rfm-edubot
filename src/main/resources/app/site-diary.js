@@ -241,15 +241,13 @@ async function openDiaryEntry(id) {
   body.className = 'record';
   const draw = () => {
     body.innerHTML = `
-      <div class="detail__head">
-        ${projectLink ? `<button class="detail__client detail__client--link" type="button" data-diary-project>${escapeHTML(entry.projectName)}</button>` : `<div class="detail__client">${escapeHTML(entry.projectName)}</div>`}
-        <div class="detail__amount">${entry.shared ? bldPill(BLD.diarySharedYes, 'info') : bldPill(BLD.diaryInternal, '')}</div>
-      </div>
-      ${dashFacts([
-        [BLD.thWeather, [weatherLabel(entry.weather), entry.temperatureC != null ? `${entry.temperatureC}\u00a0°C` : ''].filter(Boolean).join(' · ') || '—'],
-        [BLD.thWorkers, entry.workers ?? '—'],
-        entry.lostHours ? [BLD.diaryLostHours, fmtQty(entry.lostHours)] : null,
-        [BLD.diaryWrittenBy, entry.updatedBy !== entry.createdBy ? `${entry.createdBy} · ${entry.updatedBy}` : entry.createdBy],
+      ${recordFieldsHtml([
+        [BLD.thStatus, entry.shared ? bldPill(BLD.diarySharedYes, 'info') : bldPill(BLD.diaryInternal, '')],
+        [BLD.project, docClientHtml(entry.projectName, projectLink)],
+        [BLD.thWeather, escapeHTML([weatherLabel(entry.weather), entry.temperatureC != null ? `${entry.temperatureC}\u00a0°C` : ''].filter(Boolean).join(' · ') || '—')],
+        [BLD.thWorkers, escapeHTML(String(entry.workers ?? '—'))],
+        entry.lostHours ? [BLD.diaryLostHours, escapeHTML(fmtQty(entry.lostHours))] : null,
+        [BLD.diaryWrittenBy, escapeHTML(entry.updatedBy !== entry.createdBy ? `${entry.createdBy} · ${entry.updatedBy}` : entry.createdBy)],
       ])}
       ${textPanel(BLD.thWorkDone, entry.workDone)}
       ${entry.progress.length ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.diaryProgress)}</h2></header><ul class="worklist">${entry.progress.map(c => `<li><button class="worklist__item" type="button" disabled data-tone="${c.toPct >= 100 ? 'ok' : 'accent'}"><span class="worklist__dot"></span><span class="worklist__main"><span class="worklist__title">${escapeHTML(c.phaseName)}</span></span><span class="worklist__side"><span class="worklist__meta">${escapeHTML(`${c.fromPct}% → ${c.toPct}%`)}</span></span></button></li>`).join('')}</ul></section>` : ''}
@@ -260,11 +258,10 @@ async function openDiaryEntry(id) {
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('tab.photos'))} <span class="tag">${entry.photos.length}</span></h2>
         <div class="panel__tools"><button class="btn btn--sm btn--ghost" type="button" data-diary-add-photos>${escapeHTML(BLD.photosAdd)}</button></div></header>
         <div class="panel__body">${entry.photos.length ? photoGridHtml(entry.photos) : `<p class="dash-empty">${escapeHTML(BLD.diaryNoPhotos)}</p>`}</div></section>
-      <div class="detail__foot">
-        <button class="btn btn--sm btn--accent" type="button" data-diary-edit>${escapeHTML(BLD.edit)}</button>
+      ${docFootHtml(`
         <button class="btn btn--sm btn--ghost" type="button" data-diary-delete>${escapeHTML(BLD.delete)}</button>
-      </div>`;
-    $('[data-diary-project]', body)?.addEventListener('click', () => openFrom(here, () => openProjectDrawer(entry.projectId, 'diary')));
+        <button class="btn btn--sm btn--primary" type="button" data-diary-edit>${escapeHTML(BLD.edit)}</button>`)}`;
+    $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openProjectDrawer(entry.projectId, 'diary')));
     $('[data-diary-edit]', body).addEventListener('click', () => openFrom(here, () => openDiaryForm(entry)));
     $('[data-diary-add-photos]', body).addEventListener('click', () => addPhotosTo(entry.projectId, { logId: entry.id, shared: entry.shared ? 'true' : 'false' }, reload));
     $('[data-diary-delete]', body).addEventListener('click', async () => {

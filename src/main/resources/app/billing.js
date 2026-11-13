@@ -372,26 +372,24 @@ function openEmailMessage(m) {
   const doc = m.recordType === 'quote' && hasModule('quotes') ? { key: `quote:${m.recordId}`, label: GOOGLE.openQuote, open: () => openQuoteDetail(m.recordId) }
     : m.recordType === 'invoice' && hasModule('invoices') ? { key: `invoice:${m.recordId}`, label: GOOGLE.openInvoice, open: () => openInvoiceDetail(m.recordId) }
       : null;
-  const fact = (label, value) => (value ? `<div><dt>${escapeHTML(label)}</dt><dd>${escapeHTML(value)}</dd></div>` : '');
   const attachments = m.attachments || [];
   const form = document.createElement('div');
   form.className = 'form';
+  // The design's record drawer: the message's fields, its text, then the way to its quote, invoice or the Email page in the foot.
   form.innerHTML = `
-    <div class="detail__head"><div class="detail__client">${escapeHTML(m.fromName || m.from || '—')}</div>
-      <div class="detail__amount"><span class="pill ${outbound ? 'pill--info' : 'pill--accent'}">${escapeHTML(googleTextOr(`direction.${m.direction}`, m.direction))}</span></div></div>
-    <dl class="dash-facts">
-      ${m.fromName ? fact(GOOGLE.msgFrom, m.from) : ''}
-      ${fact(GOOGLE.msgTo, (m.to || []).join(', '))}
-      ${fact(GOOGLE.msgCc, (m.cc || []).join(', '))}
-      ${fact(GOOGLE.msgDate, fmtDate(m.date))}
-      ${fact(GOOGLE.msgSentBy, sentBy)}
-    </dl>
+    ${recordFieldsHtml([
+      [GOOGLE.msgStatus, `<span class="pill ${outbound ? 'pill--info' : 'pill--accent'}">${escapeHTML(googleTextOr(`direction.${m.direction}`, m.direction))}</span>`],
+      [GOOGLE.msgFrom, escapeHTML(m.fromName && m.from ? `${m.fromName} · ${m.from}` : m.fromName || m.from || '—')],
+      [GOOGLE.msgTo, escapeHTML((m.to || []).join(', '))],
+      [GOOGLE.msgCc, escapeHTML((m.cc || []).join(', '))],
+      [GOOGLE.msgDate, escapeHTML(fmtDate(m.date))],
+      [GOOGLE.msgSentBy, escapeHTML(sentBy)],
+    ])}
     ${m.bodyPurged ? `<p class="hint">${escapeHTML(GOOGLE.purged)}</p>` : `<div class="email-body">${escapeHTML(m.body ?? m.snippet ?? '')}</div>`}
     ${attachments.length ? `<p class="hint">${escapeHTML(googleText('attachments', { files: attachments.join(', ') }))}</p>` : ''}
-    ${(doc && !linksBackTo(doc.key)) || hasModule('email') ? `<div class="detail__foot">
+    ${docFootHtml(`
       ${doc && !linksBackTo(doc.key) ? `<button class="btn btn--sm btn--ghost" type="button" data-email-doc>${escapeHTML(doc.label)}</button>` : ''}
-      ${hasModule('email') ? `<button class="btn btn--sm btn--ghost" type="button" data-email-page>${escapeHTML(I18N.t('app.email.openInEmail'))}</button>` : ''}
-    </div>` : ''}`;
+      ${hasModule('email') ? `<button class="btn btn--sm btn--ghost" type="button" data-email-page>${escapeHTML(I18N.t('app.email.openInEmail'))}</button>` : ''}`)}`;
   $('[data-email-doc]', form)?.addEventListener('click', () => openFrom(here, doc.open));
   $('[data-email-page]', form)?.addEventListener('click', () => openEmailPage(m.id));
   openDrawer(m.subject || GOOGLE.msgEyebrow, form, false, { eyebrow: GOOGLE.msgEyebrow });

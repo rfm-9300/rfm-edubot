@@ -452,7 +452,7 @@ function agentsDeps() {
   return {
     api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, openFrom, bindDrawerClose,
     drawerGen: () => drawerGen,
-    hero, statCards, crmPanel, recordKpisHtml, detailMeta,
+    hero, statCards, crmPanel, recordKpisHtml, recordFieldsHtml, recordFigureHtml, docClientHtml, docFootHtml,
     fmtDate, fmtDay, fmtWhen, fmtEUR, relTime, localDay, uiLocale,
     render, hasModule, labels, STR, CRM,
     get state() { return state; },
@@ -471,7 +471,7 @@ const isCompanyAdmin = () => state.me?.principalType === 'operator-imp' || state
 function timesheetsDeps() {
   return {
     api, escapeHTML, toast, confirmDialog, openDrawer, closeDrawer, openFrom, linksBackTo, download: downloadFile,
-    hero, statCards, periodNav, detailMeta, recordTable, recordEmpty,
+    hero, statCards, periodNav, recordFieldsHtml, recordFigureHtml, docClientHtml, docFootHtml, recordTable, recordEmpty,
     fmtDate, fmtDay, fmtDayKey, fmtWhen, relTime, uiLocale, tenantTz,
     todayKey, addDayKey, periodKey, currentPeriodKey, shiftPeriodKey,
     render, hasModule, isPortal, isAdmin: isCompanyAdmin, openPayeeDrawer, labels, STR, CRM,

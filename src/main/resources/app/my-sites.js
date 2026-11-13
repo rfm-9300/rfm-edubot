@@ -87,7 +87,7 @@ function openMySiteIssueForm(site, issue, onSaved) {
   form.className = 'form';
   const next = { OPEN: ['IN_PROGRESS', BLD.issueStart], IN_PROGRESS: ['RESOLVED', BLD.issueResolve] }[i.status];
   form.innerHTML = `
-    ${issue ? `<div class="detail__head"><div class="detail__client">${escapeHTML(i.number)}</div><div class="detail__amount">${issueStatusPill(i.status, i.overdue)}</div></div>` : ''}
+    ${issue ? recordFieldsHtml([[BLD.thIssue, escapeHTML(i.number)], [BLD.thStatus, issueStatusPill(i.status, i.overdue)]]) : ''}
     <div class="form__grid">
       <div class="form__row form__row--full"><label class="lbl" for="mi-title">${escapeHTML(BLD.issueTitle)} <span class="req">●</span></label>
         <input class="inp" id="mi-title" maxlength="160" required value="${escapeHTML(i.title || '')}" placeholder="${escapeHTML(BLD.issueTitlePh)}" /></div>

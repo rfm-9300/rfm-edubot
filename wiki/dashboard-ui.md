@@ -343,6 +343,29 @@ List lost its day group rows (When carries the day) and gained tick boxes, statu
 duration columns. The booking drawer is a field list with its actions in the foot, Confirm, Mark done or
 Invoice last. The design's "Where" and "Assigned to" fields have no data behind them on a booking.
 
+**The rest of the drawers (2026-11-13).** Rodrigo saw that some drawers still had the old look (a name and a
+big figure on top, a grid of boxed facts) while the Clients and Services ones were what he wanted. Every
+record-like drawer now follows the Services one: the kind as the eyebrow, one `recordFieldsHtml` list
+(status first, then the linked client, payee, employee or project through `docClientHtml`, the dates, the money as a
+`recordFigureHtml`), the Lines table where there are lines, and the actions in `docFootHtml` with links and removal
+first and the step that moves it on as the primary button last.
+
+- Converted: Payments, an employee's registered service, a shift, an email message, a change order, a measurement (its
+  totals are a field list too, redrawn as the quantities change), a site diary entry, an issue, a posted update, an
+  agent's run, approval and task, the persona version and source, a site photo, and the account (Google) and
+  mailbox / Google account drawers.
+- `detailHead()`, `detailMeta()` and their `.detail__head` / `.detail__meta` / `.detail__figure` CSS are deleted.
+  `dl.dash-facts` stays for Home's cards and for panels inside a record (a project's money rows), not for a
+  drawer's top list.
+- New strings: `app.eyebrowPayment` and `app.integrations.google.msgStatus`, in all three catalogs.
+- Left alone on purpose: forms (their foot is already `.drawer__foot`), the agent builder, the project record's
+  tabs and the Gantt, which are not field lists.
+- Checked in Chrome on the mock data (Portuguese, 1920px): Payments, a registered service, an issue, a change order,
+  a measurement, a diary entry and an email message (a made-up one). Only syntax-checked, since the mock data has no
+  rows or the module is off: a shift, an agent's run, approval and task, the persona version and source, the photo
+  viewer, the mailbox and Google account drawers, and a draft measurement's live totals. Look at those first when
+  one of them is next on screen.
+
 ## Backoffice adopts the compact shell (2026-11-13)
 
 The platform backoffice now declares `data-shell="compact"` too: its workspace is the same inset main

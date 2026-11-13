@@ -301,26 +301,28 @@ async function openPaymentDetail(id) {
   const here = { key: `payment:${pay.id}`, label: pay.number, open: () => openPaymentDetail(pay.id) };
   const form = document.createElement('div');
   form.className = 'form';
+  // The document drawer, as an invoice's: its fields, its lines, then the actions in the foot, the main step last.
   form.innerHTML = `
-    ${detailHead(payeeName(pay), paymentPill(status), pay.totalEur, tone, payeeLink)}
-    ${detailMeta([
-      { label: STR.detailCreated, value: fmtDay(pay.createdAt) },
-      { label: t.thDueDate, value: canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate) },
-      pay.status === 'PAID' && pay.paidAt ? { label: STR.paidOnLabel, value: fmtDay(pay.paidAt) } : null,
-      clientsOn ? { label: t.client, value: pay.clientName || t.noClient } : null,
-      projectsOn ? { label: t.project, value: pay.projectLabel || t.noProject } : null,
+    ${recordFieldsHtml([
+      [t.thStatus, paymentPill(status)],
+      [t.thPayee, docClientHtml(payeeName(pay), payeeLink)],
+      [STR.detailCreated, escapeHTML(fmtDay(pay.createdAt))],
+      [t.thDueDate, escapeHTML(canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate))],
+      pay.status === 'PAID' && pay.paidAt ? [STR.paidOnLabel, escapeHTML(fmtDay(pay.paidAt))] : null,
+      clientsOn ? [t.client, escapeHTML(pay.clientName || t.noClient)] : null,
+      projectsOn ? [t.project, escapeHTML(pay.projectLabel || t.noProject)] : null,
+      [t.thTotal, recordFigureHtml(fmtEUR(pay.totalEur)), tone],
     ])}
-    ${itemsTable(pay.items)}
+    ${docLinesHtml(pay.items, pay.totalEur)}
     ${pay.notes ? `<p class="hint">${escapeHTML(pay.notes)}</p>` : ''}
-    <div class="detail__foot">
-      ${canMarkPaid ? `<button class="btn btn--sm btn--accent" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}
+    ${docFootHtml(`
       ${clientLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-client>${escapeHTML(STR.detailOpenRecordAria({ name: pay.clientName || '' }))}</button>` : ''}
       ${clientsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-client>${escapeHTML(pay.clientId ? t.changeClient : t.linkClient)}</button>` : ''}
       ${projectLink ? `<button class="btn btn--sm btn--ghost" type="button" data-open-project>${escapeHTML(BLD.openProject)}</button>` : ''}
       ${projectsOn ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-project>${escapeHTML(pay.projectId ? t.changeProject : t.linkProject)}</button>` : ''}
       ${canMarkPaid ? `<button class="btn btn--sm btn--ghost" type="button" data-pay-cancel>${escapeHTML(t.cancel)}</button>` : ''}
       <button class="btn btn--sm btn--ghost" type="button" data-pay-delete>${escapeHTML(t.delete)}</button>
-    </div>`;
+      ${canMarkPaid ? `<button class="btn btn--sm btn--primary" type="button" id="pay-paid">${escapeHTML(t.markPaid)}</button>` : ''}`)}`;
   $('[data-detail-link]', form)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer(kind, payeeId(pay))));
   $('[data-open-client]', form)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(pay.clientId)));
   $('[data-pay-client]', form)?.addEventListener('click', () => openFrom(here, () => openPaymentClientForm(pay)));
@@ -332,7 +334,7 @@ async function openPaymentDetail(id) {
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
   $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
-  openDrawer(pay.number, form, false, { tags: { kind: 'payments', id: pay.id } });
+  openDrawer(pay.number, form, false, { eyebrow: STR.eyebrowPayment, tags: { kind: 'payments', id: pay.id } });
 }
 
 // Links a payment to the client it was for, or unlinks it.

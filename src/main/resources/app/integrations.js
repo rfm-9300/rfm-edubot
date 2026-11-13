@@ -164,11 +164,11 @@ function openMailbox(id) {
     <div class="form__row"><label class="lbl" for="mb-address">${escapeHTML(MAILBOX.addressLabel)}</label>
       <div class="inp-row"><input class="inp mono" id="mb-address" readonly value="${escapeHTML(account.accountEmail)}" />
         <button class="btn btn--sm" type="button" data-mb-copy>${escapeHTML(MAILBOX.copy)}</button></div></div>
-    <dl class="dash-facts">
-      <div><dt>${escapeHTML(MAILBOX.factLastEmail)}</dt><dd>${escapeHTML(account.receivedAt ? relTime(account.receivedAt) : MAILBOX.factNoneYet)}</dd></div>
-      ${account.forwarders?.length ? `<div><dt>${escapeHTML(MAILBOX.factForwardedFrom)}</dt><dd>${escapeHTML(account.forwarders.join(', '))}</dd></div>` : ''}
-      ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-mb-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
-    </dl>
+    ${recordFieldsHtml([
+      [MAILBOX.factLastEmail, escapeHTML(account.receivedAt ? relTime(account.receivedAt) : MAILBOX.factNoneYet)],
+      account.forwarders?.length ? [MAILBOX.factForwardedFrom, escapeHTML(account.forwarders.join(', '))] : null,
+      account.dailyLimit ? [GOOGLE.factSentToday, `<span data-mb-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</span>`] : null,
+    ])}
     <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(MAILBOX.forwardTitle)}</h2>
       <div class="panel__tools panel__tools--chips" role="group" aria-label="${escapeHTML(MAILBOX.providersAria)}">${chips}</div></header>
       <div class="panel__body" data-mb-steps>${mailboxStepsHtml(mailboxProvider)}</div></section>
@@ -394,11 +394,11 @@ function openEmailAccount(id) {
       <div class="notice__text"><strong>${escapeHTML(revoked ? GOOGLE.revokedTitle : GOOGLE.reconnectTitle)}</strong><span>${escapeHTML(revoked ? GOOGLE.revokedDesc : GOOGLE.reconnectDesc)}</span></div>
       ${canConnect ? `<div class="notice__actions"><button class="btn btn--sm btn--primary" type="button" data-ga-reconnect>${escapeHTML(GOOGLE.reconnect)}</button></div>` : ''}
     </div>` : ''}
-    <dl class="dash-facts">
-      <div><dt>${escapeHTML(GOOGLE.factAccount)}</dt><dd>${escapeHTML(account.accountEmail)}</dd></div>
-      ${account.connectedBy ? `<div><dt>${escapeHTML(GOOGLE.factConnectedBy)}</dt><dd>${escapeHTML(account.connectedBy)}</dd></div>` : ''}
-      ${account.dailyLimit ? `<div><dt>${escapeHTML(GOOGLE.factSentToday)}</dt><dd data-ga-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</dd></div>` : ''}
-    </dl>
+    ${recordFieldsHtml([
+      [GOOGLE.factAccount, escapeHTML(account.accountEmail)],
+      account.connectedBy ? [GOOGLE.factConnectedBy, escapeHTML(account.connectedBy)] : null,
+      account.dailyLimit ? [GOOGLE.factSentToday, `<span data-ga-sent>${escapeHTML(googleText('sentToday', { sent: account.sentToday || 0, limit: account.dailyLimit }))}</span>`] : null,
+    ])}
     ${emailInboxPanelHtml(account)}
     <div class="form__row"><label class="lbl" for="ga-name">${escapeHTML(GOOGLE.senderName)} ${optional}</label>
       <input class="inp" id="ga-name" maxlength="80" autocomplete="off" placeholder="${escapeHTML(company)}" value="${escapeHTML(account.senderName || '')}" />

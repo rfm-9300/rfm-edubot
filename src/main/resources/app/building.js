@@ -284,15 +284,14 @@ function openPhotoViewer(photo, onChange) {
   form.className = 'form';
   form.innerHTML = `
     <img class="photo-view" data-photo="${escapeHTML(photo.id)}" data-size="full" alt="${escapeHTML(photo.caption || '')}" />
-    ${dashFacts([[BLD.photoDay, fmtDay(photo.day)], [BLD.photoBy, photo.uploadedBy || '—']])}
+    ${recordFieldsHtml([[BLD.photoDay, escapeHTML(fmtDay(photo.day))], [BLD.photoBy, escapeHTML(photo.uploadedBy || '—')]])}
     <div class="form__row"><label class="lbl" for="ph-caption">${escapeHTML(BLD.photoCaption)} <span class="opt">${escapeHTML(STR.optional)}</span></label>
       <input class="inp" id="ph-caption" maxlength="300" value="${escapeHTML(photo.caption || '')}" /></div>
     <label class="form__check"><input type="checkbox" id="ph-shared" ${photo.shared ? 'checked' : ''} /> ${escapeHTML(BLD.photoShared)}</label>
     <p class="hint">${escapeHTML(BLD.photoSharedHint)}</p>
-    <div class="drawer__foot">
-      <button class="btn btn--ghost" type="button" data-photo-delete>${escapeHTML(BLD.photoDelete)}</button>
-      <button class="btn btn--accent" type="submit">${escapeHTML(BLD.save)}</button>
-    </div>`;
+    ${docFootHtml(`
+      <button class="btn btn--sm btn--ghost" type="button" data-photo-delete>${escapeHTML(BLD.photoDelete)}</button>
+      <button class="btn btn--sm btn--primary" type="submit">${escapeHTML(BLD.save)}</button>`)}`;
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const btn = $('button[type=submit]', form);
