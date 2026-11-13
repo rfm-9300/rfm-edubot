@@ -1,10 +1,10 @@
 ---
-updated: 2026-11-04
+updated: 2026-11-12
 ---
 
 # Customer-facing bot and persona
 
-How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
+How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, the start words that decide which new chats it answers at all, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
 
 ## Chat flows: ManyChat-style menus before the AI (PR #74, shipped 2026-10-13)
 
@@ -129,6 +129,53 @@ lead, Save at the very bottom. `design-system/patterns.md` → "Persona" has the
   tokens, the map, problems under fields, Try it, a clash, the checker, reordering, duplicating,
   discarding and a signed Instagram message showing up in usage; plus dark, a 375px phone, pt-PT
   and a member.
+
+### Start words: only answer chats that begin with one (2026-11-12)
+
+Asked for as "respond only if the first message is a trigger word", per channel, on Instagram and
+WhatsApp. Menu keywords plus the team-only fallback don't do it: they look at every message, so a
+keyword typed ten messages in still opens a menu, and after a menu the AI never takes over. A start
+gate looks only at how a chat **begins**. `docs/architecture.md` → "Chat flows" has the routing.
+
+- **Its own word list, per channel**, not the menus' keywords: the words that start a chat ("quote",
+  "book a visit") are not the ones that open a menu. Matching is the menus' (`FlowText`): whole
+  words, ignoring case, accents and punctuation. Stored in the same `chat_flows` document as
+  `startGates: [{channel, enabled, words}]`, read on every message like the menus.
+- **No start word in the first message: the chat is created paused and kept for the team.** The
+  message is stored (unread, "Needs reply"), nothing is sent and the model isn't called. The chat has
+  `autoReplyEnabled = false` and `autoReplyPausedBy = Conversation.START_GATE` (`bot:start-gate`), so
+  every later message is stored only, **a start word typed later doesn't wake the bot**, and a person
+  presses Resume AI in the inbox to let it answer. Chosen over a fixed "send *Info* to start" reply,
+  which would be a separate feature.
+- **Not a handoff.** The chat is born paused through `ConversationRepository.findOrCreate(…, pausedBy)`.
+  `setAutoReplyEnabled(false)` is the wrong call here: it appends a `conversation.handoff` event
+  (which agents trigger on), and nothing was handed over. No bell notification either: a busy
+  Instagram account would drown it. The `message.received` event still fires, so an agent can react.
+  The Home card "Auto-reply paused" counts these chats too.
+- **Only new chats.** The gate applies when no conversation exists yet for that customer and channel.
+  Chats that existed when it was switched on are never gated, nor are chats the team started
+  (`registerOnly`). Switching it off lets every new chat in again.
+- **A photo or voice note can open a chat too**: the media branch of `MessagePipeline` creates the
+  conversation before the text path runs, so it applies the same gate to the caption. Without that, a
+  photo as the first message would leave a chat the gate never paused.
+- **Instagram and WhatsApp only** (`StartGate.CHANNELS`); a website visitor would wait at a silent
+  widget. A gate on a channel with no company binding simply never fires.
+- **A gate that can't open anything fails open.** `saveProblem` refuses an enabled gate with no
+  usable word (`start_words`), and if one is stored by hand `find()` logs `Skipping start gate with
+  no word` and the channel behaves as if it had none: a broken setting must not silence a channel.
+- **Menus tab, same draft and save.** A "Start words" panel (Instagram and WhatsApp side by side)
+  sits above the menus and shares their draft, validation order and save bar (`app/menus.js`;
+  `PUT /app/api/persona/menus` takes `startGates`). A page that omits the field keeps the saved
+  gates and `[]` clears them. A gate that is off keeps its words.
+- **The inbox says why**: a chat paused by the gate shows "This chat began without a start word"
+  instead of "Paused by …". The Persona test chat adds a note when its first message holds no start
+  word (`gatedChannels` in the answer), and still shows the AI's answer.
+- **Trade-off:** unsolicited DMs now pile up as paused chats in the inbox instead of getting a reply.
+  That is the point of the gate, but the team has to look.
+- Checked with `StartGatePipelineTest` (real pipeline factory and Mongo), `PersonaRoutesTest` and
+  `scripts/persona-e2e/walkthrough.mjs` section 9b (setting words up, a signed WhatsApp first
+  message with and without one, the inbox banner, Resume AI, the test chat's note; dark and a
+  375px phone).
 
 ## Persona studio: settings, history, safe synthesis, handoff (PR #54, shipped 2026-10-08, `131ba11`)
 

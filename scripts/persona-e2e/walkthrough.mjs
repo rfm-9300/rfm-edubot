@@ -6,8 +6,10 @@
 // rebuilding, a signed WhatsApp message that hands a chat to the team (bell + inbox), Instagram
 // menus (built with keyword tokens, mapped, caught when incomplete, tried unsaved in the test chat
 // and with Try it, saved, team-only; a keyword clash, the message checker, reordering, duplicating
-// and discarding; a signed Instagram message the menu answers, counted in its usage), dark theme,
-// a narrow window and a phone, and a member's read-only view.
+// and discarding; a signed Instagram message the menu answers, counted in its usage), start words
+// (a WhatsApp gate set up and saved, a signed first message without one kept for the team and paused,
+// one with a start word answered, the test chat's note, Resume), dark theme, a narrow window and a
+// phone, and a member's read-only view.
 //
 // Run the app with OPENROUTER_BASE_URL pointing at fake-openrouter.py (its replies are what this
 // expects) and a password for the backoffice, then:
@@ -128,13 +130,13 @@ function fixtures(dir) {
 }
 
 /** What Meta posts when a customer writes to the company's number, signed with the app secret. */
-async function whatsappMessage(phone, text) {
+async function whatsappMessage(phone, text, from = '351912345678', name = 'Marta Silva') {
   const body = JSON.stringify({
     object: 'whatsapp_business_account',
     entry: [{ id: 'waba', changes: [{ field: 'messages', value: {
       messaging_product: 'whatsapp', metadata: { display_phone_number: '351210000000', phone_number_id: phone },
-      contacts: [{ profile: { name: 'Marta Silva' }, wa_id: '351912345678' }],
-      messages: [{ from: '351912345678', id: `wamid.persona-e2e.${Date.now()}`, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }],
+      contacts: [{ profile: { name }, wa_id: from }],
+      messages: [{ from, id: `wamid.persona-e2e.${from}.${Date.now()}`, timestamp: String(Math.floor(Date.now() / 1000)), type: 'text', text: { body: text } }],
     } }] }],
   });
   const signature = crypto.createHmac('sha256', WA_APP_SECRET).update(body).digest('hex');
@@ -418,12 +420,64 @@ try {
   expect(summary.includes('Sent once to 1 customer') || summary.includes('1 refused by Instagram'), `the menu's head counts what it sent (${summary})`);
   await shot('menus-saved');
 
+  note('9b. Start words: new chats only get answers when they begin with one');
+  const gatePanel = await text('#pm-start');
+  expect(gatePanel.includes('Instagram') && gatePanel.includes('WhatsApp') && (await page.$$('[data-gate]')).length === 2, 'the tab offers a start gate for Instagram and WhatsApp');
+  expect(!(await page.$('[data-gate-tokens]')) && !(await page.$eval('#pm-gate-WHATSAPP-on', el => el.checked)), 'both are off, so every new chat is answered');
+  await click('#pm-gate-WHATSAPP-on', 700);
+  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-gate-WHATSAPP-words', 'switching WhatsApp on puts the cursor in its start words');
+  expect(await page.$eval('[data-pm-savebar]', el => el.classList.contains('is-dirty')), 'and counts as an unsaved change');
+  await click('[data-pm-save]', 300);
+  expect((await toast()).includes('WhatsApp: add at least one start word'), 'a gate with no word is caught before saving');
+  expect((await text('[data-gate-issue="WHATSAPP"]')).startsWith('Add at least one start word'), 'and says so under the field');
+  await type('#pm-gate-WHATSAPP-words', 'quote\nBook a visit', 20);
+  expect((await page.$$('[data-gate-tokens="WHATSAPP"] .token')).length === 1 && await page.$eval('#pm-gate-WHATSAPP-words', el => el.value) === 'Book a visit', 'Enter adds a start word token');
+  await type('#pm-gate-WHATSAPP-words', '\nQUOTE\n', 20);
+  expect((await text('[data-gate-notes="WHATSAPP"]')).includes('“quote” is already a start word') && (await page.$$('[data-gate-tokens="WHATSAPP"] .token')).length === 2, 'a repeat is refused, ignoring capitals, and names the word already there');
+  await shot('start-words-draft');
+  await click('[data-pm-save]', 1300);
+  const gateSaved = await page.evaluate(async () => (await api('/app/api/persona/menus')).startGates);
+  expect(JSON.stringify(gateSaved) === JSON.stringify([{ channel: 'WHATSAPP', enabled: true, words: ['quote', 'Book a visit'] }]), `saving keeps the words, the one being typed included (${JSON.stringify(gateSaved)})`);
+  await click('#persona-chat-clear', 300);
+  await type('#persona-chat-input', 'Do you open on Sundays?', 20);
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => document.querySelectorAll('#persona-chat-log .chat__note').length > 0, { timeout: 20000 });
+  await pause(500);
+  expect((await text('#persona-chat-log')).includes('No reply on WhatsApp'), 'the test chat says a new chat opening like that gets no reply on WhatsApp');
+
+  // Two new customers write on WhatsApp: one without a start word, one with.
+  expect(await whatsappMessage(company.phone, 'Hi, do you open on Saturdays?', '351913000001', 'Rui Gate') === 200, 'a new customer writes without a start word');
+  expect(await whatsappMessage(company.phone, 'I would like a QUOTE please', '351913000002', 'Eva Quote') === 200, 'another writes with one');
+  await pause(5000);
+  await page.reload({ waitUntil: 'networkidle2' });
+  await pause(1500);
+  await click('.nav__item[data-tab="conversations"]', 1500);
+  await click('[data-inbox-filter="all"]', 800);
+  const open = async name => {
+    await page.$$eval('.inbox-row', (rows, n) => rows.find(r => r.innerText.includes(n))?.click(), name);
+    await pause(1500);
+  };
+  await open('Rui Gate');
+  expect((await text('.thread-banner')).includes('This chat began without a start word'), 'the chat without a start word says why the bot kept quiet');
+  expect((await text('.thread-head__tools')).includes('AI paused') && (await text('#inbox-log')).includes('do you open on Saturdays'), 'its message waits in the inbox with the AI paused');
+  expect(!(await text('.thread-banner')).includes('Paused by'), 'it is not shown as paused by a person');
+  await shot('inbox-start-gate');
+  await open('Eva Quote');
+  expect(!(await page.$('.thread-banner')) && (await text('.thread-head__tools')).includes('AI replying'), 'the chat that opened with a start word runs as usual');
+  await open('Rui Gate');
+  await click('[data-ai-toggle="on"]', 1500);
+  expect((await text('.thread-head__tools')).includes('AI replying') && !(await page.$('.thread-banner')), 'Resume AI lets the bot answer that chat from now on');
+
   note('10. Dark theme, a narrow window and a phone');
+  await openPersona();
   await tab('behavior');
   await click('#btn-theme', 1200);
   await shot('dark');
   await tab('menus');
   await shot('menus-dark');
+  await page.$eval('#pm-start', el => el.scrollIntoView({ block: 'start' }));
+  await pause(500);
+  await shot('start-words-dark');
   await click('#btn-theme', 800);
   await tab('behavior');
   const cdp = await page.target().createCDPSession();
@@ -440,6 +494,10 @@ try {
   await pause(1500);
   expect(!(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)), 'the menus scroll no sideways on a 375px phone');
   await shot('menus-phone');
+  await page.$eval('#pm-start', el => el.scrollIntoView({ block: 'start' }));
+  await pause(500);
+  expect((await page.$$eval('[data-gate]', els => els.map(el => Math.round(el.getBoundingClientRect().left)))).every((x, _, all) => x === all[0]), 'the start words of both channels stack in one column on a phone');
+  await shot('start-words-phone');
   await cdp.send('Emulation.clearDeviceMetricsOverride');
   await pause(1000);
 
@@ -458,7 +516,8 @@ try {
   await page.waitForSelector('#pm-0-name');
   expect(await page.$eval('#pm-0-name', el => el.disabled) && !(await page.$('[data-pm-save]')) && !(await page.$('[data-menu-add]')), 'menus are read-only');
   expect(!(await page.$('[data-menu-up="0"], [data-kw-remove]')) && await page.$eval('[data-menu-try="0"]', el => !el.disabled), 'members can\'t reorder or edit keywords, but can try a menu');
-  expect((await tryChip('who')).includes("I'm Sofia"), 'members still use the test chat');
+  await tryChip('who');
+  expect((await text('#persona-chat-log')).includes("I'm Sofia"), 'members still use the test chat');
   await shot('member');
 } catch (e) {
   failures.push(`stopped: ${e.message}`);

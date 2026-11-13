@@ -14,7 +14,9 @@ import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
 import com.rfm.edubot.flows.ChatFlow
+import com.rfm.edubot.flows.ChatFlowLimits
 import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.StartGate
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.PersonaCompiler
 import com.rfm.edubot.persona.PersonaLimits
@@ -291,9 +293,16 @@ class PersonaRoutesTest {
         if (draft != null) put("draft", draft)
     }
 
-    private fun menus(vararg flows: JsonObject, teamOnly: List<String> = emptyList()) = buildJsonObject {
+    private fun menus(vararg flows: JsonObject, teamOnly: List<String> = emptyList(), gates: List<JsonObject>? = null) = buildJsonObject {
         putJsonArray("flows") { flows.forEach { add(it) } }
         putJsonArray("teamOnlyChannels") { teamOnly.forEach { add(it) } }
+        if (gates != null) putJsonArray("startGates") { gates.forEach { add(it) } }
+    }
+
+    private fun gate(channel: String, vararg words: String, enabled: Boolean = true) = buildJsonObject {
+        put("channel", channel)
+        put("enabled", enabled)
+        putJsonArray("words") { words.forEach { add(it) } }
     }
 
     private fun menu(
@@ -902,6 +911,59 @@ class PersonaRoutesTest {
         val broken = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(keywords = listOf("?!")))))
         assertEquals(HttpStatusCode.BadRequest, broken.status)
         assertEquals("keywords", broken.obj().text("problem"))
+    }
+
+    @Test
+    fun `start gates are saved with the menus, kept when a page leaves them out, checked, and tried in the test chat`() = personaTest {
+        val c = company()
+        val token = token(c.admin.email)
+        fun JsonObject.gates() = this["startGates"]!!.jsonArray.map { g -> g.jsonObject.text("channel") to g.jsonObject["words"]!!.jsonArray.map { it.jsonPrimitive.content } }
+
+        val empty = send("GET", "/app/api/persona/menus", token).obj()
+        assertEquals(emptyList(), empty.gates())
+        assertEquals(listOf("INSTAGRAM", "WHATSAPP"), empty["startChannels"]!!.jsonArray.map { it.jsonPrimitive.content }, "the website has no gate")
+        assertEquals(ChatFlowLimits.MAX_START_WORDS, empty.obj("limits").int("startWords"))
+
+        val saved = send(
+            "PUT", "/app/api/persona/menus", token,
+            menus(menu(), gates = listOf(gate("WHATSAPP", "oi", enabled = false), gate("INSTAGRAM", " Orçamento ", "", "orcamento", "?!", "Quero marcar"))),
+        ).obj()
+        assertEquals(listOf("INSTAGRAM" to listOf("Orçamento", "Quero marcar"), "WHATSAPP" to listOf("oi")), saved.gates(), "trimmed, without blanks or repeats, in channel order")
+        val stored = ChatFlowRepository(mongo, c.id).find()!!
+        assertEquals(StartGate(true, listOf("Orçamento", "Quero marcar")), stored.startGate(Platform.INSTAGRAM))
+        assertNull(stored.startGate(Platform.WHATSAPP), "a gate that is off keeps its words but doesn't run")
+        assertEquals(StartGate(false, listOf("oi")), stored.startGates[Platform.WHATSAPP])
+
+        val older = send("PUT", "/app/api/persona/menus", token, menus(menu(name = "Serviços"))).obj()
+        assertEquals(saved.gates(), older.gates(), "a page that doesn't send start gates leaves the saved ones")
+
+        suspend fun refused(vararg gates: JsonObject): JsonObject {
+            val response = send("PUT", "/app/api/persona/menus", token, menus(menu(), gates = gates.toList()))
+            assertEquals(HttpStatusCode.BadRequest, response.status)
+            return response.obj().also { assertEquals("menu_problem", it.text("error")) }
+        }
+        val noWords = refused(gate("INSTAGRAM", "?!"))
+        assertEquals("start_words" to "INSTAGRAM", noWords.text("problem") to noWords.text("channel"))
+        val website = refused(gate("WEB", "oi"))
+        assertEquals("invalid" to "WEB", website.text("problem") to website.text("channel"))
+        val long = refused(gate("WHATSAPP", "x".repeat(61)))
+        assertEquals(Triple("start_word", "WHATSAPP", ChatFlowLimits.MAX_KEYWORD_CHARS), Triple(long.text("problem"), long.text("channel"), long.int("limit")))
+        assertEquals(saved.gates(), send("GET", "/app/api/persona/menus", token).obj().gates(), "a refused save changes nothing")
+
+        fun gated(response: JsonObject) = response["gatedChannels"]!!.jsonArray.map { it.jsonPrimitive.content }
+        assertEquals(listOf("INSTAGRAM"), gated(send("POST", "/app/api/persona/test", token, testChat("user" to "Olá")).obj()), "no start word: Instagram would leave this chat to the team")
+        assertEquals(emptyList(), gated(send("POST", "/app/api/persona/test", token, testChat("user" to "Queria um orçamento")).obj()))
+        assertEquals(
+            listOf("INSTAGRAM"),
+            gated(send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", "assistant" to "Olá!", "user" to "Queria um orçamento")).obj()),
+            "only the first message counts",
+        )
+        val tried = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(), gates = listOf(gate("WHATSAPP", "olá"))))).obj()
+        assertEquals(emptyList(), gated(tried), "unsaved gates replace the saved ones")
+        val closed = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(), gates = listOf(gate("WHATSAPP", "preço"))))).obj()
+        assertEquals(listOf("WHATSAPP"), gated(closed))
+
+        assertEquals(emptyList(), send("PUT", "/app/api/persona/menus", token, menus(menu(), gates = emptyList())).obj().gates(), "an empty list removes the gates")
     }
 
     @Test

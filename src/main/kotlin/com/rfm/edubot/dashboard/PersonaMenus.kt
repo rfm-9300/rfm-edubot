@@ -10,12 +10,20 @@ import com.rfm.edubot.flows.FlowProblem
 import com.rfm.edubot.flows.FlowStep
 import com.rfm.edubot.flows.FlowText
 import com.rfm.edubot.flows.FlowUsage
+import com.rfm.edubot.flows.StartGate
 import com.rfm.edubot.tenant.model.Platform
 import kotlinx.serialization.Serializable
 
-/** The Persona page's Menus tab edits a company's chat flows; the same shape goes in and comes out. */
+/**
+ * The Persona page's Menus tab edits a company's chat flows; the same shape goes in and comes out.
+ * [startGates] left out (an older page) keeps the saved ones.
+ */
 @Serializable
-internal data class MenusInput(val flows: List<MenuDto>, val teamOnlyChannels: List<String>)
+internal data class MenusInput(val flows: List<MenuDto>, val teamOnlyChannels: List<String>, val startGates: List<StartGateDto>? = null)
+
+/** A channel's start gate: new chats there only get answers when the first message holds one of [words]. */
+@Serializable
+internal data class StartGateDto(val channel: String, val enabled: Boolean, val words: List<String>)
 
 @Serializable
 internal data class MenuDto(val id: String, val name: String, val enabled: Boolean, val keywords: List<String>, val steps: List<MenuStepDto>)
@@ -32,6 +40,7 @@ internal data class MenuLimitsDto(
     val steps: Int,
     val keywords: Int,
     val keywordChars: Int,
+    val startWords: Int,
     val nameChars: Int,
     val buttons: Int,
     val titleChars: Int,
@@ -50,6 +59,9 @@ internal data class MenuSentDto(val id: String, val sent: Int, val failed: Int, 
 internal data class MenusDto(
     val flows: List<MenuDto>,
     val teamOnlyChannels: List<String>,
+    val startGates: List<StartGateDto>,
+    /** The channels that can have a start gate. */
+    val startChannels: List<String>,
     val canEdit: Boolean,
     /** Menus only answer Instagram messages, so the tab says when there is no Instagram account to answer. */
     val instagramConnected: Boolean,
@@ -59,15 +71,18 @@ internal data class MenusDto(
     val usage: MenuUsageDto,
 )
 
-/** `error` is always `menu_problem`; [problem] says what, [menu] and [step] where, as positions in what was sent. */
+/** `error` is always `menu_problem`; [problem] says what, [menu] and [step] where, as positions in what was sent, or [channel] for a start gate. */
 @Serializable
-internal data class MenuErrorDto(val error: String, val problem: String, val menu: Int?, val step: Int?, val limit: Int?)
+internal data class MenuErrorDto(val error: String, val problem: String, val menu: Int?, val step: Int?, val limit: Int?, val channel: String?)
 
 @Serializable
 internal data class QuickReplyDto(val title: String, val payload: String)
 
-/** As stored: trimmed, blank and repeated keywords dropped (repeats ignore case and accents), on Instagram. */
-internal fun MenusInput.toChatFlows() = ChatFlows(
+/**
+ * As stored: trimmed, blank and repeated keywords and start words dropped (repeats ignore case and accents),
+ * menus on Instagram. Without [startGates] in the input, [keepGates] stay as they were.
+ */
+internal fun MenusInput.toChatFlows(keepGates: Map<Platform, StartGate> = emptyMap()) = ChatFlows(
     flows = flows.map { menu ->
         ChatFlow(
             id = menu.id.trim(),
@@ -81,6 +96,10 @@ internal fun MenusInput.toChatFlows() = ChatFlows(
         )
     },
     teamOnlyChannels = teamOnlyChannels.mapNotNull { name -> Platform.entries.firstOrNull { it.name == name } }.toSet(),
+    startGates = startGates?.mapNotNull { gate ->
+        val platform = Platform.entries.firstOrNull { it.name == gate.channel } ?: return@mapNotNull null
+        platform to StartGate(gate.enabled, gate.words.map { it.trim() }.filter { FlowText.normalize(it).isNotEmpty() }.distinctBy { FlowText.normalize(it) })
+    }?.toMap() ?: keepGates,
 )
 
 internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: Boolean, usage: Map<String, FlowUsage>) = MenusDto(
@@ -88,6 +107,8 @@ internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: B
         MenuDto(flow.id, flow.name, flow.enabled, flow.keywords, flow.steps.map { step -> MenuStepDto(step.id, step.text, step.buttons.map { MenuButtonDto(it.title, it.next) }) })
     },
     teamOnlyChannels = flows?.teamOnlyChannels.orEmpty().map { it.name }.sorted(),
+    startGates = flows?.startGates.orEmpty().entries.sortedBy { it.key.name }.map { (platform, gate) -> StartGateDto(platform.name, gate.enabled, gate.words) },
+    startChannels = StartGate.CHANNELS.map { it.name }.sorted(),
     canEdit = canEdit,
     instagramConnected = instagramConnected,
     updatedAt = flows?.updatedAt?.toString(),
@@ -97,6 +118,7 @@ internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: B
         steps = ChatFlowLimits.MAX_STEPS,
         keywords = ChatFlowLimits.MAX_KEYWORDS,
         keywordChars = ChatFlowLimits.MAX_KEYWORD_CHARS,
+        startWords = ChatFlowLimits.MAX_START_WORDS,
         nameChars = ChatFlowLimits.MAX_NAME_CHARS,
         buttons = ChatFlow.MAX_BUTTONS,
         titleChars = ChatFlow.MAX_TITLE,
@@ -110,6 +132,6 @@ internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: B
     ),
 )
 
-internal fun FlowProblem.dto() = MenuErrorDto("menu_problem", code, menu, step, limit)
+internal fun FlowProblem.dto() = MenuErrorDto("menu_problem", code, menu, step, limit, channel)
 
 internal fun QuickReply.dto() = QuickReplyDto(title, payload)

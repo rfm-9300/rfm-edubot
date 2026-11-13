@@ -28,6 +28,10 @@ class ChatFlowRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         return ChatFlows(
             flows = flows,
             teamOnlyChannels = platforms(doc.strings("teamOnlyChannels")),
+            startGates = doc.documents("startGates").mapNotNull { raw ->
+                val platform = platforms(listOfNotNull(raw.getString("channel"))).singleOrNull() ?: return@mapNotNull null
+                platform to StartGate(raw.getBoolean("enabled") ?: true, raw.strings("words"))
+            }.toMap(),
             updatedAt = doc.getDate("updatedAt")?.let { Instant.fromEpochMilliseconds(it.time) },
             updatedBy = doc.getString("updatedBy"),
         )
@@ -36,6 +40,9 @@ class ChatFlowRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     /** The flows that can run, or null when the company has none. A flow with [ChatFlow.problems] is left out and logged. */
     suspend fun find(): ChatFlows? {
         val all = load() ?: return null
+        all.startGates.filter { (_, gate) -> gate.enabled && !gate.usable() }.keys.forEach {
+            log.warn("Skipping start gate with no word: tenantId={}, channel={}", tenantId, it)
+        }
         return all.copy(
             flows = all.flows.filter { flow ->
                 val problems = flow.problems()
@@ -45,7 +52,7 @@ class ChatFlowRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         )
     }
 
-    /** Replaces the company's flows and AI setting with [flows], saved by [author]. */
+    /** Replaces the company's flows, AI setting and start gates with [flows], saved by [author]. */
     suspend fun save(flows: ChatFlows, author: String): ChatFlows {
         val now = Date(SystemClock.now().toEpochMilliseconds())
         collection.updateOne(
@@ -53,6 +60,12 @@ class ChatFlowRepository(mongo: MongoModule, private val tenantId: ObjectId) {
             Updates.combine(
                 Updates.set("flows", flows.flows.map { it.toDocument() }),
                 Updates.set("teamOnlyChannels", flows.teamOnlyChannels.map { it.name }.sorted()),
+                Updates.set(
+                    "startGates",
+                    flows.startGates.entries.sortedBy { it.key.name }.map { (platform, gate) ->
+                        Document("channel", platform.name).append("enabled", gate.enabled).append("words", gate.words)
+                    },
+                ),
                 Updates.set("updatedAt", now),
                 Updates.set("updatedBy", author),
                 Updates.setOnInsert("createdAt", now),

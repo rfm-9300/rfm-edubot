@@ -2,7 +2,8 @@
    keyword automations. A list of menus that open in place, each with its keywords, a map of where its
    buttons lead and its messages, beside the test chat app.js draws. app.js mounts it with init() and passes
    its helpers; the server checks every rule again when menus are saved or tried (`/app/api/persona/menus`).
-   Unsaved edits live in state.personaDraft.menus, a copy of the saved menus taken on the first edit. */
+   Unsaved edits live in state.personaDraft.menus, a copy of the saved menus taken on the first edit. The tab also
+   holds each channel's start words: a new chat there is only answered when its first message holds one. */
 (function () {
   let d = null;
   const M = I18N.section('app.personaStudio.menus');
@@ -16,7 +17,7 @@
   // Not part of the draft: which menus are open and which maps are folded (by menu id), whether a save was
   // refused (problems then show under their fields), the message being checked, a keyword being typed and a
   // note about the last keyword entry.
-  const ui = { open: new Set(), maps: new Set(), checked: false, probe: '', pending: {}, note: null, seeded: null };
+  const ui = { open: new Set(), maps: new Set(), checked: false, probe: '', pending: {}, note: null, gateNote: null, seeded: null };
 
   const utf8Bytes = text => new TextEncoder().encode(text || '').length;
   /** A keyword as the server matches it: lowercase words without accents or punctuation. */
@@ -49,7 +50,11 @@
 
   /** The menus as they stand: the unsaved draft, else the saved ones. */
   function menus() {
-    return d.state.personaDraft?.menus || { flows: saved()?.flows || [], teamOnlyChannels: saved()?.teamOnlyChannels || [] };
+    return d.state.personaDraft?.menus || savedMenus();
+  }
+
+  function savedMenus() {
+    return { flows: saved()?.flows || [], teamOnlyChannels: saved()?.teamOnlyChannels || [], startGates: saved()?.startGates || [] };
   }
 
   /** The draft to change, started as a copy of the saved menus. */
@@ -79,14 +84,44 @@
         steps: (f.steps || []).map(s => ({ id: s.id, text: (s.text || '').trim(), buttons: (s.buttons || []).map(b => ({ title: (b.title || '').trim(), next: b.next || '' })) })),
       })),
       teamOnlyChannels: [...(m.teamOnlyChannels || [])].sort(),
+      // A gate that is off and has no words is nothing to keep.
+      startGates: (m.startGates || [])
+        .map(g => ({ channel: g.channel, enabled: !!g.enabled, words: cleanKeywords(g.words) }))
+        .filter(g => g.enabled || g.words.length)
+        .sort((a, b) => (a.channel < b.channel ? -1 : a.channel > b.channel ? 1 : 0)),
     };
   }
+
+  // ── Start words: what a new chat's first message must hold, by channel ───────────────────────
+
+  const channels = () => saved()?.startChannels || [];
+  const channelName = channel => tr(`startChannel.${channel}`);
+  const gateOf = (m, channel) => (m.startGates || []).find(g => g.channel === channel) || { channel, enabled: false, words: [] };
+
+  /** The gate of [channel] in the draft, added when the channel has none yet. */
+  function editableGate(channel) {
+    const m = editable();
+    m.startGates = m.startGates || [];
+    let g = m.startGates.find(x => x.channel === channel);
+    if (!g) { g = { channel, enabled: false, words: [] }; m.startGates.push(g); }
+    g.words = g.words || [];
+    return g;
+  }
+
+  /** What stops gate [g] from being saved, with the server's code: too many words, a word too long, or on with none. */
+  function gateIssue(g, limits = limitsOf()) {
+    const list = cleanKeywords(g.words);
+    if (list.length > limits.startWords) return { code: 'start_words_limit', limit: limits.startWords };
+    if (list.some(w => w.length > limits.keywordChars)) return { code: 'start_word', limit: limits.keywordChars };
+    if (g.enabled && !list.length) return { code: 'start_words' };
+    return null;
+  }
+  const gateIssues = m => channels().map(c => gateIssue(gateOf(m, c))).filter(Boolean).length;
 
   /** Drops the draft once it matches the saved menus again, so an edit undone by hand isn't left "unsaved". */
   function settle() {
     const draft = d.state.personaDraft.menus;
-    const was = { flows: saved()?.flows || [], teamOnlyChannels: saved()?.teamOnlyChannels || [] };
-    if (draft && JSON.stringify(payload(draft)) === JSON.stringify(payload(was))) delete d.state.personaDraft.menus;
+    if (draft && JSON.stringify(payload(draft)) === JSON.stringify(payload(savedMenus()))) delete d.state.personaDraft.menus;
   }
 
   // ── What the menus do: problems, keyword clashes, where buttons lead ───────────────────────────
@@ -114,6 +149,10 @@
         if (buttons.some(b => !titleOk(b.title, limits))) return { problem: 'title', menu, step, limit: limits.titleChars };
         if (buttons.some(b => !ids.includes(b.next))) return { problem: 'next', menu, step };
       }
+    }
+    for (const g of payload(m).startGates) {
+      const issue = gateIssue(g, limits);
+      if (issue) return { problem: issue.code, channel: g.channel, limit: issue.limit };
     }
     return null;
   }
@@ -239,7 +278,7 @@
     const add = !edit || !flows.length ? ''
       : room ? `<div><button type="button" class="btn btn--ghost" data-menu-add><span class="btn__plus">+</span> ${esc(M.add)}</button></div>`
         : `<p class="hint">${esc(tr('menusFull', { max: count(limits.menus || 10) }))}</p>`;
-    return `${notice}<form class="form flow-menus" id="persona-menus-form" novalidate>${overview(m, edit)}${list}${add}${edit ? saveBar(ctx) : ''}</form>`;
+    return `${notice}<form class="form flow-menus" id="persona-menus-form" novalidate>${overview(m, edit)}${startPanel(m, edit)}${list}${add}${edit ? saveBar(ctx) : ''}</form>`;
   }
 
   /** On a fresh load a single menu starts open; with several, the list shows them folded. */
@@ -271,6 +310,95 @@
         </div>
       </div>
     </section>`;
+  }
+
+  function startPanel(m, edit) {
+    const rows = channels().map(channel => {
+      const g = gateOf(m, channel);
+      const id = `pm-gate-${channel}`;
+      const words = !g.enabled ? '' : `<div class="form__row-head"><label class="lbl" for="${id}-words">${esc(M.startWords)}</label><span class="hint" data-gate-count="${channel}"></span></div>
+          <div class="tokens${edit ? '' : ' is-readonly'}" data-gate-tokens="${channel}">${edit ? `<input class="tokens__input" id="${id}-words" data-gate-input="${channel}" maxlength="${limitsOf().keywordChars || 60}" autocomplete="off" enterkeyhint="enter" aria-describedby="${id}-hint" value="${esc(ui.pending[`gate:${channel}`] || '')}" />` : ''}</div>
+          <p class="hint" id="${id}-hint">${esc(M.startWordsHelp)}</p>
+          <p class="hint hint--bad" data-gate-issue="${channel}" hidden></p>
+          <div class="flow-menu__notes" data-gate-notes="${channel}" aria-live="polite"></div>`;
+      return `<div class="form__row" data-gate="${channel}"><span class="lbl">${esc(channelName(channel))}</span>
+          <label class="form__check"><input type="checkbox" id="${id}-on" data-gate-on="${channel}"${g.enabled ? ' checked' : ''}${edit ? '' : ' disabled'} /> ${esc(M.startOnly)}</label>
+          ${words}</div>`;
+    }).join('');
+    if (!rows) return '';
+    return `<section class="panel" id="pm-start"><header class="panel__head"><h2 class="panel__title">${esc(M.startTitle)}</h2></header>
+      <div class="panel__body form"><p class="hint">${esc(M.startIntro)}</p><div class="form__grid">${rows}</div></div>
+    </section>`;
+  }
+
+  function gateTokens(g, edit) {
+    return (g.words || []).map((w, n) => `<span class="token">${edit
+      ? `<button type="button" class="token__text" tabindex="-1" data-gate-edit="${g.channel}:${n}" aria-label="${esc(tr('startWordEdit', { word: w }))}">${esc(w)}</button><button type="button" class="token__rm" data-gate-remove="${g.channel}:${n}" aria-label="${esc(tr('startWordRemove', { word: w }))}">×</button>`
+      : `<span class="token__text">${esc(w)}</span>`}</span>`).join('');
+  }
+
+  /** Brings each open gate's chips, counter, note and problem in step with the draft, leaving the field being typed in alone. */
+  function paintGates(form, m, edit) {
+    const limits = limitsOf();
+    for (const channel of channels()) {
+      const g = gateOf(m, channel);
+      const box = $(`[data-gate-tokens="${channel}"]`, form);
+      if (!g.enabled || !box) continue;
+      const chips = gateTokens(g, edit);
+      if (painted.get(box) !== chips) {
+        $$('.token', box).forEach(t => t.remove());
+        box.insertAdjacentHTML('afterbegin', chips);
+        painted.set(box, chips);
+      }
+      const max = limits.startWords || 50;
+      const n = (g.words || []).length;
+      const input = $('[data-gate-input]', box);
+      if (input) {
+        input.disabled = n >= max;
+        input.placeholder = n >= max ? tr('startWordsFull', { max: count(max) }) : n ? M.startWordsPhMore : M.startWordsPh;
+      }
+      const counter = $(`[data-gate-count="${channel}"]`, form);
+      if (counter) counter.textContent = tr('startWordsCount', { n: count(n), max: count(max) });
+      const notes = $(`[data-gate-notes="${channel}"]`, form);
+      if (notes) setHtml(notes, ui.gateNote?.channel === channel ? `<p class="hint">${esc(ui.gateNote.text)}</p>` : '');
+      const issue = gateIssue(g, limits);
+      const say = $(`[data-gate-issue="${channel}"]`, form);
+      if (say) {
+        const text = ui.checked && issue ? issueText(issue) : '';
+        say.textContent = text;
+        say.hidden = !text;
+      }
+      input?.toggleAttribute('aria-invalid', ui.checked && !!issue);
+    }
+  }
+
+  function addGateWords(channel, texts) {
+    const g = editableGate(channel);
+    const limits = limitsOf();
+    const max = limits.startWords || 50;
+    const have = new Map(g.words.map(w => [words(w), w]));
+    ui.gateNote = null;
+    for (const raw of texts) {
+      const word = raw.trim().slice(0, limits.keywordChars || 60);
+      if (!word) continue;
+      const w = words(word);
+      if (!w) { ui.gateNote = { channel, text: tr('startWordNoWords', { word }) }; continue; }
+      if (have.has(w)) { ui.gateNote = { channel, text: tr('startWordRepeat', { word: have.get(w) }) }; continue; }
+      if (g.words.length >= max) { ui.gateNote = { channel, text: tr('startWordsFull', { max: count(max) }) }; break; }
+      g.words.push(word);
+      have.set(w, word);
+    }
+    delete ui.pending[`gate:${channel}`];
+    settle();
+    paint();
+  }
+
+  /** Adds what is typed in a start-word field; Enter, leaving the field and pasting lines all do it. */
+  function commitGateWord(input) {
+    const text = input.value;
+    if (!text.trim()) return;
+    input.value = '';
+    addGateWords(input.dataset.gateInput, [text]);
   }
 
   function kpis(m) {
@@ -525,7 +653,7 @@
 
   function saveStatus(ctx) {
     if (!isDirty()) return esc(M.allSaved);
-    const errors = ctx.reduce((n, a) => n + a.errors.length, 0);
+    const errors = ctx.reduce((n, a) => n + a.errors.length, 0) + gateIssues(menus());
     return `<span class="savebar__dot" aria-hidden="true"></span>${esc(errors ? tr('unsavedFix', { n: count(errors) }) : M.unsaved)}`;
   }
 
@@ -540,6 +668,7 @@
     setHtml($('[data-pm-count]', form), count((m.flows || []).length));
     setHtml($('[data-pm-kpis]', form), kpis(m));
     setHtml($('[data-pm-probe]', form), probeHtml(m));
+    paintGates(form, m, edit);
     (m.flows || []).forEach((f, i) => {
       const a = ctx[i];
       setHtml($(`[data-menu-title="${i}"]`, form), esc(menuName(f, i)));
@@ -624,7 +753,8 @@
     const flow = (m.flows || [])[problem.menu];
     const menu = flow ? menuName(flow, problem.menu) : '';
     const key = `app.personaStudio.menus.errors.${problem.problem}`;
-    const text = I18N.t(key, { menu, step: problem.step != null ? problem.step + 1 : '', limit: problem.limit != null ? count(problem.limit) : '' });
+    const channel = problem.channel ? channelName(problem.channel) : '';
+    const text = I18N.t(key, { menu, channel, step: problem.step != null ? problem.step + 1 : '', limit: problem.limit != null ? count(problem.limit) : '' });
     return text === key ? PS.errorGeneric : text;
   }
 
@@ -754,6 +884,11 @@
 
   /** Scrolls to the field a problem is about and puts the cursor in it. */
   function focusProblem(problem) {
+    if (problem?.channel) {
+      const gate = $(`#pm-gate-${problem.channel}-words`) || $(`#pm-gate-${problem.channel}-on`);
+      gate?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      return gate?.focus({ preventScroll: true });
+    }
     if (problem?.menu == null) return;
     const limits = limitsOf();
     const base = `pm-${problem.menu}`;
@@ -804,6 +939,10 @@
         if (f) ui.pending[f.id] = el.value;
         return;
       }
+      if (el.dataset.gateInput != null) {
+        ui.pending[`gate:${el.dataset.gateInput}`] = el.value;
+        return;
+      }
       if (el.dataset.menuField === 'name') {
         editable().flows[menuOf(el)].name = el.value;
       } else if (el.dataset.stepField === 'text') {
@@ -827,6 +966,11 @@
     form.addEventListener('change', e => {
       const el = e.target;
       if (!edit) return;
+      if (el.dataset.gateOn != null) {
+        editableGate(el.dataset.gateOn).enabled = el.checked;
+        settle();
+        return redraw(el.checked ? `pm-gate-${el.dataset.gateOn}-words` : `pm-gate-${el.dataset.gateOn}-on`);
+      }
       if (el.id === 'pm-fallback') {
         const m = editable();
         const others = (m.teamOnlyChannels || []).filter(c => c !== 'INSTAGRAM');
@@ -860,7 +1004,21 @@
       if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
         e.preventDefault();
         if (el.dataset.kwInput != null) commitKeyword(el);
+        if (el.dataset.gateInput != null) commitGateWord(el);
         if (edit) save();
+        return;
+      }
+      if (el.dataset.gateInput != null) {
+        if (e.key === 'Enter') { e.preventDefault(); commitGateWord(el); return; }
+        if (e.key === 'Backspace' && !el.value) {
+          const g = editableGate(el.dataset.gateInput);
+          if (!g.words.length) return;
+          e.preventDefault();
+          el.value = g.words.pop();
+          ui.pending[`gate:${g.channel}`] = el.value;
+          settle();
+          paint();
+        }
         return;
       }
       if (el.dataset.kwInput != null) {
@@ -882,6 +1040,7 @@
 
     form.addEventListener('focusout', e => {
       if (e.target.dataset?.kwInput != null && edit) commitKeyword(e.target);
+      if (e.target.dataset?.gateInput != null && edit) commitGateWord(e.target);
     });
 
     // A keyword's buttons work without taking the cursor out of the field.
@@ -891,12 +1050,14 @@
 
     form.addEventListener('paste', e => {
       const el = e.target;
-      if (el.dataset?.kwInput == null || !edit) return;
+      if ((el.dataset?.kwInput == null && el.dataset?.gateInput == null) || !edit) return;
       const text = e.clipboardData?.getData('text') || '';
       if (!/[\r\n]/.test(text)) return;
       e.preventDefault();
       el.value = '';
-      addKeywords(Number(el.dataset.kwInput), text.split(/\r?\n/));
+      const lines = text.split(/\r?\n/);
+      if (el.dataset.gateInput != null) addGateWords(el.dataset.gateInput, lines);
+      else addKeywords(Number(el.dataset.kwInput), lines);
     });
 
     form.addEventListener('click', async e => {
@@ -906,6 +1067,8 @@
       if (!b) {
         const tokens = e.target.closest('[data-tokens]');
         if (tokens) $('[data-kw-input]', tokens)?.focus();
+        const gateTokens = e.target.closest('[data-gate-tokens]');
+        if (gateTokens) $('[data-gate-input]', gateTokens)?.focus();
         return;
       }
       if (!form.contains(b)) return;
@@ -925,6 +1088,27 @@
         return;
       }
       if (!edit) return;
+      if (ds.gateRemove != null) {
+        const [channel, n] = ds.gateRemove.split(':');
+        editableGate(channel).words.splice(Number(n), 1);
+        ui.gateNote = null;
+        settle();
+        paint();
+        return $(`#pm-gate-${channel}-words`, form)?.focus();
+      }
+      if (ds.gateEdit != null) {
+        const [channel, n] = ds.gateEdit.split(':');
+        const input = $(`#pm-gate-${channel}-words`, form);
+        if (!input) return;
+        if (input.value.trim()) commitGateWord(input);
+        const [word] = editableGate(channel).words.splice(Number(n), 1);
+        input.value = word;
+        ui.pending[`gate:${channel}`] = word;
+        settle();
+        paint();
+        input.disabled = false;
+        return input.focus();
+      }
       if (ds.kwRemove != null) {
         const [i, n] = pair(ds.kwRemove);
         editable().flows[i].keywords.splice(n, 1);
@@ -1018,6 +1202,7 @@
         delete d.state.personaDraft.menus;
         ui.checked = false;
         ui.note = null;
+        ui.gateNote = null;
         ui.pending = {};
         return redraw();
       }
