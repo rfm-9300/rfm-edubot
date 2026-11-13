@@ -144,4 +144,36 @@ class ChatFlowRepositoryTest {
 
         assertFailsWith<MongoWriteException> { collection.insertOne(Document("tenantId", tenantId)) }
     }
+
+    @Test
+    fun `start gates are saved by channel and read back, and a document without any has none`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val repository = ChatFlowRepository(mongo, tenantId)
+        collection.insertOne(Document("tenantId", tenantId).append("flows", emptyList<Document>()))
+        assertEquals(emptyMap(), repository.find()!!.startGates)
+
+        val gates = mapOf(
+            Platform.WHATSAPP to StartGate(enabled = true, words = listOf("Orçamento", "Quero marcar")),
+            Platform.INSTAGRAM to StartGate(enabled = false, words = listOf("Oi")),
+        )
+        val saved = repository.save(ChatFlows(startGates = gates), "ana@clinica.pt")
+
+        assertEquals(gates, saved.startGates)
+        assertEquals(gates, repository.find()!!.startGates)
+        val stored = collection.find(org.bson.Document("tenantId", tenantId)).first().getList("startGates", Document::class.java)
+        assertEquals(listOf("INSTAGRAM", "WHATSAPP"), stored.map { it.getString("channel") }, "stored in channel order")
+    }
+
+    @Test
+    fun `a start gate of an unknown channel is ignored when reading`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        collection.insertOne(
+            Document("tenantId", tenantId).append(
+                "startGates",
+                listOf(Document("channel", "TELEGRAM").append("words", listOf("oi")), Document("channel", "WHATSAPP").append("words", listOf("oi"))),
+            ),
+        )
+
+        assertEquals(mapOf(Platform.WHATSAPP to StartGate(true, listOf("oi"))), ChatFlowRepository(mongo, tenantId).find()!!.startGates)
+    }
 }

@@ -661,6 +661,7 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 ```html
 <form class="form flow-menus">
   <section class="panel"><!-- head: title + count .tag, saved-by .panel__meta; body: hint, .record-kpis, .form__grid (fallback .sel, "Check a message" .inp + result .hint) --></section>
+  <section class="panel" id="pm-start"><!-- "Start words": hint, then a .form__grid with one .form__row per channel (Instagram, WhatsApp): .form__check to switch it on and, when on, its words as .tokens with a count and a note for a repeat; same draft, problems and savebar as the menus --></section>
   <section class="panel flow-menu is-open">
     <header class="panel__head flow-menu__head">
       <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Welcome menu</span></button></h2>

@@ -1502,7 +1502,9 @@ so a saved change applies at once.
 
 ```mermaid
 flowchart TD
-    IN[Customer message] --> TAP{"Tapped a quick reply<br/>whose step exists?"}
+    IN[Customer message] --> GATE{"New chat, and its channel asks<br/>for start words the message lacks?"}
+    GATE -->|yes| HOLD["Create the chat paused,<br/>store for the team, no reply"]
+    GATE -->|no| TAP{"Tapped a quick reply<br/>whose step exists?"}
     TAP -->|yes| STEP[Send that step]
     TAP -->|no| KW{"Text holds a<br/>flow keyword?"}
     KW -->|yes| FIRST["Send the flow's first step"]
@@ -1527,6 +1529,17 @@ flowchart TD
   flow with problems is skipped and logged on every message.
 - **Team-only channels.** `teamOnlyChannels` turns the AI off on a channel: a message no flow
   answers is stored without a reply, before the rate limiter, and waits in the inbox.
+- **Start gates.** `ChatFlows.startGates` (Instagram and WhatsApp) holds, per channel, words a new
+  chat's first message must contain. Where no conversation exists yet and the message holds none
+  (`StartGate.opens`, the menus' whole-word matching), `MessagePipeline` creates the conversation
+  already paused (`findOrCreate(…, pausedBy = Conversation.START_GATE)`, which raises no handoff
+  event), stores the message and sends nothing, so later messages fall under the paused-conversation
+  check until a person resumes the AI. The media branch applies the same gate to a first photo's
+  caption. Existing conversations are never gated; a gate that is off, or has no usable word, is
+  ignored. `PUT /app/api/persona/menus` takes `startGates: [{channel, enabled, words}]` (left out
+  keeps the saved ones) and refuses `start_words`, `start_words_limit` and `start_word`, with the
+  gate's `channel` in the error; the test chat answers `gatedChannels` for a first message that
+  holds no start word.
 
 ## Context Building
 

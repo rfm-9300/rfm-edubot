@@ -15,10 +15,19 @@ data class ChatFlows(
     val flows: List<ChatFlow> = emptyList(),
     /** Channels where the AI never answers on its own, so a message no flow answers waits for the team. */
     val teamOnlyChannels: Set<Platform> = emptySet(),
+    /** Channels where a new chat only gets answers when its first message holds a start word, by channel. */
+    val startGates: Map<Platform, StartGate> = emptyMap(),
     val updatedAt: Instant? = null,
     /** The dashboard user's email, or `operator`. */
     val updatedBy: String? = null,
 ) {
+    /**
+     * The gate a new chat on [platform] has to pass, or null when the channel has none or its gate can't run
+     * (off, or with no word to look for: a gate nothing opens would silence the channel, so it is skipped).
+     */
+    fun startGate(platform: Platform): StartGate? =
+        startGates[platform]?.takeIf { it.enabled && it.usable() }
+
     /**
      * The step that answers a customer's [text] on [platform]: the one a tapped quick reply's [payload] leads
      * to, else the first step of the first flow with a keyword the text contains.
@@ -45,7 +54,36 @@ data class ChatFlows(
             if (flow.steps.size > ChatFlowLimits.MAX_STEPS) return FlowProblem("steps_limit", menu, limit = ChatFlowLimits.MAX_STEPS)
             flow.problems().firstOrNull()?.let { return FlowProblem.of(it, flow, menu) }
         }
+        for ((platform, gate) in startGates) {
+            val channel = platform.name
+            if (platform !in StartGate.CHANNELS) return FlowProblem("invalid", channel = channel)
+            if (gate.words.size > ChatFlowLimits.MAX_START_WORDS) return FlowProblem("start_words_limit", channel = channel, limit = ChatFlowLimits.MAX_START_WORDS)
+            if (gate.words.any { it.length > ChatFlowLimits.MAX_KEYWORD_CHARS }) return FlowProblem("start_word", channel = channel, limit = ChatFlowLimits.MAX_KEYWORD_CHARS)
+            if (gate.enabled && !gate.usable()) return FlowProblem("start_words", channel = channel)
+        }
         return null
+    }
+}
+
+/**
+ * What the first message of a new chat must hold before the bot answers on a channel: one of [words], as whole
+ * words, ignoring case, accents and punctuation. A chat that starts without one is stored and left to the team,
+ * paused for the AI and for menus until someone resumes it, so a later start word in that chat doesn't wake the bot.
+ * Chats that already exist are never gated.
+ */
+data class StartGate(val enabled: Boolean = true, val words: List<String> = emptyList()) {
+    /** Whether there is a word to look for. */
+    fun usable(): Boolean = words.any { FlowText.normalize(it).isNotEmpty() }
+
+    /** Whether [text] holds a start word. */
+    fun opens(text: String): Boolean {
+        val said = FlowText.normalize(text)
+        return words.any { FlowText.containsPhrase(said, it) }
+    }
+
+    companion object {
+        /** Not the website: its visitors would wait at a silent widget. */
+        val CHANNELS = setOf(Platform.INSTAGRAM, Platform.WHATSAPP)
     }
 }
 
@@ -56,10 +94,11 @@ object ChatFlowLimits {
     const val MAX_KEYWORDS = 50
     const val MAX_KEYWORD_CHARS = 60
     const val MAX_NAME_CHARS = 60
+    const val MAX_START_WORDS = 50
 }
 
-/** Why flows can't be saved. [menu] and [step] are positions in what was sent, for the editor to point at. */
-data class FlowProblem(val code: String, val menu: Int? = null, val step: Int? = null, val limit: Int? = null) {
+/** Why flows can't be saved. [menu] and [step] are positions in what was sent, for the editor to point at; [channel] names a start gate. */
+data class FlowProblem(val code: String, val menu: Int? = null, val step: Int? = null, val limit: Int? = null, val channel: String? = null) {
     companion object {
         /** A [ChatFlow.problems] entry (`code` or `code:stepId`) of the flow at position [menu]. */
         fun of(problem: String, flow: ChatFlow, menu: Int): FlowProblem {

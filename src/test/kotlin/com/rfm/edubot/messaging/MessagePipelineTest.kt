@@ -204,6 +204,7 @@ class MessagePipelineTest {
         val u = user()
         coEvery { users.findOrCreate(any(), any(), any()) } returns u
         val convo = conversation(u.id)
+        coEvery { conversations.findByWaId(any(), any()) } returns null
         coEvery { conversations.findOrCreate(u.id, any(), any()) } returns convo
         val stored = mutableListOf<Message>()
         coEvery { messages.insertIfAbsent(capture(stored)) } returns true
