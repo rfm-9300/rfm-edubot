@@ -3492,12 +3492,12 @@ html[data-layout="minimal"] .panel__search { height: 28px; }
 }
 
 /* ============================================================
-   SHELL · compact — html[data-shell="compact"], on /app only
+   SHELL · compact — html[data-shell="compact"], on /app and /backoffice
    The 2026-10-27 "Tenant Dashboard" design over the minimal skin: the sidebar
    sits on the gray page and folds to a rail of icons, the main area is one
    white card inset 8px, the top bar is a 40px page bar (page icon and name),
    tables are dense 32px grids, filters are flat tabs, drawers float inset.
-   Fonts and colors stay the skin's; only size, density and radius change.
+   Colors stay the skin's; /app switches to Inter while the backoffice keeps Outfit + Nunito.
    ============================================================ */
 html[data-shell="compact"] {
   --bg:        #f1f2f4;
@@ -3513,12 +3513,17 @@ html[data-shell="compact"] {
   --nav-hover:  color-mix(in srgb, var(--ink) 5%, transparent);
   --nav-active: color-mix(in srgb, var(--ink) 8%, transparent);
 }
+/* The platform surface uses the compact geometry without changing its established typography. */
+html[data-shell="compact"][data-surface="backoffice"] {
+  --sans: "Nunito", ui-sans-serif, system-ui, sans-serif;
+  --display: "Outfit", var(--sans);
+}
 html[data-shell="compact"][data-theme="dark"] {
   --bg:        #08090c;
   --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.50);
 }
 html[data-shell="compact"] body { font-size: 13px; letter-spacing: -0.003em; }
-/* Inter reads a weight heavier than Nunito: names, nav, buttons and tabs at 500, titles and figures at 600. */
+/* Compact density keeps names, nav, buttons and tabs at 500, titles and figures at 600. */
 html[data-shell="compact"] :is(.btn, .chip, .nav__item, .nav__group-label, .tbl thead th, .tbl .name, .tbl__open, .pill, .kpi__label, .stat__label, .dash-kpi__label, .lbl, .worklist__title, .rank__name, .agenda__who, .inbox-row__name, .record-fields__value, .tag) { font-weight: 500; }
 html[data-shell="compact"] :is(.nav__item.is-active, .brand__name, .crumb__leaf, .panel__title, .drawer__title, .view__title, .dash__title, .stat__value, .dash-kpi__value, .dash-figure__value, .empty__title, .kpi__value) { font-weight: 600; }
 html[data-shell="compact"] .tbl tbody td { font-weight: 400; }

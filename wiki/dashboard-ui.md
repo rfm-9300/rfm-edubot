@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Dashboard UI decisions
@@ -342,6 +342,15 @@ bookings are the orange cards, the List's Pending tab counts them, and List rows
 List lost its day group rows (When carries the day) and gained tick boxes, status tabs with counts, phone and
 duration columns. The booking drawer is a field list with its actions in the foot, Confirm, Mark done or
 Invoice last. The design's "Where" and "Assigned to" fields have no data behind them on a booking.
+
+## Backoffice adopts the compact shell (2026-11-13)
+
+The platform backoffice now declares `data-shell="compact"` too: its workspace is the same inset main
+card, short page bar, dense table grid and collapsible 56px desktop rail as `/app`. It keeps Outfit +
+Nunito (the dashboard alone uses Inter), through `data-surface="backoffice"`. The platform rail has
+its own remembered state (`ui:backofficeSidebarCollapsed`), and its page-bar crumb receives the active
+view icon from the matching navigation item so the page remains identifiable when the hero heading is
+visually hidden.
 
 ## Amounts are hidden everywhere in /app, from a switch in the top bar (2026-11-10, 2026-11-12)
 
