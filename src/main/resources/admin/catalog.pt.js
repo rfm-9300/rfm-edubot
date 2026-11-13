@@ -1734,6 +1734,18 @@ window.__I18N_CATALOGS['pt-PT'] = {
       resetOrder: 'Repor a ordem das colunas',
       selectAll: 'Selecionar todas as linhas', selectRow: 'Selecionar esta linha', selected: p => `${p.n} ${p.n === 1 ? 'selecionado' : 'selecionados'}`, exportCsv: 'Exportar CSV', clearSelection: 'Limpar',
     },
+    tags: {
+      title: 'Etiquetas', add: 'Adicionar etiqueta', addAria: 'Adicionar uma etiqueta', newPlaceholder: 'Nova etiqueta',
+      remove: p => `Remover a etiqueta ${p.tag}`,
+      hint: 'Só a sua equipa vê as etiquetas. Prima Enter para adicionar uma.',
+      filterAll: 'Todas as etiquetas', filterAria: 'Filtrar por etiqueta', filterNone: 'Sem etiquetas',
+      saveFailed: 'Não foi possível guardar as etiquetas',
+      errors: {
+        too_many_tags: 'Cada registo pode ter até 10 etiquetas.',
+        tag_too_long: 'Uma etiqueta pode ter até 30 caracteres.',
+        record_not_found: 'Este registo já não existe.',
+      },
+    },
     notifications: {
       title: 'Notificações', aria: 'Notificações', ariaUnread: 'Notificações, {n} por ler',
       unreadGroup: 'Novas', earlierGroup: 'Anteriores', markAllRead: 'Marcar todas como lidas',

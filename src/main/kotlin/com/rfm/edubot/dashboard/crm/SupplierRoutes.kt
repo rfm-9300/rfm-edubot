@@ -5,6 +5,8 @@ import com.rfm.edubot.crm.api.dto
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
 import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.dashboard.recordTagRoutes
+import com.rfm.edubot.tags.TagKind
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
@@ -19,6 +21,7 @@ import org.bson.types.ObjectId
 internal object SupplierRoutes : DashboardFeature(DashboardModules.SUPPLIERS) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/crm") {
+            recordTagRoutes(TagKind.SUPPLIER, "suppliers", deps)
             get("/suppliers") {
                 val crm = deps.crm(call)
                 val archived = call.request.queryParameters["archived"] == "1"

@@ -54,6 +54,7 @@ function quoteColumns() {
     { id: 'number', label: t.thNumber, cell: quote => `<td class="id"><button class="tbl__open" type="button">${escapeHTML(quote.number)}</button></td>` },
     { id: 'client', label: t.thClient, cell: quote => `<td class="name">${nameWithInitials(quote.clientName)}</td>` },
     { id: 'status', label: t.thStatus, cell: quote => `<td>${quotePill(quote.status)}</td>` },
+    ...tagsColumnIfUsed('quotes'),
     { id: 'issued', label: t.thIssued, cell: quote => `<td class="mono muted nowrap">${fmtDay(quote.createdAt)}</td>` },
     { id: 'validUntil', label: t.thValidUntil, cell: quote => `<td class="mono muted">${fmtDay(quote.validUntil)}</td>` },
     { id: 'total', label: t.thTotal, head: 'right', cell: quote => `<td class="num">${fmtEUR(quote.totalEur)}</td>` },
@@ -65,14 +66,16 @@ function renderQuotes(root) {
   const t = CRM.quotes;
   const q = state.search.toLowerCase();
   const columns = orderedColumns('quotes', quoteColumns());
-  const listed = state.quotes.filter(quote => !state.filterQuoteStatus || quote.status === state.filterQuoteStatus);
+  // The counts follow the tag picked, so each tab's number is the rows it shows.
+  const tagged = state.quotes.filter(quote => matchesTagFilter('quotes', quote.id));
+  const listed = tagged.filter(quote => !state.filterQuoteStatus || quote.status === state.filterQuoteStatus);
   const rows = listed
-    .filter(quote => !q || `${quote.number} ${quote.clientName || ''} ${quoteStatusLabel(quote.status)}`.toLowerCase().includes(q))
+    .filter(quote => !q || `${quote.number} ${quote.clientName || ''} ${quoteStatusLabel(quote.status)} ${tagsText('quotes', quote.id)}`.toLowerCase().includes(q))
     .map(quote => `<tr class="conversation-row ${quote.status === 'ACEITO' ? 'is-paid' : ''}" data-quote="${escapeHTML(quote.id)}">${columnCells(columns, quote)}</tr>`)
     .join('');
-  const tools = `<button class="chip ${!state.filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(t.tabAll)}${chipCount(state.quotes.length)}</button>`
-    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}${chipCount(state.quotes.filter(o => o.status === s).length)}</button>`).join('')
-    + `<span class="panel__tools-end">${columnOrderButton('quotes')}</span>`;
+  const tools = `<button class="chip ${!state.filterQuoteStatus ? 'is-on' : ''}" data-filter-quote="">${escapeHTML(t.tabAll)}${chipCount(tagged.length)}</button>`
+    + QUOTE_STATUSES.map(s => `<button class="chip ${state.filterQuoteStatus === s ? 'is-on' : ''}" data-filter-quote="${s}">${escapeHTML(quoteStatusLabel(s))}${chipCount(tagged.filter(o => o.status === s).length)}</button>`).join('')
+    + `<span class="panel__tools-end">${tagFilterHtml('quotes')}${columnOrderButton('quotes')}</span>`;
   pageCount(listed.length);
   root.innerHTML = hero(labels.quotes, CRM.tabs.orcamentos.desc) + crmPanel({
     title: '',
@@ -84,6 +87,7 @@ function renderQuotes(root) {
     emptyDesc: t.emptyDesc,
   });
   wirePdfButtons(root);
+  wireTagFilter(root, 'quotes');
   wireColumnOrder(root, 'quotes', quoteColumns());
   wireSelection(root, 'quotes', listed.map(o => o.id));
   $$('[data-filter-quote]', root).forEach(btn => btn.addEventListener('click', () => { state.filterQuoteStatus = btn.dataset.filterQuote; render(); }));
@@ -200,7 +204,7 @@ async function openQuoteDetail(id) {
   });
   $('[data-q-delete]', form)?.addEventListener('click', () => deleteQuote(quote));
   wirePdfButtons(form);
-  openDrawer(quote.number, form, false, { eyebrow: STR.eyebrowQuote });
+  openDrawer(quote.number, form, false, { eyebrow: STR.eyebrowQuote, tags: { kind: 'quotes', id: quote.id } });
   mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
 }
 

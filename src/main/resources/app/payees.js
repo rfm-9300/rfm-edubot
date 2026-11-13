@@ -16,6 +16,7 @@ function supplierColumns() {
     { id: 'address', label: t.thAddress, default: true, cell: s => `<td class="muted long">${escapeHTML(s.address || '')}</td>` },
     { id: 'contactPerson', label: t.formContact, cell: s => `<td class="muted">${escapeHTML(s.contactPerson || '')}</td>` },
     { id: 'phone', label: t.thPhone, default: true, cell: s => `<td class="mono muted nowrap">${escapeHTML(s.phone)}</td>` },
+    tagsColumn('suppliers'),
     { id: 'createdAt', label: t.thCreated, default: true, cell: s => `<td class="mono muted nowrap">${fmtDay(s.createdAt)}</td>` },
     { id: 'number', label: t.thNo, head: 'right', cell: s => `<td class="id right">${escapeHTML(s.number)}</td>` },
   ];
@@ -36,6 +37,7 @@ function employeeColumns() {
     { id: 'phone', label: t.thPhone, default: true, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.phone)}</td>` },
     { id: 'email', label: t.formEmail, default: true, cell: e => `<td class="muted">${escapeHTML(e.email || '')}</td>` },
     { id: 'status', label: t.thStatus, default: true, cell: e => `<td>${statusPill(e)}</td>` },
+    tagsColumn('employees'),
     { id: 'taxId', label: t.formTaxId, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.taxId || '')}</td>` },
     { id: 'birthDate', label: t.formBirthDate, cell: e => `<td class="mono muted nowrap">${escapeHTML(e.birthDate ? fmtDay(e.birthDate) : '')}</td>` },
     { id: 'address', label: t.formAddress, cell: e => `<td class="muted long">${escapeHTML(e.address || '')}</td>` },
@@ -66,21 +68,21 @@ function renderSuppliers(root) {
   if (typeKey && !types.some(v => supplierTypeKey(v) === typeKey)) state.filterSupplierType = '';
   const columns = shownColumns('suppliers', supplierColumns());
   const ids = new Set(columns.map(c => c.id));
-  const shown = source.filter(s => !state.filterSupplierType || supplierTypeKey(s.type) === typeKey);
+  const shown = source.filter(s => (!state.filterSupplierType || supplierTypeKey(s.type) === typeKey) && matchesTagFilter('suppliers', s.id));
   const rows = shown
-    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${s.contactPerson || ''} ${supplierServiceNames(s)}`.toLowerCase().includes(q))
+    .filter(s => !q || `${s.number || ''} ${s.name || ''} ${s.type || ''} ${s.phone || ''} ${s.address || ''} ${s.contactPerson || ''} ${supplierServiceNames(s)} ${tagsText('suppliers', s.id)}`.toLowerCase().includes(q))
     .map(s => `<tr class="conversation-row" data-supplier="${escapeHTML(s.id)}">${columnCells(columns, s, ids)}</tr>`)
     .join('');
   const typeFilter = types.length
     ? `<select class="sel" data-filter-supplier-type aria-label="${escapeHTML(t.filterTypeAria)}"><option value="">${escapeHTML(t.filterTypeAll)}</option>${types.map(v => `<option value="${escapeHTML(v)}" ${supplierTypeKey(v) === supplierTypeKey(state.filterSupplierType) ? 'selected' : ''}>${escapeHTML(v)}</option>`).join('')}</select>`
     : '';
-  const filtered = Boolean(state.filterSupplierType || q);
+  const filtered = Boolean(state.filterSupplierType || tagFilterOf('suppliers') || q);
   const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-directory-view="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
   const tabs = tab('', t.filterAll, (state.suppliers || []).length, !archived) + tab('suppliers', STR.directoryArchived, archived ? source.length : null, archived);
   pageCount(shown.length);
   root.innerHTML = hero(labels.suppliers, CRM.tabs.fornecedores.desc) + crmPanel({
     title: '',
-    tools: `${tabs}<span class="panel__tools-end">${typeFilter}${columnsButton('suppliers')}${columnOrderButton('suppliers')}</span>`,
+    tools: `${tabs}<span class="panel__tools-end">${typeFilter}${tagFilterHtml('suppliers')}${columnsButton('suppliers')}${columnOrderButton('suppliers')}</span>`,
     bar: selectionBar('suppliers'),
     head: columnsHead(columns, 'suppliers'),
     rows,
@@ -89,6 +91,7 @@ function renderSuppliers(root) {
   });
   $$('[data-supplier]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('supplier', source.find(s => s.id === r.dataset.supplier) || r.dataset.supplier)));
   $('[data-filter-supplier-type]', root)?.addEventListener('change', e => { state.filterSupplierType = e.target.value; render(); });
+  wireTagFilter(root, 'suppliers');
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('suppliers', supplierColumns(), labels.suppliers));
   wireColumnOrder(root, 'suppliers', supplierColumns());
   wireSelection(root, 'suppliers', shown.map(s => s.id));
@@ -105,20 +108,21 @@ function renderEmployees(root) {
   // Tabs: everyone active, those with services to approve (with the employee portal), the inactive ones.
   const waiting = new Set(state.pendingSubmissions.map(s => s.employeeId));
   const toApproveTab = !archived && state.filterEmployeeView === 'toApprove';
-  const shown = toApproveTab ? source.filter(e => waiting.has(e.id)) : source;
+  const tagged = list => list.filter(e => matchesTagFilter('employees', e.id));
+  const shown = tagged(toApproveTab ? source.filter(e => waiting.has(e.id)) : source);
   const rows = shown
-    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.email || ''} ${e.role || ''} ${e.taxId || ''}`.toLowerCase().includes(q))
+    .filter(e => !q || `${e.number || ''} ${e.name || ''} ${e.phone || ''} ${e.email || ''} ${e.role || ''} ${e.taxId || ''} ${tagsText('employees', e.id)}`.toLowerCase().includes(q))
     .map(e => `<tr class="conversation-row" data-employee="${escapeHTML(e.id)}">${columnCells(columns, e, ids)}</tr>`)
     .join('');
   const active = state.employees || [];
   const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-employee-tab="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
-  const tabs = tab('', t.tabAll, active.length, !archived && !toApproveTab)
-    + (state.fetched.submissions ? tab('toApprove', SUB.kpiToApprove, active.filter(e => waiting.has(e.id)).length, toApproveTab) : '')
+  const tabs = tab('', t.tabAll, tagged(active).length, !archived && !toApproveTab)
+    + (state.fetched.submissions ? tab('toApprove', SUB.kpiToApprove, tagged(active).filter(e => waiting.has(e.id)).length, toApproveTab) : '')
     + tab('inactive', t.viewInactive, archived ? source.length : null, archived);
   pageCount(shown.length);
   root.innerHTML = hero(labels.employees, CRM.tabs.colaboradores.desc) + crmPanel({
     title: '',
-    tools: `${tabs}<span class="panel__tools-end">${columnsButton('employees')}${columnOrderButton('employees')}</span>`,
+    tools: `${tabs}<span class="panel__tools-end">${tagFilterHtml('employees')}${columnsButton('employees')}${columnOrderButton('employees')}</span>`,
     bar: selectionBar('employees'),
     head: columnsHead(columns, 'employees'),
     rows,
@@ -126,6 +130,7 @@ function renderEmployees(root) {
     emptyDesc: archived ? t.inactiveEmptyDesc : t.emptyDesc,
   });
   $$('[data-employee]', root).forEach(r => r.addEventListener('click', () => openPayeeDrawer('employee', source.find(e => e.id === r.dataset.employee) || r.dataset.employee)));
+  wireTagFilter(root, 'employees');
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('employees', employeeColumns(), labels.employees));
   wireColumnOrder(root, 'employees', employeeColumns());
   wireSelection(root, 'employees', shown.map(e => e.id));
@@ -164,7 +169,7 @@ async function openPayeeDrawer(kind, ref) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = p => [cfg.eyebrow(), p?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known), tags: { kind: `${kind}s`, id } });
   const q = encodeURIComponent(id);
   const work = kind === 'employee' && submissionsOn();
   const signIn = kind === 'employee' && employeePortalOn();

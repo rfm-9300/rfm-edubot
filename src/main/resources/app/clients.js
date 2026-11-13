@@ -68,6 +68,7 @@ function clientColumns() {
       id: f.key, label: f.label, default: f.showInList, custom: true, head: f.type === 'NUMBER' ? 'right' : '',
       cell: c => `<td class="${{ NUMBER: 'num nowrap', DATE: 'mono muted nowrap', CHECKBOX: 'muted' }[f.type] || 'muted long'}">${escapeHTML(customFieldText(f, c.customFields?.[f.key]))}</td>`,
     })),
+    tagsColumn('clients'),
     ...money,
     { id: 'createdAt', label: t.thSince, default: true, cell: c => `<td class="mono muted nowrap">${fmtDay(c.createdAt)}</td>` },
     { id: 'number', label: t.thNo, head: 'right', cell: c => `<td class="id right">${escapeHTML(c.number)}</td>` },
@@ -84,13 +85,14 @@ function renderClients(root) {
   const columns = shownColumns('clients', clientColumns());
   const ids = new Set(columns.map(c => c.id));
   const matches = c => !q
-    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')}`.toLowerCase().includes(q)
+    || `${c.number || ''} ${c.name || ''} ${c.phone || ''} ${fullAddress(c)} ${c.contactPerson || ''} ${c.email || ''} ${c.taxId || ''} ${custom.map(f => customFieldText(f, c.customFields?.[f.key])).join(' ')} ${tagsText('clients', c.id)}`.toLowerCase().includes(q)
     || (qDigits.length >= 3 && qDigits === q.replace(/[\s+()-]/g, '') && phoneDigits(c.phone).includes(qDigits));
   const money = hasModule('invoices') && !!state.clientBalances;
   state.clientBalances = money ? clientBalances() : null;
   const standingOf = c => clientStanding(state.clientBalances?.get(c.id) || NO_BALANCE);
   const filter = !archived && money ? CLIENT_STANDING_FILTERS[state.filterClientStanding] : null;
-  const shown = source.filter(c => !filter || filter(standingOf(c)));
+  const tagged = list => list.filter(c => matchesTagFilter('clients', c.id));
+  const shown = tagged(source).filter(c => !filter || filter(standingOf(c)));
   const rows = shown
     .filter(matches)
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), uiLocale(), { sensitivity: 'base' }))
@@ -98,14 +100,14 @@ function renderClients(root) {
     .join('');
   // Tabs: every client, then by what they owe (with the invoices module), then the archived ones.
   const tab = (key, label, n, on) => `<button class="chip ${on ? 'is-on' : ''}" type="button" data-client-tab="${key}">${escapeHTML(label)}${n == null ? '' : chipCount(n)}</button>`;
-  const standingTab = (key, label) => tab(key, label, state.clients.filter(c => CLIENT_STANDING_FILTERS[key](standingOf(c))).length, !archived && state.filterClientStanding === key);
-  const tabs = tab('', t.tabAll, state.clients.length, !archived && !filter)
+  const standingTab = (key, label) => tab(key, label, tagged(state.clients).filter(c => CLIENT_STANDING_FILTERS[key](standingOf(c))).length, !archived && state.filterClientStanding === key);
+  const tabs = tab('', t.tabAll, tagged(state.clients).length, !archived && !filter)
     + (money ? standingTab('owing', t.tabOwing) + standingTab('overdue', t.tabOverdue) + standingTab('none', t.tabNotBilled) : '')
     + tab('archived', STR.directoryArchived, archived ? source.length : null, archived);
   pageCount(shown.length);
   root.innerHTML = hero(labels.clients, CRM.tabs.clientes.desc) + crmPanel({
     title: '',
-    tools: tabs + `<span class="panel__tools-end">${columnsButton('clients') + columnOrderButton('clients')
+    tools: tabs + `<span class="panel__tools-end">${tagFilterHtml('clients') + columnsButton('clients') + columnOrderButton('clients')
       + (state.clientFields?.canEdit ? `<button class="btn btn--sm btn--ghost" type="button" data-client-fields>${escapeHTML(FIELDS.open)}</button>` : '')}</span>`,
     bar: selectionBar('clients'),
     head: columnsHead(columns, 'clients'),
@@ -116,6 +118,7 @@ function renderClients(root) {
   });
   $$('[data-client]', root).forEach(r => r.addEventListener('click', () => openClientDrawer(source.find(c => c.id === r.dataset.client) || r.dataset.client)));
   $('[data-client-fields]', root)?.addEventListener('click', () => openClientFieldsEditor());
+  wireTagFilter(root, 'clients');
   $('[data-columns]', root)?.addEventListener('click', () => openColumnPicker('clients', clientColumns(), labels.clients));
   wireColumnOrder(root, 'clients', clientColumns());
   wireSelection(root, 'clients', shown.map(c => c.id));
@@ -666,7 +669,7 @@ async function openClientDrawer(ref, tab) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = c => [STR.clientEyebrow, c?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known) });
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known), tags: { kind: 'clients', id } });
   const record = await loadClientRecord(id);
   if (gen !== drawerGen) return;
   if (!record.client) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
