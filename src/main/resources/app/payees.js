@@ -572,6 +572,9 @@ function openEmployeeReportForm(p) {
 }
 
 // The printable page: who, when, the figures, the services by title, and every service day by day.
+// The report is its own document, outside the amounts blur: its amounts carry no marks.
+const reportEur = n => plainMoney(fmtEUR(n));
+
 function employeeReportHtml(p, services, from, to, opts) {
   const t = CRM.employees;
   const s = CRM.services;
@@ -601,7 +604,7 @@ function employeeReportHtml(p, services, from, to, opts) {
   const money = opts.values;
   const facts = [
     [t.reportServices, String(rows.length)],
-    ...(money ? [[t.reportValue, fmtEUR(total)]] : []),
+    ...(money ? [[t.reportValue, reportEur(total)]] : []),
     [t.reportClients, String(new Set(rows.map(x => x.clientId)).size)],
     [t.reportDays, String(new Set(rows.map(day)).size)],
   ];
@@ -609,11 +612,11 @@ function employeeReportHtml(p, services, from, to, opts) {
   const body = !rows.length ? `<p class="none">${escapeHTML(t.reportNone)}</p>` : `
     <h2>${escapeHTML(t.reportByService)}</h2>
     <table><thead><tr><th>${escapeHTML(s.thService)}</th><th class="num">${escapeHTML(t.reportTimes)}</th>${money ? `<th class="num">${escapeHTML(s.thTotal)}</th>` : ''}</tr></thead>
-      <tbody>${groups.map(g => `<tr><td>${escapeHTML(g.title)}</td><td class="num">${g.times}</td>${money ? `<td class="num">${fmtEUR(g.eur)}</td>` : ''}</tr>`).join('')}</tbody></table>
+      <tbody>${groups.map(g => `<tr><td>${escapeHTML(g.title)}</td><td class="num">${g.times}</td>${money ? `<td class="num">${reportEur(g.eur)}</td>` : ''}</tr>`).join('')}</tbody></table>
     <h2>${escapeHTML(t.reportDetail)}</h2>
     <table><thead><tr><th>${escapeHTML(s.thWhen)}</th><th>${escapeHTML(s.thClient)}</th><th>${escapeHTML(s.thService)}</th><th>${escapeHTML(s.thStatus)}</th>${money ? `<th class="num">${escapeHTML(s.thTotal)}</th>` : ''}</tr></thead>
-      <tbody>${rows.map(x => `<tr><td class="nowrap">${escapeHTML(fmtDay(day(x)))}</td><td>${escapeHTML(x.clientName || '')}</td><td>${escapeHTML(serviceRowText(x))}</td><td>${escapeHTML(status(x))}</td>${money ? `<td class="num">${fmtEUR(x.totalEur)}</td>` : ''}</tr>`).join('')}</tbody>
-      ${money ? `<tfoot><tr><td colspan="4">${escapeHTML(t.reportTotal)}</td><td class="num">${fmtEUR(total)}</td></tr></tfoot>` : ''}</table>`;
+      <tbody>${rows.map(x => `<tr><td class="nowrap">${escapeHTML(fmtDay(day(x)))}</td><td>${escapeHTML(x.clientName || '')}</td><td>${escapeHTML(serviceRowText(x))}</td><td>${escapeHTML(status(x))}</td>${money ? `<td class="num">${reportEur(x.totalEur)}</td>` : ''}</tr>`).join('')}</tbody>
+      ${money ? `<tfoot><tr><td colspan="4">${escapeHTML(t.reportTotal)}</td><td class="num">${reportEur(total)}</td></tr></tfoot>` : ''}</table>`;
   return `<!doctype html><html lang="${escapeHTML(uiLocale())}"><head><meta charset="utf-8" />
     <title>${escapeHTML(t.reportDocTitle({ name: p.name, period }))}</title>
     <style>
