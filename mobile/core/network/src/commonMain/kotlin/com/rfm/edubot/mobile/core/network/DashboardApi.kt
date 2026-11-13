@@ -1,6 +1,25 @@
 package com.rfm.edubot.mobile.core.network
 
 import com.rfm.edubot.mobile.core.model.Account
+import com.rfm.edubot.mobile.core.model.CatalogCategory
+import com.rfm.edubot.mobile.core.model.ChangeOrder
+import com.rfm.edubot.mobile.core.model.ChangeStatus
+import com.rfm.edubot.mobile.core.model.CreateService
+import com.rfm.edubot.mobile.core.model.DirectoryFields
+import com.rfm.edubot.mobile.core.model.Measurement
+import com.rfm.edubot.mobile.core.model.MeasurementInvoiced
+import com.rfm.edubot.mobile.core.model.MySite
+import com.rfm.edubot.mobile.core.model.MySiteDetail
+import com.rfm.edubot.mobile.core.model.PortalClient
+import com.rfm.edubot.mobile.core.model.Project
+import com.rfm.edubot.mobile.core.model.QuoteToService
+import com.rfm.edubot.mobile.core.model.SaveIssue
+import com.rfm.edubot.mobile.core.model.SaveSiteLog
+import com.rfm.edubot.mobile.core.model.ServiceSubmission
+import com.rfm.edubot.mobile.core.model.SiteIssue
+import com.rfm.edubot.mobile.core.model.SiteLog
+import com.rfm.edubot.mobile.core.model.SubmitService
+import com.rfm.edubot.mobile.core.model.UpdateService
 import com.rfm.edubot.mobile.core.model.Agent
 import com.rfm.edubot.mobile.core.model.AgentApproval
 import com.rfm.edubot.mobile.core.model.AgentRun
@@ -100,6 +119,7 @@ interface InboxApi {
 interface CrmApi {
     suspend fun clients(query: String? = null, archived: Boolean = false): List<CrmClient>
     suspend fun client(id: String): CrmClient
+    suspend fun clientFields(): DirectoryFields
     suspend fun createClient(request: SaveClient): CrmClient
     suspend fun updateClient(id: String, request: SaveClient): CrmClient
     suspend fun archiveClient(id: String, archived: Boolean)
@@ -109,23 +129,47 @@ interface CrmApi {
     suspend fun createQuote(request: CreateQuote): Quote
     suspend fun setQuoteStatus(id: String, status: String): Quote
     suspend fun convertQuote(id: String, request: ConvertQuote): Invoice
+    suspend fun quoteToService(id: String, request: QuoteToService): ClientService
+    suspend fun deleteQuote(id: String)
 
     suspend fun invoices(clientId: String? = null, status: String? = null): List<Invoice>
     suspend fun invoice(id: String): Invoice
     suspend fun createInvoice(request: CreateInvoice): Invoice
     suspend fun markInvoicePaid(id: String): Invoice
+    suspend fun receiveInstallment(id: String, index: Int): Invoice
+    suspend fun cancelInvoice(id: String): Invoice
+    suspend fun deleteInvoice(id: String)
 
     suspend fun catalog(query: String? = null): List<CatalogItem>
+    suspend fun catalogCategories(): List<CatalogCategory>
     suspend fun saveCatalogItem(request: SaveCatalogItem, id: String? = null): CatalogItem
     suspend fun deleteCatalogItem(id: String)
 
-    suspend fun services(clientId: String? = null, status: String? = null): List<ClientService>
+    /** [from] and [to] (`yyyy-MM-dd`) go together and narrow the rows to those days. */
+    suspend fun services(
+        clientId: String? = null,
+        status: String? = null,
+        employeeId: String? = null,
+        from: String? = null,
+        to: String? = null,
+    ): List<ClientService>
+    suspend fun service(id: String): ClientService
+    suspend fun createService(request: CreateService): ClientService
+    suspend fun updateService(id: String, request: UpdateService): ClientService
+    suspend fun deleteService(id: String)
     suspend fun invoiceServices(request: InvoiceClientServices): Invoice
 
     suspend fun suppliers(archived: Boolean = false): List<Supplier>
+    suspend fun supplier(id: String): Supplier
     suspend fun employees(archived: Boolean = false): List<Employee>
-    suspend fun payments(status: String? = null): List<Payment>
+    suspend fun employee(id: String): Employee
+    suspend fun payments(status: String? = null, supplierId: String? = null, employeeId: String? = null): List<Payment>
     suspend fun markPaymentPaid(id: String): Payment
+
+    /** What employees registered from their own sign-in, for the team to approve. */
+    suspend fun serviceSubmissions(employeeId: String? = null, status: String? = null): List<ServiceSubmission>
+    suspend fun approveSubmission(id: String): ServiceSubmission
+    suspend fun rejectSubmission(id: String, reason: String?): ServiceSubmission
 }
 
 interface BookingsApi {
@@ -179,6 +223,57 @@ interface SettingsApi {
     suspend fun webWidget(): WebWidget
     suspend fun updateLocale(locale: String): String
     suspend fun account(): Account
+}
+
+/**
+ * An employee's own My services (`/app/api/portal/…`): the clients and catalog to pick from, and the
+ * services they registered, which they can change or withdraw while nobody has decided on them.
+ */
+interface PortalApi {
+    suspend fun clients(): List<PortalClient>
+    suspend fun catalog(): List<CatalogItem>
+    suspend fun myServices(): List<ServiceSubmission>
+    suspend fun submit(request: SubmitService): ServiceSubmission
+    suspend fun update(id: String, request: SubmitService): ServiceSubmission
+    suspend fun withdraw(id: String)
+}
+
+/** A site manager's My sites (`/app/api/portal/sites…`): the projects they run, with no money anywhere. */
+interface MySitesApi {
+    suspend fun sites(): List<MySite>
+    suspend fun site(id: String): MySiteDetail
+    suspend fun writeDiary(siteId: String, request: SaveSiteLog): SiteLog
+    suspend fun editDiary(siteId: String, entryId: String, request: SaveSiteLog): SiteLog
+    suspend fun logIssue(siteId: String, request: SaveIssue): SiteIssue
+    suspend fun editIssue(siteId: String, issueId: String, request: SaveIssue): SiteIssue
+}
+
+/** The Building category's team pages (`/app/api/building/…`). `status` filters take several, comma-separated. */
+interface BuildingApi {
+    suspend fun projects(status: String? = null): List<Project>
+    suspend fun project(id: String): Project
+    suspend fun setProjectStatus(id: String, status: String): Project
+    suspend fun setPhaseProgress(projectId: String, phaseId: String, progressPct: Int): Project
+
+    suspend fun diary(projectId: String? = null, from: String? = null, to: String? = null): List<SiteLog>
+    suspend fun diaryEntry(id: String): SiteLog
+    suspend fun writeDiary(request: SaveSiteLog): SiteLog
+    suspend fun editDiary(id: String, request: SaveSiteLog): SiteLog
+
+    suspend fun issues(projectId: String? = null, status: String? = null): List<SiteIssue>
+    suspend fun issue(id: String): SiteIssue
+    suspend fun logIssue(request: SaveIssue): SiteIssue
+    suspend fun editIssue(id: String, request: SaveIssue): SiteIssue
+
+    suspend fun changes(projectId: String? = null, status: String? = null): List<ChangeOrder>
+    suspend fun change(id: String): ChangeOrder
+    suspend fun setChangeStatus(id: String, request: ChangeStatus): ChangeOrder
+
+    suspend fun measurements(projectId: String? = null, status: String? = null): List<Measurement>
+    suspend fun measurement(id: String): Measurement
+    suspend fun approveMeasurement(id: String): Measurement
+    suspend fun reopenMeasurement(id: String): Measurement
+    suspend fun invoiceMeasurement(id: String, dueDate: String): MeasurementInvoiced
 }
 
 /** An employee's own time clock (`/app/api/portal/time…`). */

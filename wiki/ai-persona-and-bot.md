@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-12
+updated: 2026-11-13
 ---
 
 # Customer-facing bot and persona
@@ -218,8 +218,8 @@ person. Checked in the code when it merged:
   another OpenAI-compatible endpoint. #54 and #55 carried the identical commit. Both PRs' browser
   walkthroughs (`scripts/persona-e2e/`, `scripts/assistant-e2e/`) run the app against a deterministic
   `fake-openrouter.py` on port 8099; the repo AGENTS.md has the commands.
-- **Mobile follow-up:** the app's Persona screen still offers editing to members, who now get `403`;
-  it could hide it with `canEdit` ([mobile](mobile.md)).
+- **Mobile:** the app's Persona screen reads `canEdit` since 2026-11-10 and is read-only for members
+  (they can still test it) ([mobile](mobile.md)).
 
 Merged first and unchanged: it was based on the `main` of the day and CI was green. CI deployed
 `131ba11`, health ok, 0 `ERROR` lines.

@@ -3,20 +3,27 @@ package com.rfm.edubot.mobile.core.data
 import com.rfm.edubot.mobile.core.common.AppError
 import com.rfm.edubot.mobile.core.common.InMemorySnapshotStore
 import com.rfm.edubot.mobile.core.common.Outcome
+import com.rfm.edubot.mobile.core.model.CatalogCategory
 import com.rfm.edubot.mobile.core.model.CatalogItem
 import com.rfm.edubot.mobile.core.model.ClientService
 import com.rfm.edubot.mobile.core.model.ConvertQuote
 import com.rfm.edubot.mobile.core.model.CreateInvoice
 import com.rfm.edubot.mobile.core.model.CreateQuote
+import com.rfm.edubot.mobile.core.model.CreateService
 import com.rfm.edubot.mobile.core.model.CrmClient
+import com.rfm.edubot.mobile.core.model.DirectoryFields
 import com.rfm.edubot.mobile.core.model.Employee
 import com.rfm.edubot.mobile.core.model.Invoice
+import com.rfm.edubot.mobile.core.model.InvoiceInstallment
 import com.rfm.edubot.mobile.core.model.InvoiceClientServices
 import com.rfm.edubot.mobile.core.model.Payment
 import com.rfm.edubot.mobile.core.model.Quote
+import com.rfm.edubot.mobile.core.model.QuoteToService
 import com.rfm.edubot.mobile.core.model.SaveCatalogItem
 import com.rfm.edubot.mobile.core.model.SaveClient
+import com.rfm.edubot.mobile.core.model.ServiceSubmission
 import com.rfm.edubot.mobile.core.model.Supplier
+import com.rfm.edubot.mobile.core.model.UpdateService
 import com.rfm.edubot.mobile.core.network.ApiException
 import com.rfm.edubot.mobile.core.network.CrmApi
 import kotlinx.coroutines.test.runTest
@@ -83,7 +90,62 @@ private open class FakeCrmApi : CrmApi {
 
     override suspend fun deleteCatalogItem(id: String) = Unit
 
-    override suspend fun services(clientId: String?, status: String?): List<ClientService> = emptyList()
+    var services = mutableListOf<ClientService>()
+    var deletedQuotes = mutableListOf<String>()
+
+    override suspend fun services(
+        clientId: String?,
+        status: String?,
+        employeeId: String?,
+        from: String?,
+        to: String?,
+    ): List<ClientService> = services
+
+    override suspend fun service(id: String): ClientService = services.first { it.id == id }
+
+    override suspend fun createService(request: CreateService): ClientService =
+        ClientService(id = "svc-new", clientId = request.clientId, name = request.name, items = request.items, employeeId = request.employeeId)
+
+    override suspend fun updateService(id: String, request: UpdateService): ClientService =
+        services.first { it.id == id }.let { it.copy(status = request.status ?: it.status) }
+
+    override suspend fun deleteService(id: String) {
+        services.removeAll { it.id == id }
+    }
+
+    override suspend fun clientFields(): DirectoryFields = DirectoryFields.DEFAULT
+
+    override suspend fun quoteToService(id: String, request: QuoteToService): ClientService =
+        ClientService(id = "svc-from-quote", name = "From quote", quoteId = id, status = "OPEN")
+
+    override suspend fun deleteQuote(id: String) {
+        deletedQuotes += id
+    }
+
+    override suspend fun receiveInstallment(id: String, index: Int): Invoice =
+        invoices.first { it.id == id }.let { invoice ->
+            invoice.copy(installments = invoice.installments.mapIndexed { i, part -> if (i == index) part.copy(paidAt = "2026-01-03T00:00:00Z") else part })
+        }
+
+    override suspend fun cancelInvoice(id: String): Invoice = invoices.first { it.id == id }.copy(status = "CANCELLED")
+
+    override suspend fun deleteInvoice(id: String) {
+        invoices.removeAll { it.id == id }
+    }
+
+    override suspend fun catalogCategories(): List<CatalogCategory> = listOf(CatalogCategory("Pintura", 2))
+
+    override suspend fun supplier(id: String): Supplier = Supplier(id = id, name = "Supplier")
+
+    override suspend fun employee(id: String): Employee = Employee(id = id, name = "Employee")
+
+    override suspend fun serviceSubmissions(employeeId: String?, status: String?): List<ServiceSubmission> = emptyList()
+
+    override suspend fun approveSubmission(id: String): ServiceSubmission =
+        ServiceSubmission(id = id, status = ServiceSubmission.APPROVED, serviceId = "svc-approved")
+
+    override suspend fun rejectSubmission(id: String, reason: String?): ServiceSubmission =
+        ServiceSubmission(id = id, status = ServiceSubmission.REJECTED, rejectionReason = reason)
 
     override suspend fun invoiceServices(request: InvoiceClientServices): Invoice =
         Invoice(id = "inv-services", number = "F3", status = "PENDING", dueDate = request.dueDate)
@@ -92,7 +154,7 @@ private open class FakeCrmApi : CrmApi {
 
     override suspend fun employees(archived: Boolean): List<Employee> = emptyList()
 
-    override suspend fun payments(status: String?): List<Payment> = emptyList()
+    override suspend fun payments(status: String?, supplierId: String?, employeeId: String?): List<Payment> = emptyList()
 
     override suspend fun markPaymentPaid(id: String): Payment =
         Payment(id = id, status = "PAID", paidAt = "2026-01-02T00:00:00Z")
@@ -213,5 +275,99 @@ class CrmRepositoryTest {
 
         assertTrue(invoice is Outcome.Success)
         assertEquals(listOf("inv-from-quote"), repository.invoices.state.value.value?.map { it.id })
+    }
+
+    @Test
+    fun `a cancelled invoice keeps its row and reads as closed with nothing to pay`() = runTest {
+        val api = FakeCrmApi().apply {
+            invoices = mutableListOf(Invoice(id = "inv1", number = "F1", status = "PENDING", dueDate = "2026-01-01"))
+        }
+        val (repository, _) = repository(api)
+        repository.invoices.load()
+
+        repository.cancelInvoice(repository.invoices.state.value.value!!.first())
+
+        val invoice = repository.invoices.state.value.value!!.single()
+        assertTrue(invoice.cancelled)
+        assertTrue(invoice.closed)
+        assertTrue(!invoice.paid)
+    }
+
+    @Test
+    fun `deleting an invoice takes it off the list`() = runTest {
+        val api = FakeCrmApi().apply {
+            invoices = mutableListOf(Invoice(id = "inv1", number = "F1", status = "PENDING", dueDate = "2026-01-01"))
+        }
+        val (repository, _) = repository(api)
+        repository.invoices.load()
+
+        repository.deleteInvoice(repository.invoices.state.value.value!!.first())
+
+        assertEquals(emptyList(), repository.invoices.state.value.value)
+    }
+
+    @Test
+    fun `receiving an installment updates that part of the invoice`() = runTest {
+        val api = FakeCrmApi().apply {
+            invoices = mutableListOf(
+                Invoice(
+                    id = "inv1",
+                    status = "PENDING",
+                    installments = listOf(InvoiceInstallment(50.0, "2026-01-01"), InvoiceInstallment(50.0, "2026-02-01")),
+                ),
+            )
+        }
+        val (repository, _) = repository(api)
+        repository.invoices.load()
+
+        repository.receiveInstallment(repository.invoices.state.value.value!!.first(), 1)
+
+        assertEquals(listOf(false, true), repository.invoices.state.value.value!!.single().installments.map { it.paid })
+    }
+
+    @Test
+    fun `turning a quote into a service adds the row to Services`() = runTest {
+        val (repository, _) = repository()
+        repository.services.load()
+
+        val service = repository.quoteToService(Quote(id = "q1", status = "ACEITO"))
+
+        assertTrue(service is Outcome.Success)
+        assertEquals(listOf("svc-from-quote"), repository.services.state.value.value?.map { it.id })
+    }
+
+    @Test
+    fun `deleting a quote removes it from the list`() = runTest {
+        val (repository, api) = repository()
+        repository.quotes.load()
+
+        repository.deleteQuote(repository.quotes.state.value.value!!.first())
+
+        assertEquals(listOf("q1"), api.deletedQuotes)
+        assertEquals(emptyList(), repository.quotes.state.value.value)
+    }
+
+    @Test
+    fun `cancelling a service replaces its row`() = runTest {
+        val api = FakeCrmApi().apply { services = mutableListOf(ClientService(id = "s1", name = "Pintura", status = "OPEN")) }
+        val (repository, _) = repository(api)
+        repository.services.load()
+
+        repository.updateService(repository.services.state.value.value!!.first(), UpdateService(status = "CANCELLED"))
+
+        assertTrue(repository.services.state.value.value!!.single().cancelled)
+    }
+
+    @Test
+    fun `a new service names who does the work`() = runTest {
+        val (repository, _) = repository()
+        repository.services.load()
+
+        val created = repository.createService(
+            CreateService(clientId = "cl1", name = "Pintura", items = listOf(com.rfm.edubot.mobile.core.model.LineItem("Pintura", 1.0, "", 80.0)), employeeId = "e1"),
+        )
+
+        assertEquals("e1", created.valueOrNull?.employeeId)
+        assertEquals(listOf("svc-new"), repository.services.state.value.value?.map { it.id })
     }
 }

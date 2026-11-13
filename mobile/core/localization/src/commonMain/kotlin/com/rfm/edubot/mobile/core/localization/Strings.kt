@@ -103,6 +103,15 @@ class Strings internal constructor(
         return values[key] ?: fallback[key] ?: status.lowercase().replaceFirstChar { it.uppercase() }
     }
 
+    /**
+     * A value's label within one record's vocabulary (`building.issueStatus`, `building.weather`…),
+     * where the same status name reads differently per record. Falls back to [status].
+     */
+    fun label(prefix: String, value: String): String {
+        val key = "$prefix.${value.uppercase()}"
+        return values[key] ?: fallback[key] ?: status(value)
+    }
+
     /** Monday-first weekday name for `AvailabilityRule.dayOfWeek` (1..7). */
     fun weekday(dayOfWeek: Int): String = get("weekday.${dayOfWeek.coerceIn(1, 7)}")
 
@@ -127,12 +136,12 @@ class Strings internal constructor(
 
 object Localization {
     private val catalogs: Map<AppLocale, Map<String, String>> = mapOf(
-        AppLocale.English to englishCatalog,
-        AppLocale.Portuguese to portugueseCatalog,
-        AppLocale.Spanish to spanishCatalog,
+        AppLocale.English to englishCatalog + featureEnglish,
+        AppLocale.Portuguese to portugueseCatalog + featurePortuguese,
+        AppLocale.Spanish to spanishCatalog + featureSpanish,
     )
 
-    fun of(locale: AppLocale): Strings = Strings(locale, catalogs.getValue(locale), englishCatalog)
+    fun of(locale: AppLocale): Strings = Strings(locale, catalogs.getValue(locale), catalogs.getValue(AppLocale.English))
 
     fun of(tag: String?): Strings = of(AppLocale.of(tag))
 

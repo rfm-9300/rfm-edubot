@@ -2,7 +2,7 @@ package com.rfm.edubot.mobile.app
 
 import com.rfm.edubot.mobile.core.model.DashboardModules
 
-enum class ModuleGroup { Home, Inbox, Business, Automation, Setup }
+enum class ModuleGroup { Home, Inbox, Business, Building, Automation, Setup }
 
 /**
  * A dashboard module as the app knows it.
@@ -29,8 +29,10 @@ object ModuleRegistry {
     val catalog: List<MobileModule> = listOf(
         MobileModule(DashboardModules.OVERVIEW, ModuleGroup.Home, "⌂"),
         MobileModule(DashboardModules.MY_HOURS, ModuleGroup.Home, "◷"),
-        MobileModule(DashboardModules.MY_SERVICES, ModuleGroup.Home, "✓", supported = false),
+        MobileModule(DashboardModules.MY_SERVICES, ModuleGroup.Home, "✓"),
+        MobileModule(DashboardModules.MY_SITES, ModuleGroup.Home, "▥"),
         MobileModule(DashboardModules.CONVERSATIONS, ModuleGroup.Inbox, "◌"),
+        MobileModule(DashboardModules.EMAIL, ModuleGroup.Inbox, "✉", supported = false),
         MobileModule(DashboardModules.CONTACTS, ModuleGroup.Inbox, "◎"),
         MobileModule(DashboardModules.INSTAGRAM, ModuleGroup.Inbox, "◍", supported = false),
         MobileModule(DashboardModules.CLIENTS, ModuleGroup.Business, "☰"),
@@ -43,6 +45,11 @@ object ModuleRegistry {
         MobileModule(DashboardModules.TIMESHEETS, ModuleGroup.Business, "◷", supported = false),
         MobileModule(DashboardModules.CATALOG, ModuleGroup.Business, "⊞"),
         MobileModule(DashboardModules.BOOKINGS, ModuleGroup.Business, "▦"),
+        MobileModule(DashboardModules.PROJECTS, ModuleGroup.Building, "▥"),
+        MobileModule(DashboardModules.SITE_DIARY, ModuleGroup.Building, "✍"),
+        MobileModule(DashboardModules.SITE_ISSUES, ModuleGroup.Building, "⚠"),
+        MobileModule(DashboardModules.CHANGE_ORDERS, ModuleGroup.Building, "±"),
+        MobileModule(DashboardModules.MEASUREMENTS, ModuleGroup.Building, "⊟"),
         MobileModule(DashboardModules.PERSONA, ModuleGroup.Automation, "☺"),
         MobileModule(DashboardModules.AI_ASSISTANT, ModuleGroup.Automation, "✦"),
         MobileModule(DashboardModules.AGENTS, ModuleGroup.Automation, "⚙"),
@@ -51,8 +58,11 @@ object ModuleRegistry {
 
     private val byId: Map<String, MobileModule> = catalog.associateBy { it.id }
 
+    /** The Building category's team pages, which the shell renders with one screen. */
+    val buildingPages: List<String> = catalog.filter { it.group == ModuleGroup.Building }.map { it.id }
+
     /** Only an employee's sign-in has these, and it has nothing else but Settings. */
-    private val employeePages = setOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES)
+    private val employeePages = setOf(DashboardModules.MY_HOURS, DashboardModules.MY_SERVICES, DashboardModules.MY_SITES)
 
     /**
      * Settings is always reachable: signing out, changing language and switching company live
@@ -93,16 +103,19 @@ object ModuleRegistry {
     }
 
     /**
-     * The bottom bar. Home, the inbox and whichever automation surface this tenant has, because
-     * those are what someone opens a phone for; everything else is one tap away under More. An
-     * employee's is their clock.
+     * The bottom bar. Home, the inbox, a construction company's projects and whichever automation
+     * surface this tenant has, because those are what someone opens a phone for; everything else is
+     * one tap away under More. An employee's are their own pages, the clock first.
      */
     fun bottomBar(enabled: Collection<String>, employee: Boolean = false): List<MobileModule> {
         val available = available(enabled, employee).map { it.id }.toSet()
         return listOf(
             DashboardModules.MY_HOURS,
+            DashboardModules.MY_SITES,
+            DashboardModules.MY_SERVICES,
             DashboardModules.OVERVIEW,
             DashboardModules.CONVERSATIONS,
+            DashboardModules.PROJECTS,
             DashboardModules.AGENTS,
             DashboardModules.AI_ASSISTANT,
             DashboardModules.BOOKINGS,

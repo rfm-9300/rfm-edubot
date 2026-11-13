@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-09
+updated: 2026-11-10
 ---
 
 # Mobile app (Kotlin Multiplatform)
@@ -51,7 +51,7 @@ WhatsApp template management, Instagram, the Google/Gmail integrations and perso
 Google sign-in, push notifications and inbox media are not started (`docs/plan-kmp-mobile-frontend.md`
 on the PR branch).
 
-**The client form doesn't follow per-company client fields (as of 2026-10-06).** Since PR #52
+**The client form didn't follow per-company client fields (2026-10-06, fixed 2026-11-10, below).** Since PR #52
 (`a1e6a74`, see [crm-directories.md](crm-directories.md)) each company picks which client fields staff must fill and can add
 its own. The form #44 added still requires NIF and address on its own (`ClientFormViewModel.canSave`)
 and has no contact person or custom-field inputs. So it blocks saves a company has made optional, and
@@ -94,3 +94,77 @@ Three cloud-agent PRs merged that day touch the app (server side: [employee-port
 - Quality gate and structure defaults live on [KMP engineering guide](kmp-engineering-guide.md), not in this page.
   When the app's actual stack diverges from the guide, update **both** this page and the
   guide's "where this binds" note — do not silently fork.
+
+## Catching up with the web (2026-11-10)
+
+The app hadn't changed since 2026-10-08 while the web gained about 150 commits. Rodrigo asked to bring
+it up to date; this pass covers the CRM, the employee pages and the Building category. Email stays
+web-only.
+
+- **Fixed what was broken.** The client form is built from `GET /crm/clients/fields`: the standard
+  fields in the company's order, each optional unless it requires it, then its own fields by type
+  (text, number, date, choice as chips, yes/no as a switch). Every shown field is sent, an empty one
+  as `""`, because a PATCH keeps an omitted field and the backend clears an address that isn't sent.
+  A `custom_field_*` refusal marks the field its `detail` names. Persona reads `canEdit` and is
+  read-only for members. A cancelled invoice or payment never offers Mark paid.
+- **Records, as on the web.** Each CRM list row opens a record. The **client** record shows its
+  profile with the company's own fields, a billed / to receive / overdue strip, and its invoices,
+  quotes and services. A **quote** record has its status steps, Turn into invoice (asks for a due
+  date), Turn into a service, and Delete, offered only while the quote isn't billed. An **invoice**
+  record has received and to-receive amounts, installments to mark received, ATCUD, project or
+  measurement, Cancel and Delete. A **service** record shows who did it (and changes that), Cancel or
+  Reopen, and Delete. The **employee** record has a month of services with previous and next, the
+  services they registered for the team to approve or reject, and payments. The **supplier** record
+  shows the point of contact, the services they do and payments. A **catalog** row opens the item to
+  edit or delete, with category chips from `/crm/catalog-categories`. New service is a form with
+  lines, a day and who did it.
+- **Employee pages.** `my-services` and `my-sites` are screens now, so an employee whose company
+  has no time clock no longer lands on Settings. My services lists what they registered by status;
+  they register one with the same form the team uses (`ServiceFormViewModel` takes where the options
+  come from and where the draft goes), and change or withdraw it while pending. My sites lists the
+  projects they run and whether today's diary is written; a site shows phases, the last two weeks of
+  diary and the issues, and they write the diary and log and move issues.
+- **Building** (`feature:building`, under its own nav group): Projects (progress against the plan,
+  health, phases whose progress can be set from site, contract / measured / to invoice / retention,
+  and the project's diary, open issues, changes and measurements), Site diary (write and edit, with
+  weather, people, phase progress and shared), Issues (log and move with a note, history), Change
+  orders (send, approve or reject for the client, back to draft), Measurements (approve, reopen,
+  invoice). The diary and issue forms write through `SiteWriter`, which both `BuildingRepository`
+  and `MySitesRepository` implement, so the team and a site manager share them.
+- **Home** shows the Services and Projects cards (honouring `hiddenCards`), opens a project from
+  "furthest behind" and from a delayed project in Needs you, and hides amounts behind Show amounts
+  like the web, remembered until sign-out (which clears the cache).
+
+**Still web-only:** photos (counts only; no image loading in the app yet), every PDF (no platform
+file opener yet), creating projects, change orders and measurements, measuring quantities, editing
+client fields, the Email page, Instagram, chat flows and the rest listed in
+[`docs/architecture.md`](../docs/architecture.md#not-on-mobile). This pass was checked with the
+guide's builds and tests (JVM, Android unit, iOS simulator, the iOS framework link, the debug APK),
+decoding tests over server-shaped JSON, and on 2026-11-11 **a walkthrough on an Android phone**
+against the local backend (`installDebug -PapiBaseUrl=http://localhost:8080` with
+`adb reverse tcp:8080 tcp:8080`): Home, a project (phase progress, diary), an issue, a change sent
+and approved, a measurement invoiced, invoice and client records, the client form, an employee's
+approval, a catalog item, a supplier, and an employee's sign-in on My sites and My services. iOS
+hasn't been run on a device.
+
+**Gotchas from this pass:**
+
+- Building statuses read differently per record (a resolved issue is "To check", an approved
+  measurement "To invoice"), so the app uses the web's vocabularies (`building.issueStatus.*`,
+  `building.measurementStatus.*`…) through `Strings.label(prefix, value)`, not the generic `status.*`.
+- New copy lives in `FeatureCatalogs.kt` with the three languages side by side, merged into the base
+  catalogs; a test fails if a new key overrides an existing one.
+- A diary edit names in `clear` only numbers the entry had and the person erased; a JSON null can't
+  clear one, and the app's `Json` leaves nulls out (`explicitNulls = false`).
+- **A form's view model needs a key per opening** (`rememberFormKey`). The signed-in view models
+  live in `SessionViewModels` for the whole session, so a fixed key ("client-form:new") handed the
+  second New client the first one's view model, already `saved`, and the form closed itself; #44's
+  forms had this. Records clear their `gone` / `archived` flag as they step back (`consumeGone`).
+- **What the phone walkthrough found** (all fixed the same day): three amounts side by side cut each
+  to "€"/"€ 5.366,…" (`MoneyStrip` lays them two to a row now); Home's due dates printed raw, since
+  `listStamp` only formats instants (`TenantClock.day` reads a plain day); a quantity or price printed
+  as Kotlin prints a Double (`2.0`, `15.0`); "1 serviços" (a plural key now); and a pending service's
+  generated name stayed fixed when its line changed (the form leaves a generated name empty).
+- Kotlin/Native refuses commas in backtick test names; `scripts/check-native-test-names.sh` catches it
+  before the iOS job does.
+

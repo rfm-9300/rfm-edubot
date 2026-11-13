@@ -33,6 +33,7 @@ kotlin {
             implementation(project(":feature:assistant"))
             implementation(project(":feature:auth"))
             implementation(project(":feature:bookings"))
+            implementation(project(":feature:building"))
             implementation(project(":feature:contacts"))
             implementation(project(":feature:crm"))
             implementation(project(":feature:inbox"))

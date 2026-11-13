@@ -63,11 +63,14 @@ import com.rfm.edubot.mobile.feature.assistant.AssistantScreen
 import com.rfm.edubot.mobile.feature.auth.LoginExperienceScreen
 import com.rfm.edubot.mobile.feature.bookings.BookingsScreen
 import com.rfm.edubot.mobile.feature.contacts.ContactsScreen
-import com.rfm.edubot.mobile.feature.crm.CatalogItemFormScreen
-import com.rfm.edubot.mobile.feature.crm.ClientFormScreen
+import com.rfm.edubot.mobile.feature.building.BuildingRoute
+import com.rfm.edubot.mobile.feature.building.BuildingRouteScreen
+import com.rfm.edubot.mobile.feature.building.BuildingScreen
+import com.rfm.edubot.mobile.feature.building.MySitesScreen
+import com.rfm.edubot.mobile.feature.crm.CrmRouteScreen
 import com.rfm.edubot.mobile.feature.crm.CrmScreen
-import com.rfm.edubot.mobile.feature.crm.DocumentFormScreen
-import com.rfm.edubot.mobile.feature.crm.DocumentKind
+import com.rfm.edubot.mobile.feature.crm.MyServiceFormScreen
+import com.rfm.edubot.mobile.feature.crm.MyServicesScreen
 import com.rfm.edubot.mobile.feature.inbox.ConversationScreen
 import com.rfm.edubot.mobile.feature.inbox.InboxScreen
 import com.rfm.edubot.mobile.feature.notifications.NotificationsScreen
@@ -217,36 +220,37 @@ private fun DashboardShell(
                 padding = padding,
                 onBack = { navigator.back() },
             )
-            is Destination.NewClient -> ClientFormScreen(
+            is Destination.Crm -> CrmRouteScreen(
+                route = destination.route,
                 repository = graph.crm,
+                modules = modules.toSet(),
                 strings = strings,
+                clock = clock,
                 padding = padding,
-                onSaved = { navigator.back() },
-                onCancel = { navigator.back() },
+                onOpen = { navigator.open(Destination.Crm(it)) },
+                onBack = { navigator.back() },
             )
-            is Destination.NewQuote, is Destination.NewInvoice -> DocumentFormScreen(
-                repository = graph.crm,
-                kind = if (destination is Destination.NewQuote) DocumentKind.Quote else DocumentKind.Invoice,
+            is Destination.Building -> BuildingRouteScreen(
+                route = destination.route,
+                building = graph.building.takeUnless { employee },
+                mySites = identity.employee?.let { graph.mySites(it.id) },
+                modules = modules.toSet(),
                 strings = strings,
+                clock = clock,
                 padding = padding,
-                onSaved = { navigator.back() },
-                onCancel = { navigator.back() },
+                onOpen = { navigator.open(Destination.Building(it)) },
+                onBack = { navigator.back() },
             )
-            is Destination.NewCatalogItem -> CatalogItemFormScreen(
-                repository = graph.crm,
-                strings = strings,
-                padding = padding,
-                onSaved = { navigator.back() },
-                onCancel = { navigator.back() },
-            )
-            is Destination.Client -> ClientFormScreen(
-                repository = graph.crm,
-                strings = strings,
-                padding = padding,
-                clientId = destination.clientId,
-                onSaved = { navigator.back() },
-                onCancel = { navigator.back() },
-            )
+            is Destination.MyService -> identity.employee?.let { me ->
+                MyServiceFormScreen(
+                    repository = graph.portal(me.id),
+                    submissionId = destination.submissionId,
+                    strings = strings,
+                    clock = clock,
+                    padding = padding,
+                    onDone = { navigator.back() },
+                )
+            }
             is Destination.Module -> ModuleScreen(
                 graph = graph,
                 sessionVm = sessionVm,
@@ -279,6 +283,14 @@ private fun ModuleScreen(
             clock = clock,
             padding = padding,
             onOpenModule = navigator::selectModule,
+            onOpenProject = if (DashboardModules.PROJECTS in identity.modules) {
+                { id -> navigator.open(Destination.Building(BuildingRoute.Project(id))) }
+            } else {
+                null
+            },
+            onOpenAttention = { item ->
+                attentionDestination(item, identity.modules.toSet())?.let { navigator.open(it); true } ?: false
+            },
         )
         DashboardModules.CONVERSATIONS -> InboxScreen(
             repository = graph.inbox,
@@ -328,6 +340,32 @@ private fun ModuleScreen(
                 padding = padding,
             )
         }
+        DashboardModules.MY_SERVICES -> identity.employee?.let { me ->
+            MyServicesScreen(
+                repository = graph.portal(me.id),
+                strings = strings,
+                clock = clock,
+                padding = padding,
+                onRegister = { navigator.open(Destination.MyService(null)) },
+                onOpen = { navigator.open(Destination.MyService(it.id)) },
+            )
+        }
+        DashboardModules.MY_SITES -> identity.employee?.let { me ->
+            MySitesScreen(
+                repository = graph.mySites(me.id),
+                strings = strings,
+                padding = padding,
+                onOpen = { navigator.open(Destination.Building(it)) },
+            )
+        }
+        in ModuleRegistry.buildingPages -> BuildingScreen(
+            repository = graph.building,
+            section = moduleId,
+            strings = strings,
+            clock = clock,
+            padding = padding,
+            onOpen = { navigator.open(Destination.Building(it)) },
+        )
         DashboardModules.SETTINGS -> SettingsScreen(
             settings = graph.settings,
             identity = identity,
@@ -346,8 +384,7 @@ private fun ModuleScreen(
             strings = strings,
             clock = clock,
             padding = padding,
-            onNew = newRecordFor(moduleId)?.let { destination -> ({ navigator.open(destination) }) },
-            onOpenClient = { navigator.open(Destination.Client(it)) },
+            onOpen = { navigator.open(Destination.Crm(it)) },
         )
     }
 }
@@ -526,19 +563,11 @@ private fun MoreScreen(
     }
 }
 
-/** What the list's "New" button creates, or null for the lists the app cannot add to yet. */
-private fun newRecordFor(moduleId: String): Destination? = when (moduleId) {
-    DashboardModules.CLIENTS -> Destination.NewClient
-    DashboardModules.QUOTES -> Destination.NewQuote
-    DashboardModules.INVOICES -> Destination.NewInvoice
-    DashboardModules.CATALOG -> Destination.NewCatalogItem
-    else -> null
-}
-
 private fun ModuleGroup.labelKey(): String = when (this) {
     ModuleGroup.Home -> Txt.NAV_GROUP_HOME
     ModuleGroup.Inbox -> Txt.NAV_GROUP_INBOX
     ModuleGroup.Business -> Txt.NAV_GROUP_BUSINESS
+    ModuleGroup.Building -> Txt.NAV_GROUP_BUILDING
     ModuleGroup.Automation -> Txt.NAV_GROUP_AUTOMATION
     ModuleGroup.Setup -> Txt.NAV_GROUP_SETUP
 }

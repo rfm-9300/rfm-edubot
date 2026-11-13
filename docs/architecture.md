@@ -1639,7 +1639,7 @@ on `core:network` — that boundary is what keeps HTTP and bearer tokens out of 
 flowchart TD
   android[androidApp] --> shared
   ios[iosApp] --> shared
-  shared --> features["feature:* (12 modules)"]
+  shared --> features["feature:* (13 modules)"]
   features --> data["core:data — repositories + cache"]
   features --> ui["core:ui — tokens, theme, components"]
   features --> l10n["core:localization — Txt + 3 catalogs"]
@@ -1666,11 +1666,15 @@ flowchart TD
 - `mobile/core/data` — the repositories, plus `CachedResource` and `SnapshotCache`.
 - `mobile/core/localization` — compile-checked keys in `Txt` and three catalogs (en, pt-PT, es),
   with tests asserting the key sets match and placeholders are preserved.
-- `mobile/core/ui` — the design tokens, light and dark themes, and the shared components.
+- `mobile/core/ui` — the design tokens, light and dark themes, the shared components, the record
+  pieces (`FieldRow`, `RecordCard`, `ProgressBar`, `ChipRow`, `ActionRow`, the confirm and prompt
+  dialogs) and `RecordViewModel`, the load / act / remove view model every record screen shares.
 - `mobile/core/testing` — `Samples` (representative records) and `FakeVoiceInput`.
 - `mobile/feature/*` — one module per area: `auth`, `overview`, `inbox`, `contacts`, `crm`,
-  `bookings`, `agents`, `notifications`, `assistant`, `persona`, `settings`, `timeclock`. Each pairs a
-  stateless composable with a KMP `ViewModel` exposing an immutable `StateFlow`.
+  `bookings`, `building`, `agents`, `notifications`, `assistant`, `persona`, `settings`, `timeclock`.
+  Each pairs a stateless composable with a KMP `ViewModel` exposing an immutable `StateFlow`. `crm`
+  and `building` expose a route type (`CrmRoute`, `BuildingRoute`) and one composable that renders
+  it, so the shell pushes a record without knowing its screens.
 - `mobile/shared` — the shell: `MobileGraph` (the object graph), `Navigator` (the back stack),
   `ModuleRegistry` (the nav model), `DashboardSessionViewModel`, `SessionViewModels` (the signed-in
   screens' view models, cleared when a different session starts), and `DashboardApp`. It is also the
@@ -1706,8 +1710,8 @@ other plain fields (`outside_sites` names the nearest site and how far it is).
 
 An employee's sign-in (`DashboardIdentity.employee`) is refused with a 401 everywhere but `/me`,
 `/account…` and `/portal/…`, so for any other call the app would sign them out. `ModuleRegistry` takes
-`employee` and offers only their pages (`my-hours` lands; `my-services` is named as web-only) plus
-Settings; the shell shows no bell and polls no notifications for them; Settings skips the company's
+`employee` and offers only their pages (`my-hours`, `my-services` and `my-sites`, landing on the first
+the company gives them) plus Settings; the shell shows no bell and polls no notifications for them; Settings skips the company's
 widget, channels and companies, and changes the language on the phone only. The signed-in screens'
 view models live in `SessionViewModels`, which is cleared when a different session starts: several
 of them poll, and one left from an admin's session would call with the next employee's token.
@@ -1723,7 +1727,9 @@ one account never sees another's data.
 The time clock is the exception: a punch's time is the backend's, so nothing is queued offline and
 the buttons need a connection. Its status and shifts are cached per employee
 (`timeclock.{employeeId}.…`), and `MobileGraph.timeClock(employeeId)` hands a new repository to
-whoever signs in next, so a phone shared at a site never shows one person's clock to another.
+whoever signs in next, so a phone shared at a site never shows one person's clock to another. My
+services and My sites follow the same rule (`portal.services.{employeeId}`,
+`portal.sites.{employeeId}`, `MobileGraph.portal(…)` and `mySites(…)`).
 
 ### Freshness
 
@@ -1738,14 +1744,18 @@ notification badge every 60s; persona every 3s while a prompt is compiling.
 marks whether the app has a screen for a module: `/app/api/me` lists every module the tenant pays
 for, and modules the app cannot render are shown under a "on the web dashboard" heading rather than
 as taps that go nowhere. `Navigator` holds the back stack; Android wires its `back()` to the
-activity's `OnBackPressedDispatcher`.
+activity's `OnBackPressedDispatcher`, and every pushed screen has its own Back button for iOS. A
+list row pushes `Destination.Crm(CrmRoute…)` or `Destination.Building(BuildingRoute…)`; records pass
+the company's modules down so they only link into modules it has (any other call answers 403).
 
 ### Not on mobile
 
 The agent builder, the document-template studio, the website-widget customiser, WhatsApp template
-CRUD, Instagram, the Google/Gmail integrations, persona file uploads, the team's Timesheets (review,
-corrections, approvals, export, work sites and rules) and an employee's My services stay on the web
-dashboard. The app names them rather than hiding them.
+CRUD, Instagram, the Email page, the Google/Gmail integrations, persona file uploads and the Menus
+tab, the team's Timesheets (review, corrections, approvals, export, work sites and rules), PDFs
+(quotes, invoices, measurements, an employee's services report), Building photos, creating projects,
+change orders and measurements, and editing a company's client fields stay on the web dashboard.
+The app names the modules rather than hiding them, and says so on the records that have photos.
 
 ### Time clock on the phone
 

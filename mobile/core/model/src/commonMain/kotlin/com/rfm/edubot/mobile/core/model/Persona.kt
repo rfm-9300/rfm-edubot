@@ -10,6 +10,8 @@ data class Persona(
     val status: String = "",
     val updatedAt: String? = null,
     val sources: List<PersonaSource> = emptyList(),
+    /** Only admins change the persona; everyone else gets `403` and reads it. */
+    val canEdit: Boolean = true,
 ) {
     /** The backend is still rebuilding the prompt; the screen polls while this holds. */
     val compiling: Boolean get() = status.equals("COMPILING", ignoreCase = true)

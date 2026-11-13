@@ -72,6 +72,9 @@ fun toneForStatus(status: String): Tone = when (status.uppercase()) {
     "BLOCKED", "FAILED", "CANCELLED", "REJECTED", "RECUSADO", "NO_SHOW", "DISABLED", "OVERDUE" -> Tone.Bad
     "INVOICED" -> Tone.Ok
     "OPEN", "SENT", "ENVIADO", "RUNNING" -> Tone.Info
+    "ON_TRACK" -> Tone.Ok
+    "AT_RISK", "ON_HOLD" -> Tone.Warn
+    "DELAYED", "LATE" -> Tone.Bad
     else -> Tone.Neutral
 }
 
@@ -289,7 +292,14 @@ fun ListRow(
 
 /** One number with its label. The web's `.dash-kpi`. */
 @Composable
-fun MetricCard(label: String, value: String, modifier: Modifier = Modifier, tone: Tone = Tone.Neutral) = Surface(
+fun MetricCard(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier,
+    tone: Tone = Tone.Neutral,
+    /** Three to a row: a smaller figure, so an amount isn't cut down to its "€". */
+    compact: Boolean = false,
+) = Surface(
     modifier = modifier,
     color = BotColors.surface,
     shape = RoundedCornerShape(BotRadius.lg),
@@ -300,9 +310,11 @@ fun MetricCard(label: String, value: String, modifier: Modifier = Modifier, tone
         Spacer(Modifier.height(BotSpace.sm))
         Text(
             value,
-            style = MaterialTheme.typography.headlineSmall,
+            style = if (compact) MaterialTheme.typography.titleMedium else MaterialTheme.typography.headlineSmall,
             color = if (tone == Tone.Neutral) BotColors.ink else tone.ink(),
             maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis,
         )
     }
 }
