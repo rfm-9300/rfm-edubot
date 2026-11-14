@@ -1,10 +1,10 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # Employee portal and time clock
 
-What an employee's own sign-in can reach: registering services for the team to approve, and the opt-in time clock. Both run under `/app/api/portal/`.
+What an employee's own sign-in can reach: registering services for the team to approve, and the opt-in time clock, with its hours per job and planned shifts (phase 2). Both run under `/app/api/portal/`.
 
 ## Employees sign in and register their services (PR #48, shipped 2026-10-03, `4f4b2cd`)
 
@@ -92,7 +92,8 @@ Trabalho art. 202.º, Lei 58/2019 art. 28.º, CNPD on geolocation; Connecteam, J
   emulator. CI builds Android, links the iOS framework and runs the native tests, but permission
   prompts, fingerprint and Face ID, and re-enrolling after a biometric change need a real phone. Details
   on [mobile](mobile.md).
-- Phase 2 (offline punches, Home tiles, agent triggers) is in the plan.
+- Phase 2 (offline punches, Home tiles, agent triggers) is in the plan. Hours per job and schedules
+  came first, as the next section says.
 
 Merging it after #54 and #55: six files conflicted, all with additions on both sides that were kept
 together (the catalogs' `time` block beside the column picker's `columns`, notification kinds, tones
@@ -103,3 +104,66 @@ parsed body as `err.body`. `timesheets.js` reads
 `err.body.distanceM` and `siteName` to say how far from which work site a clock-in was refused. CI
 deployed `ef78cbe`, health ok, 0 `ERROR` lines three and a half minutes after boot, past the retention
 job's first scheduled run.
+
+## Hours per job and schedules (phase 2, built 2026-11-13)
+
+Rodrigo asked for a "very complete" time clock for companies that need strict, specific and detailed
+hours. Of four candidate areas he picked **hours per job** and **schedules and attendance**; sign-off
+with locked periods (and a monthly record PDF) and absences with labour-rule checks were left for
+later, as was the team's side on mobile. Plan: [`docs/plan-time-clock-jobs-schedules.md`](../docs/plan-time-clock-jobs-schedules.md);
+as built: [`docs/architecture.md` → Time clock](../docs/architecture.md#time-clock). Both rules default
+to off, so a company that changes nothing keeps phase 1. Decisions that matter later:
+
+- **Segments live inside the shift**, not in their own collection. Splitting time is then one versioned
+  write with the clock-in, switch or correction that causes it, approval covers it, and the shift's
+  history holds the team's job changes (`ShiftEdit.jobs`, the times kept on both sides). Reports read
+  the period's shifts and cut them (`WorkLog.spans`); Building's job costing queries
+  `segments.job.projectId` (indexed).
+- **Minutes are cumulative**: a segment holds `⌊W(end)/60⌋ − ⌊W(start)/60⌋` of the seconds worked, so the
+  parts always add up to the shift's worked minutes, breaks counted in none.
+- **A typed split goes in time order** (`WorkLog.inOrder`; the first part, the shift's start, stays first).
+  Both editors add a new part at the end of the form, so refusing parts out of order meant splitting the
+  middle of a shift took retyping every later part (found on a phone). Only two parts at the same minute
+  are refused (`segments_same_start`).
+- **A job keeps the names it had** (client, project, activity), so a rename or delete doesn't rewrite
+  history; a segment is billable when its activity is, or, without one, when it names a client or
+  project. Resolving a job accepts archived clients and activities out of use, so an old shift can still
+  be edited; the pickers only list the live ones.
+- **Strict means strict, but never stuck.** Under `workLog = REQUIRED` a clock-in or switch without a
+  complete job is refused (`job_required`, `job_incomplete` naming the part as `detail`), untagged time
+  flags `UNALLOCATED`, and approving refuses it (`409 unallocated`; a bulk approve skips such shifts and
+  answers how many as `skipped`). Clock-out is never refused. An employee may save a split with untagged
+  parts; the flag and the approval stop them from counting.
+- **Projects come through a port.** `timesheets/` must not import `building/` (Building already reads
+  the time clock for job costing), so `JobProjects` is defined in the time clock and Building implements
+  it (`BuildingJobProjects`), handed to the routes in `AppRoutes`.
+- **A switch is a punch** (`SWITCH`): it gathers location and the phone's signature like any other, a
+  geofence only flags it, and one within a minute of the segment's start changes that segment's job (a
+  wrong pick fixed at once) instead of cutting a new one. Switching to the job already running is `409
+  same_job`.
+- **Matching a clock-in to a plan** looks from four hours before the planned start (only
+  `earlyClockInMinutes` under the strict rule) to its end, nearest start first; a team-added shift is
+  matched the same way. Clocking out for lunch and back in links both shifts to one plan:
+  `PlanLinks.relink` keeps lateness on the first and early leave on the last, so neither reads as late
+  or as leaving early.
+- **The clock card's plan** (`status.planned`) is the open shift's plan, else one matching now, else one
+  later today; never a later day's (those are `upcoming`). So a plan dated another day began on an
+  earlier one (a night shift past midnight, a clock-out forgotten overnight): web and phone name it by
+  its day (`plannedOn`), not as the next one, which is how a forgotten Friday shift read on Saturday.
+- **No-shows** are found by `AttendanceWatch`, not computed at read time only, because the team should
+  hear about one while it matters: once per plan (`claimAlert`), not for employees who left, and not for
+  plans older than a day (an outage shouldn't ring old news). A plan found attended (late, or by a shift
+  that ran over it) is marked so it isn't looked at again.
+- An attended plan can't be deleted (`planned_attended`), only re-timed, which moves its shifts' lateness
+  with it; copying a week skips whatever would overlap and never copies an excuse.
+- **Web:** the jobs and schedule code sit in two self-contained scripts beside `timesheets.js`
+  (`time-jobs.js`, `time-schedule.js`), which its `init()` mounts with a kit of its helpers. By job and
+  Activities only show while the company logs jobs. The planner reuses the bookings board's
+  `.week-event` cards in a `.tbl--stack` table (`.planner`, `table-layout: fixed`, so long attendance
+  text ellipsizes instead of widening the week).
+- **Mobile** (employee side only): [mobile.md](mobile.md#hours-per-job-and-schedules-2026-11-13).
+- **Checked:** 1,038 backend tests green (new `WorkLogTest`, `AttendanceTest`,
+  `TimeClockJobsScheduleRoutesTest`, a Building costs case), and a browser walkthrough of every new tab,
+  drawer and form against a throwaway local stack (pt-PT, light and dark, 390 px), which caught a
+  shadowed helper printing `[object Object]` in the work log and a planner that scrolled sideways. The
+  employee's side then ran on a real Android phone ([mobile.md](mobile.md#hours-per-job-and-schedules-2026-11-13)).

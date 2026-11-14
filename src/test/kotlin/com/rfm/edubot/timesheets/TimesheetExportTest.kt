@@ -34,8 +34,11 @@ class TimesheetExportTest {
         val csv = TimesheetExport.csv(listOf(shift), mapOf(worker.id to worker), lisbon, "pt-PT", now)
         val lines = csv.removePrefix("\uFEFF").trimEnd().split("\r\n")
         assertTrue(csv.startsWith("\uFEFF"))
-        assertEquals("Número;Colaborador;NIF;Dia;Entrada;Saída;Pausas (min);Horas;Minutos;Local;Alertas;Estado;Corrigido;Nota", lines[0])
-        assertEquals("COL-001;\"'=Ana; \"\"Costa\"\"\";123456789;2026-10-05;22:00;06:30 (+1);30;8:00;480;;EDITED;Por rever;Sim;Turno da noite", lines[1])
+        assertEquals(
+            "Número;Colaborador;NIF;Dia;Entrada;Saída;Pausas (min);Horas;Minutos;Local;Alertas;Estado;Corrigido;Nota;Planeado;Atraso (min);Saída antecipada (min);Trabalhos",
+            lines[0],
+        )
+        assertEquals("COL-001;\"'=Ana; \"\"Costa\"\"\";123456789;2026-10-05;22:00;06:30 (+1);30;8:00;480;;EDITED;Por rever;Sim;Turno da noite;;;;", lines[1])
         assertEquals("Number", TimesheetExport.csv(emptyList(), emptyMap(), lisbon, "en", now).removePrefix("\uFEFF").substringBefore(";"))
     }
 }

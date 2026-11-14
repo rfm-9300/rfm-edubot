@@ -60,6 +60,7 @@ import com.rfm.edubot.tenant.ChannelBindingService
 import com.rfm.edubot.tenant.TenantPipelineFactory
 import com.rfm.edubot.tenant.TenantRegistry
 import com.rfm.edubot.tenant.TenantRepository
+import com.rfm.edubot.building.BuildingJobProjects
 import com.rfm.edubot.timesheets.timeClockRoutes
 import com.rfm.edubot.timesheets.timesheetRoutes
 import com.rfm.edubot.web.WebChannelRegistry
@@ -171,9 +172,11 @@ internal fun Routing.installRoutes(s: AppServices) {
         employees = s.employeeLookup,
     )
     employeeWorkRoutes(s.mongo, s.dashboardUsers, s.notifications)
-    timeClockRoutes(s.mongo, s.notifications)
+    // Jobs on shifts can name Building's projects; the time clock gets them through this port, never by import.
+    val jobProjects = BuildingJobProjects(s.mongo)
+    timeClockRoutes(s.mongo, s.notifications, projects = jobProjects)
     mySitesRoutes(s.mongo) { s.runtimeConfig.get().pdfStoragePath }
-    timesheetRoutes(s.mongo)
+    timesheetRoutes(s.mongo, projects = jobProjects)
     dashboardCompanyRoutes(
         tenantRepository = s.tenants,
         runtimeConfig = s.runtimeConfig,

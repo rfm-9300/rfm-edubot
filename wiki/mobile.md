@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-14
 ---
 
 # Mobile app (Kotlin Multiplatform)
@@ -84,6 +84,55 @@ Three cloud-agent PRs merged that day touch the app (server side: [employee-port
 - **AI Assistant (PR #55).** The backend sends a card's `preview` as a JSON object and the app expected
   a string, so cards with a preview couldn't be read; `core/model` and `feature/assistant` now read the
   object and show it. Assistant settings, rename/delete and retry are web-only.
+
+## Hours per job and schedules (2026-11-13)
+
+The employee's side of the time clock's phase 2 ([employee-portal-and-time-clock.md](employee-portal-and-time-clock.md#hours-per-job-and-schedules-phase-2-built-2026-11-13)).
+The team's side (planner, By job, activities, rules) stays on the web.
+
+- **My hours** shows the job the next clock-in is for when the company logs jobs (the planned shift's,
+  else the last one worked) with Change, Switch job while working, the planned shift on the clock card
+  (how late, when the strict schedule opens clocking in, or that nothing is planned), and My schedule.
+  A shift row opens its detail (times, plan and lateness, work log, clock record) and, until the team
+  approves it, Split the time between jobs.
+- **The picker, the shift and the split are navigator destinations** (`Destination.TimeJob(target)`,
+  `TimeShift`, `TimeSplit`), so the back gesture closes them, and they reach My hours' view model by
+  its key from the session's view-model store (`timeClockViewModel()`), which is how a pick lands on the
+  clock-in, a switch or one part of a split (`JobTarget`). The client list shows 30 matches at a time
+  (a company can have thousands) and keeps the picked one in sight: in its place, or on top when the
+  search hides it. Moving it to the top on every pick made the row jump from under the finger.
+- **Time rows put the hours on the right**, over the status badge (`ListRow`'s `trailingLabel`), and the
+  day alone in the title: sharing the one-line title cut the end time off on a phone ("Segunda 16/11 ·
+  08:00–16:…"). A planned shift's lateness goes in the detail line, so its badge stays one word.
+- **The shift detail ticks** (`rememberNow`, as My hours): the running part of the work log is the
+  shift's live total less the parts before it, so the parts always add up to the total.
+- **Key an effect on the screen's input, not on state its own action changes.** The split screen
+  started a draft in a `LaunchedEffect` keyed on the draft; saving clears the draft, so the effect
+  started a new one and wiped "saved" before it showed. It is keyed on the shift and whether it has
+  loaded, and reads the view model's state inside.
+- `JobRules.missing` in `core/model` is the backend's rule for a complete job (nothing named comes
+  first, as `job`), so the phone says what is missing before a punch spends a location fix or a
+  fingerprint.
+- **Tests:** feature modules have no JVM target, so their tests run in `testDebugUnitTest` (and on the
+  iOS simulator), not `jvmTest`. Kotlin/Native refuses a comma in a backticked test name (the JVM
+  refuses a colon). Checked: `jvmTest`, `testDebugUnitTest`, `:androidApp:assembleDebug`,
+  `iosSimulatorArm64Test` and `:shared:linkDebugFrameworkIosSimulatorArm64` green.
+- **Run on a real Android 15 phone (2026-11-13/14)** against a throwaway local backend: picking a job,
+  clocking in on it, switching (with a project and a note), the shift detail, My schedule, a split saved
+  with its parts out of order, a break, clocking out, and closing a shift left open overnight. That run
+  found the list jump, the cut-off hours, the stale and missing lines on the shift detail, the split
+  refused out of order, a past plan called "next" and the keyboard handling below, all fixed. Not yet on
+  a device: the location and fingerprint checks (the test company had both off). iOS has only run in the
+  simulator tests.
+- **A form screen inside the Scaffold pads for the keyboard with
+  `padding(padding).consumeWindowInsets(padding).imePadding()`** (the job picker and the split). The
+  manifest sets no `windowSoftInputMode`, so without `imePadding()` Android pans the whole window and
+  the header slides under the status bar; with `imePadding()` alone (the older forms) the bottom bar's
+  height is counted twice, and an empty band sits above the keyboard.
+- **To drive the phone against a local backend**: `adb reverse tcp:<port> tcp:<port>`, then
+  `./gradlew :androidApp:installDebug -PapiBaseUrl=http://localhost:<port>` (it replaces the installed
+  app and keeps its data, so reinstall without the flag afterwards). `adb shell uiautomator dump` gives
+  each element's bounds to tap; let a fling settle before tapping, or the tap lands on another row.
 
 ## Agent notes
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-13
 ---
 
 # Clients, suppliers and employees
@@ -64,7 +64,8 @@ to it, archive it when it has history (hidden from lists and pickers, restorable
 three. Decisions that matter later:
 
 - **History means** quotes, invoices, Serviços rows or bookings for a client, and payments for a
-  supplier or employee (since `4f4b2cd` also an employee's registered or done services). A hard
+  supplier or employee (since `4f4b2cd` also an employee's registered or done services; with the time
+  clock, their clocked shifts, and since 2026-11-13 their planned shifts, the attendance record). A hard
   delete would orphan them: invoice PDFs are rebuilt on every download
   and 404 without their client, and invoices must be kept anyway. `DELETE /crm/{kind}/{id}` answers
   `409 in_use` then; archive and restore are separate `POST …/archive|restore` calls

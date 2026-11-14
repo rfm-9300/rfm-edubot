@@ -20,9 +20,19 @@
   const FLAG_TONES = {
     MOCK_LOCATION: 'bad', OUTSIDE_SITE: 'warn', NO_LOCATION: 'warn', LOW_ACCURACY: 'warn', UNVERIFIED: 'warn',
     LONG_SHIFT: 'warn', MISSED_CLOCK_OUT: 'warn', EDITED: 'info', MANUAL: 'info',
+    UNALLOCATED: 'warn', LATE: 'warn', LEFT_EARLY: 'warn', UNSCHEDULED: 'info',
   };
-  const POLICIES = { location: ['OFF', 'OPTIONAL', 'REQUIRED'], geofence: ['FLAG', 'BLOCK'], biometric: ['OFF', 'OPTIONAL', 'REQUIRED'] };
-  const TABS = { shifts: 'tabShifts', sites: 'tabSites', rules: 'tabRules' };
+  const POLICIES = {
+    location: ['OFF', 'OPTIONAL', 'REQUIRED'], geofence: ['FLAG', 'BLOCK'], biometric: ['OFF', 'OPTIONAL', 'REQUIRED'],
+    workLog: ['OFF', 'OPTIONAL', 'REQUIRED'], schedule: ['OFF', 'FLAG', 'BLOCK'],
+  };
+  // By job and Activities only show once the company logs jobs.
+  const TABS = { shifts: 'tabShifts', schedule: 'tabSchedule', jobs: 'tabJobs', activities: 'tabActivities', sites: 'tabSites', rules: 'tabRules' };
+  const JOB_TABS = ['jobs', 'activities'];
+  const NEEDS = ['client', 'project', 'activity', 'note'];
+  const jobsUI = () => window.TimeJobsUI;
+  const scheduleUI = () => window.TimeScheduleUI;
+  const logsJobs = policy => !!policy && policy.workLog && policy.workLog !== 'OFF';
   const FILTERS = {
     review: s => isPendingClosed(s),
     flagged: s => s.flags.length > 0,
@@ -31,8 +41,10 @@
   };
   const FILTER_LABELS = { review: 'filterReview', flagged: 'filterFlagged', approved: 'filterApproved', all: 'filterAll' };
 
-  // offset: server clock minus this browser's, so a running shift ticks on the server's time.
-  const mine = { status: null, shifts: [], offset: 0, busy: false };
+  // offset: server clock minus this browser's, so a running shift ticks on the server's time. jobs: what a job can
+  // name; picker: the clock card's job fields while clocked out.
+  const mine = { status: null, shifts: [], offset: 0, busy: false, jobs: null, picker: null };
+  const LAST_JOB = 'timeclock.lastJob';
   const team = { tab: 'shifts', weekStart: '', filter: 'review', employee: '', data: null, board: null, sites: null, settings: null, employees: null, clients: null, offset: 0 };
   let ticker = null;
 
@@ -105,7 +117,18 @@
     const code = err?.code || '';
     if (code === 'location_required' && locationError) return known(`geoErrors.${locationError}`, tr('errors.location_required'));
     if (code === 'outside_sites') return tr('errors.outside_sites', { distance: distance(err.body?.distanceM), site: err.body?.siteName || '' });
+    if (code === 'job_incomplete' && jobsUI()) return jobsUI().missingText(err.body?.detail || 'job');
+    if (code === 'too_early') return tr('errors.too_early', { time: err.body?.opensTime || '' });
     return code ? known(`errors.${code}`, T.saveFailed) : T.saveFailed;
+  }
+
+  /** The job last clocked in with, to start the next clock-in from (this browser only). */
+  function lastJob() {
+    try { return JSON.parse(localStorage.getItem(LAST_JOB) || 'null'); } catch { return null; }
+  }
+
+  function rememberJob(job) {
+    try { localStorage.setItem(LAST_JOB, JSON.stringify(job)); } catch { /* private mode: nothing to remember */ }
   }
 
   /** One fix from the browser, only when asked for; rejects with the reason the server stores. */
@@ -130,8 +153,8 @@
     </div>`;
   }
 
-  /** A shift as a table row; the team's rows lead with the employee, an employee's with the day. */
-  function shiftRow(s, withEmployee, now) {
+  /** A shift as a table row; the team's rows lead with the employee, an employee's with the day. [withJobs] adds what it was for. */
+  function shiftRow(s, withEmployee, now, withJobs = false) {
     const marker = s.status === 'OPEN' ? ' is-current' : s.review === 'APPROVED' ? ' is-paid' : '';
     const label = text => ` data-label="${esc(text)}"`;
     return `<tr class="conversation-row${marker}" data-shift="${esc(s.id)}" tabindex="0">
@@ -139,6 +162,7 @@
       <td class="mono"${withEmployee ? label(T.thDay) : ''}>${esc(dayText(s.day))}</td>
       <td class="mono"${label(T.thTime)}>${esc(timeRange(s))}${s.breakMinutes ? `<div class="sub">${esc(tr('breakSub', { time: hm(s.breakMinutes) }))}</div>` : ''}</td>
       <td class="num"${label(T.thWorked)}>${esc(hm(workedNow(s, now)))}</td>
+      ${withJobs ? `<td${label(T.thJobs)}>${esc(jobsUI()?.summary(s.segments) || '—')}</td>` : ''}
       <td${label(T.thSite)}>${esc(s.siteName || '—')}</td>
       <td${label(T.thFlags)}>${s.flags.length ? `<div class="tbl__pills">${flagPills(s.flags)}</div>` : '<span class="muted">—</span>'}</td>
       <td${label(T.thStatus)}>${reviewPill(s)}</td>
@@ -159,6 +183,7 @@
     const [status, shifts] = await Promise.all([d.api('/app/api/portal/time'), d.api('/app/api/portal/time/shifts')]);
     setStatus(status);
     mine.shifts = shifts || [];
+    mine.jobs = logsJobs(status.policy) && jobsUI() ? await jobsUI().loadOptions(false).catch(() => null) : null;
   }
 
   function setStatus(status) {
@@ -187,11 +212,14 @@
     if (!s) { root.innerHTML = d.hero(d.labels[MINE], T.myDesc); return; }
     const now = mineNow();
     const totals = mineTotals(now);
+    mine.picker = s.state === 'OFF' && logsJobs(s.policy) && mine.jobs ? jobsUI().fields('tc-job', s.planned?.job || lastJob(), mine.jobs, s.policy) : null;
     root.innerHTML = d.hero(d.labels[MINE], T.myDesc, d.statCards([
       { label: T.statToday, value: hm(totals.today) },
       { label: T.statWeek, value: tr('weekOfLimit', { worked: hoursValue(totals.week), limit: s.policy.weeklyHours }) },
-    ])) + overdueHtml(s) + clockHtml(s, now) + historyHtml(now);
+    ])) + overdueHtml(s) + clockHtml(s, now) + (scheduleUI()?.myScheduleHtml(s) || '') + historyHtml(now);
     $$('[data-punch]', root).forEach(b => b.addEventListener('click', () => punch(b.dataset.punch)));
+    $('[data-switch]', root)?.addEventListener('click', () => jobsUI().openSwitch(mine.status, job => punch('SWITCH', job)));
+    mine.picker?.wire(root);
     $('[data-overdue]', root)?.addEventListener('submit', closeForgotten);
     wireRows(root, id => openShift(id));
     startTicker();
@@ -211,13 +239,22 @@
       WORKING: [['BREAK_START', T.breakStart, 'btn--ghost'], ['OUT', T.clockOut, 'btn--primary']],
       ON_BREAK: [['BREAK_END', T.breakEnd, 'btn--primary'], ['OUT', T.clockOut, 'btn--ghost']],
     }[s.state] || [];
+    // The strict schedule keeps clock-in closed until shortly before a planned shift, and for none planned.
+    const closed = s.state === 'OFF' && ['TOO_EARLY', 'NOT_SCHEDULED'].includes(s.clockIn?.state);
+    const current = open?.segments?.[open.segments.length - 1]?.job;
+    const working = open && logsJobs(p) ? `<p class="clock__meta">${esc(tr('workingOn', { job: jobsUI()?.label(current) || '' }))}</p>` : '';
+    const switcher = s.state === 'WORKING' && logsJobs(p) && jobsUI()
+      ? `<button class="btn btn--ghost" type="button" data-switch${appOnly ? ' disabled' : ''}>${esc(T.switchJob)}</button>` : '';
     return `<section class="panel clock" data-state="${esc(s.state)}">
       <div class="clock__head"><h2 class="panel__title">${esc(T.clockTitle)}</h2>${pill(known(`state.${s.state}`, s.state), STATE_TONES[s.state])}</div>
       <p class="clock__time" data-clock-big>${esc(s.state === 'OFF' ? clockTime(now) : hm(workedNow(open, now)))}</p>
       <p class="clock__line" data-clock-line>${esc(line)}</p>
+      ${working}
+      ${scheduleUI()?.clockLines(s, now) || ''}
       ${last ? `<p class="clock__meta">${esc(tr('lastPunch', { what: `${known(`punchType.${last.type}`, last.type)} ${last.time} · ${punchWhere(last)}` }))}</p>` : ''}
       ${appOnly ? `<div class="notice notice--info" role="status"><div class="notice__text"><span>${esc(T.useApp)}</span></div></div>` : ''}
-      <div class="clock__actions">${buttons.map(([type, label, cls]) => `<button class="btn ${cls}" type="button" data-punch="${type}"${appOnly ? ' disabled' : ''}>${esc(label)}</button>`).join('')}</div>
+      ${mine.picker ? `<div class="clock__job"><p class="lbl">${esc(T.jobTitle)}</p>${mine.picker.html}</div>` : ''}
+      <div class="clock__actions">${switcher}${buttons.map(([type, label, cls]) => `<button class="btn ${cls}" type="button" data-punch="${type}"${appOnly || (type === 'IN' && closed) ? ' disabled' : ''}>${esc(label)}</button>`).join('')}</div>
       <p class="hint">${esc(p.location === 'OFF' ? T.locationOffNote : T.locationNote)}</p>
     </section>`;
   }
@@ -243,24 +280,37 @@
       if (!weeks.has(week)) weeks.set(week, []);
       weeks.get(week).push(s);
     });
+    const withJobs = logsJobs(mine.status?.policy) || mine.shifts.some(s => s.segments?.length);
     const rows = [...weeks.entries()].sort((a, b) => b[0].localeCompare(a[0])).map(([week, list]) => {
       const total = list.reduce((sum, s) => sum + workedNow(s, now), 0);
       const label = `${tr('weekRow', { date: d.fmtDayKey(week, { day: 'numeric', month: 'short' }) })} · ${hm(total)}`;
-      return `<tr class="is-day"><td colspan="6">${esc(label)}</td></tr>${list.map(s => shiftRow(s, false, now)).join('')}`;
+      return `<tr class="is-day"><td colspan="${withJobs ? 7 : 6}">${esc(label)}</td></tr>${list.map(s => shiftRow(s, false, now, withJobs)).join('')}`;
     }).join('');
     return tablePanel({
       title: T.historyTitle,
       tag: mine.shifts.length,
-      head: [[T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
+      head: [[T.thDay], [T.thTime], [T.thWorked, 'right'], ...(withJobs ? [[T.thJobs]] : []), [T.thSite], [T.thFlags], [T.thStatus]],
       rows,
       empty: T.historyEmpty,
       emptyDesc: T.historyEmptyDesc,
     });
   }
 
-  async function punch(type) {
-    if (mine.busy || !mine.status) return;
+  /**
+   * One punch from the browser; true when it went through. A clock-in takes the job from the clock card's fields, a
+   * switch the one picked in its drawer ([job]).
+   */
+  async function punch(type, job = null) {
+    if (mine.busy || !mine.status) return false;
     const policy = mine.status.policy;
+    let picked = job;
+    if (type === 'IN' && mine.picker) {
+      const root = $('#view');
+      const missing = mine.picker.check(root);
+      if (missing) { d.toast(jobsUI().missingText(missing)); return false; }
+      picked = mine.picker.read(root);
+    }
+    let done = false;
     mine.busy = true;
     $$('[data-punch]').forEach(b => { b.disabled = true; });
     let location = null;
@@ -271,16 +321,22 @@
       try { location = await currentPosition(); } catch (code) { locationError = typeof code === 'string' ? code : 'UNAVAILABLE'; }
     }
     try {
-      const res = await d.api('/app/api/portal/time/punches', { method: 'POST', body: JSON.stringify({ type, channel: 'WEB', location, locationError }) });
+      const res = await d.api('/app/api/portal/time/punches', {
+        method: 'POST',
+        body: JSON.stringify({ type, channel: 'WEB', location, locationError, ...(picked ? { job: picked } : {}) }),
+      });
       setStatus(res.status);
       mergeShift(res.shift);
+      if (type === 'IN' && picked) rememberJob(picked);
       d.toast(known(`punched.${type}`, ''));
+      done = true;
     } catch (err) {
       if (err.message !== 'unauthorized') d.toast(errorText(err, locationError));
     } finally {
       mine.busy = false;
       if (d.state.active === MINE) d.render();
     }
+    return done;
   }
 
   async function closeForgotten(e) {
@@ -338,6 +394,9 @@
     }
     if (!s) { d.toast(T.loadFailed); return; }
     const now = forTeam ? teamNow() : mineNow();
+    const policy = forTeam ? team.data?.policy || team.settings : mine.status?.policy;
+    // The employee splits their time until it is approved; the team changes it any time, with a reason.
+    const canEditJobs = logsJobs(policy) && !!jobsUI() && (forTeam || s.review !== 'APPROVED');
     const here = { key: `shift:${s.id}`, label: [s.employeeName, dayText(s.day)].filter(Boolean).join(' · '), open: () => openShift(s.id) };
     const name = forTeam ? s.employeeName || '' : dayText(s.day);
     const link = forTeam && !d.linksBackTo(`employee:${s.employeeId}`);
@@ -359,15 +418,21 @@
         [T.metaStart, esc(s.startTime)],
         [T.metaEnd, esc(s.endTime ? `${s.endTime}${s.endsNextDay ? ` (${T.nextDay})` : ''}` : '…')],
         [T.metaBreaks, esc(s.breaks.length ? `${hm(s.breakMinutes)} · ${s.breaks.map(breakRange).join(', ')}` : '—')],
+        s.planned ? [T.metaPlanned, esc(plannedText(s))] : null,
         s.siteName ? [T.metaSite, esc(s.siteName)] : null,
         [T.thWorked, d.recordFigureHtml(hm(workedNow(s, now)))],
         s.flags.length ? [T.thFlags, `<span class="actions">${flagPills(s.flags)}</span>`] : null,
         reviewed ? [reviewed.label, esc(reviewed.value)] : null,
       ])}
+      ${jobsUI()?.segmentsHtml(s, canEditJobs) || ''}
       ${punchesHtml(s)}
       ${editsHtml(s)}
       ${noteHtml(s, forTeam)}
       ${d.docFootHtml(actions.join(''))}`;
+    $('[data-segments-edit]', body)?.addEventListener('click', () => d.openFrom(here, () => jobsUI().openSegments(s, forTeam, policy, saved => {
+      if (forTeam) afterChange();
+      else { mergeShift(saved); if (d.state.active === MINE) d.render(); }
+    })));
     $$('[data-map]', body).forEach(a => a.addEventListener('click', e => e.stopPropagation()));
     const openEmployee = () => d.openFrom(here, () => d.openPayeeDrawer('employee', s.employeeId));
     $('[data-detail-link]', body)?.addEventListener('click', openEmployee);
@@ -394,10 +459,22 @@
     d.openDrawer(dayText(s.day), body, false, { eyebrow: forTeam ? `${T.detailEyebrow} · ${s.employeeNumber || ''}`.replace(/ · $/, '') : T.detailEyebrow });
   }
 
+  /** "08:00–16:00 · 12 min late · left 1 h early" against the planned shift. */
+  function plannedText(s) {
+    const p = s.planned;
+    const parts = [`${p.startTime}⁠–⁠${p.endTime}`];
+    if (s.lateMinutes) parts.push(tr('lateBy', { time: hm(s.lateMinutes) }));
+    if (s.earlyLeaveMinutes) parts.push(tr('leftEarlyBy', { time: hm(s.earlyLeaveMinutes) }));
+    return parts.join(' · ');
+  }
+
   function punchesHtml(s) {
     if (!s.punches?.length) return '';
     const rows = s.punches.map(p => {
-      const how = [known(`channel.${p.channel}`, p.channel), p.recordedAt ? tr('recordedAt', { when: d.fmtDate(p.recordedAt) }) : '', p.by || ''].filter(Boolean).join(' · ');
+      const how = [
+        known(`channel.${p.channel}`, p.channel), p.recordedAt ? tr('recordedAt', { when: d.fmtDate(p.recordedAt) }) : '', p.by || '',
+        p.job ? jobsUI()?.label(p.job) : '',
+      ].filter(Boolean).join(' · ');
       const verified = p.verified ? pill(tr('verifiedOn', { device: p.deviceName || '' }), 'ok')
         : p.channel === 'APP' || p.channel === 'WEB' ? pill(T.notVerified, '') : '';
       // The verification column already says whether the phone signed it.
@@ -418,8 +495,10 @@
   function editsHtml(s) {
     if (!s.edits?.length) return '';
     const times = t => [`${t.startTime}–${t.endTime || '…'}`, t.breaks.length ? t.breaks.map(breakRange).join(', ') : ''].filter(Boolean).join(' · ');
+    const jobs = list => list.map(seg => `${seg.startTime} ${jobsUI()?.label(seg.job) || ''}`.trim()).join(', ');
     const rows = [...s.edits].reverse().map(e => {
-      const change = e.before ? `${T.before}: ${times(e.before)} → ${T.after}: ${times(e.after)}` : `${T.added}: ${times(e.after)}`;
+      const change = e.jobs ? `${T.jobsChanged}: ${jobs(e.jobs.before)} → ${jobs(e.jobs.after)}`
+        : e.before ? `${T.before}: ${times(e.before)} → ${T.after}: ${times(e.after)}` : `${T.added}: ${times(e.after)}`;
       return `<li><button class="worklist__item" type="button" data-tone="info" disabled>
         <span class="worklist__dot" aria-hidden="true"></span>
         <span class="worklist__main"><span class="worklist__title">${esc(e.reason)}</span><span class="worklist__detail">${esc(change)}</span></span>
@@ -458,8 +537,12 @@
     team.board = board;
     team.offset = Date.parse(board.serverTime) - Date.now();
     team.employees = employees;
+    if (JOB_TABS.includes(team.tab) && !logsJobs(data.policy)) team.tab = 'shifts';
     if (team.tab === 'sites') await loadSites();
     if (team.tab === 'rules') team.settings = await d.api('/app/api/timesheets/settings');
+    if (team.tab === 'schedule') await scheduleUI()?.load(team.weekStart);
+    if (team.tab === 'jobs') await jobsUI()?.loadReport();
+    if (team.tab === 'activities') await jobsUI()?.loadActivities();
   }
 
   async function loadSites() {
@@ -478,20 +561,28 @@
     const working = team.board?.working || [];
     const worked = data.totals.reduce((sum, t) => sum + t.workedMinutes, 0);
     const over = data.totals.reduce((sum, t) => sum + Math.max(t.overDailyMinutes, t.overWeeklyMinutes), 0);
-    const nav = team.tab === 'shifts' ? d.periodNav(team.weekStart, 'week', 'data-ts-period', d.CRM.services) : '';
-    const stats = d.statCards([
+    const weekNav = d.periodNav(team.weekStart, 'week', 'data-ts-period', d.CRM.services);
+    const nav = { shifts: weekNav, schedule: weekNav, jobs: jobsUI()?.reportNav() || '' }[team.tab] || '';
+    const figures = {
+      schedule: () => scheduleUI()?.stats(),
+      jobs: () => jobsUI()?.reportStats(),
+    }[team.tab]?.() || [
       { label: T.statWorking, value: working.length },
       { label: T.statToReview, value: data.shifts.filter(isPendingClosed).length },
       { label: T.statHours, value: hm(worked) },
       { label: T.statOver, value: over ? hm(over) : '—' },
-    ]);
-    const tabs = `<div class="settings-tabs" role="tablist">${Object.entries(TABS).map(([id, key]) => `<button class="chip${team.tab === id ? ' is-on' : ''}" type="button" role="tab" aria-selected="${team.tab === id}" data-ts-tab="${id}">${esc(T[key])}</button>`).join('')}</div>`;
+    ];
+    const shown = Object.entries(TABS).filter(([id]) => !JOB_TABS.includes(id) || logsJobs(data.policy));
+    const tabs = `<div class="settings-tabs" role="tablist">${shown.map(([id, key]) => `<button class="chip${team.tab === id ? ' is-on' : ''}" type="button" role="tab" aria-selected="${team.tab === id}" data-ts-tab="${id}">${esc(T[key])}</button>`).join('')}</div>`;
     const body = {
-      shifts: () => boardHtml(working, now) + shiftsHtml(data.shifts, now) + totalsHtml(data.totals),
+      shifts: () => boardHtml(working, now) + (scheduleUI()?.expectedHtml(team.board?.expected) || '') + shiftsHtml(data.shifts, now) + totalsHtml(data.totals),
+      schedule: () => scheduleUI()?.plannerHtml(team.weekStart) || '',
+      jobs: () => jobsUI()?.reportHtml() || '',
+      activities: () => jobsUI()?.activitiesHtml() || '',
       sites: () => sitesHtml(),
       rules: () => rulesHtml(),
     }[team.tab]();
-    root.innerHTML = d.hero(d.labels[TEAM], T.desc, stats, nav) + tabs + body;
+    root.innerHTML = d.hero(d.labels[TEAM], T.desc, d.statCards(figures), nav) + tabs + body;
     wireTeam(root);
   }
 
@@ -499,7 +590,8 @@
     const rows = working.map(s => {
       const tone = s.overdue ? 'warn' : s.onBreak ? 'info' : 'ok';
       const where = s.siteName || (s.flags.includes('OUTSIDE_SITE') ? known('flags.OUTSIDE_SITE', '') : '');
-      const detail = [tr('boardSince', { time: s.startTime }), where, s.onBreak ? known('state.ON_BREAK', '') : ''].filter(Boolean).join(' · ');
+      const job = s.segments?.length ? jobsUI()?.label(s.segments[s.segments.length - 1].job) : '';
+      const detail = [tr('boardSince', { time: s.startTime }), where, job, s.onBreak ? known('state.ON_BREAK', '') : ''].filter(Boolean).join(' · ');
       const side = s.overdue ? pill(T.overdueTag, 'warn') : `<span class="worklist__when">${esc(hm(workedNow(s, now)))}</span>`;
       return `<li><button class="worklist__item" type="button" data-shift="${esc(s.id)}" data-tone="${tone}">
         <span class="worklist__dot" aria-hidden="true"></span>
@@ -521,13 +613,14 @@
       clean.length ? `<button class="btn btn--sm btn--accent" type="button" data-ts-approve-clean>${esc(tr('approveClean', { n: clean.length }))}</button>` : '',
       `<button class="btn btn--sm btn--ghost" type="button" data-ts-export>${esc(T.exportCsv)}</button>`,
     ].join('');
+    const withJobs = logsJobs(team.data?.policy);
     return tablePanel({
       title: T.shiftsTitle,
       tag: visible.length,
       tools,
       filters: employees + chips,
-      head: [[T.thEmployee], [T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thSite], [T.thFlags], [T.thStatus]],
-      rows: visible.map(s => shiftRow(s, true, now)).join(''),
+      head: [[T.thEmployee], [T.thDay], [T.thTime], [T.thWorked, 'right'], ...(withJobs ? [[T.thJobs]] : []), [T.thSite], [T.thFlags], [T.thStatus]],
+      rows: visible.map(s => shiftRow(s, true, now, withJobs)).join(''),
       empty: T.shiftsEmpty,
       emptyDesc: T.shiftsEmptyDesc,
     });
@@ -535,18 +628,26 @@
 
   function totalsHtml(totals) {
     if (!totals.length) return '';
+    // Planned hours, late arrivals and absences once the company plans shifts.
+    const planned = team.data?.policy?.schedule !== 'OFF' || totals.some(t => t.plannedMinutes);
     const label = text => ` data-label="${esc(text)}"`;
     const rows = totals.map(t => `<tr class="conversation-row" data-ts-person="${esc(t.employeeId)}" tabindex="0">
       <td class="name">${esc(t.employeeName)}<div class="sub mono">${esc(t.employeeNumber)}</div></td>
       <td class="num"${label(T.thDays)}>${t.days}</td>
+      ${planned ? `<td class="num"${label(T.thPlanned)}>${t.plannedMinutes ? esc(hm(t.plannedMinutes)) : '—'}</td>` : ''}
       <td class="num"${label(T.thWorked)}>${esc(hm(t.workedMinutes))}</td>
       <td class="num"${label(T.thOverDaily)}>${t.overDailyMinutes ? pill(hm(t.overDailyMinutes), 'warn') : '—'}</td>
       <td class="num"${label(T.thOverWeekly)}>${t.overWeeklyMinutes ? pill(hm(t.overWeeklyMinutes), 'warn') : '—'}</td>
+      ${planned ? `<td class="num"${label(T.thLate)}>${t.late ? pill(String(t.late), 'warn') : '—'}</td>
+      <td class="num"${label(T.thAbsences)}>${t.absences ? pill(String(t.absences), 'bad') : '—'}</td>` : ''}
       <td class="num"${label(T.thToReview)}>${t.toReview}</td>
     </tr>`).join('');
     return tablePanel({
       title: T.totalsTitle,
-      head: [[T.thEmployee], [T.thDays, 'right'], [T.thWorked, 'right'], [T.thOverDaily, 'right'], [T.thOverWeekly, 'right'], [T.thToReview, 'right']],
+      head: [
+        [T.thEmployee], [T.thDays, 'right'], ...(planned ? [[T.thPlanned, 'right']] : []), [T.thWorked, 'right'], [T.thOverDaily, 'right'], [T.thOverWeekly, 'right'],
+        ...(planned ? [[T.thLate, 'right'], [T.thAbsences, 'right']] : []), [T.thToReview, 'right'],
+      ],
       rows,
       empty: '',
     });
@@ -595,6 +696,20 @@
           ${number('weeklyHours', T.ruleWeekly, 1, 80)}
         </div>
         <p class="hint">${esc(T.ruleMaxShiftHint)}</p>
+        <h3 class="form__section">${esc(T.rulesWorkLog)}</h3>
+        ${select('workLog', 'workLogPolicy', T.ruleWorkLog)}
+        <div class="form__row form__row--full"><span class="lbl" id="tr-needs-label">${esc(T.ruleJobNeeds)}</span>
+          <div class="form__checks" role="group" aria-labelledby="tr-needs-label">${NEEDS.filter(n => n !== 'project' || d.hasModule('projects')).map(n => `<label class="form__check"><input type="checkbox" id="tr-needs-${n}"${s.jobNeeds?.[n] ? ' checked' : ''}${off} /> ${esc(tr(`needs.${n}`))}</label>`).join('')}</div>
+          <p class="hint">${esc(T.ruleJobNeedsHint)}</p></div>
+        <h3 class="form__section">${esc(T.rulesSchedules)}</h3>
+        ${select('schedule', 'schedulePolicy', T.ruleSchedule)}
+        <div class="form__grid">
+          ${number('lateGraceMinutes', T.ruleLateGrace, 0, 120)}
+          ${number('earlyLeaveGraceMinutes', T.ruleEarlyLeaveGrace, 0, 120)}
+          ${number('earlyClockInMinutes', T.ruleEarlyClockIn, 0, 240)}
+          ${number('noShowMinutes', T.ruleNoShow, 5, 240)}
+        </div>
+        <p class="hint">${esc(T.rulesScheduleHint)}</p>
         <div class="notice notice--info"><div class="notice__text"><span>${esc(T.rulesInform)}</span></div></div>
         ${s.canEdit ? `<div class="actions"><button class="btn btn--primary" type="submit">${esc(T.rulesSave)}</button></div>` : `<p class="hint">${esc(T.rulesAdminOnly)}</p>`}
       </form></section>`;
@@ -634,6 +749,11 @@
     }
     $('[data-ts-site-new]', root)?.addEventListener('click', () => openSiteForm(null));
     $('[data-ts-rules]', root)?.addEventListener('submit', saveRules);
+    const redraw = () => { if (d.state.active === TEAM) d.render(); };
+    if (team.tab === 'shifts') scheduleUI()?.wireExpected(root, team.board?.expected, reload);
+    if (team.tab === 'schedule') scheduleUI()?.wirePlanner(root, team.weekStart, reload);
+    if (team.tab === 'jobs') jobsUI()?.wireReport(root, redraw);
+    if (team.tab === 'activities') jobsUI()?.wireActivities(root, redraw);
   }
 
   /** Approves [ids]; true when it went through. */
@@ -642,7 +762,8 @@
     if (btn) btn.disabled = true;
     try {
       const res = await d.api('/app/api/timesheets/shifts/approve', { method: 'POST', body: JSON.stringify({ ids }) });
-      d.toast(ids.length === 1 ? T.approvedToast : tr('approvedN', { n: res.approved }));
+      const done = ids.length === 1 ? T.approvedToast : tr('approvedN', { n: res.approved });
+      d.toast(res.skipped ? `${done} ${tr('approvedSkipped', { n: res.skipped })}` : done);
       await afterChange();
       return true;
     } catch (err) {
@@ -653,6 +774,7 @@
   }
 
   async function afterChange() {
+    scheduleUI()?.forgetSites();
     if (d.state.active !== TEAM) return;
     try { await loadTeam(); } catch { /* keep what is on screen */ }
     d.render();
@@ -688,9 +810,19 @@
           maxShiftHours: Number(value('maxShiftHours')),
           dailyHours: Number(value('dailyHours')),
           weeklyHours: Number(value('weeklyHours')),
+          workLog: value('workLog'),
+          jobNeeds: Object.fromEntries(NEEDS.filter(n => $(`#tr-needs-${n}`, form)).map(n => [n, $(`#tr-needs-${n}`, form).checked])),
+          schedule: value('schedule'),
+          lateGraceMinutes: Number(value('lateGraceMinutes')),
+          earlyLeaveGraceMinutes: Number(value('earlyLeaveGraceMinutes')),
+          earlyClockInMinutes: Number(value('earlyClockInMinutes')),
+          noShowMinutes: Number(value('noShowMinutes')),
         }),
       });
       d.toast(T.rulesSaved);
+      // The tabs and the work log's pickers follow the new rules.
+      jobsUI()?.forgetOptions();
+      try { await loadTeam(); } catch { /* keep what is on screen */ }
       d.render();
     } catch (err) {
       btn.disabled = false;
@@ -735,18 +867,23 @@
   }
 
   /** [mode]: `correct` a closed shift, `close` an open one, or `add` one nobody clocked. */
-  function openTimesForm(shift, mode) {
+  async function openTimesForm(shift, mode) {
     const adding = mode === 'add';
     const closing = mode === 'close';
     const breaks = breaksField(mode === 'correct' ? shift.breaks : []);
     const day = shift?.day || d.todayKey();
     const end = closing ? addTime(shift.startTime, (team.data?.policy?.dailyHours || 8) * 60) : shift?.endTime || '';
     const employees = (team.employees || []).filter(e => !e.archivedAt);
+    // A shift the team adds can say what it was for, when the company logs jobs.
+    const policy = team.data?.policy;
+    const opts = adding && logsJobs(policy) && jobsUI() ? await jobsUI().loadOptions(true).catch(() => null) : null;
+    const picker = opts ? jobsUI().fields('ts-job', null, opts, policy) : null;
     const form = document.createElement('form');
     form.className = 'form';
     form.innerHTML = `
       ${adding ? `<div class="form__row form__row--full"><label class="lbl" for="ts-employee">${esc(T.formEmployee)} <span class="req">●</span></label>
         <select class="sel" id="ts-employee" required><option value="">${esc(T.chooseEmployee)}</option>${employees.map(e => `<option value="${esc(e.id)}"${team.employee === e.id ? ' selected' : ''}>${esc(e.name)}</option>`).join('')}</select></div>` : ''}
+      ${picker ? `<div class="lbl">${esc(T.jobTitleTeam)}</div>${picker.html}` : ''}
       <div class="form__grid form__grid--3">
         ${closing ? '' : `<div class="form__row"><label class="lbl" for="ts-day">${esc(T.formDay)} <span class="req">●</span></label>
           <input class="inp inp--mono" id="ts-day" type="date" required max="${esc(d.todayKey())}" value="${esc(day)}" /></div>
@@ -765,6 +902,7 @@
         <button class="btn btn--ghost" type="button" data-form-cancel>${esc(d.STR.cancel)}</button>
       </div>`;
     if (!closing) breaks.wire(form);
+    picker?.wire(form);
     $('[data-form-cancel]', form).addEventListener('click', () => d.closeDrawer());
     form.addEventListener('submit', async e => {
       e.preventDefault();
@@ -780,7 +918,8 @@
           const payload = { day: value('ts-day'), start: value('ts-start'), end: value('ts-end'), breaks: breaks.collect(form), reason };
           if (adding) {
             if (!value('ts-employee')) { btn.disabled = false; d.toast(tr('errors.employee_not_found')); return; }
-            await d.api('/app/api/timesheets/shifts', { method: 'POST', body: JSON.stringify({ ...payload, employeeId: value('ts-employee') }) });
+            const job = picker?.read(form);
+            await d.api('/app/api/timesheets/shifts', { method: 'POST', body: JSON.stringify({ ...payload, employeeId: value('ts-employee'), ...(job ? { job } : {}) }) });
           } else {
             await d.api(`/app/api/timesheets/shifts/${encodeURIComponent(shift.id)}`, { method: 'PATCH', body: JSON.stringify(payload) });
           }
@@ -924,9 +1063,17 @@
     const rows = shifts.map(s => `<tr class="conversation-row${s.status === 'OPEN' ? ' is-current' : s.review === 'APPROVED' ? ' is-paid' : ''}" data-shift="${esc(s.id)}" tabindex="0">
       <td class="mono">${esc(dayText(s.day))}</td><td class="mono">${esc(timeRange(s))}</td>
       <td class="num">${esc(hm(workedNow(s, now)))}</td><td>${reviewPill(s)}</td></tr>`).join('');
+    // Against the plan, once the company plans shifts: planned hours, late arrivals and absences this week.
+    const totals = (info.week?.totals || []).find(t => t.employeeId === employee.id);
+    const planned = totals?.plannedMinutes ? [
+      tr('recordPlanned', { time: hm(totals.plannedMinutes) }),
+      totals.late ? tr('recordLate', { n: totals.late }) : '',
+      totals.absences ? tr('recordAbsences', { n: totals.absences }) : '',
+    ].filter(Boolean).join(' · ') : '';
+    const title = [T.recordHours, T.recordWeek, hm(total), planned].filter(Boolean).join(' · ');
     const hours = shifts.length
-      ? d.recordTable([[T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thStatus]], rows, { title: `${T.recordHours} · ${T.recordWeek} · ${hm(total)}`, count: shifts.length })
-      : d.recordEmpty(T.recordNoShifts, null, '');
+      ? d.recordTable([[T.thDay], [T.thTime], [T.thWorked, 'right'], [T.thStatus]], rows, { title, count: shifts.length })
+      : d.recordEmpty(planned ? `${T.recordNoShifts} · ${planned}` : T.recordNoShifts, null, '');
     const device = info.devices.find(x => x.active);
     const admin = d.isAdmin();
     const detail = device
@@ -971,11 +1118,23 @@
     openTimesForm(null, 'add');
   }
 
+  /** A planned shift, from the bell's `planned:ID`. */
+  function openPlan(id) {
+    scheduleUI()?.openById(id, afterChange);
+  }
+
   function init(deps) {
     d = deps;
+    // What jobs and schedules (time-jobs.js, time-schedule.js) share with this page.
+    const kit = {
+      d, T, tr, known, esc, $, $$, hm, pill, dayText, timeRange, tablePanel, errorText, wireRows, openShift,
+      get team() { return team; },
+    };
+    jobsUI()?.init(kit);
+    scheduleUI()?.init(kit);
   }
 
   window.TimesheetsUI = {
-    init, loadMine, renderMine, loadTeam, renderTeam, openShift, newShift, badge, kpis, loadRecord, recordHtml, wireRecord,
+    init, loadMine, renderMine, loadTeam, renderTeam, openShift, openPlan, newShift, badge, kpis, loadRecord, recordHtml, wireRecord,
   };
 })();

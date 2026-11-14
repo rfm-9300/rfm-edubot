@@ -28,6 +28,7 @@ import com.rfm.edubot.crm.CatalogItemBackfill
 import com.rfm.edubot.crm.EmployeeRepository
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.EmployeeLookup
+import com.rfm.edubot.timesheets.AttendanceWatch
 import com.rfm.edubot.timesheets.TimesheetLocationRetention
 import com.rfm.edubot.events.Actor
 import com.rfm.edubot.events.ActorContext
@@ -237,6 +238,8 @@ private fun Application.bootstrapModule(runtimeConfig: RuntimeConfig, mongoModul
     EmailRetention(EmailMessageRepository(mongoModule), AgentRunRepository(mongoModule), AgentApprovalRepository(mongoModule))
         .job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 2.minutes)
     TimesheetLocationRetention(mongoModule).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 3.minutes)
+    AttendanceWatch(mongoModule, tenantRepository, NotificationRepository(mongoModule)).job(SchedulerLease(mongoModule))
+        .start(pipelineScope, initialDelay = 90.seconds)
     ProjectHealthWatch(mongoModule, tenantRepository).job(SchedulerLease(mongoModule)).start(pipelineScope, initialDelay = 4.minutes)
     if (appConfig.google.inboxEnabled) {
         GmailSyncWorker(google, EmailMessageRepository(mongoModule), DomainEventLog(mongoModule), mongoModule, tenants = { tenantRepository.findById(it) })
