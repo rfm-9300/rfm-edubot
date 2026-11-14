@@ -1059,6 +1059,14 @@ The punch card on an employee's **My hours** ([patterns.md](patterns.md#my-hours
 - `.clock__actions` holds the buttons that fit the state, the main one `.btn--primary`. On phones they share the row.
 - A `.notice` inside the card sits flush (the "use the app" notice when the company requires the phone's biometrics, with the buttons `disabled`).
 - A forgotten clock-out is a `.notice--warn` above the card whose `form.notice__actions.clock__fix` holds a `.lbl`, a 120px time `.inp` and Save; on phones the notice stacks.
+- When the company logs jobs, `.clock__job` (under a hairline, above the buttons) holds the job's fields for the next clock-in (a `.lbl` then a `.form__grid` of `.sel`s and a note `.inp`); while working, a `.clock__meta` says the current job and a ghost **Switch job** leads `.clock__actions`. The planned shift is a `.clock__meta` line; running late for it is `.clock__meta--warn` (`--warn-ink`, semibold).
+- **Splitting a shift between jobs** (a drawer): `.segments` stacks one `section.panel.segment` per part. The first part's head is a `.panel__title` ("From 08:00 (start)"); the others hold `.segment__start` (a `.lbl` and a 120px time `.inp`) and a remove `.iconbtn` in `.panel__tools`; each body is the job's `.form__grid`.
+
+### Week planner
+
+The team's Schedule tab (`app/time-schedule.js`): a `.tbl.tbl--stack.planner` with one row per employee and a `td.planner__cell` per day, each holding the day's planned shifts as `.week-event` buttons (the bookings board's cards, toned by attendance: `--completed` worked, `--pending` late, left early or due, `--no-show` missing or absent, `--confirmed` working now, `--cancelled` excused) and a `.week-board__add` that shows on hover and focus, always under 920px. Above 920px the table is `table-layout: fixed` (first column 150px, last 96px), so a long attendance line ellipsizes (the button's `title` has it whole) instead of widening the week; in the stacked cards the text wraps. Today's heading is `.planner__day.is-today`.
+
+`.form__section` is a heading that opens a group of fields inside a long `.form` (the time clock's Rules: Hours per job, Schedules): 13px semibold `--ink` over a top hairline.
 
 ## Backoffice board
 

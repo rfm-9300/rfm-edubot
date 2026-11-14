@@ -16,25 +16,52 @@ import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
+import io.ktor.server.routing.put
 import io.ktor.server.routing.route
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
+import kotlinx.datetime.TimeZone
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.minus
+import kotlinx.datetime.plus
 import kotlinx.serialization.Serializable
 
 /**
  * An employee's own time clock (`/app/api/portal/time…`): clock in and out, breaks, a forgotten clock-out,
  * their shifts, and the phone that signs their punches. Their company needs `employees` and `timesheets`.
  */
-fun Route.timeClockRoutes(mongo: MongoModule, notifications: NotificationRepository, clock: () -> Instant = SystemClock::now) {
-    val timeClock = TimeClock(mongo, notifications, clock)
+fun Route.timeClockRoutes(
+    mongo: MongoModule,
+    notifications: NotificationRepository,
+    clock: () -> Instant = SystemClock::now,
+    projects: JobProjects = JobProjects.None,
+) {
+    val timeClock = TimeClock(mongo, notifications, clock, projects)
     authenticate("dashboard") {
         route("/app/api/portal/time") {
             get {
                 val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@get
                 call.respond(timeClock.status(session.tenant, session.employee))
+            }
+            get("/jobs") {
+                val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@get
+                call.respond(timeClock.jobOptions(session.tenant))
+            }
+            get("/schedule") {
+                val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@get
+                val today = ShiftMath.localDay(timeClock.now(), session.tenant.zone())
+                val (from, to) = call.dayRange(today, today.plus(TimeClock.UPCOMING_DAYS, DateTimeUnit.DAY)) ?: return@get
+                call.respond(timeClock.schedule(session.tenant, session.employee, from, to))
+            }
+            put("/shifts/{id}/segments") {
+                val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@put
+                val id = call.parameters["id"]?.toObjectIdOrNull() ?: return@put call.respond(HttpStatusCode.NotFound)
+                val request = call.receiveOrNull<SegmentsRequest>() ?: return@put call.respondInvalidBody()
+                when (val outcome = timeClock.editSegments(session.tenant, session.employee, id, request)) {
+                    is Outcome.Refused -> call.respondRefusal(outcome)
+                    is Outcome.Ok -> call.respond(ShiftView(session.tenant.zone(), timeClock.rules(session.tenant), timeClock.now()).dto(outcome.value, detail = true))
+                }
             }
             get("/shifts") {
                 val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@get
@@ -54,7 +81,7 @@ fun Route.timeClockRoutes(mongo: MongoModule, notifications: NotificationReposit
                 val session = call.portalSession(EmployeePortal.MY_HOURS) ?: return@post
                 val request = call.receiveOrNull<PunchRequest>() ?: return@post call.respondInvalidBody()
                 when (val outcome = timeClock.punch(session.tenant, session.employee, request)) {
-                    is Outcome.Refused -> call.respondRefusal(outcome)
+                    is Outcome.Refused -> call.respondRefusal(outcome, session.tenant.zone())
                     is Outcome.Ok -> {
                         val view = ShiftView(session.tenant.zone(), timeClock.rules(session.tenant), timeClock.now())
                         call.respond(HttpStatusCode.Created, PunchResultDto(timeClock.status(session.tenant, session.employee), view.dto(outcome.value, detail = true)))
@@ -114,8 +141,19 @@ internal suspend fun ApplicationCall.respondInvalidBody() = respond(HttpStatusCo
 
 internal suspend fun ApplicationCall.respondError(status: HttpStatusCode, error: String) = respond(status, mapOf("error" to error))
 
-internal suspend fun ApplicationCall.respondRefusal(refused: Outcome.Refused) =
-    respond(HttpStatusCode.fromValue(refused.status), PunchRefusalDto(refused.error, refused.siteName, refused.distanceM))
+/** A refusal in the error contract's shape, with what it knows about where or when; [zone] gives `opensTime`. */
+internal suspend fun ApplicationCall.respondRefusal(refused: Outcome.Refused, zone: TimeZone? = null) =
+    respond(
+        HttpStatusCode.fromValue(refused.status),
+        PunchRefusalDto(
+            error = refused.error,
+            siteName = refused.siteName,
+            distanceM = refused.distanceM,
+            detail = refused.detail,
+            opensAt = refused.opensAt?.toString(),
+            opensTime = refused.opensAt?.let { at -> zone?.let { ShiftMath.localTime(at, it) } },
+        ),
+    )
 
 /**
  * `from` and `to` (`yyyy-MM-dd`, both included) from the query, or the defaults; null after answering 400 for

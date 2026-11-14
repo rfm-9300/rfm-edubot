@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-13
 ---
 
 # Building: projects and their progress
@@ -208,6 +208,12 @@ handover, an extra still to sign.
   the current contract less the budget, or less the costs once they pass it; without a budget, less the
   costs so far. **To date** is what was measured less the costs.
 - An employee's pay linked to the project and their clocked hours would count twice; the tab says so.
+- **Time tagged with the project counts in its parts (2026-11-13).** Since the time clock logs jobs
+  ([employee-portal-and-time-clock.md](employee-portal-and-time-clock.md#hours-per-job-and-schedules-phase-2-built-2026-11-13)),
+  a shift that names any project in its work log counts only its parts on this project, wherever it was
+  clocked; a shift that names none still counts whole when clocked at one of the project's sites.
+  So a day split between two jobs counts once, and a project without sites gets its tagged hours.
+  `ShiftRepository.forProject` reads both kinds in one query.
 
 ## Client updates
 

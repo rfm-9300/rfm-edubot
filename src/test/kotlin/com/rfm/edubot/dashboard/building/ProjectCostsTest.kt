@@ -7,7 +7,9 @@ import com.rfm.edubot.testing.TestCompany
 import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
 import com.rfm.edubot.timesheets.ShiftRepository
+import com.rfm.edubot.timesheets.model.Job
 import com.rfm.edubot.timesheets.model.Shift
+import com.rfm.edubot.timesheets.model.ShiftSegment
 import com.rfm.edubot.timesheets.model.ShiftStatus
 import io.ktor.http.HttpStatusCode
 import kotlinx.datetime.Clock
@@ -77,7 +79,40 @@ class ProjectCostsTest {
         )
     }
 
+    /** A finished shift on [day], clocked at [siteId] (or nowhere), split into [parts]: each a project (or none) and its minutes. */
+    private suspend fun splitShift(company: TestCompany, employeeId: String, siteId: String?, day: LocalDate, parts: List<Pair<String?, Int>>) {
+        val total = parts.sumOf { it.second }
+        val start = Clock.System.now() - (total + 60).minutes
+        val starts = parts.runningFold(0) { at, part -> at + part.second }.dropLast(1)
+        ShiftRepository(mongo, company.tenant.id).insert(
+            Shift(
+                tenantId = company.tenant.id, employeeId = ObjectId(employeeId), status = ShiftStatus.CLOSED, startAt = start,
+                endAt = start + total.minutes, day = day, siteId = siteId?.let(::ObjectId), workedMinutes = total, createdAt = start, updatedAt = start,
+                segments = parts.zip(starts).map { (part, offset) -> ShiftSegment(start + offset.minutes, part.first?.let { Job(projectId = ObjectId(it), projectName = "P") }) },
+            ),
+        )
+    }
+
     private fun JsonObject.eurOrNull(name: String): Double? = (this[name] as? JsonPrimitive)?.content?.toDoubleOrNull()
+
+    @Test
+    fun `time tagged with a project counts once, in its parts, and a site's untagged shifts count whole`() = dashboardApiTest(mongo) {
+        val a = company()
+        val id = project(a) { put("status", "ACTIVE"); put("laborRateEur", 20.0) }.text("id")!!
+        val warehouse = project(a) { put("name", "Armazém") }.text("id")!!
+        val site = site(a, "Obra da Moradia")
+        a.patch("$api/projects/$id") { putJsonArray("siteIds") { add(JsonPrimitive(site)) } }
+        val joao = employee(a, "João Pedreiro")
+        val yesterday = LocalDate.parse(a.day(-1))
+        splitShift(a, joao, site, yesterday, listOf(null to 120))
+        splitShift(a, joao, site, yesterday, listOf(id to 60, warehouse to 180))
+        splitShift(a, joao, siteId = null, yesterday, listOf(id to 90, null to 30))
+
+        val labour = a.get("$api/projects/$id/costs").obj["labour"]!!.jsonObject
+        assertEquals(listOf(4.5, 90.0), listOf("hours", "costEur").map { labour.eur(it) }, "120 untagged at the site, 60 of the split one, 90 tagged elsewhere")
+        val other = a.get("$api/projects/$warehouse/costs").obj["labour"]!!.jsonObject
+        assertEquals(3.0, other.eur("hours"), "the warehouse gets its own part, with no site of its own")
+    }
 
     @Test
     fun `a project's costs are its bills and its hours, against its budget and its contract`() = dashboardApiTest(mongo) {

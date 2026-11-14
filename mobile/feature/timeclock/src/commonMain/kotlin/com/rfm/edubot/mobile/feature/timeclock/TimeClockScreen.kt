@@ -20,6 +20,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -37,7 +38,11 @@ import com.rfm.edubot.mobile.core.data.TimeClockRepository
 import com.rfm.edubot.mobile.core.localization.AppLocale
 import com.rfm.edubot.mobile.core.localization.Strings
 import com.rfm.edubot.mobile.core.localization.Txt
+import com.rfm.edubot.mobile.core.model.Attendance
+import com.rfm.edubot.mobile.core.model.ClockIn
 import com.rfm.edubot.mobile.core.model.DashboardModules
+import com.rfm.edubot.mobile.core.model.JobRules
+import com.rfm.edubot.mobile.core.model.PlannedShift
 import com.rfm.edubot.mobile.core.model.Punch
 import com.rfm.edubot.mobile.core.model.PunchRequest
 import com.rfm.edubot.mobile.core.model.Shift
@@ -67,8 +72,20 @@ import kotlinx.datetime.isoDayNumber
 import kotlin.math.roundToInt
 
 /**
- * An employee's time clock: the state and running time, the buttons that make sense now, the phone's
- * fingerprint or face check, a forgotten clock-out, and their shifts. The team's side stays on the web.
+ * The time clock's view model, shared by My hours and the screens it opens (the job picker, a shift, its split),
+ * which all live in the signed-in session's store: one per employee.
+ */
+@Composable
+internal fun timeClockViewModel(repository: TimeClockRepository, location: LocationProvider, signer: DeviceSigner): TimeClockViewModel =
+    viewModel(
+        key = "timeclock:${repository.employeeId}",
+        factory = viewModelFactory { initializer { TimeClockViewModel(repository, location, signer) } },
+    )
+
+/**
+ * An employee's time clock: the state and running time, the job they're on, the buttons that make sense now,
+ * the phone's fingerprint or face check, a forgotten clock-out, their planned shifts and their shifts. The
+ * team's side stays on the web. [onPickJob] opens the job picker, [onOpenShift] a shift's detail.
  */
 @Composable
 fun TimeClockScreen(
@@ -78,22 +95,16 @@ fun TimeClockScreen(
     strings: Strings,
     clock: TenantClock,
     padding: PaddingValues,
+    onPickJob: (JobTarget) -> Unit = {},
+    onOpenShift: (String) -> Unit = {},
 ) {
-    val vm = viewModel<TimeClockViewModel>(
-        key = "timeclock:${repository.employeeId}",
-        factory = viewModelFactory { initializer { TimeClockViewModel(repository, location, signer) } },
-    )
+    val vm = timeClockViewModel(repository, location, signer)
     val statusState by repository.status.state.collectAsState()
     val shiftsState by repository.shifts.state.collectAsState()
+    val jobsState by repository.jobs.state.collectAsState()
     val ui by vm.state.collectAsState()
     LaunchedEffect(vm) { vm.load() }
-    var now by remember { mutableStateOf(clock.instant().toEpochMilliseconds()) }
-    LaunchedEffect(Unit) {
-        while (true) {
-            delay(TICK_MILLIS)
-            now = clock.instant().toEpochMilliseconds()
-        }
-    }
+    val now = rememberNow(clock)
 
     val status = statusState.value
     val prompt = { action: String -> BiometricPromptText(strings[Txt.TIME_PROMPT_TITLE], action, strings[Txt.TIME_PROMPT_CANCEL]) }
@@ -116,7 +127,18 @@ fun TimeClockScreen(
         status.open?.takeIf { status.overdue }?.let { open ->
             item { OverduePanel(open, status, strings, clock, busy = ui.busy, onClose = { end -> vm.closeForgotten(open.id, end) }) }
         }
-        item { ClockPanel(status, now, clock, strings, busy = ui.busy, onPunch = { type, label -> vm.punch(type, prompt(label)) }) }
+        item {
+            ClockPanel(
+                status = status,
+                now = now,
+                clock = clock,
+                strings = strings,
+                busy = ui.busy,
+                jobLabel = jobsState.value?.label(ui.job),
+                onPunch = { type, label -> vm.punch(type, prompt(label)) },
+                onPickJob = onPickJob,
+            )
+        }
         item { Feedback(ui, strings) }
         if (status.policy.biometric != TimesheetPolicy.POLICY_OFF) {
             item {
@@ -142,19 +164,75 @@ fun TimeClockScreen(
                 rightValue = strings.format(Txt.TIME_WEEK_OF_LIMIT, "worked" to hours(status.weekMinutes + running, strings.locale), "limit" to status.policy.weeklyHours),
             )
         }
+        val plans = listOfNotNull(status.planned).plus(status.upcoming)
+            .distinctBy { it.id }
+            .filter { it.attendance.state != Attendance.STATE_ATTENDED }
+        if (plans.isNotEmpty()) {
+            item { SectionLabel(strings[Txt.TIME_MY_SCHEDULE]) }
+            items(plans, key = { "plan:${it.id}" }) { plan -> PlanRow(plan, strings) }
+        }
         item { SectionLabel(strings[Txt.TIME_HISTORY]) }
         val shifts = shiftsState.value.orEmpty()
         if (shifts.isEmpty()) {
             item { EmptyState(strings[Txt.EMPTY_TITLE], strings[Txt.TIME_HISTORY_EMPTY]) }
         } else {
-            items(shifts, key = { it.id }) { shift -> ShiftRow(shift, now, strings) }
+            // A shift opens without the line about the last punch, which isn't about that shift.
+            items(shifts, key = { it.id }) { shift ->
+                ShiftRow(shift, now, strings, onClick = {
+                    vm.dismiss()
+                    onOpenShift(shift.id)
+                })
+            }
         }
     }
 }
 
+/**
+ * A planned shift in My schedule: the day, its hours on the right over how it is going, and below, any lateness and
+ * where and for what. The hours sit apart from the day so a narrow phone never cuts them off.
+ */
 @Composable
-private fun ClockPanel(status: TimeClockStatus, now: Long, clock: TenantClock, strings: Strings, busy: Boolean, onPunch: (String, String) -> Unit) {
+private fun PlanRow(plan: PlannedShift, strings: Strings) {
+    val day = runCatching { LocalDate.parse(plan.day) }.getOrNull()
+    ListRow(
+        title = dayLabel(plan.day, strings),
+        detail = (lateness(plan.attendance, strings) + listOfNotNull(plan.siteName, plan.job?.label, plan.note)).joinToString(" · "),
+        leading = day?.let { strings.weekday(it.dayOfWeek.isoDayNumber) } ?: plan.day,
+        trailingLabel = "${plan.startTime}–${plan.endTime}",
+        status = attendanceStatus(plan.attendance),
+        statusLabel = strings["time.attendance.${plan.attendance.state}"],
+    )
+}
+
+/** How late a planned shift began and how early it ended: "12 min late". The badge says how it went. */
+private fun lateness(attendance: Attendance, strings: Strings): List<String> = buildList {
+    if (attendance.late) add(strings.format(Txt.TIME_LATE_BY, "time" to hm(strings, attendance.lateMinutes)))
+    if (attendance.leftEarly) add(strings.format(Txt.TIME_LEFT_EARLY_BY, "time" to hm(strings, attendance.earlyLeaveMinutes)))
+}
+
+/** A status name the badges know, so a planned shift's tone matches the web's. */
+private fun attendanceStatus(attendance: Attendance): String = when {
+    attendance.state == Attendance.STATE_ABSENT || attendance.state == Attendance.STATE_MISSING -> "FAILED"
+    attendance.late || attendance.leftEarly || attendance.state == Attendance.STATE_DUE -> "PENDING"
+    attendance.state == Attendance.STATE_ATTENDED || attendance.state == Attendance.STATE_WORKING -> "COMPLETED"
+    else -> "OPEN"
+}
+
+@Composable
+private fun ClockPanel(
+    status: TimeClockStatus,
+    now: Long,
+    clock: TenantClock,
+    strings: Strings,
+    busy: Boolean,
+    jobLabel: String?,
+    onPunch: (String, String) -> Unit,
+    onPickJob: (JobTarget) -> Unit,
+) {
     val open = status.open
+    val policy = status.policy
+    // The strict schedule keeps clock-in closed until shortly before a planned shift, and for none planned.
+    val closed = open == null && !status.clockIn.allowed
     val (label, tone) = when (status.state) {
         TimeClockStatus.STATE_WORKING -> strings[Txt.TIME_STATE_WORKING] to Tone.Ok
         TimeClockStatus.STATE_ON_BREAK -> strings[Txt.TIME_STATE_ON_BREAK] to Tone.Warn
@@ -182,6 +260,14 @@ private fun ClockPanel(status: TimeClockStatus, now: Long, clock: TenantClock, s
             color = if (open?.onBreak == true) BotColors.warnInk else BotColors.ink,
         )
         Text(line, style = MaterialTheme.typography.bodyMedium, color = BotColors.inkSecondary)
+        if (open != null && policy.logsJobs) {
+            Text(
+                strings.format(Txt.TIME_WORKING_ON, "job" to (open.currentJob?.label ?: strings[Txt.TIME_JOB_NONE])),
+                style = MaterialTheme.typography.bodySmall,
+                color = BotColors.inkSecondary,
+            )
+        }
+        PlannedLines(status, now, clock, strings)
         open?.punches?.lastOrNull()?.let { last ->
             Spacer(Modifier.height(BotSpace.xs))
             Text(
@@ -190,12 +276,35 @@ private fun ClockPanel(status: TimeClockStatus, now: Long, clock: TenantClock, s
                 color = BotColors.inkMuted,
             )
         }
+        if (open == null && policy.logsJobs) {
+            Spacer(Modifier.height(BotSpace.md))
+            Text(strings[Txt.TIME_JOB_TITLE], style = MaterialTheme.typography.titleSmall, color = BotColors.ink)
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    jobLabel ?: strings[Txt.TIME_JOB_CHOOSE],
+                    Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (jobLabel == null) BotColors.inkMuted else BotColors.ink,
+                )
+                TextButton(onClick = { onPickJob(JobTarget.ClockIn) }, enabled = !busy) {
+                    Text(strings[Txt.TIME_JOB_CHANGE], color = BotColors.accentDeep)
+                }
+            }
+        }
+        if (closed && status.clockIn.state == ClockIn.NOT_SCHEDULED) {
+            Spacer(Modifier.height(BotSpace.sm))
+            Text(strings[Txt.TIME_NOT_SCHEDULED], style = MaterialTheme.typography.bodySmall, color = BotColors.warnInk)
+        }
         Spacer(Modifier.height(BotSpace.md))
+        if (status.state == TimeClockStatus.STATE_WORKING && policy.logsJobs) {
+            SecondaryButton(strings[Txt.TIME_SWITCH], onClick = { onPickJob(JobTarget.Switch) }, Modifier.fillMaxWidth(), enabled = !busy)
+            Spacer(Modifier.height(BotSpace.sm))
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(BotSpace.sm)) {
             buttons.forEachIndexed { index, (type, key) ->
                 val text = strings[key]
                 if (index == buttons.lastIndex) {
-                    PrimaryButton(text, onClick = { onPunch(type, text) }, Modifier.weight(1f), busy = busy)
+                    PrimaryButton(text, onClick = { onPunch(type, text) }, Modifier.weight(1f), enabled = !closed, busy = busy)
                 } else {
                     SecondaryButton(text, onClick = { onPunch(type, text) }, Modifier.weight(1f), enabled = !busy)
                 }
@@ -204,13 +313,47 @@ private fun ClockPanel(status: TimeClockStatus, now: Long, clock: TenantClock, s
     }
 }
 
+/**
+ * The planned shift that matters now, how late the employee is for it, and when clocking in opens. The backend
+ * sends the open shift's plan, one running now or one later today, so a plan on another day began on an earlier
+ * one (a night shift, or a clock-out forgotten overnight): it is named by its day, never as the next one.
+ */
+@Composable
+private fun PlannedLines(status: TimeClockStatus, now: Long, clock: TenantClock, strings: Strings) {
+    val plan = status.planned
+    val small = MaterialTheme.typography.bodySmall
+    if (plan != null) {
+        val time = "${plan.startTime}–${plan.endTime}"
+        val day = runCatching { LocalDate.parse(plan.day) }.getOrNull()
+        val whenText = if (day == clock.today() || day == null) {
+            strings.format(Txt.TIME_PLANNED_TODAY, "time" to time)
+        } else {
+            strings.format(Txt.TIME_PLANNED_ON, "day" to dayLabel(plan.day, strings), "time" to time)
+        }
+        Text(listOfNotNull(whenText, plan.siteName, plan.job?.label).joinToString(" · "), style = small, color = BotColors.inkMuted)
+        val start = parseMillis(plan.startAt)
+        if (status.open == null && start != null && now > start && plan.attendance.shiftIds.isEmpty()) {
+            Text(
+                strings.format(Txt.TIME_YOU_ARE_LATE, "time" to hm(strings, ((now - start) / 60_000).toInt())),
+                style = small,
+                color = BotColors.warnInk,
+            )
+        }
+        plan.note?.let { Text(it, style = small, color = BotColors.inkMuted) }
+    }
+    if (status.open == null && status.clockIn.state == ClockIn.TOO_EARLY) {
+        Text(strings.format(Txt.TIME_OPENS_AT, "time" to status.clockIn.opensTime.orEmpty()), style = small, color = BotColors.inkSecondary)
+    }
+}
+
 /** What is happening now, or what went through or wrong, read out by screen readers as it changes. */
 @Composable
-private fun Feedback(ui: TimeClockUiState, strings: Strings) {
+internal fun Feedback(ui: TimeClockUiState, strings: Strings) {
     val text = when {
         ui.step == TimeClockStep.LOCATING -> strings[Txt.TIME_LOCATING] to Tone.Info
         ui.step == TimeClockStep.CONFIRMING -> strings[Txt.TIME_CONFIRMING] to Tone.Info
         ui.problem != null -> strings[ui.problem.key()] to Tone.Warn
+        ui.missing != null -> missingText(ui.missing, strings) to Tone.Warn
         ui.error != null -> errorText(ui.error, strings) to Tone.Bad
         ui.done != null -> strings[ui.done.key()] to Tone.Ok
         else -> null
@@ -255,20 +398,16 @@ private fun OverduePanel(open: Shift, status: TimeClockStatus, strings: Strings,
 }
 
 @Composable
-private fun ShiftRow(shift: Shift, now: Long, strings: Strings) {
+private fun ShiftRow(shift: Shift, now: Long, strings: Strings, onClick: () -> Unit) {
+    val (status, label) = reviewStatus(shift, strings)
     val day = runCatching { LocalDate.parse(shift.day) }.getOrNull()
-    val dayLabel = day?.let { "${strings.weekday(it.dayOfWeek.isoDayNumber)} ${it.dayOfMonth.pad()}/${it.monthNumber.pad()}" } ?: shift.day
-    val range = if (shift.endTime == null) "${shift.startTime}–…" else "${shift.startTime}–${shift.endTime}"
-    val (status, label) = when {
-        shift.isOpen -> "OPEN" to strings[Txt.TIME_REVIEW_OPEN]
-        shift.review == "APPROVED" -> "APPROVED" to strings[Txt.TIME_REVIEW_APPROVED]
-        else -> "PENDING" to strings[Txt.TIME_REVIEW_PENDING]
-    }
     ListRow(
-        title = "$dayLabel · $range",
+        title = dayLabel(shift.day, strings),
+        trailingLabel = range(shift),
         detail = listOfNotNull(
             hm(strings, workedNow(shift, now)),
             shift.breakMinutes.takeIf { it > 0 }?.let { strings.format(Txt.TIME_BREAKS, "time" to hm(strings, it)) },
+            jobsSummary(shift),
             shift.siteName,
             shift.flags.takeIf { it.isNotEmpty() }?.joinToString(", ") { strings.timeFlag(it) },
         ).joinToString(" · "),
@@ -276,6 +415,44 @@ private fun ShiftRow(shift: Shift, now: Long, strings: Strings) {
         status = status,
         statusLabel = label,
         emphasised = shift.isOpen,
+        onClick = onClick,
+    )
+}
+
+/** "Seg 09/11", from a `yyyy-MM-dd` day. */
+internal fun dayLabel(day: String, strings: Strings): String =
+    runCatching { LocalDate.parse(day) }.getOrNull()?.let { "${strings.weekday(it.dayOfWeek.isoDayNumber)} ${it.dayOfMonth.pad()}/${it.monthNumber.pad()}" } ?: day
+
+internal fun range(shift: Shift): String = if (shift.endTime == null) "${shift.startTime}–…" else "${shift.startTime}–${shift.endTime}"
+
+/** The status badge of a shift: running, waiting for the team, or approved. */
+internal fun reviewStatus(shift: Shift, strings: Strings): Pair<String, String> = when {
+    shift.isOpen -> "OPEN" to strings[Txt.TIME_REVIEW_OPEN]
+    shift.approved -> "COMPLETED" to strings[Txt.TIME_REVIEW_APPROVED]
+    else -> "PENDING" to strings[Txt.TIME_REVIEW_PENDING]
+}
+
+/** A shift's jobs in a few words: the longest one, and how many others. */
+private fun jobsSummary(shift: Shift): String? {
+    if (shift.segments.isEmpty()) return null
+    val main = shift.segments.maxBy { it.minutes }.job?.label ?: return null
+    val others = shift.segments.mapNotNull { it.job?.label }.toSet().size - 1
+    return if (others > 0) "$main +$others" else main
+}
+
+/** What a missing part of a job means to a person. */
+internal fun missingText(part: String, strings: Strings): String = when (part) {
+    JobRules.PART_JOB -> strings[Txt.TIME_JOB_FIRST]
+    else -> strings.format(
+        Txt.TIME_JOB_MISSING,
+        "part" to strings[
+            when (part) {
+                JobRules.PART_CLIENT -> Txt.TIME_PART_CLIENT
+                JobRules.PART_PROJECT -> Txt.TIME_PART_PROJECT
+                JobRules.PART_ACTIVITY -> Txt.TIME_PART_ACTIVITY
+                else -> Txt.TIME_PART_NOTE
+            },
+        ],
     )
 }
 
@@ -300,6 +477,19 @@ private fun errorText(error: AppError, strings: Strings): String {
         return strings.format(Txt.TIME_OUTSIDE_SITES, "distance" to distance(meters, strings.locale), "site" to site)
     }
     return strings.error(error)
+}
+
+/** The time now, moving on every [TICK_MILLIS] while the screen shows, so running totals keep up. */
+@Composable
+internal fun rememberNow(clock: TenantClock): Long {
+    var now by remember { mutableStateOf(clock.instant().toEpochMilliseconds()) }
+    LaunchedEffect(clock) {
+        while (true) {
+            delay(TICK_MILLIS)
+            now = clock.instant().toEpochMilliseconds()
+        }
+    }
+    return now
 }
 
 /** Minutes worked so far: an open shift runs until [now], less its breaks. */
@@ -360,6 +550,7 @@ private fun String.punchedKey(): String = when (this) {
     PunchRequest.IN -> Txt.TIME_PUNCHED_IN
     PunchRequest.BREAK_START -> Txt.TIME_PUNCHED_BREAK_START
     PunchRequest.BREAK_END -> Txt.TIME_PUNCHED_BREAK_END
+    PunchRequest.SWITCH -> Txt.TIME_PUNCHED_SWITCH
     else -> Txt.TIME_PUNCHED_OUT
 }
 
@@ -368,8 +559,10 @@ private fun TimeClockDone.key(): String = when (this) {
     TimeClockDone.OUT -> Txt.TIME_PUNCHED_OUT
     TimeClockDone.BREAK_START -> Txt.TIME_PUNCHED_BREAK_START
     TimeClockDone.BREAK_END -> Txt.TIME_PUNCHED_BREAK_END
+    TimeClockDone.SWITCH -> Txt.TIME_PUNCHED_SWITCH
     TimeClockDone.PHONE_READY -> Txt.TIME_SETUP_DONE
     TimeClockDone.SHIFT_CLOSED -> Txt.TIME_OVERDUE_SAVED
+    TimeClockDone.SPLIT_SAVED -> Txt.TIME_SPLIT_SAVED
 }
 
 private const val TICK_MILLIS = 15_000L

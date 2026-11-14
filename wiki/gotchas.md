@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-04
+updated: 2026-11-13
 ---
 
 # Cross-cutting gotchas
@@ -46,6 +46,12 @@ If that is not `Unit` (for example `assertFailsWith<E> { ... }`, which returns t
 failure, no skip, it just does not run. Two `InstagramClientTest` cases had never run for this reason
 (found 2026-09-28; they pass once fixed). Use `runBlocking<Unit> { ... }` or end on an assertion, and
 check by comparing `@Test` counts with the `tests=` counts in `build/test-results/test/*.xml`.
+
+## Test gotcha: characters a backticked test name can't hold
+
+A Kotlin test name in backticks can't contain `:` on the JVM (`Name contains illegal characters: :`), and
+Kotlin/Native also refuses `,`, so a mobile test that compiles for Android fails `iosSimulatorArm64Test`
+(found 2026-11-13). Write "and" or "then" instead.
 
 ## Test gotcha: a backoffice token's email must be on the allowlist
 
@@ -115,7 +121,14 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   `.env` database. To run a second, isolated instance (its own port and Mongo, say beside a dev app
   already on 8080), build `./gradlew buildFatJar` and start `java -jar build/libs/app.jar` with the
   `.env` values read literally plus the overrides (sourcing `.env` in a shell mangles the `$` of
-  bcrypt hashes). Variables `.env` doesn't set do pass through `./gradlew run`.
+  bcrypt hashes). Variables `.env` doesn't set do pass through `./gradlew run`. Without `.env`, the jar
+  still needs `WA_VERIFY_TOKEN`, `WA_APP_SECRET`, `WA_PHONE_NUMBER_ID`, `WA_ACCESS_TOKEN`,
+  `OPENROUTER_API_KEY`, `MONGO_URI` and `ADMIN_JWT_SECRET` (`AppConfig.load` refuses to start otherwise);
+  placeholders do for a check that never calls Meta or the model, and an `ADMIN_PASSWORD_HASH` (single-quoted
+  in an env file) lets a script create a company and its users through the backoffice API.
+- **A phone-width check in the Chrome extension:** the window may not shrink below a desktop width, but a
+  same-origin `<iframe>` 390 px wide loads the dashboard with the phone's media queries (it shares the
+  page's `localStorage`, so the session too).
 - **Local UI check without a login:** sign an `operator-imp` JWT (`sub: operator`, `tenantId`,
   `typ: operator-imp`, issuer `wabot-platform`) with the local `ADMIN_JWT_SECRET`, then drive headless
   Chrome over CDP (Node 22+ has `WebSocket`) for screenshots. Seed docs with `costUsd: null`: mongosh

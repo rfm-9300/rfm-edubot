@@ -4,9 +4,15 @@ import com.rfm.edubot.mobile.core.common.InMemorySnapshotStore
 import com.rfm.edubot.mobile.core.common.Outcome
 import com.rfm.edubot.mobile.core.model.CloseShift
 import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.JobActivity
+import com.rfm.edubot.mobile.core.model.JobOptions
+import com.rfm.edubot.mobile.core.model.JobRequest
 import com.rfm.edubot.mobile.core.model.PunchRequest
 import com.rfm.edubot.mobile.core.model.PunchResult
+import com.rfm.edubot.mobile.core.model.SegmentRequest
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
 import com.rfm.edubot.mobile.core.model.Shift
+import com.rfm.edubot.mobile.core.model.ShiftSegment
 import com.rfm.edubot.mobile.core.model.TimeChallenge
 import com.rfm.edubot.mobile.core.model.TimeClockStatus
 import com.rfm.edubot.mobile.core.model.TimeDevice
@@ -56,6 +62,18 @@ class TimeClockRepositoryTest {
         }
 
         override suspend fun removeDevice(keyId: String) = Unit
+
+        val splits = mutableListOf<Pair<String, SegmentsRequest>>()
+
+        override suspend fun jobs() = JobOptions(activities = listOf(JobActivity("a1", "Limpeza")))
+
+        override suspend fun editSegments(shiftId: String, request: SegmentsRequest): Shift {
+            splits += shiftId to request
+            return Shift(
+                id = shiftId, employeeId = "e1", status = "CLOSED", day = "2026-10-06", startAt = "2026-10-06T07:00:00Z", startTime = "08:00",
+                segments = request.segments.map { ShiftSegment(startAt = "2026-10-06T07:00:00Z", startTime = it.start) },
+            )
+        }
     }
 
     @Test
@@ -71,6 +89,20 @@ class TimeClockRepositoryTest {
         assertEquals(1, api.statusCalls)
         assertEquals(1, api.shiftCalls)
         assertEquals("APP", api.punches.single().channel)
+    }
+
+    @Test
+    fun `a saved split replaces its shift row and the job options load once`() = runTest {
+        val api = FakeApi()
+        val repository = TimeClockRepository(api, SnapshotCache(InMemorySnapshotStore()), "e1")
+        repository.shifts.load()
+        val request = SegmentsRequest(listOf(SegmentRequest("08:00", JobRequest(activityId = "a1")), SegmentRequest("10:00")))
+        val saved = repository.editSegments("old", request)
+        assertEquals(listOf("08:00", "10:00"), (saved as Outcome.Success).value.segments.map { it.startTime })
+        assertEquals(listOf("08:00", "10:00"), repository.shifts.state.value.value?.single()?.segments?.map { it.startTime })
+        assertEquals("old" to request, api.splits.single())
+        assertEquals(0, api.statusCalls, "a closed shift's split doesn't fetch the status again")
+        assertEquals(listOf("Limpeza"), (repository.jobs.load() as Outcome.Success).value.activities.map { it.name })
     }
 
     @Test

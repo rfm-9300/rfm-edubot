@@ -7,6 +7,8 @@ import com.rfm.edubot.crm.model.Payment
 import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.timesheets.Timesheets
+import com.rfm.edubot.timesheets.WorkLog
+import com.rfm.edubot.timesheets.model.Shift
 import com.rfm.edubot.timesheets.model.WorkSite
 import kotlinx.datetime.Instant
 import org.bson.types.ObjectId
@@ -78,11 +80,24 @@ class ProjectCostsService(private val records: BuildingRecords, private val cloc
 
     private suspend fun labour(project: Project): ProjectCosts.Labour {
         val now = clock()
-        val minutes = with(Timesheets) { records.shifts.atSites(project.siteIds).groupBy { it.employeeId }.mapValues { (_, own) -> own.sumOf { it.workedUntil(now) } } }
+        val minutes = records.shifts.forProject(project.siteIds, project.id).groupBy { it.employeeId }
+            .mapValues { (_, own) -> own.sumOf { projectMinutes(it, project, now) } }
+            .filterValues { it > 0 }
         val rate = project.laborRateCents
         val byEmployee = minutes.map { (employeeId, worked) -> ProjectCosts.EmployeeHours(employeeId, worked, rate?.let { (worked * it / 60.0).roundToLong() }) }
             .sortedByDescending { it.minutes }
         val sites = records.sites.list().filter { it.id in project.siteIds }
         return ProjectCosts.Labour(byEmployee.sumOf { it.minutes }, rate, byEmployee, sites)
+    }
+
+    /**
+     * The minutes of [shift] that were the project's: the time tagged with the project, when anything on the shift
+     * names a project; otherwise all of it, when it was clocked at one of the project's sites. So a shift split
+     * between two jobs counts once, in its parts.
+     */
+    private fun projectMinutes(shift: Shift, project: Project, now: Instant): Int {
+        val spans = WorkLog.spans(shift, now)
+        if (spans.any { it.segment.job?.projectId != null }) return spans.filter { it.segment.job?.projectId == project.id }.sumOf { it.minutes }
+        return if (shift.siteId in project.siteIds) with(Timesheets) { shift.workedUntil(now) } else 0
     }
 }

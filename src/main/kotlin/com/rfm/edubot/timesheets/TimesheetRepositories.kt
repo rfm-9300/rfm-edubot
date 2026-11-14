@@ -14,23 +14,31 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.timesheets.model.BiometricPolicy
 import com.rfm.edubot.timesheets.model.DevicePlatform
 import com.rfm.edubot.timesheets.model.GeofencePolicy
+import com.rfm.edubot.timesheets.model.Job
+import com.rfm.edubot.timesheets.model.JobNeeds
+import com.rfm.edubot.timesheets.model.JobsChange
 import com.rfm.edubot.timesheets.model.LocationPolicy
+import com.rfm.edubot.timesheets.model.PlanLink
 import com.rfm.edubot.timesheets.model.Punch
 import com.rfm.edubot.timesheets.model.PunchChannel
 import com.rfm.edubot.timesheets.model.PunchLocation
 import com.rfm.edubot.timesheets.model.PunchType
 import com.rfm.edubot.timesheets.model.PunchVerification
 import com.rfm.edubot.timesheets.model.ReviewStatus
+import com.rfm.edubot.timesheets.model.SchedulePolicy
+import com.rfm.edubot.timesheets.model.SegmentSource
 import com.rfm.edubot.timesheets.model.Shift
 import com.rfm.edubot.timesheets.model.ShiftBreak
 import com.rfm.edubot.timesheets.model.ShiftEdit
 import com.rfm.edubot.timesheets.model.ShiftReview
+import com.rfm.edubot.timesheets.model.ShiftSegment
 import com.rfm.edubot.timesheets.model.ShiftStatus
 import com.rfm.edubot.timesheets.model.ShiftTimes
 import com.rfm.edubot.timesheets.model.SiteVerdict
 import com.rfm.edubot.timesheets.model.TimeDevice
 import com.rfm.edubot.timesheets.model.TimesheetSettings
 import com.rfm.edubot.timesheets.model.VerificationMethod
+import com.rfm.edubot.timesheets.model.WorkLogPolicy
 import com.rfm.edubot.timesheets.model.WorkSite
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
@@ -71,6 +79,24 @@ class ShiftRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     suspend fun atSites(siteIds: Collection<ObjectId>): List<Shift> =
         if (siteIds.isEmpty()) emptyList()
         else collection.find(scoped(Filters.`in`("siteId", siteIds.distinct()))).sort(Document("startAt", 1)).limit(MAX_LIST).toList().map { it.toShift() }
+
+    /** A Building project's shifts, however long ago: clocked at one of its [siteIds], or with time on [projectId]. */
+    suspend fun forProject(siteIds: Collection<ObjectId>, projectId: ObjectId): List<Shift> {
+        val either = listOfNotNull(
+            Filters.`in`("siteId", siteIds.distinct()).takeIf { siteIds.isNotEmpty() },
+            Filters.eq("segments.job.projectId", projectId),
+        )
+        return collection.find(scoped(Filters.or(either))).sort(Document("startAt", 1)).limit(MAX_LIST).toList().map { it.toShift() }
+    }
+
+    /** Shifts linked to any of the planned shifts [planIds], in start order. */
+    suspend fun linkedTo(planIds: Collection<ObjectId>): List<Shift> =
+        if (planIds.isEmpty()) emptyList()
+        else collection.find(scoped(Filters.`in`("planned.id", planIds.distinct()))).sort(Document("startAt", 1)).limit(MAX_LIST).toList().map { it.toShift() }
+
+    /** Whether any shift has time on [activityId]: such an activity is kept, only taken out of use. */
+    suspend fun usesActivity(activityId: ObjectId): Boolean =
+        collection.find(scoped(Filters.eq("segments.job.activityId", activityId))).limit(1).firstOrNull() != null
 
     suspend fun pendingCount(): Long =
         collection.countDocuments(scoped(Filters.and(Filters.eq("status", ShiftStatus.CLOSED.name), Filters.eq("review.status", ReviewStatus.PENDING.name))))
@@ -305,6 +331,19 @@ class TimesheetSettingsRepository(mongo: MongoModule) {
                 .append("maxShiftHours", settings.maxShiftHours)
                 .append("dailyHours", settings.dailyHours)
                 .append("weeklyHours", settings.weeklyHours)
+                .append("workLog", settings.workLog.name)
+                .append(
+                    "jobNeeds",
+                    Document("client", settings.jobNeeds.client)
+                        .append("project", settings.jobNeeds.project)
+                        .append("activity", settings.jobNeeds.activity)
+                        .append("note", settings.jobNeeds.note),
+                )
+                .append("schedule", settings.schedule.name)
+                .append("lateGraceMinutes", settings.lateGraceMinutes)
+                .append("earlyLeaveGraceMinutes", settings.earlyLeaveGraceMinutes)
+                .append("earlyClockInMinutes", settings.earlyClockInMinutes)
+                .append("noShowMinutes", settings.noShowMinutes)
                 .append("updatedAt", settings.updatedAt?.toDate())
                 .append("updatedBy", settings.updatedBy),
             ReplaceOptions().upsert(true),
@@ -321,6 +360,20 @@ class TimesheetSettingsRepository(mongo: MongoModule) {
             maxShiftHours = (get("maxShiftHours") as? Number)?.toInt() ?: default.maxShiftHours,
             dailyHours = (get("dailyHours") as? Number)?.toInt() ?: default.dailyHours,
             weeklyHours = (get("weeklyHours") as? Number)?.toInt() ?: default.weeklyHours,
+            workLog = enumOr(getString("workLog"), default.workLog),
+            jobNeeds = get("jobNeeds", Document::class.java)?.let {
+                JobNeeds(
+                    client = it.getBoolean("client") ?: false,
+                    project = it.getBoolean("project") ?: false,
+                    activity = it.getBoolean("activity") ?: false,
+                    note = it.getBoolean("note") ?: false,
+                )
+            } ?: default.jobNeeds,
+            schedule = enumOr(getString("schedule"), default.schedule),
+            lateGraceMinutes = (get("lateGraceMinutes") as? Number)?.toInt() ?: default.lateGraceMinutes,
+            earlyLeaveGraceMinutes = (get("earlyLeaveGraceMinutes") as? Number)?.toInt() ?: default.earlyLeaveGraceMinutes,
+            earlyClockInMinutes = (get("earlyClockInMinutes") as? Number)?.toInt() ?: default.earlyClockInMinutes,
+            noShowMinutes = (get("noShowMinutes") as? Number)?.toInt() ?: default.noShowMinutes,
             updatedAt = getDate("updatedAt")?.toInstantValue(),
             updatedBy = getString("updatedBy"),
         )
@@ -331,7 +384,7 @@ class TimesheetSettingsRepository(mongo: MongoModule) {
     }
 }
 
-private inline fun <reified E : Enum<E>> enumOr(value: String?, default: E): E =
+internal inline fun <reified E : Enum<E>> enumOr(value: String?, default: E): E =
     value?.let { raw -> enumValues<E>().firstOrNull { it.name == raw } } ?: default
 
 internal fun Shift.toDocument(): Document = Document("_id", id)
@@ -353,6 +406,10 @@ internal fun Shift.toDocument(): Document = Document("_id", id)
     .append("manual", manual)
     .append("workedMinutes", workedMinutes)
     .append("breakMinutes", breakMinutes)
+    .append("segments", segments.map { it.toDocument() })
+    .append("planned", planned?.toDocument())
+    .append("lateMinutes", lateMinutes)
+    .append("earlyLeaveMinutes", earlyLeaveMinutes)
     .append("version", version)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -383,13 +440,17 @@ internal fun Document.toShift(): Shift {
         manual = getBoolean("manual") ?: false,
         workedMinutes = (get("workedMinutes") as? Number)?.toInt() ?: 0,
         breakMinutes = (get("breakMinutes") as? Number)?.toInt() ?: 0,
+        segments = docs("segments").map { it.toSegment() },
+        planned = get("planned", Document::class.java)?.toPlanLink(),
+        lateMinutes = (get("lateMinutes") as? Number)?.toInt() ?: 0,
+        earlyLeaveMinutes = (get("earlyLeaveMinutes") as? Number)?.toInt() ?: 0,
         version = (get("version") as? Number)?.toLong() ?: 0,
         createdAt = getInstant("createdAt"),
         updatedAt = getInstant("updatedAt"),
     )
 }
 
-private fun Document.docs(field: String): List<Document> = getList(field, Document::class.java).orEmpty()
+internal fun Document.docs(field: String): List<Document> = getList(field, Document::class.java).orEmpty()
 
 private fun ShiftBreak.toDocument() = Document("startAt", startAt.toDate()).append("endAt", endAt?.toDate())
 
@@ -406,6 +467,10 @@ private fun ShiftEdit.toDocument() = Document("at", at.toDate())
     .append("reason", reason)
     .append("before", before?.toDocument())
     .append("after", after.toDocument())
+    .append(
+        "jobs",
+        jobs?.let { change -> Document("before", change.before.map { it.toDocument() }).append("after", change.after.map { it.toDocument() }) },
+    )
 
 private fun Document.toEdit() = ShiftEdit(
     at = getInstant("at"),
@@ -413,6 +478,53 @@ private fun Document.toEdit() = ShiftEdit(
     reason = getString("reason").orEmpty(),
     before = get("before", Document::class.java)?.toTimes(),
     after = get("after", Document::class.java).toTimes(),
+    jobs = get("jobs", Document::class.java)?.let { JobsChange(it.docs("before").map { s -> s.toSegment() }, it.docs("after").map { s -> s.toSegment() }) },
+)
+
+internal fun Job.toDocument(): Document = Document("clientId", clientId)
+    .append("clientName", clientName)
+    .append("projectId", projectId)
+    .append("projectName", projectName)
+    .append("activityId", activityId)
+    .append("activityName", activityName)
+    .append("note", note)
+    .append("billable", billable)
+
+internal fun Document.toJob(): Job = Job(
+    clientId = get("clientId", ObjectId::class.java),
+    clientName = getString("clientName"),
+    projectId = get("projectId", ObjectId::class.java),
+    projectName = getString("projectName"),
+    activityId = get("activityId", ObjectId::class.java),
+    activityName = getString("activityName"),
+    note = getString("note"),
+    billable = getBoolean("billable") ?: false,
+)
+
+private fun ShiftSegment.toDocument() = Document("startAt", startAt.toDate())
+    .append("job", job?.toDocument())
+    .append("source", source.name)
+    .append("siteName", siteName)
+
+private fun Document.toSegment() = ShiftSegment(
+    startAt = getInstant("startAt"),
+    job = get("job", Document::class.java)?.toJob(),
+    source = enumOr(getString("source"), SegmentSource.CLOCK),
+    siteName = getString("siteName"),
+)
+
+private fun PlanLink.toDocument() = Document("id", id)
+    .append("startAt", startAt.toDate())
+    .append("endAt", endAt.toDate())
+    .append("first", first)
+    .append("continued", continued)
+
+private fun Document.toPlanLink() = PlanLink(
+    id = getObjectId("id"),
+    startAt = getInstant("startAt"),
+    endAt = getInstant("endAt"),
+    first = getBoolean("first") ?: true,
+    continued = getBoolean("continued") ?: false,
 )
 
 private fun Punch.toDocument() = Document("type", type.name)
@@ -436,6 +548,7 @@ private fun Punch.toDocument() = Document("type", type.name)
     .append("flags", flags)
     .append("by", by)
     .append("recordedAt", recordedAt?.toDate())
+    .append("job", job?.toDocument())
 
 private fun Document.toPunch(): Punch {
     val location = get("location", Document::class.java)
@@ -470,6 +583,7 @@ private fun Document.toPunch(): Punch {
         flags = getList("flags", String::class.java).orEmpty(),
         by = getString("by"),
         recordedAt = getDate("recordedAt")?.toInstantValue(),
+        job = get("job", Document::class.java)?.toJob(),
     )
 }
 
@@ -477,3 +591,5 @@ private fun Document.toPunch(): Punch {
 internal fun locationPolicyOf(value: String?): LocationPolicy? = LocationPolicy.entries.firstOrNull { it.name == value?.trim()?.uppercase() }
 internal fun geofencePolicyOf(value: String?): GeofencePolicy? = GeofencePolicy.entries.firstOrNull { it.name == value?.trim()?.uppercase() }
 internal fun biometricPolicyOf(value: String?): BiometricPolicy? = BiometricPolicy.entries.firstOrNull { it.name == value?.trim()?.uppercase() }
+internal fun workLogPolicyOf(value: String?): WorkLogPolicy? = WorkLogPolicy.entries.firstOrNull { it.name == value?.trim()?.uppercase() }
+internal fun schedulePolicyOf(value: String?): SchedulePolicy? = SchedulePolicy.entries.firstOrNull { it.name == value?.trim()?.uppercase() }

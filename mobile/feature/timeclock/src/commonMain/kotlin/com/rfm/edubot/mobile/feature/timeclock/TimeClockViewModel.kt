@@ -16,12 +16,18 @@ import com.rfm.edubot.mobile.core.common.SignResult
 import com.rfm.edubot.mobile.core.common.SignerError
 import com.rfm.edubot.mobile.core.data.TimeClockRepository
 import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.JobRequest
+import com.rfm.edubot.mobile.core.model.JobRules
 import com.rfm.edubot.mobile.core.model.PunchLocation
 import com.rfm.edubot.mobile.core.model.PunchRequest
 import com.rfm.edubot.mobile.core.model.PunchVerification
+import com.rfm.edubot.mobile.core.model.SegmentRequest
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
+import com.rfm.edubot.mobile.core.model.Shift
 import com.rfm.edubot.mobile.core.model.TimeClockStatus
 import com.rfm.edubot.mobile.core.model.TimesheetPolicy
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,7 +51,7 @@ enum class TimeClockProblem {
 enum class TimeClockStep { IDLE, LOCATING, CONFIRMING, SENDING }
 
 /** What just went through, for the confirmation line. */
-enum class TimeClockDone { IN, OUT, BREAK_START, BREAK_END, PHONE_READY, SHIFT_CLOSED }
+enum class TimeClockDone { IN, OUT, BREAK_START, BREAK_END, SWITCH, PHONE_READY, SHIFT_CLOSED, SPLIT_SAVED }
 
 /** Whether this phone confirms clock-ins with a fingerprint or face. */
 enum class PhoneSetup {
@@ -61,12 +67,35 @@ enum class PhoneSetup {
     UNSUPPORTED,
 }
 
+/** What a job is being picked for: the next clock-in, a switch while working, or one part of a shift being split. */
+sealed interface JobTarget {
+    data object ClockIn : JobTarget
+
+    data object Switch : JobTarget
+
+    data class Part(val index: Int) : JobTarget
+}
+
+/**
+ * One part of a shift being split: where it starts (`HH:mm` on the company's clock; the first part's is the shift's
+ * start) and its job, with the job's name as it was when the part was read, for a job the pickers no longer list.
+ */
+data class PartDraft(val start: String, val job: JobRequest?, val label: String? = null)
+
+/** The split of [shiftId] being edited. */
+data class SplitDraft(val shiftId: String, val parts: List<PartDraft>)
+
 data class TimeClockUiState(
     val step: TimeClockStep = TimeClockStep.IDLE,
     val problem: TimeClockProblem? = null,
     val error: AppError? = null,
     val done: TimeClockDone? = null,
     val phone: PhoneSetup = PhoneSetup.NOT_USED,
+    /** The job the next clock-in is for, when the company logs jobs. */
+    val job: JobRequest? = null,
+    /** The part of a job the company needs that the one picked lacks ([JobRules] names). */
+    val missing: String? = null,
+    val split: SplitDraft? = null,
 ) {
     val busy: Boolean get() = step != TimeClockStep.IDLE
 }
@@ -75,7 +104,8 @@ data class TimeClockUiState(
  * Clocking in from the phone: one location fix (only if the company uses location), then a signature
  * from the phone's biometric key over a nonce the backend issued (only if the company uses biometrics
  * and this phone is set up), then the punch. The backend's clock and rules decide; this only gathers
- * the evidence and stops early when the company's rules can't be met.
+ * the evidence and stops early when the company's rules can't be met. A clock-in or a switch carries the
+ * job it is for when the company logs jobs.
  */
 class TimeClockViewModel(
     private val repository: TimeClockRepository,
@@ -92,23 +122,46 @@ class TimeClockViewModel(
     fun load() = scope.launch {
         repository.status.load()
         repository.shifts.load()
-        refreshPhone()
+        afterStatus()
     }
 
     fun refresh() = scope.launch {
-        mutable.update { it.copy(error = null, problem = null) }
+        mutable.update { it.copy(error = null, problem = null, missing = null) }
         repository.status.refresh()
         repository.shifts.refresh()
-        refreshPhone()
+        afterStatus()
     }
 
-    fun dismiss() = mutable.update { it.copy(done = null, problem = null, error = null) }
+    fun dismiss() = mutable.update { it.copy(done = null, problem = null, error = null, missing = null) }
 
-    fun punch(type: String, prompt: BiometricPromptText) = scope.launch {
+    /** The job the next clock-in is for. */
+    fun chooseJob(job: JobRequest?) = mutable.update { it.copy(job = job?.takeUnless(JobRequest::isEmpty), missing = null) }
+
+    /** A job picked on the picker, applied to what it was picked for. A switch punches at once: its work is returned. */
+    fun applyJob(target: JobTarget, job: JobRequest?, prompt: BiometricPromptText): Job? = when (target) {
+        JobTarget.ClockIn -> {
+            chooseJob(job)
+            null
+        }
+        JobTarget.Switch -> switchJob(job, prompt)
+        is JobTarget.Part -> {
+            setPartJob(target.index, job, label = null)
+            null
+        }
+    }
+
+    fun punch(type: String, prompt: BiometricPromptText) = send(type, prompt, if (type == PunchRequest.IN) mutable.value.job else null)
+
+    /** Moves the open shift to [job] from now on. */
+    fun switchJob(job: JobRequest?, prompt: BiometricPromptText) = send(PunchRequest.SWITCH, prompt, job?.takeUnless(JobRequest::isEmpty))
+
+    private fun send(type: String, prompt: BiometricPromptText, job: JobRequest?) = scope.launch {
         if (mutable.value.busy) return@launch
         val status = repository.status.state.value.value ?: return@launch
         val policy = status.policy
-        mutable.update { it.copy(done = null, problem = null, error = null) }
+        mutable.update { it.copy(done = null, problem = null, error = null, missing = null) }
+        val picksJob = policy.logsJobs && (type == PunchRequest.IN || type == PunchRequest.SWITCH)
+        if (picksJob) JobRules.missing(job, policy)?.let { part -> return@launch stop(missing = part) }
 
         var fix: PunchLocation? = null
         var locationError: String? = null
@@ -134,7 +187,8 @@ class TimeClockViewModel(
         }
 
         step(TimeClockStep.SENDING)
-        when (val sent = repository.punch(PunchRequest(type, fix, locationError, verification))) {
+        val request = PunchRequest(type, fix, locationError, verification, job = job.takeIf { picksJob })
+        when (val sent = repository.punch(request)) {
             is Outcome.Success -> finish(done = type.done())
             is Outcome.Failure -> {
                 if ((sent.error as? AppError.Rejected)?.code == DEVICE_NOT_ENROLLED) refreshPhone()
@@ -183,6 +237,48 @@ class TimeClockViewModel(
         }
     }
 
+    // ── Splitting a shift's time between jobs ────────────────────────────────────────────────────
+
+    /** Starts editing [shift]'s split from what the backend has: its parts, or one part from its start. */
+    fun startSplit(shift: Shift) {
+        val parts = shift.segments.map { PartDraft(it.startTime, it.job?.request?.takeUnless(JobRequest::isEmpty), it.job?.label) }
+            .ifEmpty { listOf(PartDraft(shift.startTime, null)) }
+        mutable.update { it.copy(split = SplitDraft(shift.id, parts), done = null, error = null, missing = null) }
+    }
+
+    fun setPartStart(index: Int, start: String) = editParts { parts ->
+        if (index <= 0 || index > parts.lastIndex) parts else parts.mapIndexed { i, p -> if (i == index) p.copy(start = start.take(5)) else p }
+    }
+
+    fun setPartJob(index: Int, job: JobRequest?, label: String?) = editParts { parts ->
+        parts.mapIndexed { i, p -> if (i == index) p.copy(job = job?.takeUnless(JobRequest::isEmpty), label = label) else p }
+    }
+
+    fun addPart() = editParts { parts -> if (parts.size >= MAX_PARTS) parts else parts + PartDraft("", null) }
+
+    fun removePart(index: Int) = editParts { parts -> if (index <= 0 || index > parts.lastIndex) parts else parts.filterIndexed { i, _ -> i != index } }
+
+    fun cancelSplit() = mutable.update { it.copy(split = null, error = null) }
+
+    /** Saves the split; times are checked here first so a typo doesn't make a round trip. */
+    fun saveSplit() = scope.launch {
+        if (mutable.value.busy) return@launch
+        val split = mutable.value.split ?: return@launch
+        if (split.parts.drop(1).any { !TIME.matches(it.start.trim()) }) return@launch stop(error = AppError.Rejected(INVALID_TIME))
+        step(TimeClockStep.SENDING)
+        val request = SegmentsRequest(split.parts.map { SegmentRequest(it.start.trim(), it.job) })
+        when (val saved = repository.editSegments(split.shiftId, request)) {
+            is Outcome.Success -> {
+                mutable.update { it.copy(split = null) }
+                finish(done = TimeClockDone.SPLIT_SAVED)
+            }
+            is Outcome.Failure -> stop(error = saved.error)
+        }
+    }
+
+    private fun editParts(change: (List<PartDraft>) -> List<PartDraft>) =
+        mutable.update { state -> state.split?.let { state.copy(split = it.copy(parts = change(it.parts)), error = null) } ?: state }
+
     private sealed interface Check {
         data class Verified(val verification: PunchVerification) : Check
         data object Skipped : Check
@@ -225,6 +321,21 @@ class TimeClockViewModel(
         return keyId.takeIf { id -> status.devices.any { it.active && it.keyId == id } }
     }
 
+    /**
+     * Once the status is in: the phone's state, what a job can name (when the company logs jobs), and, while
+     * nothing is picked yet, the next clock-in's job from the planned shift or the last job worked on.
+     */
+    private suspend fun afterStatus() {
+        refreshPhone()
+        val status = repository.status.state.value.value ?: return
+        if (!status.policy.logsJobs) return
+        repository.jobs.load()
+        if (mutable.value.job != null) return
+        val planned = status.planned?.job?.request?.takeUnless(JobRequest::isEmpty)
+        val last = repository.shifts.state.value.value?.firstOrNull()?.currentJob?.request?.takeUnless(JobRequest::isEmpty)
+        (planned ?: last)?.let { job -> mutable.update { it.copy(job = it.job ?: job) } }
+    }
+
     private fun refreshPhone() {
         val status = repository.status.state.value.value
         val phone = when {
@@ -242,11 +353,11 @@ class TimeClockViewModel(
 
     private fun finish(done: TimeClockDone?) {
         refreshPhone()
-        mutable.update { it.copy(step = TimeClockStep.IDLE, done = done, problem = null, error = null) }
+        mutable.update { it.copy(step = TimeClockStep.IDLE, done = done, problem = null, error = null, missing = null) }
     }
 
-    private fun stop(problem: TimeClockProblem? = null, error: AppError? = null) =
-        mutable.update { it.copy(step = TimeClockStep.IDLE, problem = problem, error = error) }
+    private fun stop(problem: TimeClockProblem? = null, error: AppError? = null, missing: String? = null) =
+        mutable.update { it.copy(step = TimeClockStep.IDLE, problem = problem, error = error, missing = missing) }
 
     private fun LocationFailure.problem(): TimeClockProblem = when (this) {
         LocationFailure.PERMISSION_DENIED -> TimeClockProblem.LOCATION_DENIED
@@ -269,6 +380,7 @@ class TimeClockViewModel(
         PunchRequest.IN -> TimeClockDone.IN
         PunchRequest.BREAK_START -> TimeClockDone.BREAK_START
         PunchRequest.BREAK_END -> TimeClockDone.BREAK_END
+        PunchRequest.SWITCH -> TimeClockDone.SWITCH
         else -> TimeClockDone.OUT
     }
 
@@ -276,6 +388,7 @@ class TimeClockViewModel(
         const val ENROLL = "ENROLL"
         const val DEVICE_NOT_ENROLLED = "device_not_enrolled"
         const val INVALID_TIME = "invalid_time"
+        const val MAX_PARTS = 30
         val TIME = Regex("""([01]\d|2[0-3]):[0-5]\d""")
     }
 }

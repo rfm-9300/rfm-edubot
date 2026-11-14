@@ -601,6 +601,28 @@ phone says, and nothing is queued offline.
   (every 6 hours, on a scheduler lease) removes punch coordinates after 90 days and keeps the verdict (which
   site, how far, inside or not), which is what the record needs. Each punch says whether it came from
   the app or the web.
+- **Hours per job** (phase 2, [`plan-time-clock-jobs-schedules.md`](plan-time-clock-jobs-schedules.md)).
+  With the `workLog` rule on, a shift's working time is cut into `segments`, each from its start to
+  the next one's with a job (client, Building project, activity from `timesheets.activities`, note)
+  and how it was set (`CLOCK`, `EMPLOYEE`, `TEAM`). A clock-in and a `SWITCH` punch carry the job;
+  `PUT …/shifts/{id}/segments` replaces the split (the employee's own until approved, the team's with
+  a reason kept in the history). `WorkLog` holds the rules: cumulative minutes that add up to the
+  shift's, fitting segments to corrected times, what a complete job needs. Under `REQUIRED` a punch
+  without a complete job is refused, untagged time flags `UNALLOCATED` and approving refuses it.
+  Projects come through the `JobProjects` port, which Building implements (`BuildingJobProjects`).
+- **Schedules** (phase 2): planned shifts in `timesheets.planned`. A clock-in (and a team-added shift)
+  is linked to the planned shift whose window holds it (`Attendance.match`), keeping its times on the
+  shift (`planned`) for `LATE` and `LEFT_EARLY`; `PlanLinks.relink` keeps only the first linked shift
+  checked for lateness and the last for an early leave. With the `schedule` rule at `BLOCK` a clock-in
+  too early (`409 too_early` with `opensTime`) or with nothing planned (`409 not_scheduled`) is
+  refused. `AttendanceWatch` (every 5 minutes, on a lease) rings the team's bell once per no-show
+  (`time_no_show`, `ref` `planned:ID`).
+- **Phase 2 routes.** Employee: `GET /jobs`, `GET /schedule`, `PUT /shifts/{id}/segments`; the
+  status adds `planned`, `upcoming` and `clockIn`. Team: `GET /job-options`, `PUT /shifts/{id}/segments`,
+  `GET /jobs` and `/jobs.csv` (hours by client, project, activity and employee, and the work log),
+  `/activities` (admins write), `/schedule` (plan several days at once, change, remove one nobody
+  attended, `POST /schedule/copy`, `POST|DELETE /schedule/{id}/excuse`); the board adds who is due or
+  missing, the totals add planned minutes, late arrivals and absences.
 
 ```mermaid
 sequenceDiagram
@@ -1780,3 +1802,13 @@ company's rules can't be met, so the employee reads why on the phone rather than
 
 Setting up the phone makes the key and enrolls it with a signature over a fresh nonce, which also
 proves the key works.
+
+When the company logs jobs, My hours shows the job the next clock-in is for (the planned shift's, else
+the last one worked) with **Change**, and **Switch job** while working; both open `JobPickerScreen`
+(client with a search, the client's projects, activity, note), which checks `JobRules` (the backend's
+rule for a complete job) before anything is sent. A switch goes through the same location and
+signature steps as any punch (`nonce:SWITCH`). A shift row opens `ShiftScreen` (times, the planned
+shift and lateness, its work log, its clock record), whose **Split the time between jobs** opens
+`SplitScreen` while the team hasn't approved it. My schedule lists the planned shifts to come with how
+each is going. The picker, shift and split are navigator destinations (`Destination.TimeJob`,
+`TimeShift`, `TimeSplit`) that share My hours' view model through the session's view-model store.

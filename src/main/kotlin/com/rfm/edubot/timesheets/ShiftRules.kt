@@ -1,17 +1,23 @@
 package com.rfm.edubot.timesheets
 
+import com.rfm.edubot.timesheets.model.Job
+import com.rfm.edubot.timesheets.model.JobsChange
+import com.rfm.edubot.timesheets.model.PlanLink
 import com.rfm.edubot.timesheets.model.Punch
 import com.rfm.edubot.timesheets.model.PunchChannel
 import com.rfm.edubot.timesheets.model.PunchType
 import com.rfm.edubot.timesheets.model.ReviewStatus
+import com.rfm.edubot.timesheets.model.SegmentSource
 import com.rfm.edubot.timesheets.model.Shift
 import com.rfm.edubot.timesheets.model.ShiftBreak
 import com.rfm.edubot.timesheets.model.ShiftEdit
 import com.rfm.edubot.timesheets.model.ShiftFlags
 import com.rfm.edubot.timesheets.model.ShiftReview
+import com.rfm.edubot.timesheets.model.ShiftSegment
 import com.rfm.edubot.timesheets.model.ShiftStatus
 import com.rfm.edubot.timesheets.model.ShiftTimes
 import com.rfm.edubot.timesheets.model.TimesheetSettings
+import com.rfm.edubot.timesheets.model.WorkLogPolicy
 import com.rfm.edubot.timesheets.model.WorkSite
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
@@ -48,6 +54,22 @@ object ShiftMath {
     }
 
     fun breakMinutes(times: ShiftTimes, until: Instant): Int = (breakSeconds(times, until) / 60).toInt()
+
+    /**
+     * Seconds worked from the shift's start up to [upTo], no further than its end (or [now] while open), breaks
+     * taken off. At the end it is exactly what [workedMinutes] counts, so pieces cut at any times add up to it.
+     */
+    fun workedSecondsUpTo(times: ShiftTimes, upTo: Instant, now: Instant): Long {
+        val end = times.endAt ?: now
+        val cut = minOf(upTo, end)
+        if (cut <= times.startAt) return 0
+        val breaks = times.breaks.sumOf { b ->
+            val from = maxOf(b.startAt, times.startAt)
+            val to = minOf(b.endAt ?: end, end, cut)
+            if (to > from) (to - from).inWholeSeconds else 0L
+        }
+        return ((cut - times.startAt).inWholeSeconds - breaks).coerceAtLeast(0)
+    }
 
     /** Unpaid breaks are taken off; exact minutes, never rounded up. */
     fun workedMinutes(times: ShiftTimes, until: Instant): Int {
@@ -123,7 +145,10 @@ object ShiftRules {
     fun isOverdue(shift: Shift, settings: TimesheetSettings, now: Instant): Boolean =
         shift.isOpen && now - shift.startAt > settings.maxShiftHours.hours
 
-    /** A new shift from a clock-in; [site] is the site the punch was inside, if any. */
+    /**
+     * A new shift from a clock-in; [site] is the site the punch was inside, if any, and [plan] the planned shift it
+     * belongs to. A company that logs jobs gets the first segment, on the job the clock-in picked.
+     */
     fun start(
         tenantId: ObjectId,
         employeeId: ObjectId,
@@ -133,6 +158,7 @@ object ShiftRules {
         settings: TimesheetSettings,
         zone: TimeZone,
         now: Instant,
+        plan: PlanLink? = null,
     ): Shift = Shift(
         tenantId = tenantId,
         employeeId = employeeId,
@@ -144,11 +170,16 @@ object ShiftRules {
         clientId = site?.clientId,
         note = note.cleanNote(),
         punches = listOf(punch),
+        segments = if (settings.logsJobs) listOf(ShiftSegment(punch.at, punch.job, SegmentSource.CLOCK, site?.name)) else emptyList(),
+        planned = plan,
         createdAt = now,
         updatedAt = now,
     ).recomputed(settings, zone, now)
 
-    /** A break or clock-out on the open [shift]; clocking out during a break ends the break. */
+    /**
+     * A break, clock-out or switch on the open [shift]; clocking out during a break ends the break. A switch moves
+     * the work to the punch's job from the punch's time on, never during a break.
+     */
     fun punch(shift: Shift, punch: Punch, settings: TimesheetSettings, zone: TimeZone, now: Instant): Transition {
         if (!shift.isOpen) return Transition.Refused("not_clocked_in")
         val at = maxOf(punch.at, shift.lastPunchAt)
@@ -163,6 +194,12 @@ object ShiftRules {
                 shift.copy(breaks = shift.breaks.endOpenBreak(at))
             }
             PunchType.OUT -> shift.closedAt(at)
+            PunchType.SWITCH -> {
+                if (!settings.logsJobs) return Transition.Refused("work_log_off")
+                if (shift.onBreak) return Transition.Refused("on_break")
+                if (WorkLog.isCurrent(shift, punch.job)) return Transition.Refused("same_job")
+                shift.copy(segments = WorkLog.switched(shift, punch.job, at, punch.site?.takeIf { it.inside }?.siteName))
+            }
         }
         return Transition.Ok(next.copy(punches = shift.punches + punch.copy(at = at), updatedAt = now).recomputed(settings, zone, now))
     }
@@ -210,7 +247,7 @@ object ShiftRules {
         )
     }
 
-    /** A shift nobody clocked, added by the team with its reason. */
+    /** A shift nobody clocked, added by the team with its reason, on [job] when the company logs jobs. */
     fun manual(
         tenantId: ObjectId,
         employeeId: ObjectId,
@@ -221,6 +258,8 @@ object ShiftRules {
         settings: TimesheetSettings,
         zone: TimeZone,
         now: Instant,
+        job: Job? = null,
+        plan: PlanLink? = null,
     ): Transition {
         reasonProblem(reason)?.let { return Transition.Refused(it) }
         val clean = times.copy(breaks = times.breaks.sortedBy { it.startAt })
@@ -237,16 +276,54 @@ object ShiftRules {
                 note = note.cleanNote(),
                 edits = listOf(ShiftEdit(now, by, reason.trim(), before = null, after = clean)),
                 manual = true,
+                segments = if (settings.logsJobs) listOf(ShiftSegment(clean.startAt, job, SegmentSource.TEAM)) else emptyList(),
+                planned = plan,
                 createdAt = now,
                 updatedAt = now,
             ).recomputed(settings, zone, now),
         )
     }
 
-    fun approve(shift: Shift, by: String, now: Instant): Transition {
+    /** Under the strict work log, a shift with time on no complete job can't be approved: the hours aren't accounted for. */
+    fun approve(shift: Shift, by: String, settings: TimesheetSettings, now: Instant): Transition {
         if (shift.isOpen) return Transition.Refused("shift_open")
         if (shift.review.status == ReviewStatus.APPROVED) return Transition.Refused("already_approved")
+        if (settings.workLog == WorkLogPolicy.REQUIRED && WorkLog.unallocatedMinutes(shift, settings.jobNeeds, now) > 0) {
+            return Transition.Refused("unallocated")
+        }
         return Transition.Ok(shift.copy(review = ShiftReview(ReviewStatus.APPROVED, by, now), updatedAt = now))
+    }
+
+    /** The employee splits their own shift's time between jobs, until it is approved. */
+    fun employeeJobs(shift: Shift, drafts: List<SegmentDraft>, settings: TimesheetSettings, zone: TimeZone, now: Instant): Transition {
+        if (!settings.logsJobs) return Transition.Refused("work_log_off")
+        if (shift.review.status == ReviewStatus.APPROVED) return Transition.Refused("already_approved")
+        WorkLog.problem(shift, drafts, now)?.let { return Transition.Refused(it) }
+        val segments = WorkLog.replaced(shift, drafts, SegmentSource.EMPLOYEE)
+        if (segments == shift.segments) return Transition.Ok(shift)
+        return Transition.Ok(shift.copy(segments = segments, updatedAt = now).recomputed(settings, zone, now))
+    }
+
+    /**
+     * The team changes how a shift's time splits between jobs, with a reason kept in its history; an approved shift
+     * goes back for approval.
+     */
+    fun teamJobs(shift: Shift, drafts: List<SegmentDraft>, by: String, reason: String, settings: TimesheetSettings, zone: TimeZone, now: Instant): Transition {
+        if (!settings.logsJobs) return Transition.Refused("work_log_off")
+        reasonProblem(reason)?.let { return Transition.Refused(it) }
+        WorkLog.problem(shift, drafts, now)?.let { return Transition.Refused(it) }
+        val segments = WorkLog.replaced(shift, drafts, SegmentSource.TEAM)
+        if (segments == shift.segments) return Transition.Ok(shift)
+        val edit = ShiftEdit(now, by, reason.trim(), before = shift.times, after = shift.times, jobs = JobsChange(shift.segments, segments))
+        return Transition.Ok(
+            shift.copy(segments = segments, edits = shift.edits + edit, review = ShiftReview(), updatedAt = now).recomputed(settings, zone, now),
+        )
+    }
+
+    /** The shift's planned times changed (or its plan was linked again): lateness and early leave follow. */
+    fun replan(shift: Shift, plan: PlanLink?, settings: TimesheetSettings, zone: TimeZone, now: Instant): Transition {
+        if (plan == shift.planned) return Transition.Ok(shift)
+        return Transition.Ok(shift.copy(planned = plan, updatedAt = now).recomputed(settings, zone, now))
     }
 
     /** The employee's own note, while nobody approved the shift. */
@@ -256,19 +333,35 @@ object ShiftRules {
         return Transition.Ok(shift.copy(note = note.cleanNote(), updatedAt = now))
     }
 
-    /** Minutes, the local day and the flags, from the shift's times, punches and history. */
+    /**
+     * Minutes, the local day, the segments fitted to the times, lateness against the plan and the flags, from the
+     * shift's times, punches, plan and history.
+     */
     fun Shift.recomputed(settings: TimesheetSettings, zone: TimeZone, now: Instant): Shift {
         val end = endAt
+        val fitted = copy(segments = WorkLog.fit(segments, startAt, end))
+        val plan = planned
+        val late = plan?.takeIf { it.first }?.let { (startAt - it.startAt).inWholeMinutes.toInt().coerceAtLeast(0) } ?: 0
+        val early = if (plan == null || plan.continued || end == null) 0 else (plan.endAt - end).inWholeMinutes.toInt().coerceAtLeast(0)
+        val checks = settings.checksSchedule
         val shiftFlags = listOfNotNull(
             ShiftFlags.LONG_SHIFT.takeIf { end != null && end - startAt > settings.maxShiftHours.hours },
             ShiftFlags.MISSED_CLOCK_OUT.takeIf { punches.any { it.channel == PunchChannel.CORRECTION } },
             ShiftFlags.EDITED.takeIf { edits.any { it.before != null } },
             ShiftFlags.MANUAL.takeIf { manual },
+            ShiftFlags.UNALLOCATED.takeIf {
+                settings.workLog == WorkLogPolicy.REQUIRED && WorkLog.unallocatedMinutes(fitted, settings.jobNeeds, now) > 0
+            },
+            ShiftFlags.LATE.takeIf { checks && late > settings.lateGraceMinutes },
+            ShiftFlags.LEFT_EARLY.takeIf { checks && early > settings.earlyLeaveGraceMinutes },
+            ShiftFlags.UNSCHEDULED.takeIf { checks && plan == null && !manual },
         )
-        return copy(
+        return fitted.copy(
             day = ShiftMath.localDay(startAt, zone),
             workedMinutes = ShiftMath.workedMinutes(times, now),
             breakMinutes = ShiftMath.breakMinutes(times, now),
+            lateMinutes = late,
+            earlyLeaveMinutes = early,
             flags = (punches.flatMap { it.flags } + shiftFlags).distinct().sorted(),
         )
     }
