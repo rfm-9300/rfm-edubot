@@ -1719,6 +1719,11 @@ the `cloudflared` tunnel URL from the local dev setup. The debug manifest alread
 so a local HTTP backend works without further changes. Without the property the build points at
 production, which is what a release build always does.
 
+A debug build can also prefill the sign-in form, from `debugLoginEmail` and `debugLoginPassword`
+set in `~/.gradle/gradle.properties` or passed with `-P`. They never go in a file in the repo, which
+is public (`mobile/gradle.properties` is committed). Without them the form starts empty, as it
+always does in a release build.
+
 ### Auth
 
 `SessionTokens` is the only thing that knows the bearer token. `DashboardHttpClient` attaches it,

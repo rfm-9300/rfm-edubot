@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-14
+updated: 2026-11-16
 ---
 
 # Mobile app (Kotlin Multiplatform)
@@ -133,6 +133,10 @@ The team's side (planner, By job, activities, rules) stays on the web.
   `./gradlew :androidApp:installDebug -PapiBaseUrl=http://localhost:<port>` (it replaces the installed
   app and keeps its data, so reinstall without the flag afterwards). `adb shell uiautomator dump` gives
   each element's bounds to tap; let a fling settle before tapping, or the tap lands on another row.
+- **A debug build's sign-in prefill comes from the `debugLoginEmail` and `debugLoginPassword` Gradle
+  properties**, set in `~/.gradle/gradle.properties` (one place for every checkout and worktree) or
+  passed with `-P`. They never go in a file in the repo: it is public, and `mobile/gradle.properties`
+  is committed. Without them the sign-in form starts empty, as in a release build.
 
 ## Agent notes
 

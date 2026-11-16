@@ -5,6 +5,9 @@ plugins {
     alias(libs.plugins.kotlin.android)
 }
 
+/** [value] as a Java string literal, for a BuildConfig field. */
+fun javaString(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+
 android {
     namespace = "com.rfm.edubot.mobile"
     compileSdk = libs.versions.android.compileSdk.get().toInt()
@@ -22,8 +25,18 @@ android {
 
     buildTypes {
         debug {
-            buildConfigField("String", "DEBUG_LOGIN_EMAIL", "\"review@thebotslab.pt\"")
-            buildConfigField("String", "DEBUG_LOGIN_PASSWORD", "\"review@thebotslab.pt\"")
+            // A debug build can prefill the sign-in form: set `debugLoginEmail` and
+            // `debugLoginPassword` in ~/.gradle/gradle.properties or pass them with -P, never in a
+            // file in this repo (it is public, and mobile/gradle.properties is committed). Without
+            // them the form starts empty, as it always does in a release build.
+            val loginEmail = project.findProperty("debugLoginEmail") as String?
+            val loginPassword = project.findProperty("debugLoginPassword") as String?
+            if (loginEmail != null) {
+                buildConfigField("String", "DEBUG_LOGIN_EMAIL", javaString(loginEmail))
+            }
+            if (loginPassword != null) {
+                buildConfigField("String", "DEBUG_LOGIN_PASSWORD", javaString(loginPassword))
+            }
             // `./gradlew :androidApp:installDebug -PapiBaseUrl=http://10.0.2.2:8080` points a
             // debug build at a backend on the host, so working on the app does not mean signing
             // in to production. The debug manifest already allows cleartext for this.
