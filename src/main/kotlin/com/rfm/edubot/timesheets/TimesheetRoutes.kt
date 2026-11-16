@@ -10,7 +10,9 @@ import com.rfm.edubot.dashboard.requireModules
 import com.rfm.edubot.dashboard.toObjectIdOrNull
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import com.rfm.edubot.timesheets.model.JobNeeds
 import com.rfm.edubot.timesheets.model.Shift
+import com.rfm.edubot.timesheets.model.ShiftFlags
 import com.rfm.edubot.timesheets.model.ShiftTimes
 import com.rfm.edubot.timesheets.model.TimesheetSettings
 import com.rfm.edubot.timesheets.model.WorkSite
@@ -35,6 +37,7 @@ import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.minus
 import kotlinx.datetime.plus
 import kotlinx.serialization.Serializable
 import org.bson.types.ObjectId
@@ -44,8 +47,10 @@ import org.bson.types.ObjectId
  * shifts and totals, corrections (always with a reason, kept as history), approvals and the CSV export. The
  * rules, work sites and revoking phones are for admins (and operators opening the dashboard).
  */
-fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock::now) {
+fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock::now, projects: JobProjects = JobProjects.None) {
     val settings = TimesheetSettingsRepository(mongo)
+    val schedule = ScheduleService(mongo, projects, clock)
+    suspend fun rules(ctx: DashboardContext): TimesheetSettings = settings.get(ctx.tenant.id).forCompany(ctx.tenant)
     authenticate("dashboard") {
         route("/app/api/timesheets") {
             requireModules(DashboardModules.TIMESHEETS) {
@@ -56,23 +61,32 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     val weekStart = ShiftMath.weekStart(ShiftMath.localDay(now, zone))
                     val (from, to) = call.dayRange(weekStart, weekStart.plus(6, DateTimeUnit.DAY)) ?: return@get
                     val employeeId = call.optionalId("employeeId") ?: return@get
-                    val rules = settings.get(ctx.tenant.id)
+                    val rules = rules(ctx)
                     val shifts = ShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
-                    val employees = ShiftView.employees(mongo, ctx.tenant.id, shifts)
+                    val plans = PlannedShiftRepository(mongo, ctx.tenant.id).list(from, to, employeeId.value)
+                    val employees = ShiftView.employeesById(mongo, ctx.tenant.id, shifts.map { it.employeeId } + plans.map { it.employeeId })
                     val view = ShiftView(zone, rules, now, employees)
-                    val totals = Timesheets.totals(shifts, rules, now).map { t ->
-                        val employee = employees[t.employeeId]
+                    val planView = PlanView(zone, rules, now, shifts)
+                    val planned = plans.groupBy { it.employeeId }
+                    val worked = Timesheets.totals(shifts, rules, now).associateBy { it.employeeId }
+                    val totals = (worked.keys + planned.keys).map { id ->
+                        val t = worked[id]
+                        val own = planned[id].orEmpty()
+                        val employee = employees[id]
                         EmployeeTotalsDto(
-                            employeeId = t.employeeId.toHexString(),
+                            employeeId = id.toHexString(),
                             employeeName = employee?.name.orEmpty(),
                             employeeNumber = employee?.number.orEmpty(),
-                            workedMinutes = t.workedMinutes,
-                            days = t.days,
-                            overDailyMinutes = t.overDailyMinutes,
-                            overWeeklyMinutes = t.overWeeklyMinutes,
-                            toReview = t.toReview,
-                            flagged = t.flagged,
-                            open = t.open,
+                            workedMinutes = t?.workedMinutes ?: 0,
+                            days = t?.days ?: 0,
+                            overDailyMinutes = t?.overDailyMinutes ?: 0,
+                            overWeeklyMinutes = t?.overWeeklyMinutes ?: 0,
+                            toReview = t?.toReview ?: 0,
+                            flagged = t?.flagged ?: 0,
+                            open = t?.open ?: 0,
+                            plannedMinutes = own.filter { it.excuse == null }.sumOf { Attendance.minutes(it) },
+                            late = shifts.count { it.employeeId == id && ShiftFlags.LATE in it.flags },
+                            absences = own.count { planView.status(it).state == Attendance.State.ABSENT },
                         )
                     }.sortedBy { it.employeeName.lowercase() }
                     call.respond(TimesheetDto(from.toString(), to.toString(), shifts.map { view.dto(it) }, totals, rules.dto(canEdit = ctx.isAdmin())))
@@ -80,15 +94,22 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                 get("/board") {
                     val ctx = call.moduleContext()
                     val now = clock()
+                    val zone = ctx.tenant.zone()
+                    val rules = rules(ctx)
                     val open = ShiftRepository(mongo, ctx.tenant.id).openShifts()
-                    val view = ShiftView(ctx.tenant.zone(), settings.get(ctx.tenant.id), now, ShiftView.employees(mongo, ctx.tenant.id, open))
-                    call.respond(BoardDto(open.map { view.dto(it) }, now.toString()))
+                    val view = ShiftView(zone, rules, now, ShiftView.employees(mongo, ctx.tenant.id, open))
+                    val today = ShiftMath.localDay(now, zone)
+                    val started = PlannedShiftRepository(mongo, ctx.tenant.id).list(today.minus(1, DateTimeUnit.DAY), today)
+                        .filter { it.excuse == null && it.startAt <= now && it.endAt > now }
+                    val expected = schedule.dtos(ctx.tenant, started, rules, now)
+                        .filter { it.attendance.state == Attendance.State.DUE.name || it.attendance.state == Attendance.State.MISSING.name }
+                    call.respond(BoardDto(open.map { view.dto(it) }, now.toString(), expected))
                 }
                 get("/shifts/{id}") {
                     val ctx = call.moduleContext()
                     val shift = call.parameters["id"]?.toObjectIdOrNull()?.let { ShiftRepository(mongo, ctx.tenant.id).findById(it) }
                         ?: return@get call.respond(HttpStatusCode.NotFound)
-                    call.respond(view(mongo, ctx, settings, clock, listOf(shift)).dto(shift, detail = true))
+                    call.respond(view(mongo, ctx, rules(ctx), clock, listOf(shift)).dto(shift, detail = true))
                 }
                 post("/shifts") {
                     val ctx = call.moduleContext()
@@ -99,11 +120,29 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     val day = request.day.parseDay() ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_day")
                     val times = request.times(day, zone) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
                     val now = clock()
-                    when (val t = ShiftRules.manual(ctx.tenant.id, employee.id, times, request.note, ctx.who(), request.reason, settings.get(ctx.tenant.id), zone, now)) {
+                    val rules = rules(ctx)
+                    val job = if (rules.logsJobs) {
+                        when (val resolved = JobResolver(mongo, ctx.tenant, projects).resolve(request.job)) {
+                            is Outcome.Refused -> return@post call.respondRefusal(resolved)
+                            is Outcome.Ok -> resolved.value
+                        }
+                    } else {
+                        null
+                    }
+                    val shifts = ShiftRepository(mongo, ctx.tenant.id)
+                    val plans = PlannedShiftRepository(mongo, ctx.tenant.id)
+                    val plan = Attendance.match(plans.list(day.minus(1, DateTimeUnit.DAY), day.plus(1, DateTimeUnit.DAY), employee.id), times.startAt, rules)
+                    val earlier = plan?.let { shifts.linkedTo(listOf(it.id)) }.orEmpty()
+                    val link = plan?.let { Attendance.link(it, linkedBefore = earlier.isNotEmpty()) }
+                    when (val t = ShiftRules.manual(ctx.tenant.id, employee.id, times, request.note, ctx.who(), request.reason, rules, zone, now, job, link)) {
                         is Transition.Refused -> call.respondError(HttpStatusCode.BadRequest, t.error)
                         is Transition.Ok -> {
-                            ShiftRepository(mongo, ctx.tenant.id).insert(t.shift)
-                            call.respond(HttpStatusCode.Created, view(mongo, ctx, settings, clock, listOf(t.shift)).dto(t.shift, detail = true))
+                            shifts.insert(t.shift)
+                            if (plan != null) {
+                                if (earlier.isEmpty()) plans.setMatched(plan.id, t.shift.id) else PlanLinks.relink(shifts, plan.id, rules, zone, now)
+                            }
+                            val saved = shifts.findById(t.shift.id) ?: t.shift
+                            call.respond(HttpStatusCode.Created, view(mongo, ctx, rules, clock, listOf(saved)).dto(saved, detail = true))
                         }
                     }
                 }
@@ -115,8 +154,14 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     val zone = ctx.tenant.zone()
                     val day = if (request.day.isBlank()) shift.day else request.day.parseDay() ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_day")
                     val times = request.times(day, zone) ?: return@patch call.respondError(HttpStatusCode.BadRequest, "invalid_time")
-                    val rules = settings.get(ctx.tenant.id)
-                    call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.edit(it, times, ctx.who(), request.reason, rules, zone, clock()) })
+                    val rules = rules(ctx)
+                    val edited = shifts.update(shift.id) { ShiftRules.edit(it, times, ctx.who(), request.reason, rules, zone, clock()) }
+                    val plan = shift.planned
+                    if (edited is Transition.Ok && plan != null && edited.shift.startAt != shift.startAt) {
+                        PlanLinks.relink(shifts, plan.id, rules, zone, clock())
+                        return@patch call.respondTransition(mongo, ctx, rules, clock, shifts.findById(shift.id)?.let { Transition.Ok(it) })
+                    }
+                    call.respondTransition(mongo, ctx, rules, clock, edited)
                 }
                 post("/shifts/{id}/close") {
                     val ctx = call.moduleContext()
@@ -126,8 +171,8 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     val time = ShiftMath.parseTime(request.end) ?: return@post call.respondError(HttpStatusCode.BadRequest, "invalid_time")
                     val zone = ctx.tenant.zone()
                     val endAt = ShiftMath.endAfter(shift.startAt, time, zone)
-                    val rules = settings.get(ctx.tenant.id)
-                    call.respondTransition(mongo, ctx, settings, clock, shifts.update(shift.id) { ShiftRules.closeByTeam(it, endAt, ctx.who(), request.reason, rules, zone, clock()) })
+                    val rules = rules(ctx)
+                    call.respondTransition(mongo, ctx, rules, clock, shifts.update(shift.id) { ShiftRules.closeByTeam(it, endAt, ctx.who(), request.reason, rules, zone, clock()) })
                 }
                 post("/shifts/approve") {
                     val ctx = call.moduleContext()
@@ -135,8 +180,13 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     if (request.ids.size > MAX_APPROVE) return@post call.respondError(HttpStatusCode.BadRequest, "too_many")
                     val ids = request.ids.mapNotNull { it.toObjectIdOrNull() }.distinct()
                     val shifts = ShiftRepository(mongo, ctx.tenant.id)
-                    val approved = ids.count { id -> shifts.update(id) { ShiftRules.approve(it, ctx.who(), clock()) } is Transition.Ok }
-                    call.respond(ApprovedDto(approved))
+                    val rules = rules(ctx)
+                    val results = ids.map { id -> shifts.update(id) { ShiftRules.approve(it, ctx.who(), rules, clock()) } }
+                    val approved = results.count { it is Transition.Ok }
+                    val unallocated = results.count { it is Transition.Refused && it.error == "unallocated" }
+                    // One shift that can't be approved says why; a batch counts what it left.
+                    if (ids.size == 1 && unallocated == 1) return@post call.respondError(HttpStatusCode.Conflict, "unallocated")
+                    call.respond(ApprovedDto(approved, skipped = unallocated))
                 }
                 get("/export.csv") {
                     val ctx = call.moduleContext()
@@ -168,8 +218,16 @@ fun Route.timesheetRoutes(mongo: MongoModule, clock: () -> Instant = SystemClock
                     ) {
                         return@put call.respondError(HttpStatusCode.BadRequest, "invalid_hours")
                     }
+                    if (next.lateGraceMinutes !in TimesheetSettings.GRACE_MINUTES || next.earlyLeaveGraceMinutes !in TimesheetSettings.GRACE_MINUTES ||
+                        next.earlyClockInMinutes !in TimesheetSettings.EARLY_CLOCK_IN_MINUTES || next.noShowMinutes !in TimesheetSettings.NO_SHOW_MINUTES
+                    ) {
+                        return@put call.respondError(HttpStatusCode.BadRequest, "invalid_minutes")
+                    }
                     call.respond(settings.save(ctx.tenant.id, next.copy(updatedAt = clock(), updatedBy = ctx.who())).dto(canEdit = true))
                 }
+
+                timesheetJobRoutes(mongo, projects, clock)
+                timesheetScheduleRoutes(mongo, schedule, clock)
 
                 get("/sites") {
                     val ctx = call.moduleContext()
@@ -242,6 +300,8 @@ internal data class ShiftTimesRequest(
     val breaks: List<BreakTimesRequest> = emptyList(),
     val reason: String = "",
     val note: String? = null,
+    /** Only for a new shift, when the company logs jobs: what it was for. */
+    val job: JobRequest? = null,
 ) {
     fun times(day: LocalDate, zone: TimeZone): ShiftTimes? {
         val startTime = ShiftMath.parseTime(start) ?: return null
@@ -264,6 +324,13 @@ internal data class SettingsRequest(
     val maxShiftHours: Int? = null,
     val dailyHours: Int? = null,
     val weeklyHours: Int? = null,
+    val workLog: String? = null,
+    val jobNeeds: JobNeedsRequest? = null,
+    val schedule: String? = null,
+    val lateGraceMinutes: Int? = null,
+    val earlyLeaveGraceMinutes: Int? = null,
+    val earlyClockInMinutes: Int? = null,
+    val noShowMinutes: Int? = null,
 ) {
     /** Null when a policy name isn't one. */
     fun applyTo(current: TimesheetSettings): TimesheetSettings? = current.copy(
@@ -273,8 +340,26 @@ internal data class SettingsRequest(
         maxShiftHours = maxShiftHours ?: current.maxShiftHours,
         dailyHours = dailyHours ?: current.dailyHours,
         weeklyHours = weeklyHours ?: current.weeklyHours,
+        workLog = workLog?.let { workLogPolicyOf(it) ?: return null } ?: current.workLog,
+        jobNeeds = jobNeeds?.let {
+            JobNeeds(
+                client = it.client ?: current.jobNeeds.client,
+                project = it.project ?: current.jobNeeds.project,
+                activity = it.activity ?: current.jobNeeds.activity,
+                note = it.note ?: current.jobNeeds.note,
+            )
+        } ?: current.jobNeeds,
+        schedule = schedule?.let { schedulePolicyOf(it) ?: return null } ?: current.schedule,
+        lateGraceMinutes = lateGraceMinutes ?: current.lateGraceMinutes,
+        earlyLeaveGraceMinutes = earlyLeaveGraceMinutes ?: current.earlyLeaveGraceMinutes,
+        earlyClockInMinutes = earlyClockInMinutes ?: current.earlyClockInMinutes,
+        noShowMinutes = noShowMinutes ?: current.noShowMinutes,
     )
 }
+
+/** Which parts a complete job has; a part left out keeps its rule. */
+@Serializable
+internal data class JobNeedsRequest(val client: Boolean? = null, val project: Boolean? = null, val activity: Boolean? = null, val note: Boolean? = null)
 
 /** Omitted fields keep what is stored; an empty address or client clears it. */
 @Serializable
@@ -288,10 +373,10 @@ internal data class SiteRequest(
     val active: Boolean? = null,
 )
 
-private class OptionalId(val value: ObjectId?)
+internal class OptionalId(val value: ObjectId?)
 
 /** The session behind the time clock's gate, for a change only admins make: 403 `not_allowed` for anyone else. */
-private suspend fun ApplicationCall.timesheetAdmin(): DashboardContext? {
+internal suspend fun ApplicationCall.timesheetAdmin(): DashboardContext? {
     val ctx = moduleContext()
     if (!ctx.isAdmin()) {
         respondError(HttpStatusCode.Forbidden, "not_allowed")
@@ -300,10 +385,10 @@ private suspend fun ApplicationCall.timesheetAdmin(): DashboardContext? {
     return ctx
 }
 
-private fun DashboardContext.who(): String = user?.email ?: "operator"
+internal fun DashboardContext.who(): String = user?.email ?: "operator"
 
 /** A query id that may be absent; null after answering 400 when it's present but malformed. */
-private suspend fun ApplicationCall.optionalId(name: String): OptionalId? {
+internal suspend fun ApplicationCall.optionalId(name: String): OptionalId? {
     val raw = request.queryParameters[name]?.takeIf { it.isNotBlank() } ?: return OptionalId(null)
     return raw.toObjectIdOrNull()?.let(::OptionalId) ?: run {
         respondError(HttpStatusCode.BadRequest, "invalid_$name")
@@ -311,32 +396,32 @@ private suspend fun ApplicationCall.optionalId(name: String): OptionalId? {
     }
 }
 
-private fun String.parseDay(): LocalDate? = runCatching { LocalDate.parse(trim()) }.getOrNull()
+internal fun String.parseDay(): LocalDate? = runCatching { LocalDate.parse(trim()) }.getOrNull()
 
-private suspend fun view(
+internal suspend fun view(
     mongo: MongoModule,
     ctx: DashboardContext,
-    settings: TimesheetSettingsRepository,
+    rules: TimesheetSettings,
     clock: () -> Instant,
     shifts: List<Shift>,
-) = ShiftView(ctx.tenant.zone(), settings.get(ctx.tenant.id), clock(), ShiftView.employees(mongo, ctx.tenant.id, shifts))
+) = ShiftView(ctx.tenant.zone(), rules, clock(), ShiftView.employees(mongo, ctx.tenant.id, shifts))
 
-private suspend fun ApplicationCall.respondTransition(
+internal suspend fun ApplicationCall.respondTransition(
     mongo: MongoModule,
     ctx: DashboardContext,
-    settings: TimesheetSettingsRepository,
+    rules: TimesheetSettings,
     clock: () -> Instant,
     transition: Transition?,
 ) {
     when (transition) {
         null -> respond(HttpStatusCode.NotFound)
         is Transition.Refused -> respondError(if (transition.error in CONFLICTS) HttpStatusCode.Conflict else HttpStatusCode.BadRequest, transition.error)
-        is Transition.Ok -> respond(view(mongo, ctx, settings, clock, listOf(transition.shift)).dto(transition.shift, detail = true))
+        is Transition.Ok -> respond(view(mongo, ctx, rules, clock, listOf(transition.shift)).dto(transition.shift, detail = true))
     }
 }
 
 /** Errors about the shift's state rather than the times sent. */
-private val CONFLICTS = setOf("shift_open", "not_clocked_in", "already_approved", "conflict")
+private val CONFLICTS = setOf("shift_open", "not_clocked_in", "already_approved", "conflict", "work_log_off")
 
 /** [base] changed by [request], or null after answering 400 with the first problem. */
 private suspend fun ApplicationCall.siteFrom(mongo: MongoModule, ctx: DashboardContext, request: SiteRequest, base: WorkSite): WorkSite? {

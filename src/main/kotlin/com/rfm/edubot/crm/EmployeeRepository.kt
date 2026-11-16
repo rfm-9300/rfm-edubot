@@ -46,13 +46,14 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
     }
 
     /**
-     * Only an employee with no payments, registered services, services done or clocked shifts can be deleted;
-     * the others get archived. Shifts are the working-time record the company keeps for five years.
+     * Only an employee with no payments, registered services, services done, clocked shifts or planned shifts can be
+     * deleted; the others get archived. Shifts are the working-time record the company keeps for five years, and
+     * planned ones the attendance against it (absences included).
      */
     suspend fun delete(id: ObjectId): DirectoryDelete =
         collection.deleteUnreferenced(
             mongoModule, tenantId, id, "employeeId",
-            listOf("crm.payments", ServiceSubmissionRepository.COLLECTION, "crm.client_services", SHIFTS_COLLECTION),
+            listOf("crm.payments", ServiceSubmissionRepository.COLLECTION, "crm.client_services", SHIFTS_COLLECTION, PLANNED_COLLECTION),
         )
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
@@ -158,5 +159,8 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
     private companion object {
         /** `timesheets.ShiftRepository.COLLECTION`, named here so the CRM doesn't depend on the time clock. */
         const val SHIFTS_COLLECTION = "timesheets.shifts"
+
+        /** `timesheets.PlannedShiftRepository.COLLECTION`, likewise. */
+        const val PLANNED_COLLECTION = "timesheets.planned"
     }
 }

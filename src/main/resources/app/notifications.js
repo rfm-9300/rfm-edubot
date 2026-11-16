@@ -4,7 +4,7 @@ const NOTIFY = I18N.section('app.notifications');
 const NOTIFICATIONS_POLL_MS = 60000;
 const NOTIFICATION_TONES = {
   agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad',
-  service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', conversation_handoff: 'warn',
+  service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', time_no_show: 'bad', conversation_handoff: 'warn',
   change_order_decided: n => (n.params?.decision === 'REJECTED' ? 'warn' : 'ok'),
 };
 const notificationTone = n => {
@@ -82,6 +82,7 @@ function notificationText(n) {
     case 'service_submitted': return { title: kind('service_submitted'), detail: line(p.service, p.client) };
     case 'time_device_enrolled': return { title: kind('time_device_enrolled'), detail: p.device || '' };
     case 'time_missed_clock_out': return { title: kind('time_missed_clock_out'), detail: line(p.day ? fmtDay(p.day) : '', p.end ? `${TIME.overdueEnd} ${p.end}` : '') };
+    case 'time_no_show': return { title: kind('time_no_show'), detail: line(p.day ? fmtDay(p.day) : '', p.start ? I18N.t('app.time.plannedToday', { time: p.start }) : '') };
     case 'conversation_handoff': return { title: kind('conversation_handoff'), detail: line(p.reason, p.channel ? channelName(p.channel) : '') };
     case 'change_order_decided': return { title: kind(p.decision === 'REJECTED' ? 'change_order_rejected' : 'change_order_approved'), detail: line(p.title, p.project) };
     default: return { title: n.body || NOTIFY.title, detail: '' };
@@ -176,6 +177,10 @@ function openNotification(n) {
   }
   if (n.ref?.startsWith('shift:')) {
     if (hasModule('timesheets')) openFrom(back, () => window.TimesheetsUI.openShift(n.ref.slice('shift:'.length)));
+    return;
+  }
+  if (n.ref?.startsWith('planned:')) {
+    if (hasModule('timesheets')) openFrom(back, () => window.TimesheetsUI.openPlan(n.ref.slice('planned:'.length)));
     return;
   }
   if (n.ref?.startsWith('employee:')) {

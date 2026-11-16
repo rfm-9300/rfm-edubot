@@ -2,6 +2,7 @@ package com.rfm.edubot.mobile.app
 
 import com.rfm.edubot.mobile.feature.building.BuildingRoute
 import com.rfm.edubot.mobile.feature.crm.CrmRoute
+import com.rfm.edubot.mobile.feature.timeclock.JobTarget
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,6 +25,15 @@ sealed interface Destination {
     data object Notifications : Destination
 
     data object MoreMenu : Destination
+
+    /** The time clock's job picker: for the next clock-in, a switch, or a part of a shift being split. */
+    data class TimeJob(val target: JobTarget) : Destination
+
+    /** One of the employee's own shifts. */
+    data class TimeShift(val shiftId: String) : Destination
+
+    /** Splitting one of the employee's shifts between jobs. */
+    data class TimeSplit(val shiftId: String) : Destination
 }
 
 data class NavState(val stack: List<Destination>) {

@@ -77,6 +77,9 @@ import com.rfm.edubot.mobile.feature.notifications.NotificationsScreen
 import com.rfm.edubot.mobile.feature.overview.OverviewScreen
 import com.rfm.edubot.mobile.feature.persona.PersonaScreen
 import com.rfm.edubot.mobile.feature.settings.SettingsScreen
+import com.rfm.edubot.mobile.feature.timeclock.JobPickerScreen
+import com.rfm.edubot.mobile.feature.timeclock.ShiftScreen
+import com.rfm.edubot.mobile.feature.timeclock.SplitScreen
 import com.rfm.edubot.mobile.feature.timeclock.TimeClockScreen
 
 /**
@@ -259,6 +262,42 @@ private fun DashboardShell(
                 navigator = navigator,
                 padding = padding,
             )
+            is Destination.TimeJob -> identity.employee?.let { employee ->
+                JobPickerScreen(
+                    repository = remember(employee.id) { graph.timeClock(employee.id) },
+                    location = graph.location,
+                    signer = graph.signer,
+                    strings = strings,
+                    target = destination.target,
+                    padding = padding,
+                    onDone = { navigator.back() },
+                )
+            }
+            is Destination.TimeShift -> identity.employee?.let { employee ->
+                ShiftScreen(
+                    repository = remember(employee.id) { graph.timeClock(employee.id) },
+                    location = graph.location,
+                    signer = graph.signer,
+                    strings = strings,
+                    clock = clock,
+                    shiftId = destination.shiftId,
+                    padding = padding,
+                    onSplit = { navigator.open(Destination.TimeSplit(destination.shiftId)) },
+                    onBack = { navigator.back() },
+                )
+            }
+            is Destination.TimeSplit -> identity.employee?.let { employee ->
+                SplitScreen(
+                    repository = remember(employee.id) { graph.timeClock(employee.id) },
+                    location = graph.location,
+                    signer = graph.signer,
+                    strings = strings,
+                    shiftId = destination.shiftId,
+                    padding = padding,
+                    onPickJob = { navigator.open(Destination.TimeJob(it)) },
+                    onDone = { navigator.back() },
+                )
+            }
         }
     }
 }
@@ -338,6 +377,8 @@ private fun ModuleScreen(
                 strings = strings,
                 clock = clock,
                 padding = padding,
+                onPickJob = { navigator.open(Destination.TimeJob(it)) },
+                onOpenShift = { navigator.open(Destination.TimeShift(it)) },
             )
         }
         DashboardModules.MY_SERVICES -> identity.employee?.let { me ->

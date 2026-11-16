@@ -202,6 +202,8 @@ Recipe: `.view__hero` (today, this week against the company's weekly hours) + th
 
 A punch runs the browser's geolocation on click when the company records location, then posts with `channel: WEB`; the outcome is a toast, and a refusal names the reason (`outside_sites` says how far the nearest site is). The running time ticks every 15 seconds while the page is on screen. Times and minutes join with a no-break space so a cell never wraps inside "8 h 3 min". The mobile app's My hours has the same parts in the same order, with the phone's setup panel under the card.
 
+When the company logs jobs, the card carries the job fields for the next clock-in (starting from the planned shift's job, else the last one used in this browser) and, while working, the current job and a ghost **Switch job** that opens a drawer with the same fields; under the strict rule a missing part is a toast before anything is sent. With planned shifts, the card says today's (or the next) planned shift, how late the employee is, and when the strict schedule opens clocking in (Clock in `disabled` until then), and a **My schedule** table (day, time, site, job, attendance pill) sits under the card. My shifts gains a Jobs column, and a shift's detail a **Work log** panel (time, job, minutes, who set it; an Incomplete pill) whose ghost Edit opens the split drawer until the shift is approved.
+
 ## Timesheets (the team's hours)
 
 `/app` Timesheets (in Business, after Employees). `.view__hero` with working now, to review, hours this week and over the limits, plus a week `.period-nav`; then `.settings-tabs` chips: **Shifts**, **Work sites**, **Rules**.
@@ -213,6 +215,15 @@ A punch runs the browser's geolocation on click when the company records locatio
 - **Rules**: one form with the policy selects and the hours, `disabled` for members, ending in a `.notice--info` reminding the company to tell its employees what is recorded.
 
 Flags read as pills with tones, never raw codes (`OUTSIDE_SITE` "Outside the sites", `UNVERIFIED` "Not verified", …); the bell's `time_missed_clock_out` and `time_device_enrolled` open the shift or the employee.
+
+Phase 2 adds tabs **Schedule** (always), and **By job** and **Activities** (while the company logs jobs), between Shifts and Work sites; the hero's figures and period navigator follow the tab:
+
+- **Schedule**: the [week planner](components.md#week-planner) with ghost **Copy last week** (through `.confirm`) and primary **Plan a shift**; a `.notice--info` while clock-ins aren't checked. A planned shift opens a detail (employee link, attendance pill, the planned times as the figure, `.detail__meta`, the note, an excuse as a `.notice--info`) with Open the shift, Remove (only when nobody clocked in for it), Excuse or Remove the excuse, and Change. The form: employee, day, start and end, **Also on** (`.chip-picks` of the day's week), work site, the job's fields and a note. Hero: planned hours, worked as planned, late, absent.
+- **Shifts** adds a "Not in yet" `.worklist` (planned shifts started with nobody clocked in; `warn` while due, `bad` once missing) under Working now, a Jobs column, and Planned, Late and Absences columns in the totals; Working now names each person's current job.
+- **By job**: Week / Month chips, Client / Project / Activity / Employee chips and an employee `.sel` in the filters, ghost **Export work log**; a table of the group (name with a `.cellbar`, hours, billable, people, entries) and the work log (latest 500, each row opening its shift; a `.hint` when there are more). Hero: hours, billable, not accounted for, billable share.
+- **Activities**: a table (name with the code as a mono `.sub`, a Billable or Not billable pill, In use or Not in use); admins add and edit in a drawer (name, code, billable, in use) and remove one nobody logged time against.
+- **Rules** gains two `.form__section` groups: Hours per job (the policy and, under `.form__checks`, what a complete job has) and Schedules (the policy and four minute fields).
+- The team's shift detail gains the planned times with lateness in `.detail__meta` and the Work log panel, whose Edit asks for a reason; the bell's `time_no_show` opens the planned shift.
 
 ## Building (projects and their progress)
 

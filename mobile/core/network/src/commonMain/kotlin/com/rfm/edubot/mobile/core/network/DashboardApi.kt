@@ -6,6 +6,7 @@ import com.rfm.edubot.mobile.core.model.ChangeOrder
 import com.rfm.edubot.mobile.core.model.ChangeStatus
 import com.rfm.edubot.mobile.core.model.CreateService
 import com.rfm.edubot.mobile.core.model.DirectoryFields
+import com.rfm.edubot.mobile.core.model.JobOptions
 import com.rfm.edubot.mobile.core.model.Measurement
 import com.rfm.edubot.mobile.core.model.MeasurementInvoiced
 import com.rfm.edubot.mobile.core.model.MySite
@@ -15,6 +16,7 @@ import com.rfm.edubot.mobile.core.model.Project
 import com.rfm.edubot.mobile.core.model.QuoteToService
 import com.rfm.edubot.mobile.core.model.SaveIssue
 import com.rfm.edubot.mobile.core.model.SaveSiteLog
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
 import com.rfm.edubot.mobile.core.model.ServiceSubmission
 import com.rfm.edubot.mobile.core.model.SiteIssue
 import com.rfm.edubot.mobile.core.model.SiteLog
@@ -285,4 +287,10 @@ interface TimeClockApi {
     suspend fun closeForgotten(shiftId: String, request: CloseShift): PunchResult
     suspend fun enroll(request: EnrollDevice): TimeDevice
     suspend fun removeDevice(keyId: String)
+
+    /** What a job can name: the company's clients, open projects and activities in use. */
+    suspend fun jobs(): JobOptions
+
+    /** Splits the employee's own unapproved shift between jobs; answers the shift as saved. */
+    suspend fun editSegments(shiftId: String, request: SegmentsRequest): Shift
 }

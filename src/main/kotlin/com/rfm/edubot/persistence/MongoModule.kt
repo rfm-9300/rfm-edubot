@@ -230,7 +230,17 @@ class MongoModule(config: AppConfig.MongoConfig) {
             shifts.createIndex(Document("tenantId", 1).append("employeeId", 1).append("day", -1))
             shifts.createIndex(Document("tenantId", 1).append("status", 1).append("review.status", 1))
             shifts.createIndex(Document("punches.at", 1))
+            // Phase 2: shifts linked to a planned one, and time on a client or project (all time, for job costing).
+            shifts.createIndex(Document("tenantId", 1).append("planned.id", 1), IndexOptions().sparse(true))
+            shifts.createIndex(Document("tenantId", 1).append("segments.job.clientId", 1), IndexOptions().sparse(true))
+            shifts.createIndex(Document("tenantId", 1).append("segments.job.projectId", 1), IndexOptions().sparse(true))
             db.getCollection<Document>("timesheets.sites").createIndex(Document("tenantId", 1).append("name", 1))
+            db.getCollection<Document>("timesheets.activities").createIndex(Document("tenantId", 1).append("name", 1))
+            val planned = db.getCollection<Document>("timesheets.planned")
+            planned.createIndex(Document("tenantId", 1).append("day", 1))
+            planned.createIndex(Document("tenantId", 1).append("employeeId", 1).append("startAt", 1))
+            // The no-show watch: started plans nobody matched or was alerted about, across companies.
+            planned.createIndex(Document("startAt", 1).append("matchedShiftId", 1).append("alertedAt", 1))
             val timeDevices = db.getCollection<Document>("timesheets.devices")
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("keyId", 1), IndexOptions().unique(true))
             timeDevices.createIndex(Document("tenantId", 1).append("employeeId", 1).append("active", 1))

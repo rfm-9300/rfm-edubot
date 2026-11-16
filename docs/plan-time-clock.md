@@ -2,7 +2,8 @@
 
 Status: **Phase 1 implemented** (server, `/app` employee page and team page, mobile time clock with
 location and biometrics); the as-built reference is [Time clock](architecture.md#time-clock) in the
-architecture doc · Owner: Rodrigo · Last updated: 2026-10-07
+architecture doc. Hours per job and schedules followed on 2026-11-13:
+[plan-time-clock-jobs-schedules.md](plan-time-clock-jobs-schedules.md) · Owner: Rodrigo · Last updated: 2026-11-13
 
 Employees (colaboradores) clock in and out, take breaks and see their hours, from the web or the
 phone. The company sees who is working, reviews and approves the hours, fixes mistakes with a reason
@@ -321,7 +322,8 @@ are Phase 2.
 - Reminders: push notification for a forgotten clock-out, and before a scheduled shift (needs push,
   which the app doesn't have yet).
 - Approve new phones before they count as verified; Play Integrity / App Attest attestation.
-- Schedules (planned shifts), late/absent alerts, early clock-in prevention.
+- Schedules (planned shifts), late/absent alerts, early clock-in prevention. Done 2026-11-13, with
+  hours per job: [plan-time-clock-jobs-schedules.md](plan-time-clock-jobs-schedules.md).
 - Turn approved hours into payroll payments or into billable Serviços rows for the site's client.
 - Kiosk mode (shared tablet with PIN) for teams without phones.
 - PDF export signed off by the employee (art. 202.º n.º 3 "visar" for external workers).

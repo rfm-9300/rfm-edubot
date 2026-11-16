@@ -7,6 +7,7 @@ import com.rfm.edubot.mobile.core.model.ChangeStatus
 import com.rfm.edubot.mobile.core.model.CreateService
 import com.rfm.edubot.mobile.core.model.DirectoryFields
 import com.rfm.edubot.mobile.core.model.DueDate
+import com.rfm.edubot.mobile.core.model.JobOptions
 import com.rfm.edubot.mobile.core.model.Measurement
 import com.rfm.edubot.mobile.core.model.MeasurementInvoiced
 import com.rfm.edubot.mobile.core.model.MySite
@@ -19,6 +20,7 @@ import com.rfm.edubot.mobile.core.model.QuoteToService
 import com.rfm.edubot.mobile.core.model.RejectSubmission
 import com.rfm.edubot.mobile.core.model.SaveIssue
 import com.rfm.edubot.mobile.core.model.SaveSiteLog
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
 import com.rfm.edubot.mobile.core.model.ServiceSubmission
 import com.rfm.edubot.mobile.core.model.SiteIssue
 import com.rfm.edubot.mobile.core.model.SiteLog
@@ -478,6 +480,10 @@ class KtorTimeClockApi(private val http: DashboardHttpClient) : TimeClockApi {
     override suspend fun removeDevice(keyId: String) {
         http.send(HttpMethod.Delete, "$APP/portal/time/devices/$keyId")
     }
+
+    override suspend fun jobs(): JobOptions = http.get("$APP/portal/time/jobs")
+
+    override suspend fun editSegments(shiftId: String, request: SegmentsRequest): Shift = http.put("$APP/portal/time/shifts/$shiftId/segments", request)
 }
 
 class KtorSettingsApi(private val http: DashboardHttpClient) : SettingsApi {

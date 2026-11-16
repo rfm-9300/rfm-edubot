@@ -16,9 +16,19 @@ import com.rfm.edubot.mobile.core.data.SnapshotCache
 import com.rfm.edubot.mobile.core.data.TimeClockRepository
 import com.rfm.edubot.mobile.core.model.CloseShift
 import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.Job
+import com.rfm.edubot.mobile.core.model.JobActivity
+import com.rfm.edubot.mobile.core.model.JobClient
+import com.rfm.edubot.mobile.core.model.JobNeeds
+import com.rfm.edubot.mobile.core.model.JobOptions
+import com.rfm.edubot.mobile.core.model.JobRequest
+import com.rfm.edubot.mobile.core.model.JobRules
+import com.rfm.edubot.mobile.core.model.PlannedShift
 import com.rfm.edubot.mobile.core.model.PunchRequest
 import com.rfm.edubot.mobile.core.model.PunchResult
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
 import com.rfm.edubot.mobile.core.model.Shift
+import com.rfm.edubot.mobile.core.model.ShiftSegment
 import com.rfm.edubot.mobile.core.model.TimeChallenge
 import com.rfm.edubot.mobile.core.model.TimeClockStatus
 import com.rfm.edubot.mobile.core.model.TimeDevice
@@ -83,16 +93,29 @@ private class FakeApi(var policy: TimesheetPolicy, var sites: List<WorkSite> = e
     val punches = mutableListOf<PunchRequest>()
     val enrolled = mutableListOf<EnrollDevice>()
     val closed = mutableListOf<Pair<String, String>>()
+    val splits = mutableListOf<Pair<String, SegmentsRequest>>()
     var devices = emptyList<TimeDevice>()
+    var planned: PlannedShift? = null
+    var history = emptyList<Shift>()
 
     private fun statusOf(state: String = TimeClockStatus.STATE_OFF) =
-        TimeClockStatus(policy = policy, state = state, sites = sites, devices = devices, serverTime = "2026-10-07T08:00:00Z")
+        TimeClockStatus(policy = policy, state = state, sites = sites, devices = devices, serverTime = "2026-10-07T08:00:00Z", planned = planned)
+
+    override suspend fun jobs() = JobOptions(
+        clients = listOf(JobClient("c1", "CLT-001", "Casa Silva")),
+        activities = listOf(JobActivity("a1", "Limpeza"), JobActivity("a2", "Deslocação", billable = false)),
+    )
+
+    override suspend fun editSegments(shiftId: String, request: SegmentsRequest): Shift {
+        splits += shiftId to request
+        return shift.copy(id = shiftId, status = "CLOSED")
+    }
 
     private val shift = Shift(id = "s1", employeeId = "e1", status = "OPEN", day = "2026-10-07", startAt = "2026-10-07T07:00:00Z", startTime = "08:00")
 
     override suspend fun status(): TimeClockStatus = statusOf()
 
-    override suspend fun shifts(): List<Shift> = emptyList()
+    override suspend fun shifts(): List<Shift> = history
 
     override suspend fun challenge() = TimeChallenge("n1", "2026-10-07T08:02:00Z")
 
@@ -320,5 +343,104 @@ class TimeClockViewModelTest {
         h.vm.closeForgotten("s1", " 18:30 ").join()
         assertEquals(listOf("s1" to "18:30"), h.api.closed)
         assertEquals(TimeClockDone.SHIFT_CLOSED, h.vm.state.value.done)
+    }
+
+    private val strict = nothingAsked.copy(workLog = TimesheetPolicy.POLICY_REQUIRED, jobNeeds = JobNeeds(activity = true))
+
+    @Test
+    fun `under the strict work log a clock-in waits for a complete job and then carries it`() = runTest {
+        val h = harness(strict)
+        h.vm.load().join()
+
+        h.vm.punch(PunchRequest.IN, PROMPT).join()
+        assertTrue(h.api.punches.isEmpty(), "nothing reaches the backend without a job")
+        assertEquals(JobRules.PART_JOB, h.vm.state.value.missing)
+
+        h.vm.chooseJob(JobRequest(clientId = "c1"))
+        h.vm.punch(PunchRequest.IN, PROMPT).join()
+        assertEquals(JobRules.PART_ACTIVITY, h.vm.state.value.missing)
+
+        h.vm.chooseJob(JobRequest(clientId = "c1", activityId = "a1"))
+        h.vm.punch(PunchRequest.IN, PROMPT).join()
+        assertEquals(JobRequest(clientId = "c1", activityId = "a1"), h.api.punches.single().job)
+        assertNull(h.vm.state.value.missing)
+        assertEquals(TimeClockDone.IN, h.vm.state.value.done)
+    }
+
+    @Test
+    fun `the next clock-in starts from the planned shift job or else the last one worked`() = runTest {
+        val h = harness(nothingAsked.copy(workLog = TimesheetPolicy.POLICY_OPTIONAL))
+        h.api.history = listOf(
+            Shift(
+                id = "old", employeeId = "e1", status = "CLOSED", day = "2026-10-06", startAt = "2026-10-06T07:00:00Z", startTime = "08:00",
+                segments = listOf(ShiftSegment("2026-10-06T07:00:00Z", startTime = "08:00", job = Job(activityId = "a2", activityName = "Deslocação"))),
+            ),
+        )
+        h.vm.load().join()
+        assertEquals(JobRequest(activityId = "a2"), h.vm.state.value.job, "the last job worked on")
+
+        val other = harness(nothingAsked.copy(workLog = TimesheetPolicy.POLICY_OPTIONAL))
+        other.api.planned = PlannedShift(
+            id = "p1", day = "2026-10-07", startAt = "2026-10-07T07:00:00Z", endAt = "2026-10-07T15:00:00Z", startTime = "08:00", endTime = "16:00",
+            job = Job(clientId = "c1", clientName = "Casa Silva", activityId = "a1", activityName = "Limpeza"),
+        )
+        other.api.history = h.api.history
+        other.vm.load().join()
+        assertEquals(JobRequest(clientId = "c1", activityId = "a1"), other.vm.state.value.job, "the plan wins")
+        assertEquals("Casa Silva · Limpeza", other.repository.jobs.state.value.value?.label(other.vm.state.value.job))
+    }
+
+    @Test
+    fun `a switch punches with its job and a company without a work log sends none`() = runTest {
+        val h = harness(strict)
+        h.vm.load().join()
+        h.vm.switchJob(JobRequest(clientId = "c1"), PROMPT).join()
+        assertTrue(h.api.punches.isEmpty())
+        assertEquals(JobRules.PART_ACTIVITY, h.vm.state.value.missing)
+
+        h.vm.applyJob(JobTarget.Switch, JobRequest(activityId = "a2"), PROMPT)?.join()
+        val sent = h.api.punches.single()
+        assertEquals(PunchRequest.SWITCH to JobRequest(activityId = "a2"), sent.type to sent.job)
+        assertEquals(TimeClockDone.SWITCH, h.vm.state.value.done)
+
+        val plain = harness(nothingAsked)
+        plain.vm.load().join()
+        plain.vm.chooseJob(JobRequest(activityId = "a1"))
+        plain.vm.punch(PunchRequest.IN, PROMPT).join()
+        assertNull(plain.api.punches.single().job, "no work log, no job")
+    }
+
+    @Test
+    fun `splitting a shift edits its parts on the phone and checks the times before saving them`() = runTest {
+        val h = harness(nothingAsked.copy(workLog = TimesheetPolicy.POLICY_OPTIONAL))
+        h.vm.load().join()
+        val shift = Shift(
+            id = "s9", employeeId = "e1", status = "CLOSED", day = "2026-10-06", startAt = "2026-10-06T07:00:00Z", startTime = "08:00",
+            segments = listOf(ShiftSegment("2026-10-06T07:00:00Z", startTime = "08:00", job = Job(clientId = "c1", clientName = "Casa Silva"))),
+        )
+        h.vm.startSplit(shift)
+        assertEquals(listOf(PartDraft("08:00", JobRequest(clientId = "c1"), "Casa Silva")), h.vm.state.value.split?.parts)
+
+        h.vm.addPart()
+        h.vm.setPartStart(1, "10:3")
+        h.vm.applyJob(JobTarget.Part(1), JobRequest(activityId = "a2"), PROMPT)
+        h.vm.setPartStart(0, "07:00")
+        assertEquals("08:00", h.vm.state.value.split?.parts?.first()?.start, "the first part starts with the shift")
+
+        h.vm.saveSplit().join()
+        assertTrue(h.api.splits.isEmpty(), "a half-typed time doesn't make a round trip")
+        assertEquals(AppError.Rejected("invalid_time"), h.vm.state.value.error)
+
+        h.vm.setPartStart(1, "10:30")
+        h.vm.saveSplit().join()
+        val (shiftId, request) = h.api.splits.single()
+        assertEquals("s9", shiftId)
+        assertEquals(listOf("08:00" to JobRequest(clientId = "c1"), "10:30" to JobRequest(activityId = "a2")), request.segments.map { it.start to it.job })
+        assertNull(h.vm.state.value.split)
+        assertEquals(TimeClockDone.SPLIT_SAVED, h.vm.state.value.done)
+
+        h.vm.startSplit(shift)
+        h.vm.removePart(0)
+        assertEquals(1, h.vm.state.value.split?.parts?.size, "the first part can't be removed")
     }
 }

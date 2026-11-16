@@ -2508,6 +2508,34 @@ html[data-theme="dark"] .tpl__dirty { color: var(--warn); }
   .clock__actions .btn { flex: 1 1 140px; min-width: 0; }
   .notice:has(.clock__fix) { flex-direction: column; align-items: stretch; }
 }
+/* Running late for the planned shift. */
+.clock__meta--warn { color: var(--warn-ink); font-weight: 600; }
+/* What the clock-in is for: the job's fields above the buttons, under a hairline. */
+.clock__job { display: grid; gap: 8px; padding-top: 12px; border-top: 1px solid var(--line-soft); }
+.clock__job > .lbl { margin: 0; }
+/* A heading that opens a group of fields inside a long .form (the time clock's Rules). */
+.form__section { margin: 6px 0 -4px; padding-top: 14px; border-top: 1px solid var(--line); color: var(--ink); font-size: 13px; font-weight: 700; }
+/* The team's week planner: one row per employee, a cell per day with .week-event cards and a reveal-on-hover add.
+   A fixed layout shares the width between the days, so a long attendance line ellipsizes instead of widening it. */
+.planner { table-layout: fixed; }
+.planner th:first-child { width: 150px; }
+.planner th:last-child { width: 96px; }
+.planner td.planner__cell { vertical-align: top; }
+.planner__cell .week-event + .week-event { margin-top: 4px; }
+.planner__cell:hover .week-board__add, .planner__cell .week-board__add:focus-visible { opacity: 1; }
+.planner .planner__day.is-today { color: var(--ink); font-weight: 700; }
+/* A shift's time split between jobs: one card per part, its start time in the head. */
+.segments { display: grid; gap: 12px; }
+.segment .panel__head { align-items: center; gap: 8px; }
+.segment__start { display: flex; align-items: center; gap: 8px; }
+.segment__from { margin: 0; }
+.segment__time { width: 120px; }
+@media (max-width: 920px) {
+  .planner { table-layout: auto; }
+  .planner__cell .week-board__add { opacity: 1; }
+  /* A day's cell has room to wrap in the stacked card. */
+  .planner__cell .week-event :is(b, span) { white-space: normal; }
+}
 
 /* ── Building (/app → Projects, Site diary, Issues, Changes, Measurements) ── */
 /* A project's or phase's progress: the work done as a fill in its tone, and a tick where the plan is by now. */

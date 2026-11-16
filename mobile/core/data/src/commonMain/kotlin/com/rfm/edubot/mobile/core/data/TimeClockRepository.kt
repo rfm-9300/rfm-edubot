@@ -3,7 +3,9 @@ package com.rfm.edubot.mobile.core.data
 import com.rfm.edubot.mobile.core.common.Outcome
 import com.rfm.edubot.mobile.core.model.CloseShift
 import com.rfm.edubot.mobile.core.model.EnrollDevice
+import com.rfm.edubot.mobile.core.model.JobOptions
 import com.rfm.edubot.mobile.core.model.PunchRequest
+import com.rfm.edubot.mobile.core.model.SegmentsRequest
 import com.rfm.edubot.mobile.core.model.PunchResult
 import com.rfm.edubot.mobile.core.model.Shift
 import com.rfm.edubot.mobile.core.model.TimeChallenge
@@ -37,6 +39,28 @@ class TimeClockRepository(
         cache = cache,
         fetch = { api.shifts() },
     )
+
+    /** What a job can name; only fetched when the company logs jobs. */
+    val jobs = CachedResource(
+        key = "timeclock.$employeeId.jobs",
+        serializer = JobOptions.serializer(),
+        cache = cache,
+        fetch = { api.jobs() },
+    )
+
+    /**
+     * Splits the employee's own shift between jobs. The saved shift replaces its row; when it is the one running, the
+     * status (which shows its current job) is fetched again.
+     */
+    suspend fun editSegments(shiftId: String, request: SegmentsRequest): Outcome<Shift> {
+        val saved = apiCall { api.editSegments(shiftId, request) }
+        saved.valueOrNull?.let { shift ->
+            val current = shifts.state.value.value
+            if (current != null) shifts.put(current.map { if (it.id == shift.id) shift else it })
+            if (shift.isOpen) status.refresh()
+        }
+        return saved
+    }
 
     suspend fun challenge(): Outcome<TimeChallenge> = apiCall { api.challenge() }
 

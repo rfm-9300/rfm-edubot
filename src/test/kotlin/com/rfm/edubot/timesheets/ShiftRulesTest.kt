@@ -134,10 +134,10 @@ class ShiftRulesTest {
     fun `the team's corrections keep what the shift was and send it back for approval`() {
         val now = monday8 + 30.hours
         val closed = started().then(PunchType.OUT, monday8 + 8.hours)
-        val approved = ShiftRules.approve(closed, "ana@obras.test", now).shift()
+        val approved = ShiftRules.approve(closed, "ana@obras.test", settings, now).shift()
         assertEquals(ReviewStatus.APPROVED, approved.review.status)
-        assertEquals("already_approved", assertIs<Transition.Refused>(ShiftRules.approve(approved, "ana@obras.test", now)).error)
-        assertEquals("shift_open", assertIs<Transition.Refused>(ShiftRules.approve(started(), "ana@obras.test", now)).error)
+        assertEquals("already_approved", assertIs<Transition.Refused>(ShiftRules.approve(approved, "ana@obras.test", settings, now)).error)
+        assertEquals("shift_open", assertIs<Transition.Refused>(ShiftRules.approve(started(), "ana@obras.test", settings, now)).error)
 
         val corrected = ShiftMath.wallTimes(LocalDate(2026, 10, 5), LocalTime(8, 0), LocalTime(17, 30), listOf(LocalTime(12, 0) to LocalTime(13, 0)), lisbon)
         assertEquals("reason_required", assertIs<Transition.Refused>(ShiftRules.edit(approved, corrected, "rui@obras.test", " ", settings, lisbon, now)).error)
@@ -181,7 +181,7 @@ class ShiftRulesTest {
             return started(start).then(PunchType.OUT, start + hours.hours)
         }
         val week = listOf(day("2026-10-05", 10), day("2026-10-06", 9), day("2026-10-07", 9), day("2026-10-08", 9), day("2026-10-09", 8))
-        val approved = ShiftRules.approve(week.last(), "rui", now).shift()
+        val approved = ShiftRules.approve(week.last(), "rui", settings, now).shift()
         val totals = Timesheets.totals(week.dropLast(1) + approved, settings, now).single()
         assertEquals(45 * 60, totals.workedMinutes)
         assertEquals(5, totals.days)
