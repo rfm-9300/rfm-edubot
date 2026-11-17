@@ -242,8 +242,12 @@ async function loadModule(tab) {
     state.catalogCategories = categories;
   }
   if (tab === 'persona') {
-    state.persona = await api('/app/api/persona');
-    if (state.personaTab === 'menus') await window.MenusUI.load().catch(() => { state.personaFlows = { failed: true }; });
+    // The Overview and the Channels tab both read the channel settings and menus.
+    const [persona] = await Promise.all([
+      api('/app/api/persona'),
+      window.MenusUI.load().catch(() => { state.personaFlows = { failed: true }; }),
+    ]);
+    state.persona = persona;
   }
   if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
@@ -516,7 +520,8 @@ function emailDeps() {
     canOpenRecord: subject => canOpenAgentSubject(subject),
   };
 }
-// The Persona page's Menus tab; the test chat beside it stays here and tries the unsaved menus.
+// The Persona page's Channels tab (menus.js); the test chat beside it (persona.js) tries the unsaved menus,
+// and the page's one save bar saves them.
 function menusDeps() {
   return {
     api, escapeHTML, toast, confirmDialog, render, renderKeepingFocus, setActive, relTime, fmtCount, personaNotice, personaAuthor,
@@ -524,6 +529,7 @@ function menusDeps() {
     get state() { return state; },
     onDraft: paintPersonaDraft,
     tryInChat: tryPersonaMenu,
+    save: savePersonaPage,
   };
 }
 // Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
@@ -566,6 +572,7 @@ async function init(relayed = false) {
   window.AssistantUI?.init(assistantDeps());
   window.EmailUI?.init(emailDeps());
   window.MenusUI?.init(menusDeps());
+  wirePersonaUnload();
   I18N.applyDom(document);
   startAmounts();
   wireSidebarToggle();

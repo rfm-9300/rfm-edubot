@@ -236,10 +236,11 @@ class PersonaRoutesTest {
         }
     }
 
-    private inner class Company(modules: List<String>? = null, val budget: Long = 2_000_000L) {
+    private inner class Company(modules: List<String>? = null, val budget: Long = 2_000_000L, channels: List<Platform> = emptyList()) {
         val id = ObjectId()
         val tenant = Tenant(
-            id = id, slug = "t-${id.toHexString()}", name = "Clínica Sorriso", channels = emptyList(), openrouterModel = "tenant/model",
+            id = id, slug = "t-${id.toHexString()}", name = "Clínica Sorriso", openrouterModel = "tenant/model",
+            channels = channels.map { com.rfm.edubot.tenant.model.ChannelBinding(it, "${it.name.lowercase()}-${id.toHexString()}") },
             enabledModules = modules, monthlyTokenBudget = budget, createdAt = now, updatedAt = now,
         )
         lateinit var admin: DashboardUser
@@ -273,7 +274,8 @@ class PersonaRoutesTest {
             .sign(Algorithm.HMAC256(SECRET))
     }
 
-    private suspend fun company(modules: List<String>? = null, budget: Long = 2_000_000L) = Company(modules, budget).create()
+    private suspend fun company(modules: List<String>? = null, budget: Long = 2_000_000L, channels: List<Platform> = emptyList()) =
+        Company(modules, budget, channels).create()
 
     private suspend fun HttpResponse.obj(): JsonObject = json.parseToJsonElement(bodyAsText()).jsonObject
     private suspend fun HttpResponse.list(): JsonArray = json.parseToJsonElement(bodyAsText()).jsonArray
@@ -726,6 +728,94 @@ class PersonaRoutesTest {
 
         send("POST", "/app/api/persona/test", token, messages("user" to "procura"))
         assertTrue(chats.last().messages.last().content!!.contains("\"clients\""), "the read tool ran")
+    }
+
+    @Test
+    fun `one save writes the settings and the instructions as one version, and the page learns what applies to the company`() = personaTest {
+        val c = company(modules = listOf(DashboardModules.PERSONA, DashboardModules.CATALOG, DashboardModules.CLIENTS))
+        val token = token(c.admin.email)
+        val empty = persona(token)
+        assertEquals("Clínica Sorriso", empty.text("companyName"))
+        assertEquals(listOf("catalog", "records"), empty["capabilities"]!!.jsonArray.map { it.jsonPrimitive.content }, "no Bookings module, no bookings switch")
+        assertEquals(listOf("WHATSAPP" to false, "INSTAGRAM" to false, "WEB" to false), empty["channels"]!!.jsonArray.map { it.jsonObject.text("channel") to it.jsonObject.bool("connected") })
+        assertEquals(listOf("ASKS_FOR_PERSON", "UPSET", "CANT_HELP"), empty.obj("behavior").obj("handoff")["reasons"]!!.jsonArray.map { it.jsonPrimitive.content }, "a new persona offers the usual situations")
+
+        val everything = buildJsonObject {
+            put("compiledInstructions", "Notas livres.")
+            putJsonObject("behavior") {
+                put("botName", "Sofia")
+                put("disclosure", "WHEN_ASKED")
+                put("scope", "BUSINESS")
+                put("unknown", "SHARE_CONTACT")
+                putJsonObject("business") { put("name", "Clínica Sorriso"); put("hours", "9–18") }
+                putJsonArray("faq") { addJsonObject { put("question", "Preço?"); put("answer", "40 €.") } }
+                putJsonObject("capabilities") { put("catalog", true); put("bookings", true); put("records", false) }
+                putJsonObject("handoff") { put("enabled", true); putJsonArray("reasons") { add("URGENT") } }
+            }
+        }
+        val saved = send("PUT", "/app/api/persona", token, everything).obj()
+        assertEquals(1, saved.int("version"))
+        assertEquals("Notas livres.", saved.text("compiledInstructions"))
+        val b = saved.obj("behavior")
+        assertEquals(listOf("Sofia", "WHEN_ASKED", "BUSINESS", "SHARE_CONTACT"), listOf("botName", "disclosure", "scope", "unknown").map { b.text(it) })
+        assertEquals("9–18", b.obj("business").text("hours"))
+        assertEquals("40 €.", b["faq"]!!.jsonArray.single().jsonObject.text("answer"))
+        assertEquals(false, b.obj("capabilities").bool("records"))
+        assertEquals(listOf("URGENT"), b.obj("handoff")["reasons"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals("SETTINGS_AND_INSTRUCTIONS", send("GET", "/app/api/persona/versions", token).list().single().jsonObject.text("change"))
+        verify(exactly = 1) { pipelines.evict(c.id) }
+
+        assertEquals(1, send("PUT", "/app/api/persona", token, everything).obj().int("version"), "saving the same again writes nothing")
+        assertEquals(2, send("PUT", "/app/api/persona", token, buildJsonObject { putJsonObject("behavior") { put("botName", "Rita") } }).obj().int("version"))
+        assertEquals("Notas livres.", persona(token).text("compiledInstructions"), "settings alone keep the instructions")
+
+        val half = buildJsonObject { putJsonObject("behavior") { putJsonArray("faq") { addJsonObject { put("question", "a"); put("answer", "b") }; addJsonObject { put("question", "Sem resposta?") } } } }
+        val refused = send("PUT", "/app/api/persona", token, half)
+        assertEquals(HttpStatusCode.BadRequest, refused.status)
+        val problem = refused.obj()
+        assertEquals(listOf("answer_required", "faq.answer", "1"), listOf(problem.text("error"), problem.text("field"), problem.text("index")))
+        assertEquals(2, persona(token).int("version"), "a refused save writes nothing")
+        assertEquals(HttpStatusCode.Forbidden, send("PUT", "/app/api/persona", token(c.member.email), everything).status)
+    }
+
+    @Test
+    fun `what the bot can do decides the tools the test chat offers, saved or unsaved`() = personaTest {
+        val c = company(modules = listOf(DashboardModules.PERSONA, DashboardModules.CATALOG, DashboardModules.CLIENTS, DashboardModules.QUOTES))
+        val token = token(c.admin.email)
+        send("POST", "/app/api/persona/test", token, messages("user" to "Olá"))
+        assertTrue(chats.last().offers("list_standard_items") && chats.last().offers("search_clients"), "everything is on by default")
+
+        send("PUT", "/app/api/persona/behavior", token, behavior { putJsonObject("capabilities") { put("records", false) } })
+        send("POST", "/app/api/persona/test", token, messages("user" to "Olá"))
+        assertTrue(chats.last().offers("list_standard_items"))
+        assertFalse(chats.last().offers("search_clients") || chats.last().offers("list_quotes"), "no clients, quotes or invoices")
+        // The tool list is the gate (the shared CRM rules may still name other tools: SystemPromptsTest).
+        val toolList = chats.last().system.joinToString("\n").substringAfter("Ferramentas disponiveis:").substringBefore("Regras:")
+        assertTrue("list_standard_items" in toolList && "search_clients" !in toolList, "nor listed: $toolList")
+
+        val nothing = buildJsonObject { putJsonObject("behavior") { putJsonObject("capabilities") { put("catalog", false); put("records", false) } } }
+        send("POST", "/app/api/persona/test", token, messages("user" to "Olá", draft = nothing))
+        assertTrue(chats.last().tools.isEmpty(), "an unsaved switch is tried too")
+        assertEquals(3, chats.last().system.size, "only the persona, the platform rules and the date")
+    }
+
+    @Test
+    fun `the AI can be turned off on WhatsApp too, never on the website, and the test chat says where it's off`() = personaTest {
+        val c = company(channels = listOf(Platform.WHATSAPP))
+        val token = token(c.admin.email)
+        val before = send("GET", "/app/api/persona/menus", token).obj()
+        assertEquals(listOf("INSTAGRAM", "WHATSAPP"), before["teamOnlyOptions"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(true, before.bool("whatsappConnected"))
+        assertEquals(false, before.bool("instagramConnected"))
+        assertEquals(listOf("WHATSAPP" to true), persona(token)["channels"]!!.jsonArray.map { it.jsonObject }.filter { it.bool("connected") }.map { it.text("channel") to true })
+
+        val saved = send("PUT", "/app/api/persona/menus", token, menus(teamOnly = listOf("WHATSAPP", "WEB", "INSTAGRAM"))).obj()
+        assertEquals(listOf("INSTAGRAM", "WHATSAPP"), saved["teamOnlyChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(setOf(Platform.INSTAGRAM, Platform.WHATSAPP), ChatFlowRepository(mongo, c.id).load()!!.teamOnlyChannels)
+
+        val reply = send("POST", "/app/api/persona/test", token, messages("user" to "Olá")).obj()
+        assertEquals(listOf("INSTAGRAM", "WHATSAPP"), reply["aiOffChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
+        assertEquals(true, reply.bool("teamOnly"))
     }
 
     @Test

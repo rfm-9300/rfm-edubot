@@ -47,7 +47,9 @@ predates the overhaul: recheck the new structure against [KMP engineering guide]
 on it.
 
 Still web-only after #44: the agent builder, the document-template studio, the widget customiser,
-WhatsApp template management, Instagram, the Google/Gmail integrations and persona file uploads.
+WhatsApp template management, Instagram, the Google/Gmail integrations, persona file uploads and every
+Persona setting but the instructions (the profile, business details, questions and answers, rules and
+channels of the 2026-11-16 redesign; the API's additions are additive, so the app is unaffected).
 Google sign-in, push notifications and inbox media are not started (`docs/plan-kmp-mobile-frontend.md`
 on the PR branch).
 

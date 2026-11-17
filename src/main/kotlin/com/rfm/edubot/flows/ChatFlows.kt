@@ -13,7 +13,10 @@ import java.util.Locale
  */
 data class ChatFlows(
     val flows: List<ChatFlow> = emptyList(),
-    /** Channels where the AI never answers on its own, so a message no flow answers waits for the team. */
+    /**
+     * Channels where the AI never answers on its own, so a message no flow answers waits for the team. Only
+     * [TEAM_ONLY_CHANNELS]: the team can't reply to a website chat, so the website always gets the AI.
+     */
     val teamOnlyChannels: Set<Platform> = emptySet(),
     /** Channels where a new chat only gets answers when its first message holds a start word, by channel. */
     val startGates: Map<Platform, StartGate> = emptyMap(),
@@ -62,6 +65,11 @@ data class ChatFlows(
             if (gate.enabled && !gate.usable()) return FlowProblem("start_words", channel = channel)
         }
         return null
+    }
+
+    companion object {
+        /** Where the AI can be turned off: channels the team answers from Conversations. */
+        val TEAM_ONLY_CHANNELS = setOf(Platform.INSTAGRAM, Platform.WHATSAPP)
     }
 }
 

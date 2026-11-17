@@ -1,9 +1,12 @@
-/* Persona → Menus (/app): fixed messages with buttons that answer Instagram before the AI, like ManyChat's
-   keyword automations. A list of menus that open in place, each with its keywords, a map of where its
-   buttons lead and its messages, beside the test chat app.js draws. app.js mounts it with init() and passes
-   its helpers; the server checks every rule again when menus are saved or tried (`/app/api/persona/menus`).
-   Unsaved edits live in state.personaDraft.menus, a copy of the saved menus taken on the first edit. The tab also
-   holds each channel's start words: a new chat there is only answered when its first message holds one. */
+/* Persona → Channels (/app): who the bot answers on each channel, then the Instagram menus. Each channel row
+   says whether the AI answers there (WhatsApp and Instagram can leave it to the team; the website always gets
+   the AI) and its start words: a new chat there is only answered when its first message holds one. Menus are
+   fixed messages with buttons that answer Instagram before the AI, like ManyChat's keyword automations: a list
+   of menus that open in place, each with its keywords, a map of where its buttons lead and its messages, beside
+   the test chat persona.js draws. app.js mounts it with init() and passes its helpers; the server checks every
+   rule again when menus are saved or tried (`/app/api/persona/menus`). Unsaved edits live in
+   state.personaDraft.menus, a copy of the saved menus taken on the first edit, and the page's one save bar saves
+   them (save()). */
 (function () {
   let d = null;
   const M = I18N.section('app.personaStudio.menus');
@@ -95,7 +98,7 @@
   // ── Start words: what a new chat's first message must hold, by channel ───────────────────────
 
   const channels = () => saved()?.startChannels || [];
-  const channelName = channel => tr(`startChannel.${channel}`);
+  const channelName = channel => PS.channel?.[channel] || channel;
   const gateOf = (m, channel) => (m.startGates || []).find(g => g.channel === channel) || { channel, enabled: false, words: [] };
 
   /** The gate of [channel] in the draft, added when the channel has none yet. */
@@ -270,15 +273,13 @@
     const limits = limitsOf();
     const edit = canEdit();
     const ctx = analyze(m, limits);
-    const notice = s.instagramConnected ? '' : d.personaNotice('info', M.igMissingTitle, M.igMissingDesc,
-      `<div class="notice__actions"><button type="button" class="btn btn--sm" data-menus-settings>${esc(M.openSettings)}</button></div>`);
     const flows = m.flows || [];
     const list = flows.length ? flows.map((f, i) => menuPanel(m, f, i, limits, edit, ctx)).join('') : emptyState(edit);
     const room = flows.length < (limits.menus || 10);
     const add = !edit || !flows.length ? ''
       : room ? `<div><button type="button" class="btn btn--ghost" data-menu-add><span class="btn__plus">+</span> ${esc(M.add)}</button></div>`
         : `<p class="hint">${esc(tr('menusFull', { max: count(limits.menus || 10) }))}</p>`;
-    return `${notice}<form class="form flow-menus" id="persona-menus-form" novalidate>${overview(m, edit)}${startPanel(m, edit)}${list}${add}${edit ? saveBar(ctx) : ''}</form>`;
+    return `<form class="form flow-menus" id="persona-menus-form" novalidate>${channelsPanel(m, edit)}${overview(m)}${list}${add}</form>`;
   }
 
   /** On a fresh load a single menu starts open; with several, the list shows them folded. */
@@ -289,46 +290,68 @@
     if (flows.length === 1) ui.open.add(flows[0].id);
   }
 
-  function overview(m, edit) {
+  /** The Instagram menus' head: what menus are, how they did in the last 30 days and which one a message opens. */
+  function overview(m) {
     const s = saved();
-    const teamOnly = (m.teamOnlyChannels || []).includes('INSTAGRAM');
     // Menus written outside the dashboard have no author: the support team wrote them.
     const meta = s.updatedAt ? `<span class="panel__meta">${esc(tr('savedBy', { when: d.relTime(s.updatedAt), who: d.personaAuthor(s.updatedBy || 'operator') }))}</span>` : '';
     const any = (m.flows || []).length > 0;
-    const probe = any ? `<div class="form__row"><label class="lbl" for="pm-probe">${esc(M.probeLabel)}</label>
+    const probe = any ? `<div class="form__row form__row--full"><label class="lbl" for="pm-probe">${esc(M.probeLabel)}</label>
             <input class="inp" id="pm-probe" autocomplete="off" enterkeyhint="search" placeholder="${esc(M.probePh)}" value="${esc(ui.probe)}" />
             <p class="hint" data-pm-probe aria-live="polite">${probeHtml(m)}</p></div>` : '';
-    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(M.title)} <span class="tag" data-pm-count>${count((m.flows || []).length)}</span></h2>${meta}</header>
+    return `<section class="panel" id="pm-menus"><header class="panel__head"><h2 class="panel__title">${esc(M.title)} <span class="tag" data-pm-count>${count((m.flows || []).length)}</span></h2>${meta}</header>
       <div class="panel__body form">
         <p class="hint">${esc(M.intro)} ${esc(M.orderHint)} ${esc(M.desktopHint)}</p>
+        ${s.instagramConnected ? '' : `<p class="hint hint--warn">${esc(M.igMissingDesc)}</p>`}
         <div data-pm-kpis>${kpis(m)}</div>
-        <div class="form__grid">
-          <div class="form__row${any ? '' : ' form__row--full'}"><label class="lbl" for="pm-fallback">${esc(M.fallbackLabel)}</label>
-            <select class="sel" id="pm-fallback"${edit ? '' : ' disabled'}><option value="ai"${teamOnly ? '' : ' selected'}>${esc(M.fallbackAi)}</option><option value="team"${teamOnly ? ' selected' : ''}>${esc(M.fallbackTeam)}</option></select>
-            <p class="hint">${esc(M.fallbackHint)}</p></div>
-          ${probe}
-        </div>
+        ${probe}
       </div>
     </section>`;
   }
 
-  function startPanel(m, edit) {
-    const rows = channels().map(channel => {
-      const g = gateOf(m, channel);
-      const id = `pm-gate-${channel}`;
-      const words = !g.enabled ? '' : `<div class="form__row-head"><label class="lbl" for="${id}-words">${esc(M.startWords)}</label><span class="hint" data-gate-count="${channel}"></span></div>
-          <div class="tokens${edit ? '' : ' is-readonly'}" data-gate-tokens="${channel}">${edit ? `<input class="tokens__input" id="${id}-words" data-gate-input="${channel}" maxlength="${limitsOf().keywordChars || 60}" autocomplete="off" enterkeyhint="enter" aria-describedby="${id}-hint" value="${esc(ui.pending[`gate:${channel}`] || '')}" />` : ''}</div>
-          <p class="hint" id="${id}-hint">${esc(M.startWordsHelp)}</p>
-          <p class="hint hint--bad" data-gate-issue="${channel}" hidden></p>
-          <div class="flow-menu__notes" data-gate-notes="${channel}" aria-live="polite"></div>`;
-      return `<div class="form__row" data-gate="${channel}"><span class="lbl">${esc(channelName(channel))}</span>
-          <label class="form__check"><input type="checkbox" id="${id}-on" data-gate-on="${channel}"${g.enabled ? ' checked' : ''}${edit ? '' : ' disabled'} /> ${esc(M.startOnly)}</label>
-          ${words}</div>`;
+  /** Whether the company has [channel] set up: from the persona when the page has it, else from the menus. */
+  function connected(channel) {
+    const known = (d.state.persona?.channels || []).find(c => c.channel === channel);
+    if (known) return !!known.connected;
+    return channel === 'INSTAGRAM' ? !!saved()?.instagramConnected : channel === 'WHATSAPP' ? !!saved()?.whatsappConnected : false;
+  }
+
+  /** One row per channel: whether the AI answers there and the start words new chats need. */
+  function channelsPanel(m, edit) {
+    const offOptions = saved()?.teamOnlyOptions || ['INSTAGRAM', 'WHATSAPP'];
+    const order = ['WHATSAPP', 'INSTAGRAM', 'WEB'];
+    const rows = order.map(channel => {
+      const on = connected(channel);
+      const name = `<div class="bot-channel__name"><strong>${esc(channelName(channel))}</strong><span class="pill${on ? ' pill--ok' : ''}">${esc(on ? M.connected : M.notConnected)}</span></div>`;
+      if (!offOptions.includes(channel)) {
+        return `<div class="bot-channel" data-channel="${channel}">${name}<div class="bot-channel__body"><p class="hint">${esc(M.webAlways)}</p></div></div>`;
+      }
+      const aiOn = !(m.teamOnlyChannels || []).includes(channel);
+      const aiHint = aiOn ? '' : `<p class="hint">${esc(channel === 'INSTAGRAM' ? M.aiOffHintMenus : M.aiOffHint)}</p>`;
+      return `<div class="bot-channel" data-channel="${channel}">${name}<div class="bot-channel__body">
+          <div class="form__row"><label class="form__check"><input type="checkbox" id="pm-ai-${channel}" data-ai-on="${channel}"${aiOn ? ' checked' : ''}${edit ? '' : ' disabled'} /> ${esc(M.aiReplies)}</label>${aiHint}</div>
+          ${channels().includes(channel) ? gateRow(m, channel, edit) : ''}
+        </div></div>`;
     }).join('');
-    if (!rows) return '';
-    return `<section class="panel" id="pm-start"><header class="panel__head"><h2 class="panel__title">${esc(M.startTitle)}</h2></header>
-      <div class="panel__body form"><p class="hint">${esc(M.startIntro)}</p><div class="form__grid">${rows}</div></div>
+    const settings = edit && order.some(c => !connected(c))
+      ? `<div class="panel__tools"><button type="button" class="btn btn--sm btn--ghost" data-menus-settings>${esc(M.openSettings)}</button></div>` : '';
+    return `<section class="panel" id="pm-channels"><header class="panel__head"><h2 class="panel__title">${esc(M.channelsTitle)}</h2>${settings}</header>
+      <div class="panel__body form"><p class="hint">${esc(M.channelsHint)}</p><div class="bot-channels">${rows}</div></div>
     </section>`;
+  }
+
+  /** A channel's start words: a box to ask for them and, once on, the words as tokens. */
+  function gateRow(m, channel, edit) {
+    const g = gateOf(m, channel);
+    const id = `pm-gate-${channel}`;
+    const words = !g.enabled ? '' : `<div class="form__row-head"><label class="lbl" for="${id}-words">${esc(M.startWords)}</label><span class="hint" data-gate-count="${channel}"></span></div>
+        <div class="tokens${edit ? '' : ' is-readonly'}" data-gate-tokens="${channel}">${edit ? `<input class="tokens__input" id="${id}-words" data-gate-input="${channel}" maxlength="${limitsOf().keywordChars || 60}" autocomplete="off" enterkeyhint="enter" aria-describedby="${id}-hint" value="${esc(ui.pending[`gate:${channel}`] || '')}" />` : ''}</div>
+        <p class="hint" id="${id}-hint">${esc(M.startWordsHelp)}</p>
+        <p class="hint hint--bad" data-gate-issue="${channel}" hidden></p>
+        <div class="flow-menu__notes" data-gate-notes="${channel}" aria-live="polite"></div>`;
+    return `<div class="form__row" data-gate="${channel}">
+        <label class="form__check"><input type="checkbox" id="${id}-on" data-gate-on="${channel}"${g.enabled ? ' checked' : ''}${edit ? '' : ' disabled'} /> ${esc(M.startOnly)}</label>
+        ${words}</div>`;
   }
 
   function gateTokens(g, edit) {
@@ -644,17 +667,11 @@
       ${hidden ? '' : `<div class="flow-map">${mapHtml(f, i, a)}</div>`}`;
   }
 
-  function saveBar(ctx) {
-    return `<div class="savebar${isDirty() ? ' is-dirty' : ''}" data-pm-savebar>
-      <p class="savebar__status" data-pm-status aria-live="polite">${saveStatus(ctx)}</p>
-      <div class="actions"><button class="btn btn--ghost" type="button" data-pm-discard${isDirty() ? '' : ' disabled'}>${esc(PS.discard)}</button><button class="btn btn--primary" type="submit" data-pm-save${isDirty() ? '' : ' disabled'}>${esc(M.save)}</button></div>
-    </div>`;
-  }
-
-  function saveStatus(ctx) {
-    if (!isDirty()) return esc(M.allSaved);
-    const errors = ctx.reduce((n, a) => n + a.errors.length, 0) + gateIssues(menus());
-    return `<span class="savebar__dot" aria-hidden="true"></span>${esc(errors ? tr('unsavedFix', { n: count(errors) }) : M.unsaved)}`;
+  /** What stops the unsaved menus and start words from being saved, counted for the page's save bar. */
+  function problemCount() {
+    if (!isDirty() || !saved() || saved().failed) return 0;
+    const m = menus();
+    return analyze(m).reduce((n, a) => n + a.errors.length, 0) + gateIssues(m);
   }
 
   /** Brings what the page shows in step with the draft without touching the fields someone may be typing in. */
@@ -682,12 +699,6 @@
       (f.steps || []).forEach((s, j) => setHtml($(`[data-step-summary="${i}:${j}"]`, form), stepSummary(f, i, j, a)));
       paintIssues(form, f, i, a);
     });
-    setHtml($('[data-pm-status]', form), saveStatus(ctx));
-    $('[data-pm-savebar]', form)?.classList.toggle('is-dirty', isDirty());
-    const save = $('[data-pm-save]', form);
-    if (save) save.disabled = !isDirty();
-    const discard = $('[data-pm-discard]', form);
-    if (discard) discard.disabled = !isDirty();
     d.onDraft();
   }
 
@@ -848,28 +859,45 @@
     d.toast(M.duplicated);
   }
 
+  /**
+   * Saves the unsaved menus and channel settings; the page's save bar calls it after the persona. True when
+   * saved (or nothing was unsaved); false when refused, with the problem shown and the cursor on it.
+   */
   async function save() {
-    if (!isDirty()) return;
-    const form = $('#persona-menus-form');
+    if (!isDirty()) return true;
+    commitPending();
     const m = menus();
     const problem = firstProblem(m);
-    if (problem) return refuse(problem, m);
-    const button = $('[data-pm-save]', form);
-    if (button) button.disabled = true;
+    if (problem) { refuse(problem, m); return false; }
     const sent = JSON.stringify(payload(m));
     try {
       d.state.personaFlows = await d.api('/app/api/persona/menus', { method: 'PUT', body: sent });
     } catch (err) {
-      if (button) button.disabled = false;
-      if (err?.code !== 'menu_problem') return d.fail(err);
-      return refuse(err.body, m);
+      if (err?.code !== 'menu_problem') { d.fail(err); return false; }
+      refuse(err.body, m);
+      return false;
     }
     // Typing goes on while the request is out; only what was sent is saved, the rest stays unsaved.
     if (JSON.stringify(payload(menus())) === sent) delete d.state.personaDraft.menus;
     else settle();
     ui.checked = false;
-    d.toast(M.saved);
-    d.renderKeepingFocus();
+    return true;
+  }
+
+  /** A keyword or start word still being typed counts as added when the page saves. */
+  function commitPending() {
+    const el = document.activeElement;
+    if (!el?.dataset || !canEdit()) return;
+    if (el.dataset.kwInput != null) commitKeyword(el);
+    if (el.dataset.gateInput != null) commitGateWord(el);
+  }
+
+  function discard() {
+    delete d.state.personaDraft.menus;
+    ui.checked = false;
+    ui.note = null;
+    ui.gateNote = null;
+    ui.pending = {};
   }
 
   /** A save that can't go through: says why, opens the menus with problems and puts the cursor on the first. */
@@ -971,11 +999,15 @@
         settle();
         return redraw(el.checked ? `pm-gate-${el.dataset.gateOn}-words` : `pm-gate-${el.dataset.gateOn}-on`);
       }
-      if (el.id === 'pm-fallback') {
+      if (el.dataset.aiOn != null) {
         const m = editable();
-        const others = (m.teamOnlyChannels || []).filter(c => c !== 'INSTAGRAM');
-        m.teamOnlyChannels = el.value === 'team' ? [...others, 'INSTAGRAM'] : others;
-      } else if (el.dataset.menuField === 'enabled') {
+        const channel = el.dataset.aiOn;
+        const others = (m.teamOnlyChannels || []).filter(c => c !== channel);
+        m.teamOnlyChannels = el.checked ? others : [...others, channel];
+        settle();
+        return redraw(el.id);
+      }
+      if (el.dataset.menuField === 'enabled') {
         editable().flows[menuOf(el)].enabled = el.checked;
       } else if (el.dataset.buttonField === 'next') {
         const [i, j, k] = at(el);
@@ -1001,13 +1033,8 @@
 
     form.addEventListener('keydown', e => {
       const el = e.target;
-      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') {
-        e.preventDefault();
-        if (el.dataset.kwInput != null) commitKeyword(el);
-        if (el.dataset.gateInput != null) commitGateWord(el);
-        if (edit) save();
-        return;
-      }
+      // Ctrl+S goes on to the page, which saves every tab (and adds a word still being typed first).
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 's') return;
       if (el.dataset.gateInput != null) {
         if (e.key === 'Enter') { e.preventDefault(); commitGateWord(el); return; }
         if (e.key === 'Backspace' && !el.value) {
@@ -1034,7 +1061,7 @@
         }
         return;
       }
-      // Enter in a one-line field doesn't save the whole form; Save menus (or Ctrl+S) does.
+      // Enter in a one-line field doesn't save the whole page; Save (or Ctrl+S) does.
       if (e.key === 'Enter' && el.tagName === 'INPUT' && el.type !== 'checkbox') e.preventDefault();
     });
 
@@ -1197,20 +1224,11 @@
         settle();
         return redraw(`pm-${i}-${j}-b${Math.min(k, buttons.length - 1)}`, `pm-${i}-${j}-text`);
       }
-      if (ds.pmDiscard != null) {
-        if (!(await d.confirmDialog({ title: M.discardTitle, body: M.discardBody, okLabel: PS.discard }))) return;
-        delete d.state.personaDraft.menus;
-        ui.checked = false;
-        ui.note = null;
-        ui.gateNote = null;
-        ui.pending = {};
-        return redraw();
-      }
     });
 
     form.addEventListener('submit', e => {
       e.preventDefault();
-      save();
+      if (edit) d.save();
     });
 
     paint();
@@ -1219,20 +1237,24 @@
   window.MenusUI = {
     init(deps) {
       d = deps;
-      // Leaving the dashboard drops the draft, so the browser asks first.
-      window.addEventListener('beforeunload', e => {
-        if (!isDirty()) return;
-        e.preventDefault();
-        e.returnValue = '';
-      });
     },
     load,
     render,
     wire,
-    /** Whether the menus have unsaved changes, which the test chat then tries. */
+    /** Whether the menus or channel settings have unsaved changes, which the test chat then tries. */
     dirty: isDirty,
+    /** The menus and channel settings as they stand (the draft, else the saved ones), or null before they load. */
+    current: () => (saved() && !saved().failed ? menus() : null),
     /** The unsaved menus as the test chat sends them, or null when nothing is unsaved. */
     draftPayload: () => (isDirty() ? payload(d.state.personaDraft.menus) : null),
+    /** The first reason the unsaved menus can't be saved, or null. */
+    problem: () => (isDirty() && saved() && !saved().failed ? firstProblem(menus()) : null),
+    problemCount,
+    /** Shows why a save can't go through and puts the cursor on it (the Channels tab must be open). */
+    refuse: problem => refuse(problem, menus()),
+    save,
+    discard,
+    commitPending,
     errorText,
   };
 })();

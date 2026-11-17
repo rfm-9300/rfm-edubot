@@ -57,6 +57,63 @@ class PersonaValidationTest {
         assertEquals(PersonaProblem("invalid_option", "addressForm"), refused(PersonaBehaviorInput(addressForm = "royal")))
         assertEquals(PersonaProblem("invalid_option", "replyLength"), refused(PersonaBehaviorInput(replyLength = "endless")))
         assertEquals(PersonaProblem("invalid_option", "emoji"), refused(PersonaBehaviorInput(emoji = "all")))
+        assertEquals(PersonaProblem("invalid_option", "disclosure"), refused(PersonaBehaviorInput(disclosure = "never")))
+        assertEquals(PersonaProblem("invalid_option", "scope"), refused(PersonaBehaviorInput(scope = "everything")))
+        assertEquals(PersonaProblem("invalid_option", "unknown"), refused(PersonaBehaviorInput(unknown = "guess")))
+        assertEquals(PersonaProblem("invalid_option", "handoff.reasons"), refused(PersonaBehaviorInput(handoff = PersonaHandoffInput(reasons = listOf("bored")))))
+    }
+
+    @Test
+    fun `the new settings are kept as chosen, and handoff situations without repeats`() {
+        val behavior = ok(
+            PersonaBehaviorInput(
+                disclosure = "first_reply",
+                scope = "BUSINESS",
+                unknown = "share_contact",
+                capabilities = PersonaCapabilitiesInput(catalog = true, bookings = false, records = false),
+                handoff = PersonaHandoffInput(enabled = true, reasons = listOf("urgent", "PAYMENTS", "URGENT")),
+            ),
+        )
+        assertEquals(PersonaDisclosure.FIRST_REPLY, behavior.disclosure)
+        assertEquals(PersonaScope.BUSINESS, behavior.scope)
+        assertEquals(PersonaUnknown.SHARE_CONTACT, behavior.unknown)
+        assertEquals(PersonaCapabilities(catalog = true, bookings = false, records = false), behavior.capabilities)
+        assertEquals(listOf(PersonaHandoffReason.URGENT, PersonaHandoffReason.PAYMENTS), behavior.handoff.reasons)
+        // A page that sends no situations (an older one) keeps what such a persona did.
+        assertNull(ok(PersonaBehaviorInput(handoff = PersonaHandoffInput(enabled = true))).handoff.reasons)
+    }
+
+    @Test
+    fun `business facts are trimmed, blanks dropped and each held to its limit`() {
+        val business = ok(PersonaBehaviorInput(business = PersonaBusinessInput(name = " Clínica Sorriso ", about = "  ", hours = "9–18\n"))).business
+        assertEquals(PersonaBusiness(name = "Clínica Sorriso", hours = "9–18"), business)
+        assertEquals(
+            PersonaProblem("too_long", "business.about", PersonaLimits.MAX_BUSINESS_ABOUT_CHARS),
+            refused(PersonaBehaviorInput(business = PersonaBusinessInput(about = "x".repeat(PersonaLimits.MAX_BUSINESS_ABOUT_CHARS + 1)))),
+        )
+        assertEquals(
+            PersonaProblem("too_long", "business.contact", PersonaLimits.MAX_BUSINESS_FIELD_CHARS),
+            refused(PersonaBehaviorInput(business = PersonaBusinessInput(contact = "x".repeat(PersonaLimits.MAX_BUSINESS_FIELD_CHARS + 1)))),
+        )
+    }
+
+    @Test
+    fun `questions and answers drop empty pairs and point at a half-written one by position`() {
+        val faq = ok(PersonaBehaviorInput(faq = listOf(PersonaFaqInput(" Preço? ", " 40 € "), PersonaFaqInput("", " "), PersonaFaqInput("Horário?", "9–18")))).faq
+        assertEquals(listOf(PersonaFaq("Preço?", "40 €"), PersonaFaq("Horário?", "9–18")), faq)
+        assertEquals(
+            PersonaProblem("answer_required", "faq.answer", index = 1),
+            refused(PersonaBehaviorInput(faq = listOf(PersonaFaqInput("a", "b"), PersonaFaqInput("Sem resposta?", "")))),
+        )
+        assertEquals(PersonaProblem("question_required", "faq.question", index = 0), refused(PersonaBehaviorInput(faq = listOf(PersonaFaqInput("", "Só resposta.")))))
+        assertEquals(
+            PersonaProblem("too_long", "faq.answer", PersonaLimits.MAX_FAQ_ANSWER_CHARS, 0),
+            refused(PersonaBehaviorInput(faq = listOf(PersonaFaqInput("q", "x".repeat(PersonaLimits.MAX_FAQ_ANSWER_CHARS + 1))))),
+        )
+        assertEquals(
+            PersonaProblem("too_many", "faq", PersonaLimits.MAX_FAQ),
+            refused(PersonaBehaviorInput(faq = (0..PersonaLimits.MAX_FAQ).map { PersonaFaqInput("q$it", "a") })),
+        )
     }
 
     @Test

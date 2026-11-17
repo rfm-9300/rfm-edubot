@@ -1,10 +1,84 @@
 ---
-updated: 2026-11-13
+updated: 2026-11-16
 ---
 
 # Customer-facing bot and persona
 
-How the bot answers customers on WhatsApp, Instagram and the website: the persona that shapes it, the tools it gets, the chat flows that answer before it, the start words that decide which new chats it answers at all, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
+How the bot answers customers on WhatsApp, Instagram and the website: the Persona page and the persona that shapes it, the tools it gets, the chat flows that answer before it, the start words and per-channel switch that decide which chats it answers at all, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
+
+## The Persona page, redesigned (2026-11-16)
+
+Asked for because the persona feature and the settings for how the AI chatbot works were "very
+confusing", with more customization. Rodrigo chose guided tabs over one long page, and all four
+groups of new options below. `design-system/patterns.md` → "Persona" has the screen and
+`docs/architecture.md` → "Persona" the API.
+
+What was confusing, and what replaced it:
+
+- **Three places to tell the bot things** (Behavior's rules, Knowledge's notes, Instructions), an AI
+  step between notes and instructions nobody could see, and a precedence ("settings win") only a hint
+  stated. The tabs now follow a message: **Overview** (the four steps a message goes through, what is
+  set up, what the bot reads), **Profile** (who it is, how it talks), **Knowledge** (business details,
+  questions and answers, documents, and the instructions they feed), **Rules** (rules, off-topic and
+  unknown questions, what it can do, handing over), **Channels** (who the AI answers on each channel,
+  start words, the Instagram menus) and **History**. A tab id from before opens its new home
+  (`behavior` → Profile, `instructions` → Knowledge, `menus` → Channels).
+- **Start words and the AI switch hid under Menus**, and the switch was Instagram-only. Each channel is
+  now a row with "The AI answers here" (WhatsApp and Instagram: `teamOnlyChannels`, which the pipeline
+  already applied to any channel) and its start words. The website always gets the AI: a save drops it
+  from `teamOnlyChannels` (`ChatFlows.TEAM_ONLY_CHANNELS`), since nobody could answer its visitors.
+  The AI off on a channel is not a pause: the message waits in the inbox and the chat isn't paused.
+- **Three Save buttons.** One save bar saves every tab: `PUT /app/api/persona` takes `behavior`
+  and/or `compiledInstructions` and writes one version (`SETTINGS_AND_INSTRUCTIONS` when both
+  changed), then `MenusUI.save()` saves the channels and menus. A half-written question or a menu
+  problem is caught before anything is sent, and the page goes to the tab and field. Ctrl+S works from
+  any tab; leaving the dashboard asks first, wired in `app.js`'s `init()` because
+  `DashboardScriptsTest` refuses code that runs at a page script's top level.
+- **Jargon and engineers' figures.** Sources, synthesize, rebuild, and version and tokens per reply in
+  the hero became documents, "the AI reads them", learned, "rewrite from documents"; the hero shows
+  status, the channels the AI answers on, the handoff and the last change. Tokens stay in History and
+  "What the bot reads". Selects set to "Not set" became option cards with an example each,
+  **Automatic** (nothing set) first.
+
+New settings, all in `behavior`, so they are drafted, tested, versioned and restored with the rest,
+and a persona saved before them reads them as unset (capabilities as on), with no migration:
+
+- **Disclosure** (says it's a virtual assistant when asked, or in its first reply), **off-topic
+  questions** (stays on topic, or answers briefly and steers back) and **unknown answers** (offers to
+  check, shares the contacts, or hands over; handing over only reads as such while the handoff is on,
+  and adds "can't help" to its situations).
+- **Business details** (name, what it does, hours, location, contact) and **questions and answers**
+  (up to 30): their own blocks in the prompt, "About the company" and the Q&A, after the rules and
+  before the instructions, so a fact doesn't depend on the synthesis keeping a note's wording. Agents'
+  "Write with AI" steps get them too.
+- **What the bot can do**: switches for the catalog, bookings and records (clients, quotes and
+  invoices), shown only for modules the company has (`capabilities` in `GET /persona`).
+  `PersonaPrompt.botModules` removes the switched-off modules and `TenantPipelineFactory` builds the
+  pipeline on the rest, so their tools, their lines in the CRM prompt's tool list, the booking note
+  and, for records, the quote PDF reply all go. The shared CRM rules text may still name other tools,
+  as `SystemPromptsTest` allows on purpose. All on by default, so no bot changes until its company
+  switches one off.
+- **Handoff situations** (asks for a person, upset, can't help, payments, urgent) plus "Also when".
+  Null `reasons` is a persona from before: it keeps the usual three, or only its own words when it
+  had written some, as before (`PersonaHandoff.effectiveReasons`). The API sends the effective list,
+  so the page always saves an explicit one.
+
+Gotchas:
+
+- **A tab opened from the tab row doesn't scroll.** Scrolling the editor to the top hid the tabs under
+  the sticky top bar; only the Overview's buttons move the page, to their field.
+- **The sticky save bar covers the bottom of the screen** while something is unsaved, so a scripted
+  click on an option down there lands on the bar: the walkthrough centres options first (`pick`).
+- **A page from before the redesign** that saves settings without the new fields resets them (the
+  input defaults them); History restores them.
+- **Mobile is unchanged**: the app reads and edits the instructions and documents only, ignores the
+  new fields, and `PUT /persona` with instructions alone still works ([mobile](mobile.md)).
+
+Checked with `PersonaPromptTest`, `PersonaValidationTest`, `PersonaRepositoryTest`,
+`PersonaRoutesTest`, `BotSettingsPipelineTest` (the switches and WhatsApp's AI off, through the real
+pipeline factory) and `scripts/persona-e2e/walkthrough.mjs` (135 checks in English, including dark,
+820px, a 375px phone and a member; pt-PT by eye). The fake model now answers a matching question
+from the Q&A block.
 
 ## Chat flows: ManyChat-style menus before the AI (PR #74, shipped 2026-10-13)
 
@@ -30,7 +104,8 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
 - **Instagram only** for now: `ChatFlow.problems()` refuses other channels until the WhatsApp client
   sends interactive buttons (3 reply buttons of 20 characters would fit the same model).
 - **Team-only channels** (`teamOnlyChannels`) turn the AI off on a channel, as Rodrigo chose for that
-  company: whatever no flow answers waits in the inbox. There is no other tenant-wide AI switch.
+  company: whatever no flow answers waits in the inbox. Since the 2026-11-16 redesign it is "The AI
+  answers here" on each channel row, for WhatsApp and Instagram; the website always gets the AI.
 - **A person's reply stops the flow too**, because the paused-conversation check runs first: once the
   team answers in the inbox, that customer gets no menu until someone presses Resume.
 - **Stored** as one `chat_flows` document per company (unique `tenantId`), read on every message, so
@@ -41,10 +116,11 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
   constructor, so a `tenant_persona` written with `mongosh` (rules, language, handoff) changes
   nothing until that cache is evicted: by saving a real change in the Persona page (a save that
   changes nothing returns early, without evicting), or by restarting the app. A hand-written
-  persona that "didn't take" is this, not the prompt. Also: the Rules box is one rule per line
-  (`persona.js` splits on `\n`), so a rule written by hand with line breaks is split into several
-  rules on the next dashboard save, and each shows as a `-` bullet the model copies. A fixed
-  multi-line reply belongs in the Instructions text, not in a rule. A keyword starts a flow at its first step, and
+  persona that "didn't take" is this, not the prompt. Also: each rule is its own one-line field since
+  the 2026-11-16 redesign (a box with one rule per line before, which split such a rule in several),
+  so a rule written by hand with line breaks loses them on the next dashboard save: an input field
+  drops line breaks, joining the lines. A fixed reply to a question belongs in Questions and answers,
+  and a longer multi-line one in the Instructions text, not in a rule. A keyword starts a flow at its first step, and
   each button names the step it leads to:
 
   ```js
@@ -63,6 +139,8 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
 ### Edited in the Persona page's Menus tab (PR #75, 2026-10-13)
 
 Asked for the same day ("add it as a tab on the Persona page"), so a company edits its own menus.
+Since the 2026-11-16 redesign the menus sit in the Channels tab, under the channel rows, and the
+page's one save bar saves them.
 `docs/architecture.md` → "Chat flows" has the endpoints and `design-system/patterns.md` → "Persona" the
 screen. Decisions:
 
@@ -163,10 +241,11 @@ gate looks only at how a chat **begins**. `docs/architecture.md` → "Chat flows
 - **A gate that can't open anything fails open.** `saveProblem` refuses an enabled gate with no
   usable word (`start_words`), and if one is stored by hand `find()` logs `Skipping start gate with
   no word` and the channel behaves as if it had none: a broken setting must not silence a channel.
-- **Menus tab, same draft and save.** A "Start words" panel (Instagram and WhatsApp side by side)
-  sits above the menus and shares their draft, validation order and save bar (`app/menus.js`;
-  `PUT /app/api/persona/menus` takes `startGates`). A page that omits the field keeps the saved
-  gates and `[]` clears them. A gate that is off keeps its words.
+- **Same draft as the menus.** Each channel's row in the Channels tab holds its start words (since
+  the 2026-11-16 redesign; a "Start words" panel above the menus before). They share the menus' draft
+  and validation order, and the page's save bar (`app/menus.js`; `PUT /app/api/persona/menus` takes
+  `startGates`). A page that omits the field keeps the saved gates and `[]` clears them. A gate that
+  is off keeps its words.
 - **The inbox says why**: a chat paused by the gate shows "This chat began without a start word"
   instead of "Paused by …". The Persona test chat adds a note when its first message holds no start
   word (`gatedChannels` in the answer), and still shows the AI's answer.
@@ -213,7 +292,8 @@ person. Checked in the code when it merged:
   Errors are `{error, field, limit}` instead of 500s. Uploads take DOCX (DTDs off; an XXE probe is
   tested) and CSV, with size and count limits and a legacy-encoding fallback.
 - **Page:** Behavior · Knowledge · Instructions · History tabs beside a sticky test chat that uses
-  unsaved edits, a "What the bot reads" preview, and version view and restore.
+  unsaved edits, a "What the bot reads" preview, and version view and restore. Replaced by the
+  2026-11-16 redesign (top of this page); the test chat, preview, history and restore stayed.
 - **`OPENROUTER_BASE_URL`** (optional; default `https://openrouter.ai/api/v1`) points model calls at
   another OpenAI-compatible endpoint. #54 and #55 carried the identical commit. Both PRs' browser
   walkthroughs (`scripts/persona-e2e/`, `scripts/assistant-e2e/`) run the app against a deterministic

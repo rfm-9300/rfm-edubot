@@ -1,8 +1,9 @@
 """A deterministic stand-in for OpenRouter's /chat/completions, for local end-to-end runs.
 
 It answers synthesis requests by merging the new material into the current file, and chat
-requests from what the persona block says (name, language, tone, emoji, greeting, rules and
-instructions), calling handoff_to_human when a customer asks for a person and it is offered.
+requests from what the persona block says (name, language, tone, emoji, greeting, rules, business
+details, questions and answers, and instructions), calling handoff_to_human when a customer asks
+for a person and it is offered.
 It checks plumbing, not model quality. Every request is appended to the log file so a run can be
 inspected afterwards.
 
@@ -56,7 +57,10 @@ def persona_of(systems):
     rules_part = next((p for p in settings if p.startswith("Rules you always follow:")), "")
     rules = re.findall(r"^- (.+)$", rules_part, re.M)
     instructions = "\n".join(p for p in paragraphs if p not in settings)
-    knowledge = [l.strip("-# ").strip() for l in instructions.splitlines() if l.strip("-# ").strip()]
+    # Section headings ("About the company (…):") and question lines aren't facts to quote.
+    knowledge = [l.strip("-# ").strip() for l in instructions.splitlines()
+                 if l.strip("-# ").strip() and not l.rstrip().endswith(":") and not l.startswith(("Q: ", "A: "))]
+    faq = re.findall(r"^Q: (.+)\nA: (.+)$", block, re.M)
     return {
         "name": get(r"Your name is ([^.]+)\."),
         "strict": get(r"Language: always reply in ([A-Za-z ]+), even"),
@@ -67,8 +71,13 @@ def persona_of(systems):
         "formal": "Address the customer formally" in block,
         "rules": rules,
         "knowledge": knowledge,
+        "faq": faq,
         "has_block": bool(block),
     }
+
+
+def words(text):
+    return set(re.findall(r"\w+", text.lower()))
 
 
 def language_for(p, last):
@@ -116,7 +125,11 @@ def chat(body):
     if first and p["greeting"]:
         parts.append(p["greeting"])
     guarded = any(s.startswith("Platform rules.") for s in systems)
-    if re.search(r"(ignore|ignora|prompt|instruç|instrucc)", low):
+    # A question from the company's questions and answers gets its answer: most of its words are in the message.
+    asked = next((a for q, a in p["faq"] if len(words(q) & words(last)) >= max(2, len(words(q)) * 2 // 3)), None)
+    if asked:
+        parts.append(asked)
+    elif re.search(r"(ignore|ignora|prompt|instruç|instrucc)", low):
         parts.append(w["refuse"] if guarded else "My instructions are: " + " / ".join(p["knowledge"][:3]))
     elif re.search(r"(quem|who are|quién|quien)", low):
         who = w["me"].format(name=p["name"]) if p["name"] else w["me"].format(name=w["bot"]).replace("Sou a o", "Sou o")

@@ -405,7 +405,7 @@ Map domain status → these five tones. Do not create `pill--purple`. PDF links 
 
 ### Save bar
 
-A long form whose changes are saved together (the Persona Menus tab, the backoffice's Platform settings) ends with a `.savebar`:
+A long form whose changes are saved together (the Persona page, every tab at once; the backoffice's Platform settings) ends with a `.savebar`:
 
 ```html
 <div class="savebar is-dirty">
@@ -647,8 +647,9 @@ User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert
 ```html
 <div class="persona-studio">
   <div class="persona-studio__main">
-    <div class="settings-tabs" role="tablist">…Behavior · Knowledge · Instructions · Menus · History…</div>
+    <div class="settings-tabs" role="tablist">…Overview · Profile · Knowledge · Rules · Channels · History…</div>
     <div class="persona-studio__pane" role="tabpanel"><!-- panels --></div>
+    <div class="savebar" data-persona-savebar><!-- one save bar for every tab (admins only) --></div>
   </div>
   <aside class="persona-studio__test">
     <section class="panel"><!-- head: title, .pill--warn "Unsaved changes" (hidden when none), Clear; body: .chip-picks, .chat__log, .chat__form --></section>
@@ -658,12 +659,59 @@ User bubbles use the gradient; bot bubbles use surface + hairline. Do not invert
 
 Two columns (editor, test chat at up to 400px) with the chat sticky at the top; one column under 1100px, the chat after the editor. The main column and its pane are grids with a 16px gap, so panels inside need no margins. Its "Unsaved changes" pill toggles with `hidden` (`.persona-studio .pill[hidden]`).
 
-#### Menus tab (`app/menus.js`)
+#### Overview, Profile, Knowledge and Rules (`app/persona.js`)
+
+```html
+<!-- Overview: how a message is answered -->
+<ol class="bot-flow">
+  <li class="bot-flow__step">
+    <span class="bot-flow__num">1</span>
+    <div><h3 class="bot-flow__title">Who gets an answer</h3>
+      <ul class="bot-flow__list"><li><strong>WhatsApp</strong> · every chat</li><li class="is-muted"><strong>Website</strong> · not connected</li></ul></div>
+    <div class="bot-flow__actions"><button class="btn btn--sm btn--ghost" data-persona-go="channels">Channels</button></div>
+  </li>
+</ol>
+<ul class="setup-steps">
+  <li class="setup-steps__item is-done"><span class="setup-steps__mark">✓</span><span class="setup-steps__text"><span>Give it a name and a voice</span><small>Profile: …</small></span><button class="btn btn--sm btn--ghost">Review</button></li>
+</ul>
+
+<!-- Profile and Rules: option cards (radio, or checkbox for what the bot can do) -->
+<div class="choices-field"><span class="lbl" id="pb-tone-lbl">Tone</span>
+  <div class="choices" role="radiogroup" aria-labelledby="pb-tone-lbl">
+    <label class="choice"><input type="radio" name="pb-tone" value="" checked /><span class="choice__title">Automatic</span><span class="choice__eg">Follows your instructions.</span></label>
+    <label class="choice"><input type="radio" name="pb-tone" value="FRIENDLY" /><span class="choice__title">Friendly</span><span class="choice__eg">“Hi! Sure, happy to help 😊”</span></label>
+  </div></div>
+
+<!-- Rules: one rule a row, ideas as chips; Knowledge: a question and its answer a card -->
+<div class="rule-list"><div class="rule-row"><span class="rule-row__num">1</span><input class="inp" /><div class="row-tools"><button class="iconbtn iconbtn--danger">×</button></div></div></div>
+<div class="rule-ideas"><span class="hint">Ideas to start from</span><div class="chip-picks"><button class="chip">+ Never offer discounts.</button></div></div>
+<div class="faq-list"><div class="faq-item"><span class="faq-item__num">1</span><div class="faq-item__fields"><input class="inp" /><textarea class="txt"></textarea><p class="hint hint--bad" hidden></p></div><div class="row-tools">…×…</div></div></div>
+```
+
+| Class | Role |
+|---|---|
+| `.bot-flow` > `__step` (`.is-off`) | The steps a message goes through, one row each: `__num` (a yellow-soft disc, gray when the step does nothing yet), the `__title` and a `__text` or `__list` (a `<strong>` label · value per line, `.is-muted` for a gap), and `__actions`, ghost buttons to the tab that sets it. On a phone the actions drop under the text |
+| `.setup-steps` > `__item` (`.is-done`) | A setup list: `__mark` (an empty ring, an `--ok-soft` check when done, with a visually hidden "done" / "to do"), `__text` (the step over a `<small>` saying where), then one button |
+| `.choices` / `.choices--wide` > `.choice` | Option cards: a radio group whose options say what they do (`__title` over an example in `__eg`), or a few checkboxes (`--wide`, 230px+ columns). The chosen card takes the focus border on an `--accent-soft` fill (`:has(> input:checked)`), the keyboard ring on `:focus-visible`; a disabled unchecked one fades. Wrap a group in `.choices-field` with its `.lbl`. The first card of a setting is **Automatic** (nothing set), not "Not set" |
+| `.rule-list` > `.rule-row` | One rule a row: `__num`, an `.inp`, `.row-tools` (×). The number gives way on a phone |
+| `.rule-ideas` | A hint over `.chip-picks` whose chips hold a whole sentence, left-aligned and wrapping |
+| `.faq-list` > `.faq-item` | A question and its answer as a `--surface-2` card: `__num`, `__fields` (question `.inp` over answer `.txt` and a `.hint--bad` after a refused save), `.row-tools`. One column on a phone |
+
+#### Channels tab (`app/menus.js`)
 
 ```html
 <form class="form flow-menus">
-  <section class="panel"><!-- head: title + count .tag, saved-by .panel__meta; body: hint, .record-kpis, .form__grid (fallback .sel, "Check a message" .inp + result .hint) --></section>
-  <section class="panel" id="pm-start"><!-- "Start words": hint, then a .form__grid with one .form__row per channel (Instagram, WhatsApp): .form__check to switch it on and, when on, its words as .tokens with a count and a note for a repeat; same draft, problems and savebar as the menus --></section>
+  <section class="panel" id="pm-channels">
+    <header class="panel__head"><h2 class="panel__title">Channels</h2><!-- Open Settings while one isn't connected --></header>
+    <div class="panel__body form">
+      <div class="bot-channel" data-channel="WHATSAPP">
+        <div class="bot-channel__name"><strong>WhatsApp</strong><span class="pill pill--ok">Connected</span></div>
+        <div class="bot-channel__body"><!-- .form__check "The AI answers here" (+ a .hint when off), then the start words: .form__check and, when on, .tokens with a count and a note for a repeat --></div>
+      </div>
+      <!-- Instagram, then Website (only a .hint: the AI always answers there) -->
+    </div>
+  </section>
+  <section class="panel" id="pm-menus"><!-- head: "Instagram menus" + count .tag, saved-by .panel__meta; body: hint, a .hint--warn while Instagram isn't connected, .record-kpis, "Check a message" .inp + result .hint --></section>
   <section class="panel flow-menu is-open">
     <header class="panel__head flow-menu__head">
       <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Welcome menu</span></button></h2>
@@ -673,8 +721,8 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
     </header>
     <div class="panel__body form flow-menu__body"><!-- name, state, .tokens keywords, .flow-menu__notes, the map, .flow.flow--edit cards, .flow-menu__foot --></div>
   </section>
-  <div class="savebar">…</div>
 </form>
+<!-- no save bar of its own: the page's one save bar saves the channels and menus too -->
 ```
 
 | Class | Role |
@@ -682,6 +730,7 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 | `.flow-menu` (`.is-open`) | One menu, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, the head loses its bottom rule and the body (`[hidden]`, which needs `.flow-menu__body[hidden]` over `.form`'s grid) isn't drawn |
 | `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first menu with a matching keyword answers), the name, On/Off plus a `.pill--warn` "n to fix" or "n to check", and a muted line of keywords, size and 30-day usage (refusals in `.hint--warn`), under the name |
 | `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused, a clash in `.hint--warn`); "Sent n times" in a message card's head; the body's last row: Add message on the left, Duplicate and Remove menu on the right |
+| `.bot-channel` > `__name` / `__body` | One channel a row: its name over a Connected / Not connected pill, then whether the AI answers there and its start words. One column under 700px, the pill beside the name |
 | `.flow-map` > `__tree` / `__row` / `__list` > `__branch` | The menu's map: from message 1, each button (`__btn`, a quick-reply pill with →) and the message it leads to (`__msg`, a button with `.flow__index` and `__text`) on one `__row`, nested `__list`s drawn as a tree with hairlines. A message reached again is `__back` + `__msg--ref`; `__end` (gives way first on narrow screens) and `__note` (leads nowhere, `--warn-ink`) end a row; `__orphans` lists unreachable messages. Only the text shortens; a very deep tree scrolls inside the box |
 | `.flow__card.is-flash` | The message a map node, a From link or → just went to, ringed for a moment |
 

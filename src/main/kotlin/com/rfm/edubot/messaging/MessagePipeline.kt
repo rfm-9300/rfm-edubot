@@ -284,7 +284,8 @@ class MessagePipeline(
             // When the bot is still collecting data (phone, service, price), never inject a
             // synthetic confirmation — just let the AI see the reply in context and decide
             // what to ask for next. Tools stay available (via useTools below) but are not forced.
-            val pdfReply = if (isPdfRequest(inbound.messageText)) {
+            // Only where the bot may work with quotes: a company that turned its clients, quotes and invoices off gets none.
+            val pdfReply = if (DashboardModules.QUOTES in enabledModules && isPdfRequest(inbound.messageText)) {
                 try {
                     sendLatestQuotePdf(user.waId, contextMessages, responder)
                 } catch (e: Exception) {

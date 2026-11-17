@@ -1655,8 +1655,11 @@
       <div class="form__row form__row--full"><label class="form__check"><input type="checkbox" data-bind="definition.voice.usePersona" data-type="bool" data-rerender ${v.usePersona ? 'checked' : ''} /> ${esc(A.usePersona)}</label>${v.usePersona && personaEmpty() ? `<p class="hint hint--warn">${esc(tr('persona.emptyHint'))}</p>` : ''}</div>
     </div>`;
   }
-  /** The company hasn't taught its Persona anything yet (unknown counts as taught). */
-  const personaEmpty = () => !!data.persona && !String(data.persona.compiledInstructions || '').trim();
+  /**
+   * The company hasn't set its Persona up at all (unknown counts as set up): the server's EMPTY status, so
+   * business details, questions or rules count even without instructions.
+   */
+  const personaEmpty = () => !!data.persona && data.persona.status === 'EMPTY';
   async function loadPersona() {
     data.persona = d.state.persona || await d.api('/app/api/persona').catch(() => null);
   }
