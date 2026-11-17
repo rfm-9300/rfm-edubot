@@ -6,7 +6,7 @@ updated: 2026-11-16
 
 How the bot answers customers on WhatsApp, Instagram and the website: the Persona page and the persona that shapes it, the tools it gets, the chat flows that answer before it, the start words and per-channel switch that decide which chats it answers at all, and the fixes that explain today's prompts. The team's dashboard copilot is a separate module: [ai-assistant.md](ai-assistant.md).
 
-## The Persona page, redesigned (2026-11-16)
+## The Persona page, redesigned (PR #122, 2026-11-16)
 
 Asked for because the persona feature and the settings for how the AI chatbot works were "very
 confusing", with more customization. Rodrigo chose guided tabs over one long page, and all four
