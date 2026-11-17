@@ -41,6 +41,7 @@ class MongoModule(config: AppConfig.MongoConfig) {
                 "persona_sources",
                 "persona_versions",
                 "chat_flows",
+                "chat_flow_sessions",
                 "dashboard_assistant_threads",
                 "dashboard_assistant_messages",
                 "crm.clients",
@@ -59,6 +60,9 @@ class MongoModule(config: AppConfig.MongoConfig) {
             db.getCollection<Document>("persona_versions")
                 .createIndex(Document("tenantId", 1).append("version", -1), IndexOptions().unique(true))
             db.getCollection<Document>("chat_flows").createIndex(Document("tenantId", 1), IndexOptions().unique(true))
+            val flowSessions = db.getCollection<Document>("chat_flow_sessions")
+            flowSessions.createIndex(Document("tenantId", 1).append("conversationId", 1), IndexOptions().unique(true))
+            flowSessions.createIndex(Document("expiresAt", 1), IndexOptions().expireAfter(0, TimeUnit.SECONDS))
 
             val assistantThreads = db.getCollection<Document>("dashboard_assistant_threads")
             assistantThreads.createIndex(Document("tenantId", 1).append("ownerKey", 1).append("updatedAt", -1))

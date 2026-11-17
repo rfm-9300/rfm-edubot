@@ -52,6 +52,44 @@ class ChatFlowRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         )
     }
 
+    /** Replaces only the flows, leaving the AI switch and the start gates as they are: what the Chatbot page saves. */
+    suspend fun saveFlows(flows: List<ChatFlow>, author: String): ChatFlows {
+        val now = Date(SystemClock.now().toEpochMilliseconds())
+        collection.updateOne(
+            Filters.eq("tenantId", tenantId),
+            Updates.combine(
+                Updates.set("flows", flows.map { it.toDocument() }),
+                Updates.set("updatedAt", now),
+                Updates.set("updatedBy", author),
+                Updates.setOnInsert("createdAt", now),
+            ),
+            UpdateOptions().upsert(true),
+        )
+        return load()!!
+    }
+
+    /** Replaces only the AI switch and the start gates, leaving the flows as they are: what Persona → Channels saves. */
+    suspend fun saveChannels(teamOnlyChannels: Set<Platform>, startGates: Map<Platform, StartGate>, author: String): ChatFlows {
+        val now = Date(SystemClock.now().toEpochMilliseconds())
+        collection.updateOne(
+            Filters.eq("tenantId", tenantId),
+            Updates.combine(
+                Updates.set("teamOnlyChannels", teamOnlyChannels.map { it.name }.sorted()),
+                Updates.set(
+                    "startGates",
+                    startGates.entries.sortedBy { it.key.name }.map { (platform, gate) ->
+                        Document("channel", platform.name).append("enabled", gate.enabled).append("words", gate.words)
+                    },
+                ),
+                Updates.set("updatedAt", now),
+                Updates.set("updatedBy", author),
+                Updates.setOnInsert("createdAt", now),
+            ),
+            UpdateOptions().upsert(true),
+        )
+        return load()!!
+    }
+
     /** Replaces the company's flows, AI setting and start gates with [flows], saved by [author]. */
     suspend fun save(flows: ChatFlows, author: String): ChatFlows {
         val now = Date(SystemClock.now().toEpochMilliseconds())
@@ -82,13 +120,35 @@ private fun Document.toFlow() = ChatFlow(
     enabled = getBoolean("enabled") ?: true,
     channels = platforms(strings("channels")),
     keywords = strings("keywords"),
-    steps = documents("steps").map { step ->
-        FlowStep(
-            id = step.getString("id"),
-            text = step.getString("text").orEmpty(),
-            buttons = step.documents("buttons").map { FlowButton(it.getString("title").orEmpty(), it.getString("next").orEmpty()) },
-        )
-    },
+    steps = documents("steps").map { it.toStep() },
+    aiReads = getBoolean("aiReads") ?: false,
+    // A flow saved before these settings answered a reply it couldn't read by leaving it to the AI at once; it still does.
+    afterMisses = enumOf(getString("afterMisses"), AfterMisses.LET_AI),
+    handoverText = getString("handoverText")?.takeIf { it.isNotBlank() },
+    retries = getInteger("retries") ?: 0,
+)
+
+/** A step saved before steps had kinds is a message with buttons, which is all it needs. */
+private fun Document.toStep() = FlowStep(
+    id = getString("id"),
+    kind = enumOf(getString("kind"), StepKind.MESSAGE),
+    text = getString("text").orEmpty(),
+    buttons = documents("buttons").map { FlowButton(it.getString("title").orEmpty(), it.getString("next").orEmpty(), it.strings("words")) },
+    show = enumOf(getString("show"), OptionsDisplay.AUTO),
+    listLabel = getString("listLabel")?.takeIf { it.isNotBlank() },
+    retryText = getString("retryText")?.takeIf { it.isNotBlank() },
+    next = getString("next")?.takeIf { it.isNotBlank() },
+    key = getString("key")?.takeIf { it.isNotBlank() },
+    expect = enumOf(getString("expect"), Expect.TEXT),
+    check = enumOf(getString("check"), Check.HOURS),
+    hours = documents("hours").map { HoursWindow(it.getInteger("day") ?: 0, it.getString("from").orEmpty(), it.getString("to").orEmpty()) },
+    answerKey = getString("answerKey")?.takeIf { it.isNotBlank() },
+    answerIs = getString("answerIs")?.takeIf { it.isNotBlank() },
+    whenTrue = getString("whenTrue")?.takeIf { it.isNotBlank() },
+    whenFalse = getString("whenFalse")?.takeIf { it.isNotBlank() },
+    action = enumOf(getString("action"), ActionKind.NOTIFY_TEAM),
+    serviceId = getString("serviceId")?.takeIf { it.isNotBlank() },
+    failNext = getString("failNext")?.takeIf { it.isNotBlank() },
 )
 
 private fun ChatFlow.toDocument() = Document("id", id)
@@ -96,14 +156,33 @@ private fun ChatFlow.toDocument() = Document("id", id)
     .append("enabled", enabled)
     .append("channels", channels.map { it.name }.sorted())
     .append("keywords", keywords)
-    .append(
-        "steps",
-        steps.map { step ->
-            Document("id", step.id)
-                .append("text", step.text)
-                .append("buttons", step.buttons.map { Document("title", it.title).append("next", it.next) })
-        },
-    )
+    .append("steps", steps.map { it.toDocument() })
+    .append("aiReads", aiReads)
+    .append("afterMisses", afterMisses.name)
+    .append("handoverText", handoverText)
+    .append("retries", retries)
+
+private fun FlowStep.toDocument() = Document("id", id)
+    .append("kind", kind.name)
+    .append("text", text)
+    .append("buttons", buttons.map { Document("title", it.title).append("next", it.next).append("words", it.words) })
+    .append("show", show.name)
+    .append("listLabel", listLabel)
+    .append("retryText", retryText)
+    .append("next", next)
+    .append("key", key)
+    .append("expect", expect.name)
+    .append("check", check.name)
+    .append("hours", hours.map { Document("day", it.day).append("from", it.from).append("to", it.to) })
+    .append("answerKey", answerKey)
+    .append("answerIs", answerIs)
+    .append("whenTrue", whenTrue)
+    .append("whenFalse", whenFalse)
+    .append("action", action.name)
+    .append("serviceId", serviceId)
+    .append("failNext", failNext)
+
+private inline fun <reified E : Enum<E>> enumOf(name: String?, default: E): E = enumValues<E>().firstOrNull { it.name == name } ?: default
 
 private fun Document.documents(key: String): List<Document> = (get(key) as? List<*>).orEmpty().filterIsInstance<Document>()
 

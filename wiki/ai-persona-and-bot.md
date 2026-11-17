@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-16
+updated: 2026-11-17
 ---
 
 # Customer-facing bot and persona
@@ -21,8 +21,9 @@ What was confusing, and what replaced it:
   set up, what the bot reads), **Profile** (who it is, how it talks), **Knowledge** (business details,
   questions and answers, documents, and the instructions they feed), **Rules** (rules, off-topic and
   unknown questions, what it can do, handing over), **Channels** (who the AI answers on each channel,
-  start words, the Instagram menus) and **History**. A tab id from before opens its new home
-  (`behavior` → Profile, `instructions` → Knowledge, `menus` → Channels).
+  start words) and **History**. A tab id from before opens its new home
+  (`behavior` → Profile, `instructions` → Knowledge, `menus` → Channels). The Instagram menus that sat
+  under Channels became the fixed flows of the **Chatbot** page on 2026-11-17 ([chatbot-flows.md](chatbot-flows.md)).
 - **Start words and the AI switch hid under Menus**, and the switch was Instagram-only. Each channel is
   now a row with "The AI answers here" (WhatsApp and Instagram: `teamOnlyChannels`, which the pipeline
   already applied to any channel) and its start words. The website always gets the AI: a save drops it
@@ -30,8 +31,8 @@ What was confusing, and what replaced it:
   The AI off on a channel is not a pause: the message waits in the inbox and the chat isn't paused.
 - **Three Save buttons.** One save bar saves every tab: `PUT /app/api/persona` takes `behavior`
   and/or `compiledInstructions` and writes one version (`SETTINGS_AND_INSTRUCTIONS` when both
-  changed), then `MenusUI.save()` saves the channels and menus. A half-written question or a menu
-  problem is caught before anything is sent, and the page goes to the tab and field. Ctrl+S works from
+  changed), then `ChannelsUI.save()` saves the channel settings (it was `MenusUI` and the menus before
+  2026-11-17). A half-written question or a start-word problem is caught before anything is sent, and the page goes to the tab and field. Ctrl+S works from
   any tab; leaving the dashboard asks first, wired in `app.js`'s `init()` because
   `DashboardScriptsTest` refuses code that runs at a page script's top level.
 - **Jargon and engineers' figures.** Sources, synthesize, rebuild, and version and tokens per reply in
@@ -82,6 +83,13 @@ from the Q&A block.
 
 ## Chat flows: ManyChat-style menus before the AI (PR #74, shipped 2026-10-13)
 
+> **Superseded in part (2026-11-17).** The flows grew into a fixed bot of their own, edited on the
+> Chatbot page and running on WhatsApp, Instagram and the website: see [chatbot-flows.md](chatbot-flows.md).
+> This section keeps the history and what still holds (matching, quick replies on Instagram, team-only
+> channels, start words, the cached pipeline trap). "Instagram only", the Menus tab and `app/menus.js`
+> below are how it was: the tab became the Chatbot page and Channels keeps the AI switch and start words
+> (`app/channels.js`, `PUT /app/api/persona/channels`).
+
 Rodrigo asked to copy a ManyChat Instagram flow for a company moving off ManyChat: greeting and
 topic keywords open a menu, buttons lead through sub-menus to a last message with a link. Nothing in
 the product could do that, so `flows/` adds menu flows that answer before the AI.
@@ -101,8 +109,8 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
 - **Instagram conversation starters aren't read.** Their taps are postbacks too, so a company that
   kept ManyChat's starters on its profile gets those taps dropped. Typing the same question still
   works when the question is a keyword.
-- **Instagram only** for now: `ChatFlow.problems()` refuses other channels until the WhatsApp client
-  sends interactive buttons (3 reply buttons of 20 characters would fit the same model).
+- **Instagram only** at the time (2026-10): `ChatFlow.problems()` refused other channels until the WhatsApp
+  client sent interactive buttons. It does now, and flows also answer the website with numbered lines.
 - **Team-only channels** (`teamOnlyChannels`) turn the AI off on a channel, as Rodrigo chose for that
   company: whatever no flow answers waits in the inbox. Since the 2026-11-16 redesign it is "The AI
   answers here" on each channel row, for WhatsApp and Instagram; the website always gets the AI.
@@ -136,7 +144,7 @@ the product could do that, so `flows/` adds menu flows that answer before the AI
   Ids are lowercase letters, digits, `-` and `_`. Instagram's limits apply: 13 buttons per step,
   titles of 20 characters, texts of 1,000 bytes.
 
-### Edited in the Persona page's Menus tab (PR #75, 2026-10-13)
+### Edited in the Persona page's Menus tab (PR #75, 2026-10-13; since 2026-11-17 the Chatbot page)
 
 Asked for the same day ("add it as a tab on the Persona page"), so a company edits its own menus.
 Since the 2026-11-16 redesign the menus sit in the Channels tab, under the channel rows, and the
@@ -173,7 +181,7 @@ Asked to make the tab much better to use, with more features where useful. With 
 the #75 tab was a 5,400px form: every menu open, keywords in a textarea, no view of where buttons
 lead, Save at the very bottom. `design-system/patterns.md` → "Persona" has the screen. Decisions:
 
-- **Its own script:** `app/menus.js` (`MenusUI`), mounted by `app.js` like Agents and Email. The test
+- **Its own script:** `app/menus.js` (`MenusUI`; now `app/chatbot.js` for the flows and `app/channels.js` for the channel settings), mounted by `app.js` like Agents and Email. The test
   chat stays with the rest of Persona (`app/persona.js`, part of `app.js` until PR #84) and asks
   `MenusUI.dirty()` and `draftPayload()` for the unsaved menus.
 - **Menus open in place:** one menu opens on load, several start folded, so the list is the
@@ -243,7 +251,7 @@ gate looks only at how a chat **begins**. `docs/architecture.md` → "Chat flows
   no word` and the channel behaves as if it had none: a broken setting must not silence a channel.
 - **Same draft as the menus.** Each channel's row in the Channels tab holds its start words (since
   the 2026-11-16 redesign; a "Start words" panel above the menus before). They share the menus' draft
-  and validation order, and the page's save bar (`app/menus.js`; `PUT /app/api/persona/menus` takes
+  and validation order, and the page's save bar (`app/channels.js`; `PUT /app/api/persona/channels` takes
   `startGates`). A page that omits the field keeps the saved gates and `[]` clears them. A gate that
   is off keeps its words.
 - **The inbox says why**: a chat paused by the gate shows "This chat began without a start word"

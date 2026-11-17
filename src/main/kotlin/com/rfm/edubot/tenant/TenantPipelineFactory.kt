@@ -20,7 +20,13 @@ import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.messaging.DeduplicationService
 import com.rfm.edubot.events.SubjectRef
 import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.flows.AiFlowInterpreter
 import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.FlowEngine
+import com.rfm.edubot.flows.FlowSessionRepository
+import com.rfm.edubot.flows.TenantFlowActions
+import com.rfm.edubot.ai.UsageSources
+import com.rfm.edubot.bookings.BookableServiceRepository
 import com.rfm.edubot.messaging.MessagePipeline
 import com.rfm.edubot.notifications.NotificationAudience
 import com.rfm.edubot.notifications.NotificationKinds
@@ -92,6 +98,17 @@ class TenantPipelineFactory(
         val modules = PersonaPrompt.botModules(persona, DashboardModules.effectiveFor(tenant).toSet())
         val bookingTools = if (DashboardModules.BOOKINGS in modules) bookingDeps(mongo, tenant, BookingSource.WHATSAPP).tools() else null
         val notifications = NotificationRepository(mongo)
+        val usage = TenantUsageRepository(mongo, tenant.id)
+        // A chat flow's own work is the company's, whatever its persona lets the AI do: it needs the module, not the persona's switch.
+        val flowModules = DashboardModules.effectiveFor(tenant).toSet()
+        val flowBooking = if (DashboardModules.BOOKINGS in flowModules) {
+            val deps = bookingDeps(mongo, tenant, BookingSource.WHATSAPP)
+            TenantFlowActions.BookingSide(deps.scheduler, deps.services)
+        } else null
+        val flowEngine = FlowEngine(
+            actions = TenantFlowActions(tenant.id, clients.takeIf { DashboardModules.CLIENTS in flowModules }, flowBooking, notifications),
+            interpreter = AiFlowInterpreter(aiClient, tenant.openrouterModel) { tokens -> usage.recordUsage(tokens, UsageSources.CHATBOT) },
+        )
         return MessagePipeline(
             users = UserRepository(mongo, tenant.id),
             conversations = ConversationRepository(mongo, tenant.id),
@@ -109,8 +126,10 @@ class TenantPipelineFactory(
             openrouterModel = tenant.openrouterModel,
             persona = persona,
             chatFlows = ChatFlowRepository(mongo, tenant.id),
+            flowEngine = flowEngine,
+            flowSessions = FlowSessionRepository(mongo, tenant.id),
             enabledModules = modules,
-            tenantUsage = TenantUsageRepository(mongo, tenant.id),
+            tenantUsage = usage,
             monthlyTokenBudget = tenant.monthlyTokenBudget,
             timezoneId = tenant.timezone,
             onHandoff = { handoff ->

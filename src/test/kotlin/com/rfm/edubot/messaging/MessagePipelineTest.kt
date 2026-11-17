@@ -29,6 +29,13 @@ import com.rfm.edubot.crm.model.Quote
 import com.rfm.edubot.crm.model.QuoteStatus
 import com.rfm.edubot.flows.ChatFlow
 import com.rfm.edubot.flows.ChatFlowRepository
+import com.rfm.edubot.flows.FlowActionResult
+import com.rfm.edubot.flows.FlowActions
+import com.rfm.edubot.flows.FlowBooking
+import com.rfm.edubot.flows.FlowClient
+import com.rfm.edubot.flows.FlowEngine
+import com.rfm.edubot.flows.FlowTeamNote
+import com.rfm.edubot.flows.MemoryFlowSessions
 import com.rfm.edubot.flows.ChatFlows
 import com.rfm.edubot.flows.FlowButton
 import com.rfm.edubot.flows.FlowStep
@@ -550,6 +557,8 @@ class MessagePipelineTest {
     private fun pipelineWith(flows: ChatFlows?): MessagePipeline {
         val chatFlows = mockk<ChatFlowRepository>()
         coEvery { chatFlows.find() } returns flows
+        // Instagram's taps, so the menus go out as quick replies.
+        every { responder.capabilities } returns ChannelCapabilities.INSTAGRAM
         return MessagePipeline(
             users = users,
             conversations = conversations,
@@ -563,6 +572,13 @@ class MessagePipelineTest {
             invoiceRepository = invoiceRepository,
             pdfGenerator = pdfGenerator,
             chatFlows = chatFlows,
+            flowEngine = FlowEngine(object : FlowActions {
+                override suspend fun isKnownClient(phone: String?) = false
+                override suspend fun createClient(client: FlowClient) = FlowActionResult(true)
+                override suspend fun createBooking(booking: FlowBooking) = FlowActionResult(true)
+                override suspend fun notifyTeam(note: FlowTeamNote) = FlowActionResult(true)
+            }),
+            flowSessions = MemoryFlowSessions(),
         )
     }
 
@@ -580,7 +596,7 @@ class MessagePipelineTest {
     @Test
     fun `a keyword starts a chat flow, which answers with quick replies instead of the AI`() = runBlocking {
         val (u, convo) = newCustomer()
-        coEvery { responder.sendQuickReplies(any(), any(), any()) } returns Unit
+        coEvery { responder.sendQuickReplies(any(), any(), any(), any()) } returns Unit
         val stored = mutableListOf<Message>()
         coEvery { messages.insert(capture(stored)) } answers { firstArg() }
 
@@ -590,7 +606,8 @@ class MessagePipelineTest {
             responder.sendQuickReplies(
                 u.waId,
                 "Qual dos serviços lhe interessa?",
-                listOf(QuickReply("Unhas", "flow:servicos:contacto"), QuickReply("Pele", "flow:servicos:contacto")),
+                listOf(QuickReply("Unhas", "flow:servicos:contacto:0"), QuickReply("Pele", "flow:servicos:contacto:1")),
+                null,
             )
         }
         coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
@@ -609,7 +626,7 @@ class MessagePipelineTest {
         pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Unhas", payload = "flow:servicos:contacto"), responder)
 
         coVerify(exactly = 1) { responder.sendText(u.waId, "Fale com a nossa equipa") }
-        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any()) }
+        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any(), any()) }
         coVerify(exactly = 0) { aiClient.complete(any(), any(), any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
     }
@@ -649,7 +666,7 @@ class MessagePipelineTest {
         pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Olá"), responder)
 
         coVerify(exactly = 1) { messages.insertIfAbsent(any()) }
-        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any()) }
+        coVerify(exactly = 0) { responder.sendQuickReplies(any(), any(), any(), any()) }
         coVerify(exactly = 0) { responder.sendText(any(), any()) }
         coVerify(exactly = 1) { deduplicationService.markProcessed("evt-1") }
     }
@@ -660,7 +677,7 @@ class MessagePipelineTest {
         val stored = mutableListOf<Message>()
         coEvery { messages.insert(capture(stored)) } answers { firstArg() }
         coEvery { messages.markSendFailed(any(), any(), any()) } returns null
-        coEvery { responder.sendQuickReplies(any(), any(), any()) } throws OutboundDeliveryException("Instagram API error: 400")
+        coEvery { responder.sendQuickReplies(any(), any(), any(), any()) } throws OutboundDeliveryException("Instagram API error: 400")
 
         pipelineWith(ChatFlows(listOf(menuFlow))).handle(instagram("Olá"), responder)
 

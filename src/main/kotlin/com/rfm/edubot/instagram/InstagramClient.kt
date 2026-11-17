@@ -122,11 +122,11 @@ class InstagramClient(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("InstagramClient")
 
-    override val capabilities = ChannelCapabilities(supportsDocuments = false)
+    override val capabilities = ChannelCapabilities.INSTAGRAM
 
     override suspend fun sendText(to: String, text: String) = send(to, InstagramMessage(text))
 
-    override suspend fun sendQuickReplies(to: String, text: String, replies: List<QuickReply>) =
+    override suspend fun sendQuickReplies(to: String, text: String, replies: List<QuickReply>, listLabel: String?) =
         send(to, InstagramMessage(text, replies.map { InstagramQuickReply(title = it.title, payload = it.payload) }.ifEmpty { null }))
 
     private suspend fun send(to: String, message: InstagramMessage) {

@@ -3,6 +3,7 @@ package com.rfm.edubot.whatsapp
 import com.rfm.edubot.channel.ChannelCapabilities
 import com.rfm.edubot.channel.OutboundClient
 import com.rfm.edubot.channel.OutboundDeliveryException
+import com.rfm.edubot.channel.QuickReply
 import io.ktor.client.*
 import io.ktor.client.engine.cio.*
 import io.ktor.client.plugins.*
@@ -15,6 +16,9 @@ import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import org.slf4j.LoggerFactory
 
 @Serializable
@@ -87,10 +91,59 @@ class WhatsAppClient(
     private val json = Json { ignoreUnknownKeys = true; encodeDefaults = true; explicitNulls = false }
     private val log = LoggerFactory.getLogger("WhatsAppClient")
 
-    override val capabilities = ChannelCapabilities(supportsDocuments = true)
+    override val capabilities = ChannelCapabilities.WHATSAPP
 
     override suspend fun sendText(to: String, text: String) {
         sendTextMessage(to, text)
+    }
+
+    /**
+     * [text] with [replies] as WhatsApp reply buttons (up to 3), or, for more, as a list (up to 10) opened by a button
+     * named [listLabel]. A tap comes back as an interactive reply carrying the option's payload as its id.
+     */
+    override suspend fun sendQuickReplies(to: String, text: String, replies: List<QuickReply>, listLabel: String?) {
+        if (replies.isEmpty()) return sendText(to, text)
+        val interactive = if (replies.size <= capabilities.buttonReplies) {
+            buildJsonObject {
+                put("type", "button")
+                put("body", buildJsonObject { put("text", text) })
+                put("action", buildJsonObject {
+                    put("buttons", buildJsonArray {
+                        replies.forEach { reply ->
+                            add(buildJsonObject {
+                                put("type", "reply")
+                                put("reply", buildJsonObject { put("id", reply.payload); put("title", reply.title) })
+                            })
+                        }
+                    })
+                })
+            }
+        } else {
+            val label = listLabel?.takeIf { it.isNotBlank() }
+                ?: throw OutboundDeliveryException("A WhatsApp list needs a label for its button")
+            buildJsonObject {
+                put("type", "list")
+                put("body", buildJsonObject { put("text", text) })
+                put("action", buildJsonObject {
+                    put("button", label)
+                    put("sections", buildJsonArray {
+                        add(buildJsonObject {
+                            put("rows", buildJsonArray {
+                                replies.forEach { reply -> add(buildJsonObject { put("id", reply.payload); put("title", reply.title) }) }
+                            })
+                        })
+                    })
+                })
+            }
+        }
+        val body = buildJsonObject {
+            put("messaging_product", "whatsapp")
+            put("recipient_type", "individual")
+            put("to", to)
+            put("type", "interactive")
+            put("interactive", interactive)
+        }
+        postMessage(to, body.toString())
     }
 
     /** Sends a text message; later status webhooks refer to the returned id. */

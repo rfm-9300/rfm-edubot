@@ -53,6 +53,8 @@ object NotificationKinds {
     const val TIME_NO_SHOW = "time_no_show"
     /** The bot handed a conversation to the team; its subject is the conversation. */
     const val CONVERSATION_HANDOFF = "conversation_handoff"
+    /** A chat flow finished asking a customer its questions and passes the answers on; its subject is the conversation. */
+    const val CHATBOT_ANSWERS = "chatbot_answers"
     /** A client approved or rejected a change order from its link; its subject is the change. */
     const val CHANGE_ORDER_DECIDED = "change_order_decided"
 }

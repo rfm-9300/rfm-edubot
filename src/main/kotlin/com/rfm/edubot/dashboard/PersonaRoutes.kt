@@ -253,19 +253,19 @@ private fun Route.personaRoutes(
             pipelineFactory.evict(ctx.tenant.id)
             call.reply(ctx, restored)
         }
-        get("/menus") {
+        // Where the AI answers and the start words; the chat flows themselves are /app/api/chatbot's.
+        get("/channels") {
             val ctx = call.moduleContext()
-            val flows = ChatFlowRepository(mongo, ctx.tenant.id).load()
-            call.respond(menusDto(flows, ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id), ctx.tenant.binding(Platform.WHATSAPP) != null))
+            call.respond(channelsDto(ChatFlowRepository(mongo, ctx.tenant.id).load(), ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, ctx.tenant.binding(Platform.WHATSAPP) != null))
         }
-        put("/menus") {
+        put("/channels") {
             val ctx = call.personaEditor() ?: return@put
-            val input = call.body<MenusInput>() ?: return@put
+            val input = call.body<ChannelsInput>() ?: return@put
             val repository = ChatFlowRepository(mongo, ctx.tenant.id)
-            val flows = input.toChatFlows(keepGates = repository.load()?.startGates.orEmpty())
-            flows.saveProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
-            val saved = repository.save(flows, ctx.author())
-            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id), ctx.tenant.binding(Platform.WHATSAPP) != null))
+            val channels = input.toChatFlows(keepGates = repository.load()?.startGates.orEmpty())
+            channels.gateProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
+            val saved = repository.saveChannels(channels.teamOnlyChannels, channels.startGates, ctx.author())
+            call.respond(channelsDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, ctx.tenant.binding(Platform.WHATSAPP) != null))
         }
         post("/preview") {
             val ctx = call.moduleContext()
@@ -282,33 +282,13 @@ private fun Route.personaRoutes(
                 .takeLast(PersonaLimits.MAX_TEST_MESSAGES)
                 .map { it.copy(content = it.content.take(PersonaLimits.MAX_TEST_MESSAGE_CHARS)) }
             if (history.isEmpty()) return@post call.problem(PersonaProblem("messages_required", "messages"))
-            // Menus answer before the AI, as they do on Instagram; unsaved ones are tried as they are.
-            val menuRepository = ChatFlowRepository(mongo, ctx.tenant.id)
-            val menus = request.flows?.toChatFlows(keepGates = menuRepository.load()?.startGates.orEmpty()) ?: menuRepository.find()
-            if (request.flows != null) menus?.saveProblem()?.let { return@post call.respond(HttpStatusCode.BadRequest, it.dto()) }
+            // Flows answer before the AI and are tried on the Chatbot page; here only the channel settings that change what a customer gets.
+            val menus = ChatFlowRepository(mongo, ctx.tenant.id).load()
             // Channels where this test chat, as a new chat, would get no reply because its first message holds no start word.
             val opener = request.messages.firstOrNull { it.role == "user" }?.content.orEmpty()
             val gatedChannels = StartGate.CHANNELS.filter { menus?.startGate(it)?.opens(opener) == false }.map { it.name }.sorted()
-            // Channels where the AI is off, so what no menu answers there waits for the team.
+            // Channels where the AI is off, so what no flow answers there waits for the team.
             val aiOffChannels = menus?.teamOnlyChannels.orEmpty().map { it.name }.sorted()
-            val last = history.last()
-            val menuReply = if (last.role == "assistant") null else menus?.replyTo(Platform.INSTAGRAM, last.content, request.payload)
-            if (menuReply != null) {
-                return@post call.respond(
-                    PersonaTestResponse(
-                        reply = menuReply.step.text,
-                        handoff = false,
-                        handoffReason = null,
-                        draft = request.flows != null,
-                        version = repo.findByTenant(ctx.tenant.id)?.version ?: 0,
-                        menu = menuReply.flow.name,
-                        quickReplies = menuReply.quickReplies.map { it.dto() },
-                        teamOnly = false,
-                        gatedChannels = gatedChannels,
-                        aiOffChannels = emptyList(),
-                    ),
-                )
-            }
             val persona = call.draftPersona(repo, ctx.tenant.id, request.draft) ?: return@post
             val usage = TenantUsageRepository(mongo, ctx.tenant.id)
             if (usage.tokensUsedThisMonth() >= ctx.tenant.monthlyTokenBudget) {
@@ -330,9 +310,6 @@ private fun Route.personaRoutes(
                     handoffReason = outcome.handoffReason,
                     draft = request.draft != null,
                     version = persona.version,
-                    menu = null,
-                    quickReplies = emptyList(),
-                    teamOnly = menus?.teamOnlyChannels?.contains(Platform.INSTAGRAM) == true,
                     gatedChannels = gatedChannels,
                     aiOffChannels = aiOffChannels,
                 ),
@@ -347,7 +324,7 @@ private suspend fun menuUsage(mongo: MongoModule, tenantId: ObjectId) =
     ChatFlowUsage.of(MessageRepository(mongo, tenantId).countByOrigin(ChatFlowUsage.ORIGIN_PREFIX, ChatFlowUsage.since(SystemClock.now())))
 
 /** The session, for a change: only admins and operators change how the bot speaks for the company. */
-private suspend fun ApplicationCall.personaEditor(): DashboardContext? {
+internal suspend fun ApplicationCall.personaEditor(): DashboardContext? {
     val ctx = moduleContext()
     if (!ctx.isAdmin()) {
         problem(PersonaProblem("not_allowed"), HttpStatusCode.Forbidden)
@@ -356,15 +333,15 @@ private suspend fun ApplicationCall.personaEditor(): DashboardContext? {
     return ctx
 }
 
-private fun DashboardContext.author(): String = user?.email ?: "operator"
+internal fun DashboardContext.author(): String = user?.email ?: "operator"
 
-private suspend inline fun <reified T : Any> ApplicationCall.body(): T? =
+internal suspend inline fun <reified T : Any> ApplicationCall.body(): T? =
     runCatching { receive<T>() }.getOrNull() ?: run {
         problem(PersonaProblem("invalid_request"))
         null
     }
 
-private suspend fun ApplicationCall.problem(problem: PersonaProblem, status: HttpStatusCode = HttpStatusCode.BadRequest) =
+internal suspend fun ApplicationCall.problem(problem: PersonaProblem, status: HttpStatusCode = HttpStatusCode.BadRequest) =
     respond(status, PersonaErrorDto(problem.error, problem.field, problem.limit, problem.index))
 
 /** Whether one more source of [chars] fits the company's limits; answers 409 when it doesn't. */
@@ -473,17 +450,13 @@ private class PlaygroundHandoff : ToolPack {
 @Serializable private data class PersonaUpdateRequest(val compiledInstructions: String? = null, val behavior: PersonaBehaviorInput? = null)
 @Serializable private data class PersonaSourceRequest(val content: String)
 @Serializable private data class PersonaTestMessage(val role: String, val content: String)
-/** [flows] are the Menus tab's unsaved menus; [payload] is the quick reply the tester tapped for the last message. */
 @Serializable private data class PersonaTestRequest(
     val messages: List<PersonaTestMessage> = emptyList(),
     val draft: PersonaDraftInput? = null,
-    val flows: MenusInput? = null,
-    val payload: String? = null,
 )
 
 /**
- * [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram and
- * [aiOffChannels] lists every channel where it wouldn't; [gatedChannels] are the channels where a chat like this one,
+ * [aiOffChannels] lists every channel where the AI wouldn't answer; [gatedChannels] are the channels where a chat like this one,
  * whose first message holds no start word, gets no reply.
  */
 @Serializable private data class PersonaTestResponse(
@@ -492,9 +465,6 @@ private class PlaygroundHandoff : ToolPack {
     val handoffReason: String?,
     val draft: Boolean,
     val version: Int,
-    val menu: String?,
-    val quickReplies: List<QuickReplyDto>,
-    val teamOnly: Boolean,
     val gatedChannels: List<String>,
     val aiOffChannels: List<String>,
 )
@@ -586,7 +556,7 @@ private data class PersonaLimitsDto(
 
 /** A channel customers write on, and whether the company has it set up (the website: a widget key). */
 @Serializable
-private data class PersonaChannelDto(val channel: String, val connected: Boolean)
+internal data class PersonaChannelDto(val channel: String, val connected: Boolean)
 
 @Serializable
 private data class PersonaDto(
@@ -668,7 +638,7 @@ private fun capabilitiesFor(modules: Set<String>): List<String> = buildList {
     if (PersonaCapabilities.RECORD_MODULES.any { it in modules }) add("records")
 }
 
-private fun channelsOf(tenant: Tenant) = listOf(
+internal fun channelsOf(tenant: Tenant) = listOf(
     PersonaChannelDto(Platform.WHATSAPP.name, tenant.binding(Platform.WHATSAPP) != null),
     PersonaChannelDto(Platform.INSTAGRAM.name, tenant.binding(Platform.INSTAGRAM) != null),
     PersonaChannelDto(Platform.WEB.name, tenant.binding(Platform.WEB)?.externalId?.isNotBlank() == true),

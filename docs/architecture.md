@@ -30,8 +30,8 @@ sequenceDiagram
     loop Consumer → ConversationLanes (one conversation at a time per lane, 16 lanes)
         Q->>P: handle(inbound)
         P->>DB: findOrCreate User
-        P->>DB: chat_flows (keyword or tapped quick reply → flow step)
-        Note over P: No step on a team-only channel: store the message for the team and stop
+        P->>DB: chat_flows + chat_flow_sessions (waiting in a flow, a tapped option, or a keyword)
+        Note over P: No flow answers on a team-only channel: store the message for the team and stop
         P->>R: tryAcquire(waId)
         P->>DB: findOrCreate Conversation
         P->>DB: insert user Message (skipped if already stored)
@@ -176,8 +176,8 @@ graph TD
 | `http/` | The error contract: `ErrorBody`, `ApiException`, the `ApiErrors` codes, and `idParam` / `idValue` / `dateValue` / `enumValue` for values a handler can't use. Depends on no feature |
 | `admin/` | Backoffice (operator) REST endpoints, the tenant CRM among them through the same CRM services, and static admin panel routing; the team's work board in `admin/board/` and its password vault in `admin/vault/` ([Backoffice board and password vault](#backoffice-board-and-password-vault)) |
 | `ai/` | OpenRouter client — retry + primary/fallback model + tool-call parsing |
-| `channel/` | `OutboundClient` interface (text, documents, Instagram quick replies) and per-channel capability flags used by the pipeline |
-| `flows/` | Chat flows: menus with quick replies that answer before the AI, their keyword matching and limits, and the `chat_flows` reader |
+| `channel/` | `OutboundClient` interface (text, documents, quick replies for Instagram and WhatsApp) and per-channel capabilities (`ChannelCapabilities`) the pipeline and the Chatbot page's test chat fit messages to |
+| `flows/` | Chat flows: fixed bots (messages with options, questions, conditions, actions, hand-overs) that answer before the AI, their engine, answer reading, sessions and limits, and the `chat_flows` reader |
 | `instagram/` | Instagram DM Graph API outbound adapter plus post/comment inbox (webhook ingest, Graph list/reply) |
 | `whatsapp/` | Outbound Graph API client for text, media upload, and document send |
 | `ratelimit/` | In-memory token bucket (per-hour + per-day per user) |
@@ -974,7 +974,8 @@ flowchart LR
 | `tenant_persona` | One per company: the persona's instructions, its settings (`behavior`), version, token estimate, status, last synthesis error and `stale` | unique `tenantId` |
 | `persona_sources` | Notes and uploaded files' text the synthesis folds in, with `chars`, who added them and the version that folded them in (`compiledIntoVersion`, null while pending) | `tenantId+createdAt`; `tenantId+compiledIntoVersion` |
 | `persona_versions` | A snapshot of the persona after each change (instructions + settings, what changed, who), the last 50 per company | unique `(tenantId, version)` |
-| `chat_flows` | One per company: its [chat flows](#chat-flows) (keywords, steps, quick replies) and the channels where the AI stays off (`teamOnlyChannels`) | unique `tenantId` |
+| `chat_flows` | One per company: its [chat flows](#chat-flows) (keywords and steps of every kind), the channels where the AI stays off (`teamOnlyChannels`) and its start gates | unique `tenantId` |
+| `chat_flow_sessions` | Where a customer is in a flow: the step that waits, the answers kept and the misses, one per conversation, dropped by Mongo a week after the last message | unique `(tenantId, conversationId)`; TTL on `expiresAt` |
 
 ### Platform (`wabot_platform`)
 
@@ -1435,10 +1436,11 @@ business details, questions and answers, what the bot can do, handoff and its si
 **instructions**, free text that the synthesis writes from the company's sources (typed notes,
 uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand. The page's tabs follow
 a message: Overview (the steps and what is set up), Profile, Knowledge, Rules, Channels (who the AI
-answers per channel, start words, and the [chat flows](#chat-flows) that answer Instagram before the
-AI) and History, with one save bar for all of them.
+answers per channel and its start words) and History, with one save bar for all of them. The fixed
+[chat flows](#chat-flows) that answer before the AI are their own **Chatbot** page.
 Code: `persona/` (`PersonaRepository`, `PersonaCompiler`, `PersonaPrompt`, `PersonaValidation`,
-`PersonaFileExtractor`), `dashboard/PersonaRoutes.kt`, `app/persona.js` and `app/menus.js`.
+`PersonaFileExtractor`), `dashboard/PersonaRoutes.kt`, `dashboard/PersonaChannels.kt`, `app/persona.js` and
+`app/channels.js`.
 
 ```mermaid
 flowchart LR
@@ -1515,76 +1517,121 @@ flowchart LR
 
 ## Chat flows
 
-Fixed messages with quick replies that answer customers before the AI, the way ManyChat keyword
-automations do: a keyword opens a menu, and each tap leads to the next step. Code: `flows/`
-(`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline`,
-`InstagramClient.sendQuickReplies`, and the Persona page's **Channels** tab (`dashboard/PersonaMenus.kt`,
-`flows/ChatFlowUsage.kt`, `app/menus.js`). A company's flows are one `chat_flows` document
-([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape), read on every message,
-so a saved change applies at once.
+Fixed bots that answer customers before the AI, the way ManyChat automations do: a keyword starts a
+flow, which walks through steps: messages with options (taps, numbers or words), questions whose
+answers are kept, conditions, actions that create clients and bookings, and hand-overs to a person.
+Code: `flows/` (`ChatFlows` the model, `FlowEngine` the runner, `FlowAnswers` and `FlowOptions` the
+readers, `FlowRender` the channel fitting, `FlowSessions` where a customer is, `AiFlowInterpreter` the
+optional AI reading, `TenantFlowActions` the actions, `ChatFlowRepository` the storage), the flow
+branch of `MessagePipeline`, the channels' `sendQuickReplies` (`InstagramClient`, `WhatsAppClient`),
+the **Chatbot** page (`dashboard/ChatbotRoutes.kt`, `app/chatbot.js`) and Persona → **Channels**
+(`dashboard/PersonaChannels.kt`, `app/channels.js`). [wiki/chatbot-flows.md](../wiki/chatbot-flows.md)
+has the decisions and traps. A company's flows are one `chat_flows` document with its AI switch and
+start words, read on every message, so a saved change applies at once.
 
-- **Editing.** `GET /app/api/persona/menus` (anyone with the `persona` module) returns every
-  readable flow, problems included (`ChatFlowRepository.load`), so a flow that can't run is shown and
-  fixed rather than dropped by the next save; the pipeline reads `find`, which leaves such flows out.
-  `PUT` (admins and operators) trims the input, drops blank and repeated keywords, puts every flow on
-  Instagram and checks `ChatFlows.saveProblem()`: the tab's limits (10 menus, 30 messages, 50 keywords
-  of 60 characters, names of 60), then `ChatFlow.problems()`. A refusal is
-  `400 {error: "menu_problem", problem, menu, step, limit}`, positions in what was sent; the tab
-  checks the same rules in the same order before sending, with the same wording.
-- **Usage.** Both answers carry `usage`: per saved menu, over the last 30 days, the messages it sent,
-  the ones Instagram refused (`failed`, status `FAILED`, so an expired token shows instead of
-  inflating the figures), the conversations that got at least one, when it last sent, and per step.
-  `MessageRepository.countByOrigin` groups the flow messages (`origin` starting `flow:`) by origin
-  and conversation on the `tenantId + createdAt` index; `ChatFlowUsage` folds them per flow and step.
-  Messages stored before the step was kept (`origin = flow:<id>`) count towards their flow only.
-- **Test chat.** `POST /app/api/persona/test` runs the menus before the AI, through the same
-  `replyTo`, with the tab's unsaved menus when it sends them (`flows`) and a tapped button's `payload`.
-  A menu reply returns its text, `menu` and `quickReplies` without calling the model; an AI reply lists
-  `aiOffChannels`, where the AI is off and that message would wait for the team (`teamOnly` says it
-  for Instagram alone, for older pages). Unsaved menus with a problem answer `menu_problem` like a save.
+- **Steps.** A `FlowStep` has a `kind`: `MESSAGE` (text, options, or a `next`; with a `key` the chosen option's title is kept like an answer), `ASK` (a question, the
+  `key` its answer is kept under and what it `expect`s), `CONDITION` (opening `HOURS` in the company's
+  time zone, a `KNOWN_CLIENT`, or an earlier `ANSWER`), `ACTION` (`CREATE_CLIENT`, `CREATE_BOOKING`,
+  `NOTIFY_TEAM`, with a `failNext`) and `HANDOFF`. A null `next` ends the flow. Steps that don't wait
+  run on in one go (up to 12 hops), so one customer message can send several. `ChatFlow.problems()`
+  checks every kind and refuses two steps that lead back to each other without waiting (`loop`).
+- **Options, typed or tapped.** `OptionsDisplay`: `AUTO` sends taps where the channel has them
+  (`ChannelCapabilities`: Instagram 13, WhatsApp 3 buttons or up to 10 in a list when the step names
+  the list's button) and numbered lines under the text where it doesn't (the website, or too many,
+  or too long); `NUMBERED` always numbers; `HIDDEN` adds nothing, for a message that says "reply 1 for
+  nails". Typed replies always work: `FlowOptions.match` takes a number, the title, or any extra word
+  of an option, and nothing when two options match. A tap routes by its payload
+  (`flow:<flow>:<step>:<option>`), never by its title.
+- **Sessions.** `chat_flow_sessions` holds, per conversation, the step that waits, the answers kept
+  (`vars`) and the replies in a row that weren't understood (`misses`), expiring after 12 idle hours
+  (a Mongo TTL index sweeps them a week later). `FlowEngine` keeps no state: the pipeline reads the
+  session before the rate limiter, passes it in and stores what comes back, before anything is sent.
+- **Not understood.** A reply nothing reads is a miss: the step is sent again, ahead of it the step's
+  `retryText` when it has one, up to the flow's `retries` (1 for a new flow); then `afterMisses` either
+  hands the chat to a person (saying `handoverText`) or leaves the message to the AI, or to the team where
+  the AI is off, like any message no flow answers. A flow saved before these settings reads as
+  `retries = 0` and `LET_AI`: an unreadable reply goes straight to the AI, exactly as the Instagram menus
+  always did. With `aiReads`, the
+  AI is asked first, only after the usual reading failed and while the company has tokens:
+  `AiFlowInterpreter` sends the question, the options, what is expected, today and the reply, and takes
+  back `{decision: ACCEPT | REPEAT | HAND_OVER, option, value}`. An option must exist and a value must
+  pass the same reading as a typed one, so a bad answer only asks again; its tokens count as `chatbot`.
+- **Actions.** `TenantFlowActions` writes with the company's own repositories: a client from `name`,
+  `phone` and `email` (on WhatsApp the number is the customer's id; a client with that phone isn't
+  duplicated), a pending booking through `BookingScheduler` (`date`, `time`, a service by id or by name,
+  the customer's channel as source, so booking hours apply) and a `chatbot_answers` notification linked
+  to the conversation. An action needs its module (clients, bookings); without it, it fails and the flow
+  takes its `failNext`, or hands over. A hand-over pauses the chat as the AI's does
+  (`Conversation.BOT_HANDOFF`, `onHandoff`), with a reason made of the flow's name and the answers.
+- **Editing.** `GET /app/api/chatbot/flows` (anyone with the `persona` module; the page has no module
+  of its own) returns every readable flow, problems included (`ChatFlowRepository.load`), so a flow
+  that can't run is shown and fixed rather than dropped by the next save; the pipeline reads `find`,
+  which leaves such flows out. `PUT` (admins and operators) trims the input, drops blank and repeated
+  keywords and words, and checks `ChatFlows.saveProblem()`: 10 flows, 60 steps, 50 keywords of 60
+  characters, names of 60, then `ChatFlow.problems()`. A refusal is `400 {error: "flow_problem",
+  problem, flow, step, limit}`, positions in what was sent. It saves the flows only
+  (`ChatFlowRepository.saveFlows`); `PUT /app/api/persona/channels` saves the AI switch and start words
+  only (`saveChannels`), so each page leaves the other's part alone.
+- **Usage.** `GET` carries `usage`: per saved flow, over the last 30 days, the messages it sent, the
+  ones the channel refused (`failed`, status `FAILED`, so an expired token shows instead of inflating
+  the figures), the conversations that got at least one, when it last sent, and per step.
+  `MessageRepository.countByOrigin` groups the flow messages (`origin` starting `flow:`) by origin and
+  conversation on the `tenantId + createdAt` index; `ChatFlowUsage` folds them per flow and step.
+- **Test chat.** `POST /app/api/chatbot/test` runs one turn of the unsaved flows (or the saved ones),
+  on a chosen channel (so it shows taps or numbered lines as that channel would), at a pretended time
+  and with or without a known client, with the state its last turn returned. Actions are
+  `DryRunFlowActions`: nothing is written, and the answer lists what each would have done. The AI
+  reads when the flow asks and the company has tokens. The Persona test chat no longer runs flows: it
+  tests the AI, and lists `aiOffChannels` and `gatedChannels` as before.
 - **The AI per channel.** `teamOnlyChannels` can hold WhatsApp and Instagram
   (`ChatFlows.TEAM_ONLY_CHANNELS`); a save drops the website, whose visitors nobody could answer. On
-  such a channel a message no flow answers is stored for the team without pausing the chat.
+  such a channel a message no flow answers (and no customer is waiting in one) is stored for the team
+  without pausing the chat.
 
 ```mermaid
 flowchart TD
     IN[Customer message] --> GATE{"New chat, and its channel asks<br/>for start words the message lacks?"}
     GATE -->|yes| HOLD["Create the chat paused,<br/>store for the team, no reply"]
-    GATE -->|no| TAP{"Tapped a quick reply<br/>whose step exists?"}
-    TAP -->|yes| STEP[Send that step]
-    TAP -->|no| KW{"Text holds a<br/>flow keyword?"}
-    KW -->|yes| FIRST["Send the flow's first step"]
-    KW -->|no| TEAM{"Channel team-only?"}
+    GATE -->|no| ANS{"Customer waiting in a flow,<br/>tapped an option, or keyword?"}
+    ANS -->|no| TEAM{"Channel team-only?"}
     TEAM -->|yes| STORE["Store for the team, no reply"]
     TEAM -->|no| AI["AI reply as usual"]
-    STEP & FIRST --> SEND["Step text + quick replies<br/>payload flow:flow-id:step-id"]
+    ANS -->|yes| RUN["FlowEngine: read the reply,<br/>run steps to the next wait"]
+    RUN --> LOST{"Reply understood?"}
+    LOST -->|no, aiReads| READ["AI says what it means<br/>(option, value, hand over)"]
+    LOST -->|no, twice| AFTER["Hand over to a person<br/>or leave it to the AI"]
+    LOST -->|yes| ACT["Steps: messages, conditions,<br/>actions (client, booking, notice)"]
+    READ --> ACT
+    ACT --> SAVE["Store the messages, the session<br/>and any hand-over, then send"]
 ```
 
 - **Where it runs.** After the paused-conversation check, so a chat a person took over gets no flow
-  either. The step goes out after the rate limit passes and the customer's message is stored, and the
-  AI isn't called. It is stored as an `AUTOMATION` message with the flow's name in `agentName` and
-  `origin = flow:<flow id>:<step id>` (the payload's form), so the inbox shows it with the Automation
-  tag and the Channels tab can count each step.
+  either. `FlowEngine.wouldAnswer` decides (with no effects) before the team-only branch; the rate
+  limiter and the customer's message come next, then `handle`. Each message goes out as an `AUTOMATION`
+  message with the flow's name in `agentName` and `origin = flow:<flow id>:<step id>`. The session and a
+  hand-over are saved before sending, so a channel that refuses a message (a bad token, a closed
+  24-hour window) doesn't make the customer start over.
 - **Matching.** Keywords match whole words, ignoring case, accents and punctuation: "Oi" is found in
-  "Oi, tudo bem?" but not in "Depois". A tap is routed by its payload, never by its title, so a
-  button labelled "Sobrancelha/Formação" moves on even when "Formação" also starts the flow. A
-  payload whose flow or step is gone falls back to keyword matching on the title.
-- **Instagram only.** Quick replies are an Instagram feature (13 per message, titles of 20
-  characters, messages of 1,000 bytes; Instagram's desktop site doesn't show them). The WhatsApp
-  client can't send interactive buttons yet, so `ChatFlow.problems()` refuses other channels, and a
-  flow with problems is skipped and logged on every message.
+  "Oi, tudo bem?" but not in "Depois". A keyword typed at a waiting message starts its flow over
+  ("menu" works anywhere); at a question it is the answer. `FlowAnswers` reads names, phones, emails,
+  numbers, dates (`12/03`, `today`, `tomorrow`), times (`15h30`, `3pm`) and yes or no in three
+  languages, with no AI.
+- **Channels.** Instagram quick replies arrive as ordinary `messages` webhooks with a payload. WhatsApp
+  button and list replies arrive as `interactive` messages: `WhatsAppInbound` passes the option's id as
+  `quickReplyPayload`, the same field. The website's widget has no taps, so options are numbered lines.
+  The AI answers on a channel the flow doesn't cover as before.
 - **Team-only channels.** `teamOnlyChannels` turns the AI off on a channel: a message no flow
   answers is stored without a reply, before the rate limiter, and waits in the inbox.
 - **Start gates.** `ChatFlows.startGates` (Instagram and WhatsApp) holds, per channel, words a new
   chat's first message must contain. Where no conversation exists yet and the message holds none
-  (`StartGate.opens`, the menus' whole-word matching), `MessagePipeline` creates the conversation
+  (`StartGate.opens`, the keywords' whole-word matching), `MessagePipeline` creates the conversation
   already paused (`findOrCreate(…, pausedBy = Conversation.START_GATE)`, which raises no handoff
   event), stores the message and sends nothing, so later messages fall under the paused-conversation
   check until a person resumes the AI. The media branch applies the same gate to a first photo's
   caption. Existing conversations are never gated; a gate that is off, or has no usable word, is
-  ignored. `PUT /app/api/persona/menus` takes `startGates: [{channel, enabled, words}]` (left out
+  ignored. `PUT /app/api/persona/channels` takes `startGates: [{channel, enabled, words}]` (left out
   keeps the saved ones) and refuses `start_words`, `start_words_limit` and `start_word`, with the
-  gate's `channel` in the error; the test chat answers `gatedChannels` for a first message that
+  gate's `channel` in the error; the Persona test chat answers `gatedChannels` for a first message that
   holds no start word.
 
 ## Context Building
@@ -1606,7 +1653,7 @@ When CRM tools are enabled, the pipeline passes JSON Schema tool definitions to 
 - **Channel adapters at the edges** — webhook ingress normalizes WhatsApp and Instagram payloads into `InboundMessage`; the consumer selects an `OutboundClient` from the tenant's channel binding before calling the shared `MessagePipeline`.
 - **Per-channel participant identity** — `users`, `conversations`, and `messages` store `channel` plus the existing `waId` external participant id. Uniqueness is `(tenantId, channel, waId)`, so WhatsApp and Instagram sender ids cannot collide.
 - **Shared web design system** — `/app` (tenant dashboard) and `/backoffice` (operator) load the same stylesheet from `src/main/resources/admin/style.css` (`/admin/style.css`). `/admin` and `/admin/` redirect to `/backoffice/`; the `/admin/{asset}` route still serves the shared CSS, theme, catalogs, i18n, and the helpers both dashboards use (`common.js`). Agents must follow [`design-system/`](../design-system/README.md) when changing these UIs. The website widget (`widget.css`, `tbl-` prefix) and legal pages are separate and must not share that stylesheet.
-- **Dashboard scripts** — neither dashboard has a build step: each `index.html` loads plain scripts with `defer`. A page's own scripts (`core.js` first, then one per page or view such as `quotes.js` or `tenants.js`, and `app.js`, the shell, last) and `/admin/common.js`, the helpers both pages share (`escapeHTML()`, `toast()`, `confirmDialog()`, `apiFetch()`, Google sign-in, Meta's SDK), make up one global scope and only declare things at their top level; `app.js`'s `init()` starts the page once all have loaded. `/app`'s self-contained modules (`agents.js`, `timesheets.js`, `assistant.js`, `email.js`, `menus.js`, `doc-template.js`) each expose one `window.*UI` object and get the shell's helpers through `init(deps)`. `DashboardScriptsTest` checks both pages: every script is loaded and no top-level name is declared twice. File map and rules: [wiki/dashboard-frontend.md](../wiki/dashboard-frontend.md).
+- **Dashboard scripts** — neither dashboard has a build step: each `index.html` loads plain scripts with `defer`. A page's own scripts (`core.js` first, then one per page or view such as `quotes.js` or `tenants.js`, and `app.js`, the shell, last) and `/admin/common.js`, the helpers both pages share (`escapeHTML()`, `toast()`, `confirmDialog()`, `apiFetch()`, Google sign-in, Meta's SDK), make up one global scope and only declare things at their top level; `app.js`'s `init()` starts the page once all have loaded. `/app`'s self-contained modules (`agents.js`, `timesheets.js`, `assistant.js`, `email.js`, `channels.js`, `chatbot.js`, `doc-template.js`) each expose one `window.*UI` object and get the shell's helpers through `init(deps)`. `DashboardScriptsTest` checks both pages: every script is loaded and no top-level name is declared twice. File map and rules: [wiki/dashboard-frontend.md](../wiki/dashboard-frontend.md).
 - **Tenant dashboard home** — `/app` Home is a module-aware manager snapshot from `GET /app/api/overview` (processed cash, pipeline, inbox, calendar, plus an attention queue). Tenants hide cards with `GET`/`PUT /app/api/settings/overview` (`overviewHiddenCards` on the tenant); Home omits those cards in the UI while overview counts stay available for the sidebar. `/app` always runs the **minimal skin** (`html[data-layout="minimal"]`, fixed in `app/index.html`; the classic/minimal switch was removed on 2026-09-29): a light-gray, white and yellow "Clean Ops" look with a "Powered by The Bots Lab" credit in the sidebar. The backoffice declares the same skin in `backoffice/index.html` (since 2026-10-04, without the credit). Its Home is a dense CRM view that calls `GET /app/api/overview?extended=1` — the same payload plus `cashFlow` (6 months in/out), `activity` (14 days of messages), `agenda` (today's bookings), `recent` (latest business events) and `topClients` (12 months billed); blocks for hidden cards are skipped. Conversations is a split inbox with delivery ticks, the WhatsApp 24-hour window and templates ([Conversations inbox](#conversations-inbox)). Quotes can be marked sent/accepted or converted with `POST /app/api/crm/quotes/{id}/invoice`. Clients update via `PATCH /app/api/crm/clients/{id}`.
 - **Client record** — a client opens as a record drawer in `/app` (profile and contact actions, money strip, needs-attention list, activity and per-module tabs), assembled in the browser from the per-client list endpoints (`?clientId=` on quotes, invoices, services and bookings) plus the conversations list, matched by phone on its last 9 digits. Clients carry `email`, `taxId` (NIF, printed on quotes and invoices beside the client number), `postalCode`, `city`, `contactPerson` and staff-only `notes`; `CrmTools` never returns any of them to the bot except the address it always had. `PATCH` keeps those fields when omitted and clears them on an empty string. A client saved by staff (`POST`/`PATCH /app/api/crm/clients` and the backoffice create) needs the standard fields its company requires, NIF and address unless the company chose otherwise, plus its required own fields ([Client fields](#client-fields)); a `PATCH` that omits a detail keeps the stored one. Bookings and the bot's `create_client` still create clients from a name and phone. PDFs print street, postal code and city as one text, because compact client blocks fit only one address line. `GET /app/api/crm/clients` lists up to 2000 clients when unfiltered (it used to stop at 20), and `GET /app/api/crm/clients/by-phone?phone=` backs the duplicate-phone warning. Phone is unique per tenant for clients, suppliers and employees; a clash on create or update answers `409 phone_taken`. Suppliers and employees open as the same kind of record (`GET /app/api/crm/suppliers/{id}`, `/employees/{id}` plus their payments), and quote, invoice, payment and booking details link to each other and to those records through a drawer trail (`app/drawer.js`). Converting an already-invoiced quote answers `409 already_invoiced`.
 - **At-least-once delivery guard** — `DeduplicationService` uses a MongoDB unique index on `eventId`; duplicate inserts throw and the event is skipped before enqueue. Text messages also store the queued `InboundMessage` on their event. On startup, before routes accept traffic, events still `received` from the previous 30 minutes are re-queued, and the pipeline's user-message insert is idempotent on `(tenantId, waMessageId)`. A message cut off by a deploy mid-LLM call therefore still gets its reply. A crash between sending a reply and marking the event processed can produce a duplicate reply.
