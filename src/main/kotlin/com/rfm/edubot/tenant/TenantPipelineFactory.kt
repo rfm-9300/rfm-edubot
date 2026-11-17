@@ -25,6 +25,7 @@ import com.rfm.edubot.messaging.MessagePipeline
 import com.rfm.edubot.notifications.NotificationAudience
 import com.rfm.edubot.notifications.NotificationKinds
 import com.rfm.edubot.notifications.NotificationRepository
+import com.rfm.edubot.persona.PersonaPrompt
 import com.rfm.edubot.persona.PersonaRepository
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.ratelimit.RateLimiter
@@ -82,12 +83,13 @@ class TenantPipelineFactory(
     }
 
     private fun build(tenant: Tenant): MessagePipeline {
-        val modules = DashboardModules.effectiveFor(tenant).toSet()
         val clients = ClientRepository(mongo, tenant.id)
         val quotes = QuoteRepository(mongo, tenant.id)
         val invoices = InvoiceRepository(mongo, tenant.id)
         val items = StandardItemRepository(mongo, tenant.id)
         val persona = runBlocking { PersonaRepository(mongo).findByTenant(tenant.id) }
+        // The bot's tools: the company's modules less the ones its persona turned off ("What the bot can do").
+        val modules = PersonaPrompt.botModules(persona, DashboardModules.effectiveFor(tenant).toSet())
         val bookingTools = if (DashboardModules.BOOKINGS in modules) bookingDeps(mongo, tenant, BookingSource.WHATSAPP).tools() else null
         val notifications = NotificationRepository(mongo)
         return MessagePipeline(

@@ -36,8 +36,8 @@ let state = {
   // threadFor: conversation whose messages are loaded; cursor: server time for the next /updates poll.
   inbox: { filter: 'all', threadFor: null, cursor: null, drafts: {}, sending: false, reading: null, templates: null },
   settingsSection: 'channels', overviewLayout: null,
-  // Persona page: the open tab, unsaved edits ({ behavior, compiledInstructions }, either may be absent) and the history list.
-  personaTab: 'behavior', personaDraft: {}, personaVersions: null, personaPreview: null, personaFlows: null,
+  // Persona page: the open tab, unsaved edits ({ behavior, compiledInstructions, note, menus }, each may be absent) and the history list.
+  personaTab: 'overview', personaDraft: {}, personaVersions: null, personaPreview: null, personaFlows: null,
   whatsAppSignup: { enabled: false },
   // integrations: the company's connected accounts (Settings); email: whether it can send, and from where.
   integrations: null, email: null,

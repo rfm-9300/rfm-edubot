@@ -75,6 +75,18 @@ class PersonaRepository(mongo: MongoModule) {
     suspend fun saveBehavior(tenantId: ObjectId, behavior: PersonaBehavior, author: String?): TenantPersona =
         write(tenantId, mapOf("behavior" to behavior.toDocument()), PersonaChange.SETTINGS, author)!!
 
+    /**
+     * Saves what the dashboard's one Save changed, as one version: the settings, the instructions or both.
+     * Null leaves that part as it is; with neither, nothing is written and the current persona comes back.
+     */
+    suspend fun saveEdits(tenantId: ObjectId, behavior: PersonaBehavior?, instructions: String?, author: String?): TenantPersona? {
+        if (behavior == null && instructions == null) return findByTenant(tenantId)
+        if (behavior == null) return saveInstructions(tenantId, instructions!!, PersonaChange.MANUAL, author)
+        if (instructions == null) return saveBehavior(tenantId, behavior, author)
+        val fields = mapOf("compiledInstructions" to instructions, "behavior" to behavior.toDocument(), "stale" to false)
+        return write(tenantId, fields, PersonaChange.SETTINGS_AND_INSTRUCTIONS, author)
+    }
+
     /** Brings back [version] as a new version; null when that version isn't kept. */
     suspend fun restore(tenantId: ObjectId, version: Int, author: String?): TenantPersona? {
         val snapshot = findVersion(tenantId, version) ?: return null
@@ -331,6 +343,7 @@ private fun Document.toPersona() = TenantPersona(
 
 internal fun PersonaBehavior.toDocument(): Document = Document()
     .append("botName", botName)
+    .append("disclosure", disclosure?.name)
     .append("language", language)
     .append("languageStrict", languageStrict)
     .append("tone", tone?.name)
@@ -338,13 +351,30 @@ internal fun PersonaBehavior.toDocument(): Document = Document()
     .append("replyLength", replyLength?.name)
     .append("emoji", emoji?.name)
     .append("greeting", greeting)
+    .append("scope", scope?.name)
+    .append("unknown", unknown?.name)
     .append("rules", rules)
-    .append("handoff", Document("enabled", handoff.enabled).append("triggers", handoff.triggers).append("message", handoff.message))
+    .append(
+        "business",
+        Document("name", business.name).append("about", business.about).append("hours", business.hours)
+            .append("location", business.location).append("contact", business.contact),
+    )
+    .append("faq", faq.map { Document("question", it.question).append("answer", it.answer) })
+    .append("capabilities", Document("catalog", capabilities.catalog).append("bookings", capabilities.bookings).append("records", capabilities.records))
+    .append(
+        "handoff",
+        Document("enabled", handoff.enabled).append("reasons", handoff.reasons?.map { it.name })
+            .append("triggers", handoff.triggers).append("message", handoff.message),
+    )
 
+/** A persona saved before a field existed reads it as unset (and its capabilities as all on). */
 internal fun Document.toBehavior(): PersonaBehavior {
     val handoff = get("handoff") as? Document
+    val business = get("business") as? Document
+    val capabilities = get("capabilities") as? Document
     return PersonaBehavior(
         botName = getString("botName"),
+        disclosure = enumOrNull<PersonaDisclosure>(getString("disclosure")),
         language = getString("language"),
         languageStrict = getBoolean("languageStrict") ?: false,
         tone = enumOrNull<PersonaTone>(getString("tone")),
@@ -352,9 +382,27 @@ internal fun Document.toBehavior(): PersonaBehavior {
         replyLength = enumOrNull<PersonaReplyLength>(getString("replyLength")),
         emoji = enumOrNull<PersonaEmoji>(getString("emoji")),
         greeting = getString("greeting"),
+        scope = enumOrNull<PersonaScope>(getString("scope")),
+        unknown = enumOrNull<PersonaUnknown>(getString("unknown")),
         rules = getList("rules", String::class.java).orEmpty(),
+        business = PersonaBusiness(
+            name = business?.getString("name"),
+            about = business?.getString("about"),
+            hours = business?.getString("hours"),
+            location = business?.getString("location"),
+            contact = business?.getString("contact"),
+        ),
+        faq = (get("faq") as? List<*>).orEmpty().filterIsInstance<Document>().map {
+            PersonaFaq(question = it.getString("question").orEmpty(), answer = it.getString("answer").orEmpty())
+        },
+        capabilities = PersonaCapabilities(
+            catalog = capabilities?.getBoolean("catalog") ?: true,
+            bookings = capabilities?.getBoolean("bookings") ?: true,
+            records = capabilities?.getBoolean("records") ?: true,
+        ),
         handoff = PersonaHandoff(
             enabled = handoff?.getBoolean("enabled") ?: false,
+            reasons = (handoff?.get("reasons") as? List<*>)?.mapNotNull { enumOrNull<PersonaHandoffReason>(it as? String) },
             triggers = handoff?.getString("triggers"),
             message = handoff?.getString("message"),
         ),

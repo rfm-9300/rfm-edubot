@@ -45,7 +45,7 @@ class PersonaPromptTest {
     @Test
     fun `every setting becomes one plain line, ahead of the instructions it takes precedence over`() {
         val block = PersonaPrompt.personaBlock(persona("## Serviços\n- Limpeza: 40 €", everything))!!
-        assertTrue(block.startsWith("<persona>\nHow the company wants you to talk (these settings win over the instructions below when they disagree):\n"), block)
+        assertTrue(block.startsWith("<persona>\nHow the company wants you to talk and behave (these settings win over the instructions below when they disagree):\n"), block)
         assertTrue("- Your name is Sofia." in block, block)
         assertTrue("- Language: reply in European Portuguese; when the customer writes in another language, reply in theirs." in block, block)
         assertTrue("- Tone: friendly and warm" in block, block)
@@ -108,8 +108,94 @@ class PersonaPromptTest {
         assertTrue(messages[3].contains("search_clients"))
         assertEquals("BOOKING NOTE", messages[4])
         assertTrue(messages[5].startsWith("Handing over to a person: call handoff_to_human"))
-        assertTrue("when o cliente pede um reembolso" in messages[5], messages[5])
+        // Written before the company could tick situations: its own words stand alone, as they did.
+        assertTrue("when:\n- o cliente pede um reembolso\nIt pauses" in messages[5], messages[5])
+        assertFalse("asks to talk to a person" in messages[5], messages[5])
         assertTrue("don't write a reply of your own" in messages[5], messages[5])
+    }
+
+    @Test
+    fun `the handoff lists the situations the company ticked and its own words, and adds unknown answers when asked to`() {
+        val handoff = PersonaHandoff(enabled = true, reasons = listOf(PersonaHandoffReason.PAYMENTS, PersonaHandoffReason.URGENT), triggers = "pede um orçamento acima de 5000 €")
+        val note = PersonaPrompt.handoffNote(PersonaBehavior(handoff = handoff))!!
+        assertTrue(
+            "when:\n- the customer asks about a payment, a refund or an invoice\n- the customer has an urgent problem\n- pede um orçamento acima de 5000 €\n" in note,
+            note,
+        )
+        assertFalse("asks to talk to a person" in note, note)
+        val unknown = PersonaPrompt.handoffNote(PersonaBehavior(unknown = PersonaUnknown.HAND_OVER, handoff = handoff))!!
+        assertTrue("- the customer needs something you can't do" in unknown, unknown)
+        // Ticking nothing and writing nothing still hands over in the usual situations, rather than never.
+        val none = PersonaPrompt.handoffNote(PersonaBehavior(handoff = PersonaHandoff(enabled = true, reasons = emptyList())))!!
+        assertTrue("- the customer asks to talk to a person\n- the customer is upset or complaining" in none, none)
+    }
+
+    @Test
+    fun `a handoff saved before situations existed keeps the usual ones, or only the company's words`() {
+        assertEquals(PersonaHandoff.DEFAULT_REASONS, PersonaHandoff(enabled = true).effectiveReasons())
+        assertEquals(emptyList(), PersonaHandoff(enabled = true, triggers = "reembolsos").effectiveReasons())
+        assertEquals(listOf(PersonaHandoffReason.URGENT), PersonaHandoff(enabled = true, reasons = listOf(PersonaHandoffReason.URGENT), triggers = "x").effectiveReasons())
+    }
+
+    @Test
+    fun `business facts and questions follow the rules, before the instructions, with multi-line facts kept`() {
+        val behavior = PersonaBehavior(
+            rules = listOf("Sem descontos."),
+            business = PersonaBusiness(name = "Clínica Sorriso", hours = "Seg–Sex 9:00–18:00\nSáb 9:00–13:00", contact = "+351 210 000 000"),
+            faq = listOf(PersonaFaq("Quanto custa uma consulta?", "Uma consulta custa 40 €."), PersonaFaq("Têm estacionamento?", "Sim, na rua.")),
+        )
+        val block = PersonaPrompt.personaBlock(persona("Notas livres.", behavior))!!
+        assertTrue(
+            "About the company (facts to use as written; they win over the instructions below):\n- Name: Clínica Sorriso\n- Opening hours:\n  Seg–Sex 9:00–18:00\n  Sáb 9:00–13:00\n- Contact: +351 210 000 000" in block,
+            block,
+        )
+        assertTrue("Q: Quanto custa uma consulta?\nA: Uma consulta custa 40 €.\n\nQ: Têm estacionamento?\nA: Sim, na rua." in block, block)
+        val order = listOf("Rules you always follow", "About the company", "Questions customers ask", "Notas livres.").map { block.indexOf(it) }
+        assertEquals(order.sorted(), order, block)
+        assertFalse("What it does" in block, "an empty fact adds no line: $block")
+    }
+
+    @Test
+    fun `disclosure, topics and unknown answers each read as a line, and handing over unknowns needs the handoff on`() {
+        val line = { b: PersonaBehavior -> PersonaPrompt.personaBlock(persona(behavior = b))!! }
+        assertTrue("say honestly that you are the company's virtual assistant" in line(PersonaBehavior(disclosure = PersonaDisclosure.WHEN_ASKED)))
+        assertTrue("in your first reply of a new conversation" in line(PersonaBehavior(disclosure = PersonaDisclosure.FIRST_REPLY)))
+        assertTrue("Politely decline anything else" in line(PersonaBehavior(scope = PersonaScope.BUSINESS)))
+        assertTrue("answer general questions briefly" in line(PersonaBehavior(scope = PersonaScope.ANYTHING)))
+        assertTrue("give the customer the company's contact details" in line(PersonaBehavior(unknown = PersonaUnknown.SHARE_CONTACT)))
+        assertTrue("hand the conversation to a person" in line(PersonaBehavior(unknown = PersonaUnknown.HAND_OVER, handoff = PersonaHandoff(enabled = true))))
+        // Without a handoff to call, the bot offers to check instead of promising one.
+        val off = line(PersonaBehavior(unknown = PersonaUnknown.HAND_OVER))
+        assertTrue("offer to check with the team" in off && "hand the conversation" !in off, off)
+    }
+
+    @Test
+    fun `an agent writing a message also takes the business facts and questions, but not the chat-only settings`() {
+        val behavior = everything.copy(
+            disclosure = PersonaDisclosure.FIRST_REPLY,
+            scope = PersonaScope.BUSINESS,
+            unknown = PersonaUnknown.OFFER_CHECK,
+            business = PersonaBusiness(location = "Rua Augusta 100, Lisboa"),
+            faq = listOf(PersonaFaq("Têm estacionamento?", "Sim.")),
+        )
+        val compose = PersonaPrompt.personaBlock(persona(behavior = behavior), PersonaPrompt.Purpose.COMPOSE)!!
+        assertTrue("Rua Augusta 100" in compose && "Têm estacionamento?" in compose, compose)
+        listOf("Being an AI", "Topics:", "When you don't know").forEach { assertFalse(it in compose, "$it leaked into $compose") }
+    }
+
+    @Test
+    fun `turning a capability off takes its modules' tools away from the bot`() {
+        val all = setOf(DashboardModules.CATALOG, DashboardModules.BOOKINGS, DashboardModules.CLIENTS, DashboardModules.QUOTES, DashboardModules.INVOICES, DashboardModules.CONVERSATIONS)
+        assertEquals(all, PersonaPrompt.botModules(null, all))
+        assertEquals(all, PersonaPrompt.botModules(persona(), all))
+        val noRecords = persona(behavior = PersonaBehavior(capabilities = PersonaCapabilities(records = false)))
+        assertEquals(setOf(DashboardModules.CATALOG, DashboardModules.BOOKINGS, DashboardModules.CONVERSATIONS), PersonaPrompt.botModules(noRecords, all))
+        val nothing = persona(behavior = PersonaBehavior(capabilities = PersonaCapabilities(catalog = false, bookings = false, records = false)))
+        assertEquals(setOf(DashboardModules.CONVERSATIONS), PersonaPrompt.botModules(nothing, all))
+        assertNull(SystemPrompts.crmPromptFor(PersonaPrompt.botModules(nothing, all)))
+        // Only a capability turned off makes the settings non-empty: on, it is the default.
+        assertTrue(PersonaBehavior(capabilities = PersonaCapabilities()).isEmpty)
+        assertFalse(PersonaBehavior(capabilities = PersonaCapabilities(catalog = false)).isEmpty)
     }
 
     @Test

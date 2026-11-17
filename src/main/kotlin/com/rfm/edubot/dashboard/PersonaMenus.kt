@@ -62,9 +62,12 @@ internal data class MenusDto(
     val startGates: List<StartGateDto>,
     /** The channels that can have a start gate. */
     val startChannels: List<String>,
+    /** The channels where the AI can be turned off. */
+    val teamOnlyOptions: List<String>,
     val canEdit: Boolean,
     /** Menus only answer Instagram messages, so the tab says when there is no Instagram account to answer. */
     val instagramConnected: Boolean,
+    val whatsappConnected: Boolean,
     val updatedAt: String?,
     val updatedBy: String?,
     val limits: MenuLimitsDto,
@@ -95,22 +98,31 @@ internal fun MenusInput.toChatFlows(keepGates: Map<Platform, StartGate> = emptyM
             },
         )
     },
-    teamOnlyChannels = teamOnlyChannels.mapNotNull { name -> Platform.entries.firstOrNull { it.name == name } }.toSet(),
+    // The website is left out: nobody could answer a visitor there if the AI were off.
+    teamOnlyChannels = teamOnlyChannels.mapNotNull { name -> ChatFlows.TEAM_ONLY_CHANNELS.firstOrNull { it.name == name } }.toSet(),
     startGates = startGates?.mapNotNull { gate ->
         val platform = Platform.entries.firstOrNull { it.name == gate.channel } ?: return@mapNotNull null
         platform to StartGate(gate.enabled, gate.words.map { it.trim() }.filter { FlowText.normalize(it).isNotEmpty() }.distinctBy { FlowText.normalize(it) })
     }?.toMap() ?: keepGates,
 )
 
-internal fun menusDto(flows: ChatFlows?, canEdit: Boolean, instagramConnected: Boolean, usage: Map<String, FlowUsage>) = MenusDto(
+internal fun menusDto(
+    flows: ChatFlows?,
+    canEdit: Boolean,
+    instagramConnected: Boolean,
+    usage: Map<String, FlowUsage>,
+    whatsappConnected: Boolean = false,
+) = MenusDto(
     flows = flows?.flows.orEmpty().map { flow ->
         MenuDto(flow.id, flow.name, flow.enabled, flow.keywords, flow.steps.map { step -> MenuStepDto(step.id, step.text, step.buttons.map { MenuButtonDto(it.title, it.next) }) })
     },
     teamOnlyChannels = flows?.teamOnlyChannels.orEmpty().map { it.name }.sorted(),
     startGates = flows?.startGates.orEmpty().entries.sortedBy { it.key.name }.map { (platform, gate) -> StartGateDto(platform.name, gate.enabled, gate.words) },
     startChannels = StartGate.CHANNELS.map { it.name }.sorted(),
+    teamOnlyOptions = ChatFlows.TEAM_ONLY_CHANNELS.map { it.name }.sorted(),
     canEdit = canEdit,
     instagramConnected = instagramConnected,
+    whatsappConnected = whatsappConnected,
     updatedAt = flows?.updatedAt?.toString(),
     updatedBy = flows?.updatedBy,
     limits = MenuLimitsDto(

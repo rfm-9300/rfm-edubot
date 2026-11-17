@@ -61,6 +61,48 @@ class PersonaRepositoryTest {
     }
 
     @Test
+    fun `every new setting survives a save, and one save of settings and instructions is one version`(): Unit = runBlocking {
+        val tenant = ObjectId()
+        val behavior = PersonaBehavior(
+            botName = "Sofia",
+            disclosure = PersonaDisclosure.FIRST_REPLY,
+            scope = PersonaScope.BUSINESS,
+            unknown = PersonaUnknown.HAND_OVER,
+            business = PersonaBusiness(name = "Clínica Sorriso", about = "Clínica dentária.", hours = "9–18", location = "Lisboa", contact = "\$ 210 000 000"),
+            faq = listOf(PersonaFaq("Preço?", "\$40 a consulta.")),
+            capabilities = PersonaCapabilities(catalog = false, bookings = true, records = false),
+            handoff = PersonaHandoff(enabled = true, reasons = listOf(PersonaHandoffReason.URGENT), triggers = "reembolsos", message = "Já passo."),
+        )
+        val saved = repo.saveEdits(tenant, behavior, "Notas.", "ana@x.pt")!!
+        assertEquals(1, saved.version)
+        assertEquals(behavior, saved.behavior, "values starting with \$ stay text")
+        assertEquals("Notas.", saved.compiledInstructions)
+        assertEquals(behavior, repo.findByTenant(tenant)!!.behavior)
+        assertEquals(PersonaChange.SETTINGS_AND_INSTRUCTIONS, repo.listVersions(tenant).single().change)
+        assertEquals(behavior, repo.findVersion(tenant, 1)!!.behavior)
+
+        // One part at a time is the usual change, and nothing at all writes nothing.
+        assertEquals(PersonaChange.MANUAL, repo.saveEdits(tenant, null, "Outras notas.", "ana@x.pt")!!.let { repo.listVersions(tenant).first().change })
+        assertEquals(PersonaChange.SETTINGS, repo.saveEdits(tenant, behavior.copy(botName = "Rita"), null, "ana@x.pt")!!.let { repo.listVersions(tenant).first().change })
+        assertEquals(3, repo.saveEdits(tenant, null, null, "ana@x.pt")!!.version)
+    }
+
+    @Test
+    fun `a persona stored before the new settings existed reads them as unset, with every capability on`(): Unit = runBlocking {
+        val tenant = ObjectId()
+        mongo.database.getCollection<Document>("tenant_persona").insertOne(
+            Document("tenantId", tenant).append("compiledInstructions", "Antigo.").append("version", 4).append("status", "READY")
+                .append("behavior", Document("botName", "Sofia").append("rules", listOf("Sem descontos.")).append("handoff", Document("enabled", true).append("triggers", "reembolsos")))
+                .append("updatedAt", Date()),
+        )
+        val behavior = repo.findByTenant(tenant)!!.behavior
+        assertEquals(PersonaBehavior(botName = "Sofia", rules = listOf("Sem descontos."), handoff = PersonaHandoff(enabled = true, triggers = "reembolsos")), behavior)
+        assertEquals(PersonaCapabilities(), behavior.capabilities)
+        assertNull(behavior.handoff.reasons)
+        assertEquals(emptyList(), behavior.handoff.effectiveReasons(), "its own words still stand alone")
+    }
+
+    @Test
     fun `restoring brings back both the instructions and the settings as a new version`(): Unit = runBlocking {
         val tenant = ObjectId()
         repo.saveInstructions(tenant, "Versão boa.", PersonaChange.MANUAL, "ana@x.pt")

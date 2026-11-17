@@ -1395,6 +1395,83 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
   .persona-studio__test { position: static; }
 }
 
+/* Persona → Overview: how a message is answered, one numbered step a row (on to the tab that sets it). */
+.bot-flow { list-style: none; margin: 0; padding: 0; display: grid; }
+.bot-flow__step { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 4px 14px; align-items: start; padding: 12px 0; }
+.bot-flow__step + .bot-flow__step { border-top: 1px solid var(--line-soft); }
+.bot-flow__step:first-child { padding-top: 0; }
+.bot-flow__step:last-child { padding-bottom: 0; }
+.bot-flow__num { width: 28px; height: 28px; border-radius: 999px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-deep); font: 800 13px/1 var(--mono); }
+.bot-flow__step.is-off .bot-flow__num { background: var(--surface-2); color: var(--ink-mute); }
+.bot-flow__title { margin: 4px 0 2px; font-size: 14px; font-weight: 700; color: var(--ink); }
+.bot-flow__text { margin: 0; color: var(--ink-2); font-size: 13px; line-height: 1.5; }
+.bot-flow__list { margin: 4px 0 0; padding: 0; list-style: none; display: grid; gap: 3px; color: var(--ink-2); font-size: 13px; line-height: 1.45; }
+.bot-flow__list strong { color: var(--ink); font-weight: 700; }
+.bot-flow__list .is-muted { color: var(--ink-mute); }
+.bot-flow__actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+@media (max-width: 560px) {
+  .bot-flow__step { grid-template-columns: 28px minmax(0, 1fr); }
+  .bot-flow__actions { grid-column: 2; justify-content: flex-start; }
+}
+
+/* Persona → Overview: what is set up and what isn't, each line leading to where it's done. */
+.setup-steps { list-style: none; margin: 0; padding: 0; display: grid; }
+.setup-steps__item { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 7px 0; }
+.setup-steps__item + .setup-steps__item { border-top: 1px solid var(--line-soft); }
+.setup-steps__mark { width: 20px; height: 20px; border-radius: 999px; border: 1.5px solid var(--hairline-strong); display: grid; place-items: center; font-size: 11px; font-weight: 800; color: transparent; }
+.setup-steps__item.is-done .setup-steps__mark { border-color: transparent; background: var(--ok-soft); color: var(--ok-ink); }
+.setup-steps__text { display: grid; gap: 1px; min-width: 0; font-size: 13.5px; font-weight: 600; color: var(--ink); }
+.setup-steps__text small { font-size: 12px; font-weight: 500; color: var(--ink-mute); }
+.setup-steps__item.is-done .setup-steps__text { color: var(--ink-2); }
+
+/* Option cards: a radio group (or a few checkboxes) whose options say what they do, like a reply's tone. */
+.choices { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
+.choices--wide { grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.choice { position: relative; display: grid; align-content: start; gap: 2px; min-width: 0; padding: 9px 12px 10px 34px; border: 1.5px solid var(--line); border-radius: var(--r-md); background: var(--surface); cursor: pointer; transition: border-color 120ms, background 120ms; }
+.choice:hover { border-color: var(--hairline-strong); }
+.choice > input { position: absolute; left: 12px; top: 11px; width: 15px; height: 15px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.choice:has(> input:checked) { border-color: var(--focus-border); background: var(--accent-soft); }
+.choice:has(> input:focus-visible) { box-shadow: var(--focus-ring); }
+.choice:has(> input:disabled) { cursor: not-allowed; }
+.choice:has(> input:disabled):not(:has(> input:checked)) { opacity: 0.6; }
+.choice__title { font-size: 13px; font-weight: 700; color: var(--ink); }
+.choice__eg { font-size: 12px; line-height: 1.4; color: var(--ink-mute); overflow-wrap: anywhere; }
+.choice:has(> input:checked) .choice__eg { color: var(--ink-2); }
+.choices-field + .choices-field { margin-top: 6px; }
+.choices-field > .lbl { display: block; margin-bottom: 6px; }
+
+/* Persona → Rules: one rule a row; Knowledge: one question and its answer a card. Both with × at the end. */
+.rule-list, .faq-list { display: grid; gap: 8px; }
+/* Rule ideas: chips holding a whole sentence, so they may wrap (left-aligned) on a phone. */
+.rule-ideas { display: grid; gap: 6px; }
+.rule-ideas .chip-picks .chip { height: auto; min-height: 28px; padding-top: 4px; padding-bottom: 4px; text-align: left; line-height: 1.35; }
+.rule-row { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.rule-row__num, .faq-item__num { font: 700 12px/1 var(--mono); color: var(--ink-mute); text-align: right; }
+.row-tools { display: flex; gap: 4px; }
+.faq-item { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px 10px; align-items: start; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-2); }
+.faq-item__num { padding-top: 12px; }
+.faq-item__fields { display: grid; gap: 6px; min-width: 0; }
+.faq-item__fields .txt { min-height: 64px; }
+@media (max-width: 560px) {
+  .rule-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .faq-item { grid-template-columns: minmax(0, 1fr); padding: 10px; }
+  .rule-row__num, .faq-item__num { display: none; }
+  .faq-item .row-tools { justify-content: flex-end; }
+}
+
+/* Persona → Channels: one row per channel (name and state, then whether the AI answers and its start words). */
+.bot-channel { display: grid; grid-template-columns: minmax(130px, 170px) minmax(0, 1fr); gap: 8px 18px; padding: 14px 0; }
+.bot-channel + .bot-channel { border-top: 1px solid var(--line-soft); }
+.bot-channel:first-child { padding-top: 0; }
+.bot-channel:last-child { padding-bottom: 0; }
+.bot-channel__name { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; }
+.bot-channel__name strong { font-size: 14px; color: var(--ink); }
+.bot-channel__body { display: grid; gap: 10px; min-width: 0; }
+@media (max-width: 700px) {
+  .bot-channel { grid-template-columns: minmax(0, 1fr); }
+  .bot-channel__name { flex-direction: row; align-items: center; }
+}
+
 /* ── Persona → Menus (app/menus.js): menus that open in place, keyword tokens, a map of where buttons lead ── */
 .flow-menu__head { row-gap: 6px; cursor: pointer; }
 .flow-menu:not(.is-open) .flow-menu__head { border-bottom: 0; }

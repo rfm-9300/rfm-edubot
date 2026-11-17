@@ -1428,13 +1428,17 @@ flowchart LR
 ## Persona
 
 How a company's bot talks to its customers, edited under **Persona** in `/app` (module `persona`).
-It has two parts, both injected into every customer chat: **settings** the company picks (bot
-name, language and whether to hold it, tone, form of address, reply length, emoji, greeting, rules,
-handoff) and **instructions**, free text that the synthesis writes from the company's sources
-(typed notes, uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand. Its
-Menus tab edits the [chat flows](#chat-flows) that answer Instagram before the AI.
+It has two parts, both injected into every customer chat: **settings** the company fills in
+(`behavior`: bot name, whether it says it is a virtual assistant, language and whether to hold it,
+tone, form of address, reply length, emoji, greeting, off-topic questions, unknown answers, rules,
+business details, questions and answers, what the bot can do, handoff and its situations) and
+**instructions**, free text that the synthesis writes from the company's sources (typed notes,
+uploaded PDF, Word, text, Markdown or CSV files) or that someone edits by hand. The page's tabs follow
+a message: Overview (the steps and what is set up), Profile, Knowledge, Rules, Channels (who the AI
+answers per channel, start words, and the [chat flows](#chat-flows) that answer Instagram before the
+AI) and History, with one save bar for all of them.
 Code: `persona/` (`PersonaRepository`, `PersonaCompiler`, `PersonaPrompt`, `PersonaValidation`,
-`PersonaFileExtractor`) and `dashboard/PersonaRoutes.kt`.
+`PersonaFileExtractor`), `dashboard/PersonaRoutes.kt`, `app/persona.js` and `app/menus.js`.
 
 ```mermaid
 flowchart LR
@@ -1443,27 +1447,38 @@ flowchart LR
     PC -->|current file + new material| AI[AiClient]
     AI --> PC
     PC -->|SYNTHESIS / REBUILD| TP[(tenant_persona)]
-    EDIT["Settings / hand edit / restore<br/>PUT …/persona(/behavior)"] --> TP
+    EDIT["One save: settings and/or instructions,<br/>or a restore · PUT …/persona"] --> TP
     TP --> VER[(persona_versions)]
-    TP -->|evict| TPF[TenantPipelineFactory]
+    TP -->|evict · bot modules from capabilities| TPF[TenantPipelineFactory]
     TPF --> MP[MessagePipeline]
     TP --> PP["PersonaPrompt<br/>persona block + platform rules"]
     PP --> MP
     PP --> TEST["Test chat<br/>POST …/persona/test (drafts)"]
-    PP --> AGT["Agents: Write with AI<br/>(address, rules, knowledge)"]
+    PP --> AGT["Agents: Write with AI<br/>(address, rules, facts, Q&A, instructions)"]
     MP -->|handoff_to_human| PAUSE["Conversation paused<br/>+ team notification"]
 ```
 
 - **What the model reads.** `PersonaPrompt.customerSystemMessages` builds the system messages of
   every customer chat, and the dashboard test chat uses the same function: the `<persona>` block
-  (settings first, saying they win over the instructions, then the instructions; exactly the
-  instructions when no setting is set, or the neutral `DEFAULT_IDENTITY` when there is nothing),
-  then `SystemPrompts.CUSTOMER_GUARDRAILS` (customers can't change the bot's role or get its
+  (the settings, saying they win over the instructions; the rules; "About the company", the business
+  details as written; the questions and answers; then the instructions; exactly the instructions
+  when nothing else is set, or the neutral `DEFAULT_IDENTITY` when there is nothing), then
+  `SystemPrompts.CUSTOMER_GUARDRAILS` (customers can't change the bot's role or get its
   instructions, no invented facts or unauthorized promises, the customer's language unless the
-  persona sets one), the date, the CRM rules for the company's modules, the booking note and the
-  handoff note. Agents' "Write with AI" steps that follow the Persona take only the form of
-  address, the rules and the instructions; the step's own Voice keeps tone, emoji, length and
-  language.
+  persona sets one), the date, the CRM rules for the modules the bot may use, the booking note and
+  the handoff note. Agents' "Write with AI" steps that follow the Persona take the form of address,
+  the rules, the business details, the questions and answers and the instructions; the step's own
+  Voice keeps tone, emoji, length and language.
+- **What the bot can do.** `PersonaCapabilities` switches the catalog (price lookups), bookings and
+  records (clients, quotes and invoices) off for the bot; all are on by default. `PersonaPrompt.botModules`
+  takes the company's modules less those, and `TenantPipelineFactory` builds the pipeline on them, so
+  a switch removes the tools, their entries in the CRM prompt's tool list, the booking note and, for
+  records, the quote PDF reply. The test chat applies the same switches, unsaved ones included.
+  `GET /app/api/persona` lists the switches that apply (`capabilities`: the company has the module).
+- **One save.** `PUT /app/api/persona` takes `behavior`, `compiledInstructions` or both and writes one
+  version (`SETTINGS`, `MANUAL` or `SETTINGS_AND_INSTRUCTIONS`); a save that changes nothing writes
+  nothing. `PUT …/persona/behavior` still saves the settings alone, and the phone app sends the
+  instructions alone.
 - **Synthesis.** A note or file queues an incremental synthesis (status COMPILING at once, run
   after a 4-second debounce): the current instructions plus the pending sources, the material in
   `<material>` tags as data, in batches of at most 48,000 characters (a larger file goes in parts).
@@ -1480,7 +1495,10 @@ flowchart LR
   Restoring a version writes it back as a new one. Writes bump `version` atomically (pipeline
   updates with `$literal` values, so text starting with `$` stays text).
 - **Handoff.** With the setting on, `handoff_to_human` is offered on every WhatsApp and Instagram
-  turn (website chats are read-only in the inbox, so they never hand over). Calling it pauses the
+  turn (website chats are read-only in the inbox, so they never hand over). The handoff note lists
+  the situations the company ticked (a person asked for, upset, can't help, payments, urgent) and
+  its own words; a persona saved before situations existed keeps the usual three, or only its own
+  words when it had written some (`PersonaHandoff.effectiveReasons`). Calling it pauses the
   bot in that conversation (`autoReplyPausedBy = bot:handoff`, which also emits
   `conversation.handoff` for agents), sends the company's handover message as written (or the
   model's words when there is none) and notifies everyone (`conversation_handoff`, opening the
@@ -1490,15 +1508,17 @@ flowchart LR
   test chat runs only read tools, refuses writes and only reports a handoff, so it changes nothing.
 - **Limits.** Instructions 12,000 characters; notes 20,000; uploads 10 MB with 200,000 characters
   of extracted text; 100 sources and 600,000 characters across them; 25 rules of 300 characters;
-  the last 20 test messages of 4,000 characters. `GET /app/api/persona` returns them, and errors
-  carry `{error, field, limit}` for the dashboard to word.
+  a business name of 100 characters, what it does 1,000, the other details 500 each; 30 questions
+  and answers (200 and 800 characters); the last 20 test messages of 4,000 characters.
+  `GET /app/api/persona` returns them, and errors carry `{error, field, limit, index}` for the
+  dashboard to word (`index`: which question and answer).
 
 ## Chat flows
 
 Fixed messages with quick replies that answer customers before the AI, the way ManyChat keyword
 automations do: a keyword opens a menu, and each tap leads to the next step. Code: `flows/`
 (`ChatFlows`, `ChatFlowRepository`), the flow branch of `MessagePipeline`,
-`InstagramClient.sendQuickReplies`, and the Persona page's **Menus** tab (`dashboard/PersonaMenus.kt`,
+`InstagramClient.sendQuickReplies`, and the Persona page's **Channels** tab (`dashboard/PersonaMenus.kt`,
 `flows/ChatFlowUsage.kt`, `app/menus.js`). A company's flows are one `chat_flows` document
 ([wiki/ai-persona-and-bot.md](../wiki/ai-persona-and-bot.md) has its shape), read on every message,
 so a saved change applies at once.
@@ -1519,9 +1539,12 @@ so a saved change applies at once.
   Messages stored before the step was kept (`origin = flow:<id>`) count towards their flow only.
 - **Test chat.** `POST /app/api/persona/test` runs the menus before the AI, through the same
   `replyTo`, with the tab's unsaved menus when it sends them (`flows`) and a tapped button's `payload`.
-  A menu reply returns its text, `menu` and `quickReplies` without calling the model; an AI reply says
-  `teamOnly` when Instagram would leave that message for the team. Unsaved menus with a problem
-  answer `menu_problem` like a save.
+  A menu reply returns its text, `menu` and `quickReplies` without calling the model; an AI reply lists
+  `aiOffChannels`, where the AI is off and that message would wait for the team (`teamOnly` says it
+  for Instagram alone, for older pages). Unsaved menus with a problem answer `menu_problem` like a save.
+- **The AI per channel.** `teamOnlyChannels` can hold WhatsApp and Instagram
+  (`ChatFlows.TEAM_ONLY_CHANNELS`); a save drops the website, whose visitors nobody could answer. On
+  such a channel a message no flow answers is stored for the team without pausing the chat.
 
 ```mermaid
 flowchart TD
@@ -1541,7 +1564,7 @@ flowchart TD
   either. The step goes out after the rate limit passes and the customer's message is stored, and the
   AI isn't called. It is stored as an `AUTOMATION` message with the flow's name in `agentName` and
   `origin = flow:<flow id>:<step id>` (the payload's form), so the inbox shows it with the Automation
-  tag and the Menus tab can count each step.
+  tag and the Channels tab can count each step.
 - **Matching.** Keywords match whole words, ignoring case, accents and punctuation: "Oi" is found in
   "Oi, tudo bem?" but not in "Depois". A tap is routed by its payload, never by its title, so a
   button labelled "Sobrancelha/Formação" moves on even when "Formação" also starts the flow. A

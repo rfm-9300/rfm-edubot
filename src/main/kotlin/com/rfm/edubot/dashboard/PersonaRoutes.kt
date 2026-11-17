@@ -30,7 +30,7 @@ import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.persona.Checked
 import com.rfm.edubot.persona.PersonaBehavior
 import com.rfm.edubot.persona.PersonaBehaviorInput
-import com.rfm.edubot.persona.PersonaChange
+import com.rfm.edubot.persona.PersonaCapabilities
 import com.rfm.edubot.persona.PersonaCompiler
 import com.rfm.edubot.persona.PersonaDraftInput
 import com.rfm.edubot.persona.PersonaFileExtractor
@@ -95,23 +95,35 @@ private fun Route.personaRoutes(
     val repo = PersonaRepository(mongo)
 
     suspend fun ApplicationCall.reply(ctx: DashboardContext, persona: TenantPersona?, status: HttpStatusCode = HttpStatusCode.OK) =
-        respond(status, personaDto(persona, repo.listSources(ctx.tenant.id), ctx.isAdmin()))
+        respond(status, personaDto(persona, repo.listSources(ctx.tenant.id), ctx.isAdmin(), ctx.tenant))
 
     route("/persona") {
         get {
             val ctx = call.moduleContext()
             call.reply(ctx, repo.findByTenant(ctx.tenant.id))
         }
+        // The page's one Save: the settings, the instructions or both, as one version. The phone app sends instructions alone.
         put {
             val ctx = call.personaEditor() ?: return@put
             val request = call.body<PersonaUpdateRequest>() ?: return@put
-            val instructions = when (val checked = PersonaValidation.instructions(request.compiledInstructions)) {
-                is Checked.Invalid -> return@put call.problem(checked.problem)
-                is Checked.Ok -> checked.value
+            val instructions = request.compiledInstructions?.let { text ->
+                when (val checked = PersonaValidation.instructions(text)) {
+                    is Checked.Invalid -> return@put call.problem(checked.problem)
+                    is Checked.Ok -> checked.value
+                }
+            }
+            val behavior = request.behavior?.let { input ->
+                when (val checked = PersonaValidation.behavior(input)) {
+                    is Checked.Invalid -> return@put call.problem(checked.problem)
+                    is Checked.Ok -> checked.value
+                }
             }
             val current = repo.findByTenant(ctx.tenant.id)
-            if (current != null && current.compiledInstructions == instructions) return@put call.reply(ctx, current)
-            val saved = repo.saveInstructions(ctx.tenant.id, instructions, PersonaChange.MANUAL, ctx.author())
+            // A save that changes nothing writes no version and keeps the cached pipelines.
+            val changedInstructions = instructions?.takeIf { current == null || it != current.compiledInstructions }
+            val changedBehavior = behavior?.takeIf { current == null || it != current.behavior }
+            if (changedInstructions == null && changedBehavior == null) return@put call.reply(ctx, current)
+            val saved = repo.saveEdits(ctx.tenant.id, changedBehavior, changedInstructions, ctx.author())
             pipelineFactory.evict(ctx.tenant.id)
             call.reply(ctx, saved)
         }
@@ -244,7 +256,7 @@ private fun Route.personaRoutes(
         get("/menus") {
             val ctx = call.moduleContext()
             val flows = ChatFlowRepository(mongo, ctx.tenant.id).load()
-            call.respond(menusDto(flows, ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
+            call.respond(menusDto(flows, ctx.isAdmin(), ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id), ctx.tenant.binding(Platform.WHATSAPP) != null))
         }
         put("/menus") {
             val ctx = call.personaEditor() ?: return@put
@@ -253,7 +265,7 @@ private fun Route.personaRoutes(
             val flows = input.toChatFlows(keepGates = repository.load()?.startGates.orEmpty())
             flows.saveProblem()?.let { return@put call.respond(HttpStatusCode.BadRequest, it.dto()) }
             val saved = repository.save(flows, ctx.author())
-            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id)))
+            call.respond(menusDto(saved, canEdit = true, ctx.tenant.binding(Platform.INSTAGRAM) != null, menuUsage(mongo, ctx.tenant.id), ctx.tenant.binding(Platform.WHATSAPP) != null))
         }
         post("/preview") {
             val ctx = call.moduleContext()
@@ -277,6 +289,8 @@ private fun Route.personaRoutes(
             // Channels where this test chat, as a new chat, would get no reply because its first message holds no start word.
             val opener = request.messages.firstOrNull { it.role == "user" }?.content.orEmpty()
             val gatedChannels = StartGate.CHANNELS.filter { menus?.startGate(it)?.opens(opener) == false }.map { it.name }.sorted()
+            // Channels where the AI is off, so what no menu answers there waits for the team.
+            val aiOffChannels = menus?.teamOnlyChannels.orEmpty().map { it.name }.sorted()
             val last = history.last()
             val menuReply = if (last.role == "assistant") null else menus?.replyTo(Platform.INSTAGRAM, last.content, request.payload)
             if (menuReply != null) {
@@ -291,6 +305,7 @@ private fun Route.personaRoutes(
                         quickReplies = menuReply.quickReplies.map { it.dto() },
                         teamOnly = false,
                         gatedChannels = gatedChannels,
+                        aiOffChannels = emptyList(),
                     ),
                 )
             }
@@ -319,6 +334,7 @@ private fun Route.personaRoutes(
                     quickReplies = emptyList(),
                     teamOnly = menus?.teamOnlyChannels?.contains(Platform.INSTAGRAM) == true,
                     gatedChannels = gatedChannels,
+                    aiOffChannels = aiOffChannels,
                 ),
             )
         }
@@ -349,7 +365,7 @@ private suspend inline fun <reified T : Any> ApplicationCall.body(): T? =
     }
 
 private suspend fun ApplicationCall.problem(problem: PersonaProblem, status: HttpStatusCode = HttpStatusCode.BadRequest) =
-    respond(status, PersonaErrorDto(problem.error, problem.field, problem.limit))
+    respond(status, PersonaErrorDto(problem.error, problem.field, problem.limit, problem.index))
 
 /** Whether one more source of [chars] fits the company's limits; answers 409 when it doesn't. */
 private suspend fun ApplicationCall.roomFor(repo: PersonaRepository, tenantId: ObjectId, chars: Int): Boolean {
@@ -400,7 +416,8 @@ private suspend fun runPersonaTest(
     persona: TenantPersona,
     history: List<PersonaTestMessage>,
 ): PlaygroundOutcome {
-    val modules = DashboardModules.effectiveFor(tenant).toSet()
+    // The tools the bot would have: the company's modules less the ones this persona (saved or draft) turned off.
+    val modules = PersonaPrompt.botModules(persona, DashboardModules.effectiveFor(tenant).toSet())
     val bookings = DashboardModules.BOOKINGS in modules
     val context = PersonaPrompt.customerSystemMessages(
         persona = persona,
@@ -452,7 +469,8 @@ private class PlaygroundHandoff : ToolPack {
     }
 }
 
-@Serializable private data class PersonaUpdateRequest(val compiledInstructions: String)
+/** Either part may be left out, and is then kept as it is. */
+@Serializable private data class PersonaUpdateRequest(val compiledInstructions: String? = null, val behavior: PersonaBehaviorInput? = null)
 @Serializable private data class PersonaSourceRequest(val content: String)
 @Serializable private data class PersonaTestMessage(val role: String, val content: String)
 /** [flows] are the Menus tab's unsaved menus; [payload] is the quick reply the tester tapped for the last message. */
@@ -464,8 +482,9 @@ private class PlaygroundHandoff : ToolPack {
 )
 
 /**
- * [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram;
- * [gatedChannels] are the channels where a chat like this one, whose first message holds no start word, gets no reply.
+ * [menu] names the menu that answered instead of the AI; [teamOnly] says the AI wouldn't answer on Instagram and
+ * [aiOffChannels] lists every channel where it wouldn't; [gatedChannels] are the channels where a chat like this one,
+ * whose first message holds no start word, gets no reply.
  */
 @Serializable private data class PersonaTestResponse(
     val reply: String,
@@ -477,10 +496,11 @@ private class PlaygroundHandoff : ToolPack {
     val quickReplies: List<QuickReplyDto>,
     val teamOnly: Boolean,
     val gatedChannels: List<String>,
+    val aiOffChannels: List<String>,
 )
 @Serializable private data class PersonaPreviewRequest(val draft: PersonaDraftInput? = null)
 @Serializable private data class PersonaPreviewDto(val block: String?, val chars: Int, val tokenEstimate: Int)
-@Serializable private data class PersonaErrorDto(val error: String, val field: String? = null, val limit: Int? = null)
+@Serializable private data class PersonaErrorDto(val error: String, val field: String? = null, val limit: Int? = null, val index: Int? = null)
 
 @Serializable
 private data class PersonaSourceDto(
@@ -508,12 +528,23 @@ private data class PersonaSourceDetailDto(
     val truncated: Boolean,
 )
 
+/** [reasons] are the situations the bot hands over in now (see [com.rfm.edubot.persona.PersonaHandoff.effectiveReasons]). */
 @Serializable
-private data class PersonaHandoffDto(val enabled: Boolean, val triggers: String?, val message: String?)
+private data class PersonaHandoffDto(val enabled: Boolean, val reasons: List<String>, val triggers: String?, val message: String?)
+
+@Serializable
+private data class PersonaBusinessDto(val name: String?, val about: String?, val hours: String?, val location: String?, val contact: String?)
+
+@Serializable
+private data class PersonaFaqDto(val question: String, val answer: String)
+
+@Serializable
+private data class PersonaCapabilitiesDto(val catalog: Boolean, val bookings: Boolean, val records: Boolean)
 
 @Serializable
 private data class PersonaBehaviorDto(
     val botName: String?,
+    val disclosure: String?,
     val language: String?,
     val languageStrict: Boolean,
     val tone: String?,
@@ -521,7 +552,12 @@ private data class PersonaBehaviorDto(
     val replyLength: String?,
     val emoji: String?,
     val greeting: String?,
+    val scope: String?,
+    val unknown: String?,
     val rules: List<String>,
+    val business: PersonaBusinessDto,
+    val faq: List<PersonaFaqDto>,
+    val capabilities: PersonaCapabilitiesDto,
     val handoff: PersonaHandoffDto,
 )
 
@@ -537,10 +573,20 @@ private data class PersonaLimitsDto(
     val rules: Int,
     val ruleChars: Int,
     val handoffChars: Int,
+    val businessNameChars: Int,
+    val businessAboutChars: Int,
+    val businessFieldChars: Int,
+    val faq: Int,
+    val faqQuestionChars: Int,
+    val faqAnswerChars: Int,
     val testMessages: Int,
     val fileTypes: List<String>,
     val languages: List<String>,
 )
+
+/** A channel customers write on, and whether the company has it set up (the website: a widget key). */
+@Serializable
+private data class PersonaChannelDto(val channel: String, val connected: Boolean)
 
 @Serializable
 private data class PersonaDto(
@@ -558,6 +604,11 @@ private data class PersonaDto(
     val pendingSources: Int,
     val canEdit: Boolean,
     val limits: PersonaLimitsDto,
+    /** The capability switches that matter here: the company has the module behind each. */
+    val capabilities: List<String>,
+    val channels: List<PersonaChannelDto>,
+    /** The company's name, which the business name field offers until one is written. */
+    val companyName: String,
 )
 
 @Serializable
@@ -599,12 +650,31 @@ private val limitsDto = PersonaLimitsDto(
     rules = PersonaLimits.MAX_RULES,
     ruleChars = PersonaLimits.MAX_RULE_CHARS,
     handoffChars = PersonaLimits.MAX_HANDOFF_CHARS,
+    businessNameChars = PersonaLimits.MAX_BUSINESS_NAME_CHARS,
+    businessAboutChars = PersonaLimits.MAX_BUSINESS_ABOUT_CHARS,
+    businessFieldChars = PersonaLimits.MAX_BUSINESS_FIELD_CHARS,
+    faq = PersonaLimits.MAX_FAQ,
+    faqQuestionChars = PersonaLimits.MAX_FAQ_QUESTION_CHARS,
+    faqAnswerChars = PersonaLimits.MAX_FAQ_ANSWER_CHARS,
     testMessages = PersonaLimits.MAX_TEST_MESSAGES,
     fileTypes = PersonaFileExtractor.EXTENSIONS,
     languages = PersonaLanguages.names.keys.toList(),
 )
 
-private fun personaDto(persona: TenantPersona?, sources: List<PersonaSourceSummary>, canEdit: Boolean) = PersonaDto(
+/** The capability switches a company with [modules] has: each needs the module whose tools it turns off. */
+private fun capabilitiesFor(modules: Set<String>): List<String> = buildList {
+    if (DashboardModules.CATALOG in modules) add("catalog")
+    if (DashboardModules.BOOKINGS in modules) add("bookings")
+    if (PersonaCapabilities.RECORD_MODULES.any { it in modules }) add("records")
+}
+
+private fun channelsOf(tenant: Tenant) = listOf(
+    PersonaChannelDto(Platform.WHATSAPP.name, tenant.binding(Platform.WHATSAPP) != null),
+    PersonaChannelDto(Platform.INSTAGRAM.name, tenant.binding(Platform.INSTAGRAM) != null),
+    PersonaChannelDto(Platform.WEB.name, tenant.binding(Platform.WEB)?.externalId?.isNotBlank() == true),
+)
+
+private fun personaDto(persona: TenantPersona?, sources: List<PersonaSourceSummary>, canEdit: Boolean, tenant: Tenant) = PersonaDto(
     compiledInstructions = persona?.compiledInstructions.orEmpty(),
     version = persona?.version ?: 0,
     tokenEstimate = persona?.tokenEstimate ?: 0,
@@ -619,10 +689,14 @@ private fun personaDto(persona: TenantPersona?, sources: List<PersonaSourceSumma
     pendingSources = sources.count { it.compiledIntoVersion == null },
     canEdit = canEdit,
     limits = limitsDto,
+    capabilities = capabilitiesFor(DashboardModules.effectiveFor(tenant).toSet()),
+    channels = channelsOf(tenant),
+    companyName = tenant.name,
 )
 
 private fun PersonaBehavior.dto() = PersonaBehaviorDto(
     botName = botName,
+    disclosure = disclosure?.name,
     language = language,
     languageStrict = languageStrict,
     tone = tone?.name,
@@ -630,8 +704,13 @@ private fun PersonaBehavior.dto() = PersonaBehaviorDto(
     replyLength = replyLength?.name,
     emoji = emoji?.name,
     greeting = greeting,
+    scope = scope?.name,
+    unknown = unknown?.name,
     rules = rules,
-    handoff = PersonaHandoffDto(handoff.enabled, handoff.triggers, handoff.message),
+    business = PersonaBusinessDto(business.name, business.about, business.hours, business.location, business.contact),
+    faq = faq.map { PersonaFaqDto(it.question, it.answer) },
+    capabilities = PersonaCapabilitiesDto(capabilities.catalog, capabilities.bookings, capabilities.records),
+    handoff = PersonaHandoffDto(handoff.enabled, handoff.effectiveReasons().map { it.name }, handoff.triggers, handoff.message),
 )
 
 private fun PersonaVersionSummary.dto(live: Int?) = PersonaVersionDto(
