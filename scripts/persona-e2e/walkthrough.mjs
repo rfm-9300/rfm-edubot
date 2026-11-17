@@ -7,10 +7,8 @@
 // test chat), off-topic and unknown questions and what the bot can do, notes and PDF/Word/Markdown
 // uploads, the test chat (handoff and a prompt-injection try), hand edits and what the bot reads,
 // history and restore, removing a document and rewriting, a signed WhatsApp message that hands a chat
-// to the team (bell + inbox), Channels (the AI on and off per channel) and Instagram menus (built with
-// keyword tokens, mapped, caught when incomplete, tried unsaved in the test chat and with Try it,
-// saved; a keyword clash, the message checker, reordering, duplicating and discarding; a signed
-// Instagram message the menu answers, counted in its usage), start words (a WhatsApp gate set up and
+// to the team (bell + inbox), Channels (the AI on and off per channel, the pointer to the Chatbot page,
+// a flow left alone by a channel save; the flows themselves are scripts/chatbot-e2e's), start words (a WhatsApp gate set up and
 // saved, a signed first message without one kept for the team and paused, one with a start word
 // answered, the test chat's note, Resume), dark theme, a narrow window and a phone, and a member's
 // read-only view.
@@ -20,8 +18,7 @@
 //   cd scripts/persona-e2e && npm install && \
 //   ADMIN_PASSWORD=… WA_APP_SECRET=… node walkthrough.mjs
 // Optional: APP_URL (http://localhost:8080), CHROME (google-chrome), HEADLESS=1, OUT (./out),
-// SLOW (ms between steps, 0 by default; ~800 makes it watchable), IG_APP_SECRET (when the app has
-// one; Instagram webhooks are signed with it, else with WA_APP_SECRET).
+// SLOW (ms between steps, 0 by default; ~800 makes it watchable).
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -31,7 +28,6 @@ import puppeteer from 'puppeteer-core';
 const APP = (process.env.APP_URL || 'http://localhost:8080').replace(/\/$/, '');
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 const WA_APP_SECRET = process.env.WA_APP_SECRET;
-const IG_APP_SECRET = process.env.IG_APP_SECRET || WA_APP_SECRET;
 const OUT = path.resolve(process.env.OUT || 'out');
 const SLOW = Number(process.env.SLOW || 0);
 if (!ADMIN_PASSWORD || !WA_APP_SECRET) {
@@ -144,20 +140,6 @@ async function whatsappMessage(phone, text, from = '351912345678', name = 'Marta
     } }] }],
   });
   const signature = crypto.createHmac('sha256', WA_APP_SECRET).update(body).digest('hex');
-  const res = await fetch(`${APP}/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': `sha256=${signature}` }, body });
-  return res.status;
-}
-
-/** What Instagram posts when a customer writes to the company's account. */
-async function instagramMessage(account, text) {
-  const body = JSON.stringify({
-    object: 'instagram',
-    entry: [{ id: account, time: Math.floor(Date.now() / 1000), messaging: [{
-      sender: { id: 'persona-e2e-customer' }, recipient: { id: account }, timestamp: Date.now(),
-      message: { mid: `mid.persona-e2e.${Date.now()}`, text },
-    }] }],
-  });
-  const signature = crypto.createHmac('sha256', IG_APP_SECRET).update(body).digest('hex');
   const res = await fetch(`${APP}/webhook`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Hub-Signature-256': `sha256=${signature}` }, body });
   return res.status;
 }
@@ -413,127 +395,65 @@ try {
   await click('[data-inbox-filter="needs"]', 1200);
   expect((await page.$$eval('.inbox-row__name', ns => ns.map(n => n.innerText.trim()))).includes('Marta Silva'), 'the chat waits in Needs reply');
 
-  note('9. Channels, and menus that answer Instagram before the AI');
+  note('9. Channels: where the AI answers, and the pointer to the Chatbot page');
   await openPersona();
   await tab('channels');
-  await page.waitForSelector('#persona-menus-form');
+  await page.waitForSelector('#persona-channels-form');
   expect((await text('[data-channel="INSTAGRAM"]')).includes('Not connected') && (await text('[data-channel="WHATSAPP"]')).includes('Connected'), 'each channel says whether it is connected');
-  expect((await text('[data-channel="WEB"]')).includes('The AI answers every visitor') && !(await page.$('#pm-ai-WEB')), 'the website always gets the AI');
-  expect((await text('#pm-menus')).includes('Menus only answer Instagram messages'), 'the menus say they only answer Instagram');
-  expect((await text('.persona-studio__pane')).includes('No menus yet'), 'a company starts without menus');
-  await click('#pm-ai-WHATSAPP', 600);
+  expect((await text('[data-channel="WEB"]')).includes('The AI answers every visitor') && !(await page.$('#pc-ai-WEB')), 'the website always gets the AI');
+  expect((await text('#pc-chatbot')).includes('No flows are on yet'), 'the tab points at the Chatbot page, where the fixed flows live');
+  await click('#pc-ai-WHATSAPP', 600);
   expect((await text('[data-channel="WHATSAPP"]')).includes('Off: messages wait in Conversations'), 'turning the AI off on WhatsApp says where messages go');
   await tab('overview');
   expect((await text('#persona-flow')).includes('WhatsApp · the AI is off'), 'the Overview follows the unsaved channel change');
+  expect((await text('#persona-flow')).includes('No chatbot flows'), 'and says no chatbot flow answers first yet');
   await tab('channels');
-  await click('#pm-ai-WHATSAPP', 600);
-  expect(!(await page.evaluate(() => !!state.personaDraft.menus)), 'turning it back on leaves nothing unsaved');
-  await click('[data-menu-add]', 800);
-  expect(await page.$eval('#pm-0-name', el => el.value) === 'Menu 1', 'a new menu gets a name');
-  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-keywords', 'and the cursor waits in its keywords');
-  await type('#pm-0-keywords', 'Hello\nGood morning', 20);
-  await type('#pm-0-0-text', 'Hello! Which service would you like to know about?', 8);
-  const keywords = await page.evaluate(() => state.personaDraft.menus.flows[0].keywords);
-  expect(keywords.join('|') === 'Hello|Good morning' && (await page.$$('[data-tokens="0"] .token')).length === 2, `Enter adds a keyword token, and leaving the field adds the one being typed (${keywords.join('|')})`);
-  expect(await page.$eval('[data-persona-savebar]', el => el.classList.contains('is-dirty')) && (await text('[data-persona-status]')).includes('Channels'), 'the save bar follows the screen and names Channels');
-  await click('[data-button-add="0:0"]', 800);
-  await type('#pm-0-0-b0', 'Whitening', 20);
-  await page.select('#pm-0-0-n0', '__new');
-  await pause(900);
-  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', '"New message…" adds a message and moves to it');
-  expect((await text('.flow-map')).includes('Whitening') && (await text('[data-step-summary="0:1"]')).includes('1 · Whitening'), 'the map and the new message show the button that leads there');
-  await click('[data-persona-save]', 300);
-  expect((await toast()).includes('message 2: write the message'), 'an empty message is caught before saving');
-  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-0-1-text', 'and the cursor goes to it');
-  expect((await text('[data-issue="0:1:text"]')).startsWith('Write the message'), 'the message says under it what is missing');
-  await type('#pm-0-1-text', 'Whitening costs 120 €. Call us to book.', 8);
-  expect(await page.$eval('[data-issue="0:1:text"]', el => el.hidden), 'and stops once it is written');
-  expect(await page.$eval('#persona-test-draft', el => !el.hidden), 'the test chat says it uses the unsaved menu');
-  await shot('menus-draft');
-  await click('#persona-chat-clear', 300);
-  await type('#persona-chat-input', 'Hello there', 20);
-  await page.keyboard.press('Enter');
-  await page.waitForSelector('#persona-chat-log [data-quick-reply]', { timeout: 15000 });
-  await pause(500);
-  const opened = await text('#persona-chat-log');
-  expect(opened.includes('Which service would you like to know about?') && opened.includes('Answered by the menu “Menu 1”'), 'a keyword opens the unsaved menu in the test chat');
-  await click('#persona-chat-log [data-quick-reply="0"]', 300);
-  await page.waitForFunction(() => document.querySelector('#persona-chat-log').innerText.includes('Whitening costs 120'), { timeout: 15000 });
-  await pause(500);
-  expect(!(await page.$('#persona-chat-log [data-quick-reply]')), 'tapping a button moves the menu on, and the last message has no buttons');
-  await shot('menus-test-chat');
-  await click('[data-persona-save]', 300);
-  expect((await toast()).startsWith('Saved'), 'saving the menus is confirmed');
-  await pause(1000);
-  expect(await page.$eval('#persona-test-draft', el => el.hidden), 'nothing is left unsaved');
-  await click('[data-menu-try="0"]', 300);
-  await page.waitForFunction(() => document.querySelector('#persona-chat-log').innerText.includes('Answered by the menu “Menu 1”'), { timeout: 15000 });
-  expect((await page.$eval('#persona-chat-log .chat__msg--user', el => el.innerText.trim())) === 'Hello', 'Try it starts a test chat with one of the menu\'s keywords');
-  await click('#pm-ai-INSTAGRAM', 600);
-  expect((await text('[data-channel="INSTAGRAM"]')).includes('your menus still answer'), 'turning the AI off on Instagram says the menus still answer');
-  await click('[data-persona-save]', 1300);
-  await click('#persona-chat-clear', 300);
-  await type('#persona-chat-input', 'Do you open on Saturdays?', 20);
-  await page.keyboard.press('Enter');
-  await page.waitForFunction(() => document.querySelectorAll('#persona-chat-log .chat__note').length > 0, { timeout: 20000 });
-  await pause(500);
-  expect((await text('#persona-chat-log')).includes('No automatic reply on Instagram'), 'with the AI off on Instagram, the test chat says so');
+  await click('#pc-ai-WHATSAPP', 600);
+  expect(!(await page.evaluate(() => !!state.personaDraft.channels)), 'turning it back on leaves nothing unsaved');
+  await click('[data-open-chatbot]', 1500);
+  expect(await page.evaluate(() => location.hash) === '#chatbot' && !!(await page.$('#chatbot-form')), 'Open Chatbot goes to the Chatbot page');
 
-  await click('[data-menu-add]', 800);
-  await type('#pm-1-keywords', 'Hello there\n', 20);
-  await pause(300);
-  expect((await text('[data-kw-notes="1"]')).includes('“Hello there” opens “Menu 1” instead'), 'a keyword an earlier menu catches first is flagged');
-  expect(await page.$eval('[data-tokens="1"] .token', el => el.classList.contains('token--warn')), 'and its token is marked');
-  await type('#pm-probe', 'Hello there!', 20);
-  expect((await text('[data-pm-probe]')).startsWith('Opens “Menu 1”, through the keyword “Hello”'), 'the message checker names the menu that answers and its keyword');
-  await click('[data-menu-up="1"]', 800);
-  expect(!(await text('[data-kw-notes="0"]')).includes('instead') && (await text('[data-pm-probe]')).startsWith('Opens “Menu 2”'), 'moving the menu up lets its keyword answer');
-  await shot('menus-clash');
-  await click('[data-menu-duplicate="1"]', 900);
-  const copies = await page.evaluate(() => state.personaDraft.menus.flows.map(f => `${f.name}:${f.enabled}`));
-  expect(copies.length === 3 && copies[2] === 'Menu 1 (copy):false', `a duplicate is added under the menu, off (${copies.join(', ')})`);
-  await click('[data-persona-discard]', 300);
-  expect((await confirm()).startsWith('Discard all unsaved changes?'), 'discarding asks first');
-  await pause(800);
-  expect((await page.$$('.flow-menu')).length === 1 && !(await page.evaluate(() => !!state.personaDraft.menus)), 'and goes back to the saved menu');
-
-  // An Instagram customer writes; the menu answers before the AI and its usage counts it. Without a
-  // real token Instagram refuses the reply, which the figures count apart.
+  // Instagram gets connected and a chatbot flow installed (through the same API the Chatbot page uses): the AI-off hint then
+  // says the flows still answer, and saving the channels leaves the flow alone.
   await http('POST', `/admin/api/tenants/${company.slug}/channels`, company.backoffice, { platform: 'INSTAGRAM', externalId: company.instagram, accessToken: 'persona-e2e' });
-  expect(await instagramMessage(company.instagram, 'Hello!') === 200, 'the signed Instagram webhook is accepted');
-  const used = await page.waitForFunction(async () => {
-    const usage = (await api('/app/api/persona/menus')).usage.menus[0];
-    return usage && usage.sent + usage.failed > 0 && usage;
-  }, { timeout: 30000, polling: 1000 }).then(h => h.jsonValue()).catch(() => null);
-  expect(!!used, `the menu's reply is in its usage (${JSON.stringify(used)})`);
+  const flow = { id: 'hello', name: 'Hello', enabled: true, channels: ['INSTAGRAM'], keywords: ['hello'], aiReads: false, afterMisses: 'HAND_OVER', handoverText: '',
+    steps: [{ id: 'menu', kind: 'MESSAGE', text: 'Hello! How can we help?', options: [], show: 'AUTO', listLabel: '', retryText: '', next: '', key: '', expect: 'TEXT', check: 'HOURS', hours: [], answerKey: '', answerIs: '', whenTrue: '', whenFalse: '', action: 'NOTIFY_TEAM', serviceId: '', failNext: '' }] };
+  await page.evaluate(f => api('/app/api/chatbot/flows', { method: 'PUT', body: JSON.stringify({ flows: [f] }) }), flow);
   await page.reload({ waitUntil: 'networkidle2' });
   await pause(1500);
   await openPersona();
   await tab('channels');
-  await page.waitForSelector('#pm-0-name');
-  const kept = await page.evaluate(() => [document.querySelector('#pm-0-1-text').value, document.querySelector('#pm-ai-INSTAGRAM').checked, document.querySelector('#pm-0-0-n0').selectedOptions[0].textContent]);
-  expect(kept[0] === 'Whitening costs 120 €. Call us to book.' && kept[1] === false && kept[2].startsWith('2 · Whitening costs'), `the saved menu and channels read back after a reload (${kept.join(' | ')})`);
-  expect((await text('[data-channel="INSTAGRAM"]')).includes('Connected') && !(await text('#pm-menus')).includes('Menus only answer Instagram'), 'with Instagram connected, the tab stops saying it isn’t');
-  const summary = await text('[data-menu-summary="0"]');
-  expect(summary.includes('Sent once to 1 customer') || summary.includes('1 refused by Instagram'), `the menu's head counts what it sent (${summary})`);
-  await shot('menus-saved');
+  await page.waitForSelector('#persona-channels-form');
+  expect((await text('[data-channel="INSTAGRAM"]')).includes('Connected') && (await text('#pc-chatbot')).includes('1 flow is on'), 'with Instagram connected and a flow on, the tab says so');
+  await click('#pc-ai-INSTAGRAM', 600);
+  expect((await text('[data-channel="INSTAGRAM"]')).includes('your chatbot flows still answer'), 'turning the AI off on Instagram says the chatbot flows still answer');
+  await click('[data-persona-save]', 1300);
+  expect((await page.evaluate(() => api('/app/api/persona/channels'))).teamOnlyChannels.join(',') === 'INSTAGRAM', 'the AI switch is saved');
+  expect((await page.evaluate(() => api('/app/api/chatbot/flows'))).flows.length === 1, 'and the chatbot flow is left alone');
+  await page.reload({ waitUntil: 'networkidle2' });
+  await pause(1500);
+  await openPersona();
+  await tab('channels');
+  await page.waitForSelector('#pc-ai-INSTAGRAM');
+  expect(await page.$eval('#pc-ai-INSTAGRAM', el => !el.checked), 'the channel settings read back after a reload');
+  await shot('channels');
 
   note('9b. Start words: new chats only get answers when they begin with one');
   expect((await page.$$('[data-gate]')).length === 2 && !!(await page.$('[data-channel="WHATSAPP"] [data-gate]')) && !!(await page.$('[data-channel="INSTAGRAM"] [data-gate]')), 'Instagram and WhatsApp each offer start words in their row');
-  expect(!(await page.$('[data-gate-tokens]')) && !(await page.$eval('#pm-gate-WHATSAPP-on', el => el.checked)), 'both are off, so every new chat is answered');
-  await click('#pm-gate-WHATSAPP-on', 700);
-  expect(await page.evaluate(() => document.activeElement?.id) === 'pm-gate-WHATSAPP-words', 'switching WhatsApp on puts the cursor in its start words');
+  expect(!(await page.$('[data-gate-tokens]')) && !(await page.$eval('#pc-gate-WHATSAPP-on', el => el.checked)), 'both are off, so every new chat is answered');
+  await click('#pc-gate-WHATSAPP-on', 700);
+  expect(await page.evaluate(() => document.activeElement?.id) === 'pc-gate-WHATSAPP-words', 'switching WhatsApp on puts the cursor in its start words');
   expect(await page.$eval('[data-persona-savebar]', el => el.classList.contains('is-dirty')), 'and counts as an unsaved change');
   await click('[data-persona-save]', 300);
   expect((await toast()).includes('WhatsApp: add at least one start word'), 'a gate with no word is caught before saving');
   expect((await text('[data-gate-issue="WHATSAPP"]')).startsWith('Add at least one start word'), 'and says so under the field');
-  await type('#pm-gate-WHATSAPP-words', 'quote\nBook a visit', 20);
-  expect((await page.$$('[data-gate-tokens="WHATSAPP"] .token')).length === 1 && await page.$eval('#pm-gate-WHATSAPP-words', el => el.value) === 'Book a visit', 'Enter adds a start word token');
-  await type('#pm-gate-WHATSAPP-words', '\nQUOTE\n', 20);
+  await type('#pc-gate-WHATSAPP-words', 'quote\nBook a visit', 20);
+  expect((await page.$$('[data-gate-tokens="WHATSAPP"] .token')).length === 1 && await page.$eval('#pc-gate-WHATSAPP-words', el => el.value) === 'Book a visit', 'Enter adds a start word token');
+  await type('#pc-gate-WHATSAPP-words', '\nQUOTE\n', 20);
   expect((await text('[data-gate-notes="WHATSAPP"]')).includes('“quote” is already a start word') && (await page.$$('[data-gate-tokens="WHATSAPP"] .token')).length === 2, 'a repeat is refused, ignoring capitals, and names the word already there');
   await shot('start-words-draft');
   await click('[data-persona-save]', 1300);
-  const gateSaved = await page.evaluate(async () => (await api('/app/api/persona/menus')).startGates);
+  const gateSaved = await page.evaluate(async () => (await api('/app/api/persona/channels')).startGates);
   expect(JSON.stringify(gateSaved) === JSON.stringify([{ channel: 'WHATSAPP', enabled: true, words: ['quote', 'Book a visit'] }]), `saving keeps the words, the one being typed included (${JSON.stringify(gateSaved)})`);
   await click('#persona-chat-clear', 300);
   await type('#persona-chat-input', 'Do you open on Sundays?', 20);
@@ -594,7 +514,7 @@ try {
     expect(!(await page.evaluate(() => document.documentElement.scrollWidth > document.documentElement.clientWidth)), `${id} scrolls no sideways on a 375px phone`);
     await shot(`${id}-phone`);
   }
-  await page.$eval('#pm-channels', el => el.scrollIntoView({ block: 'start' }));
+  await page.$eval('#pc-channels', el => el.scrollIntoView({ block: 'start' }));
   await pause(500);
   expect((await page.$$eval('[data-gate]', els => els.map(el => Math.round(el.getBoundingClientRect().left)))).every((x, _, all) => x === all[0]), 'the channels stack in one column on a phone');
   await shot('channels-phone-rows');
@@ -617,9 +537,8 @@ try {
   await page.waitForSelector('[data-version]');
   expect((await page.$$('[data-restore]')).length === 0, 'no restoring');
   await tab('channels');
-  await page.waitForSelector('#pm-0-name');
-  expect(await page.$eval('#pm-0-name', el => el.disabled) && await page.$eval('#pm-ai-WHATSAPP', el => el.disabled) && !(await page.$('[data-menu-add]')), 'channels and menus are read-only');
-  expect(!(await page.$('[data-menu-up="0"], [data-kw-remove]')) && await page.$eval('[data-menu-try="0"]', el => !el.disabled), 'members can\'t reorder or edit keywords, but can try a menu');
+  await page.waitForSelector('#persona-channels-form');
+  expect(await page.$eval('#pc-ai-WHATSAPP', el => el.disabled) && !(await page.$('[data-gate-remove]')), 'the channel settings are read-only');
   await tryChip('who');
   expect((await text('#persona-chat-log')).includes("I'm Sofia"), 'members still use the test chat');
   await shot('member');

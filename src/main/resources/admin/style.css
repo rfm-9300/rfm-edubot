@@ -1089,14 +1089,16 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 .lines--installments .line { grid-template-columns: 52px minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--installments .lines__head > span:nth-child(3) { text-align: left; padding-left: 10px; }
 .line__index { display: grid; align-items: center; padding: 0 12px; border-right: 1px solid var(--line-soft); color: var(--ink-mute); font-size: 12.5px; font-weight: 700; }
-/* A shift's breaks (from, to): two fields and remove. A Persona menu message's buttons (title, leads to):
-   two fields, go to that message and remove. Same columns on phones. */
+/* A shift's breaks (from, to): two fields and remove. Same columns on phones. */
 .lines--breaks .lines__head,
 .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-.lines--replies .lines__head,
-.lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px 32px; }
-.lines--breaks .lines__head > span,
-.lines--replies .lines__head > span { text-align: left; }
+.lines--breaks .lines__head > span { text-align: left; }
+/* A Chatbot message's options (title, leads to, other words, remove) and a condition's opening hours (day, from, to, remove). */
+.lines--options .lines__head,
+.lines--options .line { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) 32px; }
+.lines--options .lines__head > span { text-align: left; }
+.line--hours { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.chatbot-flows { display: grid; gap: 16px; }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
 @media (max-width: 560px) {
   .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
@@ -1119,9 +1121,15 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
   .lines--installments .lines__head, .lines--installments .line { grid-template-columns: 44px minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .lines--installments .lines__head > span:first-child { grid-column: auto; }
   .lines--breaks .lines__head, .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-  .lines--replies .lines__head, .lines--replies .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px 32px; }
-  .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child,
-  .lines--replies .lines__head > span:first-child, .lines--replies .line > input:first-child { grid-column: auto; }
+  .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child { grid-column: auto; }
+  /* An option on a phone: its title with remove beside it, then where it leads and its other words, each on its own row. */
+  .lines--options .lines__head { display: none; }
+  .lines--options .line { grid-template-columns: minmax(0, 1fr) 32px; }
+  .lines--options .line > :nth-child(1) { grid-column: 1; grid-row: 1; }
+  .lines--options .line > :nth-child(4) { grid-column: 2; grid-row: 1; }
+  .lines--options .line > :nth-child(2), .lines--options .line > :nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); border-right: 0; }
+  .line--hours { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+  .line--hours > :nth-child(1) { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
 }
 /* iOS zooms the page into a focused field whose text is under 16px. */
 @media (pointer: coarse) {
@@ -1495,9 +1503,7 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .flow-menu__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .flow-menu__stat { color: var(--ink-mute); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flow-menu__notes { display: grid; gap: 4px; }
-.flow-menu__notes:empty, .flow-menu__map:empty { display: none; }
-.flow-menu__map { display: grid; gap: 8px; }
-.flow-menus [data-pm-kpis]:empty { display: none; }
+.flow-menu__notes:empty { display: none; }
 @keyframes flow-flash { 0%, 50% { border-color: var(--focus-border); box-shadow: var(--focus-ring); } 100% { box-shadow: 0 0 0 transparent; } }
 .flow__card.is-flash { animation: flow-flash 1.6s ease-out; }
 
@@ -1506,35 +1512,6 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
 .line .l-go:hover:not(:disabled) { background: var(--surface-2); color: var(--ink); }
 .line .l-go:disabled { color: var(--ink-faint); opacity: 0.5; cursor: default; }
 .line .l-go:focus-visible, .line .l-rm:focus-visible { outline: none; box-shadow: inset 0 0 0 1.5px var(--focus-border); }
-
-/* Where each button leads, as a tree from the first message. Messages shorten to fit; a very deep tree scrolls inside the box. */
-.flow-map { padding: 12px 14px; border: 1px solid var(--line-soft); border-radius: var(--r-md); background: var(--surface-2); overflow-x: auto; font-size: 13px; }
-.flow-map__list { margin: 2px 0 0 11px; padding: 0; list-style: none; }
-.flow-map__branch { position: relative; padding: 3px 0 3px 20px; }
-.flow-map__branch::before { content: ""; position: absolute; top: 0; bottom: 0; left: 0; border-left: 1px solid var(--hairline-strong); }
-.flow-map__branch:last-child::before { bottom: auto; height: 16px; }
-.flow-map__branch::after { content: ""; position: absolute; top: 16px; left: 0; width: 14px; border-top: 1px solid var(--hairline-strong); }
-/* A button and where it leads on one line; only the message's text gives way. */
-.flow-map__row { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.flow-map__row > * { flex: none; }
-.flow-map__row > .flow-map__msg { flex: 0 1 auto; }
-.flow-map__row > .flow-map__end { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.flow-map__btn { display: inline-flex; align-items: center; height: 22px; padding: 0 9px; border: 1px solid var(--hairline-strong); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.flow-map__btn::after { content: "→"; margin-left: 6px; color: var(--ink-faint); }
-.flow-map__msg {
-  display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; height: 26px; padding: 0 8px 0 2px;
-  border: 0; border-radius: 999px; background: none; color: var(--ink); font: inherit; font-weight: 600; text-align: left; cursor: pointer;
-}
-.flow-map__msg:hover { background: var(--surface); }
-.flow-map__msg:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.flow-map__msg .flow__index { flex: none; width: 22px; height: 22px; font-size: 11px; }
-.flow-map__msg--ref { color: var(--ink-mute); font-weight: 500; }
-.flow-map__msg--ref .flow-map__text { max-width: 16ch; }
-.flow-map__text { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.flow-map__back, .flow-map__end, .flow-map__note { color: var(--ink-mute); font-size: 12px; font-weight: 600; white-space: nowrap; }
-.flow-map__end { padding-left: 2px; }
-.flow-map__note { color: var(--warn-ink); }
-.flow-map__orphans { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin: 10px 0 0; padding-top: 10px; border-top: 1px dashed var(--line); }
 
 /* Several short values typed into one field (a menu's keywords): each one a token, then the field. */
 .tokens {

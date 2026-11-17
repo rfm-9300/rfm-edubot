@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-13
+updated: 2026-11-17
 ---
 
 # Dashboard frontend: how the dashboards' scripts are split
@@ -13,7 +13,7 @@ them loading, and where new code goes. The UI rules (classes, tokens, strings) a
 
 Neither page has a build step: each `index.html` loads plain scripts with `defer`. Until PR #84 nearly
 all of `/app` was `app/app.js`, 9,601 lines (574 KB) that every dashboard change touched, beside the
-self-contained modules that had already left it (`agents.js`, `assistant.js`, `email.js`, `menus.js`,
+self-contained modules that had already left it (`agents.js`, `assistant.js`, `email.js`, `channels.js`, `chatbot.js` (`menus.js` before 2026-11-17),
 `timesheets.js`, `doc-template.js`), and the backoffice was `backoffice/app.js`, 1,381 lines that copied
 about a dozen of `/app`'s helpers. At Rodrigo's request, #84 split both into one script per page or
 shared concern, without changing any code, then moved the helpers they shared into one file,

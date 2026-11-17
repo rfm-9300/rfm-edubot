@@ -27,6 +27,17 @@ class WhatsAppInboundTest {
         val message = inbound("""{"from":"351900000000","id":"wamid.i","timestamp":"1","type":"interactive","interactive":{"type":"list_reply","list_reply":{"id":"slot-2","title":"Quinta, 15h","description":"Limpeza geral"}}}""")!!
 
         assertEquals("Quinta, 15h", message.messageText)
+        assertEquals("slot-2", message.quickReplyPayload, "and its id, which is how a chat flow knows where the tap leads")
+    }
+
+    @Test
+    fun `a button reply carries its id too, and a typed message carries none`() {
+        val tapped = inbound("""{"from":"351900000000","id":"wamid.j","timestamp":"1","type":"interactive","interactive":{"type":"button_reply","button_reply":{"id":"flow:marcar:unhas:0","title":"Unhas"}}}""")!!
+        assertEquals("Unhas", tapped.messageText)
+        assertEquals("flow:marcar:unhas:0", tapped.quickReplyPayload)
+
+        assertNull(inbound("""{"from":"351900000000","id":"wamid.k","timestamp":"1","type":"text","text":{"body":"Olá"}}""")!!.quickReplyPayload)
+        assertNull(inbound("""{"from":"351900000000","id":"wamid.m","timestamp":"1","type":"button","button":{"text":"Confirmar","payload":"Confirmar"}}""")!!.quickReplyPayload, "a template's button payload isn't a flow's")
     }
 
     @Test

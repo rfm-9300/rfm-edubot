@@ -254,6 +254,7 @@ internal val featureEnglish: Map<String, String> = mapOf(
     "notification.time_device_enrolled" to "{employee} set up a phone for the time clock.",
     "notification.time_missed_clock_out" to "{employee} forgot to clock out.",
     "notification.conversation_handoff" to "{name} needs a person.",
+    "notification.chatbot_answers" to "{name} answered the chatbot.",
     "notification.change_order_decided" to "{name} answered change {number}.",
 
     "error.code.email_required" to "An email is required.",
@@ -647,6 +648,7 @@ internal val featurePortuguese: Map<String, String> = mapOf(
     "notification.time_device_enrolled" to "{employee} configurou um telemóvel para o ponto.",
     "notification.time_missed_clock_out" to "{employee} esqueceu-se de picar a saída.",
     "notification.conversation_handoff" to "{name} precisa de uma pessoa.",
+    "notification.chatbot_answers" to "{name} respondeu ao chatbot.",
     "notification.change_order_decided" to "{name} respondeu à alteração {number}.",
 
     "error.code.email_required" to "É preciso um email.",
@@ -1040,6 +1042,7 @@ internal val featureSpanish: Map<String, String> = mapOf(
     "notification.time_device_enrolled" to "{employee} configuró un teléfono para el fichaje.",
     "notification.time_missed_clock_out" to "{employee} olvidó fichar la salida.",
     "notification.conversation_handoff" to "{name} necesita a una persona.",
+    "notification.chatbot_answers" to "{name} respondió al chatbot.",
     "notification.change_order_decided" to "{name} respondió al modificado {number}.",
 
     "error.code.email_required" to "Hace falta un email.",

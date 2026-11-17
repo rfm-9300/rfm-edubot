@@ -66,6 +66,7 @@ internal object DashboardFeatures {
         ContactRoutes,
         InboxRoutes,
         PersonaRoutes,
+        ChatbotRoutes,
         SettingsRoutes,
         DocumentTemplateRoutes,
         AssistantRoutes,

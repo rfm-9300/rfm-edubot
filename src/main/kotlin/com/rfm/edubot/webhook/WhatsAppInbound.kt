@@ -10,12 +10,12 @@ import org.bson.types.ObjectId
 
 /**
  * What the pipeline receives for one WhatsApp message, or null for kinds the bot ignores (reactions,
- * deleted or unsupported messages). Button and list replies, shared locations and contacts become text
+ * deleted or unsupported messages). Button and list replies (with the id they were sent with, for chat flows), shared locations and contacts become text
  * the AI can read; photos, voice notes, videos, documents and stickers become media, stored for the
  * inbox without an automatic reply.
  */
 internal fun IncomingMessage.toInbound(tenantId: ObjectId, phoneNumberId: String, profileName: String?): InboundMessage? {
-    fun inbound(text: String, media: InboundMedia? = null) = InboundMessage(
+    fun inbound(text: String, media: InboundMedia? = null, payload: String? = null) = InboundMessage(
         tenantId = tenantId,
         phoneNumberId = phoneNumberId,
         platform = Platform.WHATSAPP,
@@ -27,11 +27,13 @@ internal fun IncomingMessage.toInbound(tenantId: ObjectId, phoneNumberId: String
         timestamp = timestamp,
         eventId = id,
         media = media,
+        quickReplyPayload = payload,
     )
 
     text?.body?.takeIf { it.isNotBlank() }?.let { return inbound(it) }
     button?.let { (it.text ?: it.payload)?.takeIf { label -> label.isNotBlank() }?.let { label -> return inbound(label) } }
-    interactive?.let { (it.buttonReply ?: it.listReply)?.title?.takeIf { title -> title.isNotBlank() }?.let { title -> return inbound(title) } }
+    // A tapped option carries the id it was sent with, which is how a chat flow knows which step it leads to.
+    interactive?.let { (it.buttonReply ?: it.listReply)?.let { reply -> reply.title?.takeIf { title -> title.isNotBlank() }?.let { title -> return inbound(title, payload = reply.id?.takeIf { id -> id.isNotBlank() }) } } }
     location?.describe()?.let { return inbound(it) }
     contacts?.mapNotNull { it.describe() }?.takeIf { it.isNotEmpty() }?.let { return inbound(it.joinToString("\n")) }
 

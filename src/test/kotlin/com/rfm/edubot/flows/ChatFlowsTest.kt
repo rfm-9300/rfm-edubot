@@ -1,6 +1,5 @@
 package com.rfm.edubot.flows
 
-import com.rfm.edubot.channel.QuickReply
 import com.rfm.edubot.tenant.model.Platform
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -22,17 +21,14 @@ class ChatFlowsTest {
     private val flows = ChatFlows(listOf(flow))
 
     private fun stepFor(text: String, payload: String? = null, platform: Platform = Platform.INSTAGRAM) =
-        flows.replyTo(platform, text, payload)?.step?.id
+        flows.entry(platform, text, payload)?.step?.id
 
     @Test
-    fun `a keyword starts the flow at its first step, with quick replies that say where they lead`() {
-        val reply = flows.replyTo(Platform.INSTAGRAM, "Olá, bom dia!", null)!!
+    fun `a keyword starts the flow at its first step`() {
+        val entry = flows.entry(Platform.INSTAGRAM, "Olá, bom dia!", null)!!
 
-        assertEquals("menu", reply.step.id)
-        assertEquals(
-            listOf(QuickReply("Pele/Laser", "flow:servicos:pele"), QuickReply("Sobrancelha/Formação", "flow:servicos:sobrancelha")),
-            reply.quickReplies,
-        )
+        assertEquals("menu", entry.step.id)
+        assertEquals(false, entry.tapped)
     }
 
     @Test
@@ -60,7 +56,7 @@ class ChatFlowsTest {
 
     @Test
     fun `a disabled flow, or one on another channel, never answers`() {
-        assertNull(ChatFlows(listOf(flow.copy(enabled = false))).replyTo(Platform.INSTAGRAM, "Olá", null))
+        assertNull(ChatFlows(listOf(flow.copy(enabled = false))).entry(Platform.INSTAGRAM, "Olá", null))
         assertNull(stepFor("Olá", platform = Platform.WHATSAPP))
         assertNull(stepFor("Pele/Laser", payload = "flow:servicos:pele", platform = Platform.WHATSAPP))
     }
@@ -79,7 +75,15 @@ class ChatFlowsTest {
         assertEquals(listOf("buttons:menu"), withMenu(menu.copy(buttons = List(14) { FlowButton("Opção $it", "pele") })))
         assertEquals(listOf("next:menu"), withMenu(menu.copy(buttons = listOf(FlowButton("Pele", "nowhere")))))
         assertEquals(listOf("text:menu"), withMenu(menu.copy(text = "\u00e3".repeat(501))))
-        assertEquals(listOf("channels"), flow.copy(channels = setOf(Platform.WHATSAPP)).problems())
+        assertEquals(listOf("channels"), flow.copy(channels = emptySet()).problems())
+        val choice = FlowStep("a", "Qual?", listOf(FlowButton("Um", "b")), key = "area")
+        val after = FlowStep("b", "Ok")
+        assertEquals(emptyList(), flow.copy(steps = listOf(choice, after)).problems())
+        assertEquals(listOf("key:a"), flow.copy(steps = listOf(choice.copy(key = "Área Nova"), after)).problems(), "a key is a name like the questions'")
+        assertEquals(listOf("key:b"), flow.copy(steps = listOf(choice, after.copy(key = "area"))).problems(), "nothing to keep without options")
+        assertEquals(listOf("retries"), flow.copy(retries = 4).problems())
+        assertEquals(listOf("retries"), flow.copy(retries = -1).problems())
+        assertEquals(emptyList(), flow.copy(retries = 0).problems())
         assertEquals(listOf("id"), flow.copy(id = "Serviços").problems())
         assertEquals(listOf("keywords"), flow.copy(keywords = listOf("?!")).problems())
         assertEquals(listOf("duplicate_step"), flow.copy(steps = flow.steps + flow.steps.last()).problems())
@@ -98,7 +102,7 @@ class ChatFlowsTest {
         assertEquals(FlowProblem("keyword", 0, limit = ChatFlowLimits.MAX_KEYWORD_CHARS), problem(flow.copy(keywords = listOf("x".repeat(61)))))
         assertEquals(FlowProblem("title", 0, 0, ChatFlow.MAX_TITLE), problem(longTitle))
         assertEquals(FlowProblem("next", 1, 2), problem(flow, leadsNowhere))
-        assertEquals(FlowProblem("menus", limit = ChatFlowLimits.MAX_FLOWS), problem(*Array(11) { flow.copy(id = "m$it") }))
+        assertEquals(FlowProblem("flows", limit = ChatFlowLimits.MAX_FLOWS), problem(*Array(11) { flow.copy(id = "m$it") }))
         assertEquals(FlowProblem("invalid"), problem(flow, flow))
         assertEquals(FlowProblem("invalid", 0), problem(flow.copy(id = "Serviços")))
     }

@@ -15,6 +15,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
+import kotlin.test.assertTrue
+import kotlinx.datetime.Instant
 
 /** How a company's flows are read from its hand-written `chat_flows` document, against a real MongoDB. */
 class ChatFlowRepositoryTest {
@@ -62,6 +64,9 @@ class ChatFlowRepositoryTest {
                     channels = setOf(Platform.INSTAGRAM),
                     keywords = listOf("Olá", "Bom dia"),
                     steps = listOf(FlowStep("menu", "Qual serviço?", listOf(FlowButton("Unhas", "contacto"))), FlowStep("contacto", "Fale connosco")),
+                    // A document written before these settings existed: an unreadable reply went to the AI at once, and still does.
+                    afterMisses = AfterMisses.LET_AI,
+                    retries = 0,
                 ),
             ),
             teamOnlyChannels = setOf(Platform.INSTAGRAM),
@@ -134,7 +139,10 @@ class ChatFlowRepositoryTest {
         val doc = collection.find(Document("tenantId", tenantId)).first()
         assertEquals(createdAt, doc.getDate("createdAt"))
         assertEquals(1L, collection.countDocuments(Document("tenantId", tenantId)))
-        assertEquals(flow("servicos", step("menu", "Qual serviço?")).keys, doc.getList("flows", Document::class.java).single().keys, "the same shape as a document written by hand")
+        assertTrue(
+            doc.getList("flows", Document::class.java).single().keys.containsAll(flow("servicos", step("menu", "Qual serviço?")).keys),
+            "everything a document written by hand has, and the settings added since",
+        )
     }
 
     @Test
@@ -175,5 +183,92 @@ class ChatFlowRepositoryTest {
         )
 
         assertEquals(mapOf(Platform.WHATSAPP to StartGate(true, listOf("oi"))), ChatFlowRepository(mongo, tenantId).find()!!.startGates)
+    }
+
+    @Test
+    fun `a flow saved with every kind of step reads back exactly`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val repo = ChatFlowRepository(mongo, tenantId)
+        val flow = ChatFlow(
+            id = "marcar", name = "Marcar", channels = setOf(Platform.WHATSAPP, Platform.WEB), keywords = listOf("marcar"),
+            aiReads = true, afterMisses = AfterMisses.LET_AI, handoverText = "Já lhe respondemos.", retries = 2,
+            steps = listOf(
+                FlowStep("menu", "Que serviço?", listOf(FlowButton("Unhas", "name", listOf("manicure", "gel")), FlowButton("Outro", "person")), show = OptionsDisplay.NUMBERED, listLabel = "Escolher", retryText = "Não percebi."),
+                FlowStep("name", "Nome?", kind = StepKind.ASK, key = "name", expect = Expect.NAME, next = "open"),
+                FlowStep("open", kind = StepKind.CONDITION, check = Check.HOURS, hours = listOf(HoursWindow(1, "09:00", "18:00"), HoursWindow(6, "10:00", "13:00")), whenTrue = "book", whenFalse = "late"),
+                FlowStep("book", "Marcado.", kind = StepKind.ACTION, action = ActionKind.CREATE_BOOKING, serviceId = "svc-1", key = "service", next = "known", failNext = "person"),
+                FlowStep("known", kind = StepKind.CONDITION, check = Check.ANSWER, answerKey = "name", answerIs = "Ana", whenTrue = "late", whenFalse = "late"),
+                FlowStep("late", "Fora de horas."),
+                FlowStep("person", "Já vamos.", kind = StepKind.HANDOFF),
+            ),
+        )
+
+        val saved = repo.saveFlows(listOf(flow), "ana@clinica.pt")
+        assertEquals(listOf(flow), saved.flows)
+        assertEquals(listOf(flow), repo.find()!!.flows)
+    }
+
+    @Test
+    fun `a step saved before steps had kinds is a plain message with its buttons`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        collection.insertOne(Document("tenantId", tenantId).append("flows", listOf(flow("servicos", step("menu", "Qual serviço?", "Unhas" to "contacto"), step("contacto", "Fale connosco")))))
+
+        val read = ChatFlowRepository(mongo, tenantId).find()!!.flows.single()
+        assertEquals(FlowStep("menu", "Qual serviço?", listOf(FlowButton("Unhas", "contacto")), kind = StepKind.MESSAGE, show = OptionsDisplay.AUTO), read.steps.first())
+        assertEquals(false, read.aiReads)
+        assertEquals(AfterMisses.LET_AI, read.afterMisses, "a reply it couldn't read always went to the AI")
+        assertEquals(0, read.retries, "and at once")
+        assertNull(read.handoverText)
+    }
+
+    @Test
+    fun `the flows and the channel settings are saved apart, each leaving the other as it was`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val repo = ChatFlowRepository(mongo, tenantId)
+        val menu = ChatFlow("servicos", "Menu", channels = setOf(Platform.INSTAGRAM), keywords = listOf("Olá"), steps = listOf(FlowStep("menu", "Qual serviço?")))
+        val gates = mapOf(Platform.WHATSAPP to StartGate(true, listOf("oi")))
+
+        repo.saveChannels(setOf(Platform.WHATSAPP), gates, "ana@clinica.pt")
+        val afterFlows = repo.saveFlows(listOf(menu), "rui@clinica.pt")
+        assertEquals(setOf(Platform.WHATSAPP), afterFlows.teamOnlyChannels, "saving flows leaves the AI switch")
+        assertEquals(gates, afterFlows.startGates, "and the start gates")
+        assertEquals("rui@clinica.pt", afterFlows.updatedBy)
+
+        val afterChannels = repo.saveChannels(emptySet(), emptyMap(), "ana@clinica.pt")
+        assertEquals(listOf(menu), afterChannels.flows, "saving channels leaves the flows")
+        assertEquals(emptySet(), afterChannels.teamOnlyChannels)
+        assertEquals(1L, collection.countDocuments(Document("tenantId", tenantId)))
+    }
+
+    @Test
+    fun `a customer's place in a flow is kept per chat, replaced by the next message, and cleared at the end`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val sessions = FlowSessionRepository(mongo, tenantId)
+        val chat = ObjectId()
+        val other = ObjectId()
+        val at = Instant.parse("2026-11-17T10:00:00Z")
+
+        assertNull(sessions.find(chat))
+        sessions.save(chat, FlowSession("f", "name", mapOf("service" to "Unhas"), 1, at))
+        sessions.save(other, FlowSession("g", "menu", updatedAt = at))
+        assertEquals(FlowSession("f", "name", mapOf("service" to "Unhas"), 1, at), sessions.find(chat))
+
+        sessions.save(chat, FlowSession("f", "phone", mapOf("service" to "Unhas", "name" to "Ana"), 0, at))
+        assertEquals("phone", sessions.find(chat)?.stepId)
+        assertEquals(1L, mongo.database.getCollection<Document>("chat_flow_sessions").countDocuments(Document("tenantId", tenantId).append("conversationId", chat)))
+        assertEquals("g", sessions.find(other)?.flowId, "another chat's place is its own")
+
+        sessions.clear(chat)
+        assertNull(sessions.find(chat))
+        assertNotNull(sessions.find(other))
+        assertNull(FlowSessionRepository(mongo, ObjectId()).find(other), "another company never sees it")
+    }
+
+    @Test
+    fun `a session is stale after twelve idle hours`() {
+        val at = Instant.parse("2026-11-17T10:00:00Z")
+        val session = FlowSession("f", "menu", updatedAt = at)
+        assertEquals(false, session.expired(Instant.parse("2026-11-17T21:59:59Z")))
+        assertEquals(true, session.expired(Instant.parse("2026-11-17T22:00:01Z")))
     }
 }

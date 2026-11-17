@@ -32,7 +32,11 @@ import com.rfm.edubot.conversation.model.TokenUsage
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.flows.ChatFlows
-import com.rfm.edubot.flows.FlowReply
+import com.rfm.edubot.flows.FlowContext
+import com.rfm.edubot.flows.FlowEngine
+import com.rfm.edubot.flows.FlowInput
+import com.rfm.edubot.flows.FlowResult
+import com.rfm.edubot.flows.FlowSessions
 import com.rfm.edubot.persona.PersonaHandoff
 import com.rfm.edubot.persona.PersonaPrompt
 import com.rfm.edubot.persona.TenantPersona
@@ -41,6 +45,9 @@ import com.rfm.edubot.ratelimit.RateLimiter
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Platform
 import com.rfm.edubot.tenant.model.TenantTimeZones
+import kotlinx.datetime.DateTimeUnit
+import kotlinx.datetime.TimeZone
+import kotlinx.datetime.plus
 import com.rfm.edubot.whatsapp.WhatsAppApiException
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -69,6 +76,9 @@ class MessagePipeline(
     private val openrouterModel: String? = null,
     private val persona: TenantPersona? = null,
     private val chatFlows: ChatFlowRepository? = null,
+    /** Runs the company's chat flows; without it (or without [flowSessions]) no flow answers. */
+    private val flowEngine: FlowEngine? = null,
+    private val flowSessions: FlowSessions? = null,
     private val enabledModules: Set<String> = DashboardModules.catalog.toSet(),
     private val tenantUsage: TenantUsageRepository? = null,
     private val monthlyTokenBudget: Long = Long.MAX_VALUE,
@@ -182,8 +192,12 @@ class MessagePipeline(
                 return
             }
 
-            val flowReply = flows?.replyTo(inbound.platform, inbound.messageText, inbound.quickReplyPayload)
-            if (flowReply == null && flows != null && inbound.platform in flows.teamOnlyChannels) {
+            // A flow answers when its customer is waiting in one or the message starts one; its session is read now, effects come later.
+            val engine = flowEngine.takeIf { flows != null && flowSessions != null }
+            val flowInput = FlowInput(inbound.platform, inbound.messageText, inbound.quickReplyPayload)
+            val session = if (engine != null && existingConversation != null) flowSessions?.find(existingConversation.id) else null
+            val flowAnswers = engine != null && flows != null && engine.wouldAnswer(flows, session, flowInput, SystemClock.now())
+            if (!flowAnswers && flows != null && inbound.platform in flows.teamOnlyChannels) {
                 val conversation = conversations.findOrCreate(user.id, inbound.waId, inbound.platform)
                 val stored = messages.insertIfAbsent(
                     Message(
@@ -229,9 +243,31 @@ class MessagePipeline(
             // A message re-queued after a restart may already be stored; carry on so it still gets its reply.
             if (messages.insertIfAbsent(userMessage)) conversations.recordInbound(conversation.id)
 
-            if (flowReply != null) {
-                replyWithFlow(flowReply, conversation, inbound, user.waId, responder)
-                return
+            if (flowAnswers && engine != null && flows != null) {
+                val result = engine.handle(
+                    flows, session, flowInput,
+                    FlowContext(
+                        platform = inbound.platform,
+                        waId = user.waId,
+                        customerName = profileName,
+                        conversationId = conversation.id,
+                        now = SystemClock.now(),
+                        zone = TimeZone.of(TenantTimeZones.normalize(timezoneId)),
+                        aiAnswers = inbound.platform !in flows.teamOnlyChannels,
+                        aiAllowed = tenantUsage == null || tenantUsage.tokensUsedThisMonth() < monthlyTokenBudget,
+                    ),
+                )
+                if (result.handled) {
+                    replyWithFlow(result, conversation, inbound, profileName, responder)
+                    return
+                }
+                // A flow gave up on this customer: the AI answers, or the team where the AI is off, as for a message no flow answers.
+                flowSessions?.clear(conversation.id)
+                if (inbound.platform in flows.teamOnlyChannels) {
+                    deduplicationService.markProcessed(inbound.eventId)
+                    log.info("A flow left the message to the team: the AI is off on this channel: platform={}, waId={}", inbound.platform, inbound.waId)
+                    return
+                }
             }
 
             if (tenantUsage != null && tenantUsage.tokensUsedThisMonth() >= monthlyTokenBudget) {
@@ -550,8 +586,11 @@ class MessagePipeline(
     }
 
     /** Pauses the bot in [conversation] the way a person pausing it in the inbox would, then tells the team. */
-    private suspend fun handOff(conversation: Conversation, customerName: String?, call: ToolCall) {
-        val reason = call.arguments["reason"]?.jsonPrimitive?.contentOrNull?.trim()?.take(300).orEmpty()
+    private suspend fun handOff(conversation: Conversation, customerName: String?, call: ToolCall) =
+        handOver(conversation, customerName, call.arguments["reason"]?.jsonPrimitive?.contentOrNull?.trim()?.take(300).orEmpty())
+
+    /** Pauses the bot in [conversation] and tells the team why, whoever decided: the model or a chat flow. */
+    private suspend fun handOver(conversation: Conversation, customerName: String?, reason: String) {
         conversations.setAutoReplyEnabled(conversation.id, false, PersonaHandoff.PAUSED_BY)
         log.info("Conversation handed to the team: conversationId={}, reason={}", conversation.id, reason)
         runCatching { onHandoff?.invoke(Handoff(conversation, customerName, reason)) }
@@ -577,30 +616,46 @@ class MessagePipeline(
     private fun startGatePause(inbound: InboundMessage, flows: ChatFlows?): String? =
         if (flows?.startGate(inbound.platform)?.opens(inbound.messageText) == false) Conversation.START_GATE else null
 
-    /** Answers with a flow's step instead of the AI, stored for the inbox as an automation's message. */
-    private suspend fun replyWithFlow(reply: FlowReply, conversation: Conversation, inbound: InboundMessage, waId: String, responder: OutboundClient) {
-        val text = reply.step.text
-        val message = Message(
-            tenantId = inbound.tenantId,
-            conversationId = conversation.id,
-            channel = inbound.platform,
-            waId = waId,
-            role = UserRole.ASSISTANT,
-            content = MessageContent.Text(text),
-            status = MessageStatus.DELIVERED,
-            createdAt = SystemClock.now(),
-            author = MessageAuthor.AUTOMATION,
-            agentName = reply.flow.name,
-            origin = reply.origin,
-        )
-        messages.insert(message)
-        val quickReplies = reply.quickReplies
-        deliver(message) {
-            if (quickReplies.isEmpty()) responder.sendText(waId, text) else responder.sendQuickReplies(waId, text, quickReplies)
+    /**
+     * Sends what a flow answers, instead of the AI, each message stored for the inbox as an automation's. Where the customer
+     * waits in the flow is kept for their next message, and a hand-over pauses the chat and tells the team.
+     */
+    private suspend fun replyWithFlow(result: FlowResult, conversation: Conversation, inbound: InboundMessage, customerName: String?, responder: OutboundClient) {
+        // A millisecond apart: messages stored together would tie, and the inbox could show them out of order.
+        val sentAt = SystemClock.now()
+        val replies = result.messages.mapIndexed { index, flowMessage ->
+            val outgoing = flowMessage.fitTo(responder.capabilities)
+            outgoing to Message(
+                tenantId = inbound.tenantId,
+                conversationId = conversation.id,
+                channel = inbound.platform,
+                waId = inbound.waId,
+                role = UserRole.ASSISTANT,
+                content = MessageContent.Text(outgoing.text),
+                status = MessageStatus.DELIVERED,
+                createdAt = sentAt.plus(index.toLong(), DateTimeUnit.MILLISECOND),
+                author = MessageAuthor.AUTOMATION,
+                agentName = result.flowName,
+                origin = flowMessage.origin,
+            )
+        }
+        replies.forEach { (_, message) -> messages.insert(message) }
+        // Where the customer waits, and a hand-over, are kept before anything is sent: a channel that refuses a message
+        // (an expired window, a bad token) must not make the customer start the flow over, or leave the team unaware.
+        result.session?.let { flowSessions?.save(conversation.id, it) } ?: flowSessions?.clear(conversation.id)
+        result.handOver?.let { handOver(conversation, customerName, it.reason) }
+        for ((outgoing, message) in replies) {
+            deliver(message) {
+                if (outgoing.replies.isEmpty()) responder.sendText(inbound.waId, outgoing.text)
+                else responder.sendQuickReplies(inbound.waId, outgoing.text, outgoing.replies, outgoing.listLabel)
+            }
         }
         conversations.bumpActivity(conversation.id)
         deduplicationService.markProcessed(inbound.eventId)
-        log.info("Answered with a chat flow: flow={}, step={}, waId={}", reply.flow.id, reply.step.id, waId)
+        log.info(
+            "Answered with a chat flow: flow={}, messages={}, waiting={}, handedOver={}, effects={}, waId={}",
+            result.flowName, result.messages.size, result.session?.stepId, result.handOver != null, result.effects.map { "${it.action}:${it.ok}" }, inbound.waId,
+        )
     }
 
     private suspend fun sendReply(reply: Message, text: String, responder: OutboundClient) = deliver(reply) { responder.sendText(reply.waId, text) }

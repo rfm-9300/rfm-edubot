@@ -24,6 +24,8 @@ object UsageSources {
     const val EMAIL = "email"
     /** Drafting a construction project's update for its client. */
     const val BUILDING = "building"
+    /** A chat flow reading a customer's answer it couldn't read itself. */
+    const val CHATBOT = "chatbot"
 }
 
 /**

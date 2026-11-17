@@ -1,7 +1,7 @@
 /* The dashboard's shell (/app), loaded last. bootAuthed() loads /me and draws the nav; setActive() and
    loadModule() switch pages and fetch what each needs; render() draws the active page; init() wires the
    top bar and starts it all. It also mounts the self-contained modules (agents.js, timesheets.js,
-   assistant.js, email.js, menus.js), handing each the helpers it needs through init(deps). */
+   assistant.js, email.js, channels.js, chatbot.js), handing each the helpers it needs through init(deps). */
 
 async function bootAuthed() {
   state.email = null;
@@ -27,7 +27,9 @@ async function bootAuthed() {
   $('#btn-backoffice').hidden = state.me.principalType !== 'operator-imp';
   // An employee's session reaches only its own pages: no bell, no Home figures.
   if (!isPortal()) startNotifications();
-  if (!state.me.modules.includes(state.active)) state.active = state.me.modules[0] || 'settings';
+  // The Chatbot page has no module of its own: it comes with Persona.
+  const pageOpens = page => state.me.modules.includes(page) || (page === 'chatbot' && state.me.modules.includes('persona'));
+  if (!pageOpens(state.active)) state.active = state.me.modules[0] || 'settings';
   // The address may still name the previous session's page, or one this session can't open.
   const hashTab = (location.hash || '').replace('#', '');
   if (hashTab && hashTab !== state.active) history.replaceState(null, '', `#${state.active}`);
@@ -90,13 +92,15 @@ function renderNav() {
     { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
-    { id: 'groupBot', items: ['persona', 'ai-assistant', 'agents'] },
+    { id: 'groupBot', items: ['persona', 'chatbot', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings'] },
   ];
   const enabled = new Set(state.me.modules);
   // Financeiro isn't its own toggleable module — it's a combined week/month lens over
   // invoices + payments, so it shows whenever either of those does.
   if (enabled.has('invoices') || enabled.has('payments')) enabled.add('financeiro');
+  // The Chatbot page shares the Persona module: whoever may see how the bot talks may see its fixed flows.
+  if (enabled.has('persona')) enabled.add('chatbot');
   $('#nav').innerHTML = groups.map(g => {
     const items = g.items.filter(m => enabled.has(m));
     if (!items.length) return '';
@@ -242,13 +246,14 @@ async function loadModule(tab) {
     state.catalogCategories = categories;
   }
   if (tab === 'persona') {
-    // The Overview and the Channels tab both read the channel settings and menus.
+    // The Overview and the Channels tab both read the channel settings.
     const [persona] = await Promise.all([
       api('/app/api/persona'),
-      window.MenusUI.load().catch(() => { state.personaFlows = { failed: true }; }),
+      window.ChannelsUI.load().catch(() => { state.personaChannels = { failed: true }; }),
     ]);
     state.persona = persona;
   }
+  if (tab === 'chatbot') await window.ChatbotUI.load().catch(err => { window.ChatbotUI.failed(err); });
   if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
@@ -335,6 +340,7 @@ function render() {
   if (state.active === 'payments') return renderPayments(root);
   if (state.active === 'catalog') return renderCatalog(root);
   if (state.active === 'persona') return renderPersona(root);
+  if (state.active === 'chatbot') return window.ChatbotUI.render(root);
   if (state.active === 'ai-assistant') return window.AssistantUI.render(root);
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
@@ -520,16 +526,21 @@ function emailDeps() {
     canOpenRecord: subject => canOpenAgentSubject(subject),
   };
 }
-// The Persona page's Channels tab (menus.js); the test chat beside it (persona.js) tries the unsaved menus,
-// and the page's one save bar saves them.
-function menusDeps() {
+// The Persona page's Channels tab (channels.js); the page's one save bar saves it.
+function channelsDeps() {
   return {
     api, escapeHTML, toast, confirmDialog, render, renderKeepingFocus, setActive, relTime, fmtCount, personaNotice, personaAuthor,
     fail: personaFail,
     get state() { return state; },
     onDraft: paintPersonaDraft,
-    tryInChat: tryPersonaMenu,
     save: savePersonaPage,
+  };
+}
+// The Chatbot page (chatbot.js): the company's fixed chat flows and a test chat beside them.
+function chatbotDeps() {
+  return {
+    api, escapeHTML, toast, confirmDialog, render, renderKeepingFocus, setActive, relTime, fmtCount, personaAuthor, hero, statCards, renderChatText,
+    get state() { return state; },
   };
 }
 // Under a quote, invoice or booking: what agents did on it, what's next and "run an agent". Stays out
@@ -571,7 +582,8 @@ async function init(relayed = false) {
   window.TimesheetsUI?.init(timesheetsDeps());
   window.AssistantUI?.init(assistantDeps());
   window.EmailUI?.init(emailDeps());
-  window.MenusUI?.init(menusDeps());
+  window.ChannelsUI?.init(channelsDeps());
+  window.ChatbotUI?.init(chatbotDeps());
   wirePersonaUnload();
   I18N.applyDom(document);
   startAmounts();

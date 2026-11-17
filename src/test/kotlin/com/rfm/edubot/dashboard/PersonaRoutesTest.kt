@@ -13,7 +13,6 @@ import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.crm.ClientRepository
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
-import com.rfm.edubot.flows.ChatFlow
 import com.rfm.edubot.flows.ChatFlowLimits
 import com.rfm.edubot.flows.ChatFlowRepository
 import com.rfm.edubot.flows.StartGate
@@ -295,8 +294,7 @@ class PersonaRoutesTest {
         if (draft != null) put("draft", draft)
     }
 
-    private fun menus(vararg flows: JsonObject, teamOnly: List<String> = emptyList(), gates: List<JsonObject>? = null) = buildJsonObject {
-        putJsonArray("flows") { flows.forEach { add(it) } }
+    private fun channels(teamOnly: List<String> = emptyList(), gates: List<JsonObject>? = null) = buildJsonObject {
         putJsonArray("teamOnlyChannels") { teamOnly.forEach { add(it) } }
         if (gates != null) putJsonArray("startGates") { gates.forEach { add(it) } }
     }
@@ -307,29 +305,8 @@ class PersonaRoutesTest {
         putJsonArray("words") { words.forEach { add(it) } }
     }
 
-    private fun menu(
-        id: String = "servicos",
-        name: String = "Menu de serviços",
-        keywords: List<String> = listOf("Olá"),
-        steps: List<JsonObject> = listOf(menuStep("menu", "Qual serviço?", "Unhas" to "contacto"), menuStep("contacto", "Fale connosco")),
-    ) = buildJsonObject {
-        put("id", id)
-        put("name", name)
-        put("enabled", true)
-        putJsonArray("keywords") { keywords.forEach { add(it) } }
-        putJsonArray("steps") { steps.forEach { add(it) } }
-    }
-
-    private fun menuStep(id: String, text: String, vararg buttons: Pair<String, String>) = buildJsonObject {
-        put("id", id)
-        put("text", text)
-        putJsonArray("buttons") { buttons.forEach { (title, next) -> addJsonObject { put("title", title); put("next", next) } } }
-    }
-
-    private fun testChat(vararg pairs: Pair<String, String>, flows: JsonObject? = null, payload: String? = null) = buildJsonObject {
+    private fun testChat(vararg pairs: Pair<String, String>) = buildJsonObject {
         putJsonArray("messages") { pairs.forEach { (role, content) -> addJsonObject { put("role", role); put("content", content) } } }
-        if (flows != null) put("flows", flows)
-        if (payload != null) put("payload", payload)
     }
 
     private fun docx(vararg paragraphs: String): ByteArray {
@@ -361,7 +338,8 @@ class PersonaRoutesTest {
             "GET" to "/app/api/persona/sources/${ObjectId().toHexString()}", "DELETE" to "/app/api/persona/sources/${ObjectId().toHexString()}",
             "POST" to "/app/api/persona/compile", "POST" to "/app/api/persona/rebuild", "GET" to "/app/api/persona/versions",
             "GET" to "/app/api/persona/versions/1", "POST" to "/app/api/persona/versions/1/restore", "POST" to "/app/api/persona/preview",
-            "POST" to "/app/api/persona/test", "GET" to "/app/api/persona/menus", "PUT" to "/app/api/persona/menus",
+            "POST" to "/app/api/persona/test", "GET" to "/app/api/persona/channels", "PUT" to "/app/api/persona/channels",
+            "GET" to "/app/api/chatbot/flows", "PUT" to "/app/api/chatbot/flows", "POST" to "/app/api/chatbot/test",
         )
         for ((method, path) in calls) assertEquals(HttpStatusCode.Forbidden, send(method, path, token, buildJsonObject { }).status, "$method $path")
         assertEquals(HttpStatusCode.Forbidden, upload(token, "a.txt", "x".toByteArray()).status)
@@ -803,19 +781,18 @@ class PersonaRoutesTest {
     fun `the AI can be turned off on WhatsApp too, never on the website, and the test chat says where it's off`() = personaTest {
         val c = company(channels = listOf(Platform.WHATSAPP))
         val token = token(c.admin.email)
-        val before = send("GET", "/app/api/persona/menus", token).obj()
+        val before = send("GET", "/app/api/persona/channels", token).obj()
         assertEquals(listOf("INSTAGRAM", "WHATSAPP"), before["teamOnlyOptions"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals(true, before.bool("whatsappConnected"))
         assertEquals(false, before.bool("instagramConnected"))
         assertEquals(listOf("WHATSAPP" to true), persona(token)["channels"]!!.jsonArray.map { it.jsonObject }.filter { it.bool("connected") }.map { it.text("channel") to true })
 
-        val saved = send("PUT", "/app/api/persona/menus", token, menus(teamOnly = listOf("WHATSAPP", "WEB", "INSTAGRAM"))).obj()
+        val saved = send("PUT", "/app/api/persona/channels", token, channels(teamOnly = listOf("WHATSAPP", "WEB", "INSTAGRAM"))).obj()
         assertEquals(listOf("INSTAGRAM", "WHATSAPP"), saved["teamOnlyChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
         assertEquals(setOf(Platform.INSTAGRAM, Platform.WHATSAPP), ChatFlowRepository(mongo, c.id).load()!!.teamOnlyChannels)
 
         val reply = send("POST", "/app/api/persona/test", token, messages("user" to "Olá")).obj()
         assertEquals(listOf("INSTAGRAM", "WHATSAPP"), reply["aiOffChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
-        assertEquals(true, reply.bool("teamOnly"))
     }
 
     @Test
@@ -873,150 +850,19 @@ class PersonaRoutesTest {
     }
 
     @Test
-    fun `menus start empty, members only read them, and admins save them the way customers get them`() = personaTest {
-        val c = company()
-        val admin = token(c.admin.email)
-        val empty = send("GET", "/app/api/persona/menus", admin).obj()
-        assertEquals(0, empty["flows"]!!.jsonArray.size)
-        assertEquals(true, empty.bool("canEdit"))
-        assertEquals(false, empty.bool("instagramConnected"))
-        assertNull(empty.text("updatedAt"))
-        assertEquals(ChatFlow.MAX_BUTTONS, empty.obj("limits").int("buttons"))
-
-        val member = token(c.member.email)
-        assertEquals(false, send("GET", "/app/api/persona/menus", member).obj().bool("canEdit"))
-        val refused = send("PUT", "/app/api/persona/menus", member, menus(menu()))
-        assertEquals(HttpStatusCode.Forbidden, refused.status)
-        assertEquals("not_allowed", refused.error().first)
-        assertNull(ChatFlowRepository(mongo, c.id).load())
-
-        val saved = send(
-            "PUT", "/app/api/persona/menus", admin,
-            menus(menu(name = "  Menu de serviços ", keywords = listOf(" Olá ", "", "ola", "?!", "Bom dia")), teamOnly = listOf("INSTAGRAM")),
-        ).obj()
-        val flow = saved["flows"]!!.jsonArray.single().jsonObject
-        assertEquals("Menu de serviços", flow.text("name"))
-        assertEquals(listOf("Olá", "Bom dia"), flow["keywords"]!!.jsonArray.map { it.jsonPrimitive.content }, "trimmed, without blanks or repeats")
-        assertEquals(listOf("INSTAGRAM"), saved["teamOnlyChannels"]!!.jsonArray.map { it.jsonPrimitive.content })
-        assertEquals(c.admin.email, saved.text("updatedBy"))
-
-        val stored = ChatFlowRepository(mongo, c.id).find()!!
-        assertEquals(setOf(Platform.INSTAGRAM), stored.teamOnlyChannels)
-        assertEquals(setOf(Platform.INSTAGRAM), stored.flows.single().channels)
-        assertEquals("contacto", stored.replyTo(Platform.INSTAGRAM, "Unhas", "flow:servicos:contacto")?.step?.id)
-        assertEquals("Menu de serviços", send("GET", "/app/api/persona/menus", member).obj()["flows"]!!.jsonArray.single().jsonObject.text("name"))
-    }
-
-    @Test
-    fun `menus come with what each one sent in the last 30 days, per message and per customer`() = personaTest {
-        val c = company()
-        val other = company()
-        val token = token(c.admin.email)
-        assertEquals(0, send("GET", "/app/api/persona/menus", token).obj().obj("usage")["menus"]!!.jsonArray.size)
-        send("PUT", "/app/api/persona/menus", token, menus(menu()))
-        val ana = ObjectId()
-        val rui = ObjectId()
-        val eva = ObjectId()
-        suspend fun sent(tenant: ObjectId, conversation: ObjectId, origin: String?, daysAgo: Int = 0, status: String = "DELIVERED") {
-            mongo.database.getCollection<Document>("messages").insertOne(
-                Document("tenantId", tenant).append("conversationId", conversation).append("role", "ASSISTANT").append("status", status)
-                    .append("origin", origin).append("createdAt", Date((now - daysAgo.days).toEpochMilliseconds())),
-            )
-        }
-        sent(c.id, ana, "flow:servicos:menu")
-        sent(c.id, ana, "flow:servicos:contacto")
-        sent(c.id, rui, "flow:servicos:menu", status = "SENT")
-        sent(c.id, rui, "flow:servicos", daysAgo = 2)
-        sent(c.id, eva, "flow:servicos:menu", status = "FAILED")
-        sent(c.id, rui, "flow:servicos:menu", daysAgo = 31)
-        sent(c.id, ana, "flow:removed:menu")
-        sent(c.id, ana, "agent:${ObjectId().toHexString()}")
-        sent(c.id, ana, null)
-        sent(other.id, ana, "flow:servicos:menu")
-
-        val usage = send("GET", "/app/api/persona/menus", token).obj().obj("usage")
-        assertEquals(30, usage.int("days"))
-        val servicos = usage["menus"]!!.jsonArray.single().jsonObject
-        assertEquals("servicos", servicos.text("id"), "only the company's own menus that still exist")
-        assertEquals(Triple(4, 1, 2), Triple(servicos.int("sent"), servicos.int("failed"), servicos.int("customers")), "a refused message is counted apart")
-        assertEquals(mapOf("menu" to 2, "contacto" to 1), servicos.obj("steps").mapValues { it.value.jsonPrimitive.content.toInt() })
-        assertNotNull(servicos.text("lastSentAt"))
-        val afterSave = send("PUT", "/app/api/persona/menus", token, menus(menu(name = "Serviços"))).obj().obj("usage")
-        assertEquals(4, afterSave["menus"]!!.jsonArray.single().jsonObject.int("sent"), "a save answers with the same figures")
-    }
-
-    @Test
-    fun `a menu that can't run is refused with what is wrong and where, and nothing is saved`() = personaTest {
-        val c = company()
-        val token = token(c.admin.email)
-        suspend fun refused(body: JsonObject): JsonObject {
-            val response = send("PUT", "/app/api/persona/menus", token, body)
-            assertEquals(HttpStatusCode.BadRequest, response.status)
-            return response.obj().also { assertEquals("menu_problem", it.text("error")) }
-        }
-
-        val noKeywords = refused(menus(menu(keywords = listOf("?!"))))
-        assertEquals("keywords" to 0, noKeywords.text("problem") to noKeywords.int("menu"))
-        val leadsNowhere = refused(menus(menu(), menu(id = "outro", steps = listOf(menuStep("menu", "Qual?", "Unhas" to "nowhere")))))
-        assertEquals(Triple("next", 1, 0), Triple(leadsNowhere.text("problem"), leadsNowhere.int("menu"), leadsNowhere.int("step")))
-        val longTitle = refused(menus(menu(steps = listOf(menuStep("menu", "Qual?", "x".repeat(21) to "menu")))))
-        assertEquals("title" to ChatFlow.MAX_TITLE, longTitle.text("problem") to longTitle.int("limit"))
-        assertEquals("invalid_request", send("PUT", "/app/api/persona/menus", token, buildJsonObject { put("flows", 3) }).error().first)
-        assertNull(ChatFlowRepository(mongo, c.id).load())
-    }
-
-    @Test
-    fun `in the test chat menus answer before the AI, buttons move them on, and unsaved menus can be tried`() = personaTest {
-        val c = company()
-        val token = token(c.admin.email)
-        send("PUT", "/app/api/persona/menus", token, menus(menu()))
-
-        val opened = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá, bom dia")).obj()
-        assertEquals("Qual serviço?", opened.text("reply"))
-        assertEquals("Menu de serviços", opened.text("menu"))
-        assertEquals(listOf("Unhas" to "flow:servicos:contacto"), opened["quickReplies"]!!.jsonArray.map { it.jsonObject.text("title") to it.jsonObject.text("payload") })
-        assertTrue(chats.isEmpty(), "a menu reply never calls the model")
-
-        val tapped = send(
-            "POST", "/app/api/persona/test", token,
-            testChat("user" to "Olá", "assistant" to "Qual serviço?", "user" to "Unhas", payload = "flow:servicos:contacto"),
-        ).obj()
-        assertEquals("Fale connosco", tapped.text("reply"))
-        assertEquals(0, tapped["quickReplies"]!!.jsonArray.size)
-
-        val ai = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?")).obj()
-        assertEquals("Olá! Como posso ajudar?", ai.text("reply"))
-        assertNull(ai.text("menu"))
-        assertEquals(false, ai.bool("teamOnly"))
-
-        val tried = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?", flows = menus(menu(keywords = listOf("sábado"))))).obj()
-        assertEquals("Qual serviço?", tried.text("reply"))
-        assertEquals(true, tried.bool("draft"))
-        assertEquals(listOf("Olá"), ChatFlowRepository(mongo, c.id).load()!!.flows.single().keywords, "trying menus saves nothing")
-
-        val teamOnly = send("POST", "/app/api/persona/test", token, testChat("user" to "Têm vaga no sábado?", flows = menus(menu(), teamOnly = listOf("INSTAGRAM")))).obj()
-        assertEquals("Olá! Como posso ajudar?", teamOnly.text("reply"), "WhatsApp and the website still get the AI")
-        assertEquals(true, teamOnly.bool("teamOnly"))
-
-        val broken = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(keywords = listOf("?!")))))
-        assertEquals(HttpStatusCode.BadRequest, broken.status)
-        assertEquals("keywords", broken.obj().text("problem"))
-    }
-
-    @Test
-    fun `start gates are saved with the menus, kept when a page leaves them out, checked, and tried in the test chat`() = personaTest {
+    fun `start gates are saved with the channels, kept when a page leaves them out, checked, and tried in the test chat`() = personaTest {
         val c = company()
         val token = token(c.admin.email)
         fun JsonObject.gates() = this["startGates"]!!.jsonArray.map { g -> g.jsonObject.text("channel") to g.jsonObject["words"]!!.jsonArray.map { it.jsonPrimitive.content } }
 
-        val empty = send("GET", "/app/api/persona/menus", token).obj()
+        val empty = send("GET", "/app/api/persona/channels", token).obj()
         assertEquals(emptyList(), empty.gates())
         assertEquals(listOf("INSTAGRAM", "WHATSAPP"), empty["startChannels"]!!.jsonArray.map { it.jsonPrimitive.content }, "the website has no gate")
-        assertEquals(ChatFlowLimits.MAX_START_WORDS, empty.obj("limits").int("startWords"))
+        assertEquals(ChatFlowLimits.MAX_START_WORDS, empty.int("startWords"))
 
         val saved = send(
-            "PUT", "/app/api/persona/menus", token,
-            menus(menu(), gates = listOf(gate("WHATSAPP", "oi", enabled = false), gate("INSTAGRAM", " Orçamento ", "", "orcamento", "?!", "Quero marcar"))),
+            "PUT", "/app/api/persona/channels", token,
+            channels(gates = listOf(gate("WHATSAPP", "oi", enabled = false), gate("INSTAGRAM", " Orçamento ", "", "orcamento", "?!", "Quero marcar"))),
         ).obj()
         assertEquals(listOf("INSTAGRAM" to listOf("Orçamento", "Quero marcar"), "WHATSAPP" to listOf("oi")), saved.gates(), "trimmed, without blanks or repeats, in channel order")
         val stored = ChatFlowRepository(mongo, c.id).find()!!
@@ -1024,13 +870,13 @@ class PersonaRoutesTest {
         assertNull(stored.startGate(Platform.WHATSAPP), "a gate that is off keeps its words but doesn't run")
         assertEquals(StartGate(false, listOf("oi")), stored.startGates[Platform.WHATSAPP])
 
-        val older = send("PUT", "/app/api/persona/menus", token, menus(menu(name = "Serviços"))).obj()
+        val older = send("PUT", "/app/api/persona/channels", token, channels()).obj()
         assertEquals(saved.gates(), older.gates(), "a page that doesn't send start gates leaves the saved ones")
 
         suspend fun refused(vararg gates: JsonObject): JsonObject {
-            val response = send("PUT", "/app/api/persona/menus", token, menus(menu(), gates = gates.toList()))
+            val response = send("PUT", "/app/api/persona/channels", token, channels(gates = gates.toList()))
             assertEquals(HttpStatusCode.BadRequest, response.status)
-            return response.obj().also { assertEquals("menu_problem", it.text("error")) }
+            return response.obj().also { assertEquals("flow_problem", it.text("error")) }
         }
         val noWords = refused(gate("INSTAGRAM", "?!"))
         assertEquals("start_words" to "INSTAGRAM", noWords.text("problem") to noWords.text("channel"))
@@ -1038,7 +884,7 @@ class PersonaRoutesTest {
         assertEquals("invalid" to "WEB", website.text("problem") to website.text("channel"))
         val long = refused(gate("WHATSAPP", "x".repeat(61)))
         assertEquals(Triple("start_word", "WHATSAPP", ChatFlowLimits.MAX_KEYWORD_CHARS), Triple(long.text("problem"), long.text("channel"), long.int("limit")))
-        assertEquals(saved.gates(), send("GET", "/app/api/persona/menus", token).obj().gates(), "a refused save changes nothing")
+        assertEquals(saved.gates(), send("GET", "/app/api/persona/channels", token).obj().gates(), "a refused save changes nothing")
 
         fun gated(response: JsonObject) = response["gatedChannels"]!!.jsonArray.map { it.jsonPrimitive.content }
         assertEquals(listOf("INSTAGRAM"), gated(send("POST", "/app/api/persona/test", token, testChat("user" to "Olá")).obj()), "no start word: Instagram would leave this chat to the team")
@@ -1048,12 +894,8 @@ class PersonaRoutesTest {
             gated(send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", "assistant" to "Olá!", "user" to "Queria um orçamento")).obj()),
             "only the first message counts",
         )
-        val tried = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(), gates = listOf(gate("WHATSAPP", "olá"))))).obj()
-        assertEquals(emptyList(), gated(tried), "unsaved gates replace the saved ones")
-        val closed = send("POST", "/app/api/persona/test", token, testChat("user" to "Olá", flows = menus(menu(), gates = listOf(gate("WHATSAPP", "preço"))))).obj()
-        assertEquals(listOf("WHATSAPP"), gated(closed))
 
-        assertEquals(emptyList(), send("PUT", "/app/api/persona/menus", token, menus(menu(), gates = emptyList())).obj().gates(), "an empty list removes the gates")
+        assertEquals(emptyList(), send("PUT", "/app/api/persona/channels", token, channels(gates = emptyList())).obj().gates(), "an empty list removes the gates")
     }
 
     @Test

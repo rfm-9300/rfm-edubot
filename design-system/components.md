@@ -697,11 +697,11 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 | `.rule-ideas` | A hint over `.chip-picks` whose chips hold a whole sentence, left-aligned and wrapping |
 | `.faq-list` > `.faq-item` | A question and its answer as a `--surface-2` card: `__num`, `__fields` (question `.inp` over answer `.txt` and a `.hint--bad` after a refused save), `.row-tools`. One column on a phone |
 
-#### Channels tab (`app/menus.js`)
+#### Channels tab (`app/channels.js`)
 
 ```html
-<form class="form flow-menus">
-  <section class="panel" id="pm-channels">
+<form class="form" id="persona-channels-form">
+  <section class="panel" id="pc-channels">
     <header class="panel__head"><h2 class="panel__title">Channels</h2><!-- Open Settings while one isn't connected --></header>
     <div class="panel__body form">
       <div class="bot-channel" data-channel="WHATSAPP">
@@ -711,30 +711,65 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
       <!-- Instagram, then Website (only a .hint: the AI always answers there) -->
     </div>
   </section>
-  <section class="panel" id="pm-menus"><!-- head: "Instagram menus" + count .tag, saved-by .panel__meta; body: hint, a .hint--warn while Instagram isn't connected, .record-kpis, "Check a message" .inp + result .hint --></section>
-  <section class="panel flow-menu is-open">
-    <header class="panel__head flow-menu__head">
-      <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Welcome menu</span></button></h2>
-      <span class="flow-menu__pills"><span class="pill pill--ok">On</span><span class="pill pill--warn">2 to fix</span></span>
-      <div class="panel__tools"><!-- Try it, ↑ ↓ --></div>
-      <p class="flow-menu__summary">Hello · Hi · Good morning +2 · 7 messages · Sent 191 times to 41 customers in the last 30 days</p>
-    </header>
-    <div class="panel__body form flow-menu__body"><!-- name, state, .tokens keywords, .flow-menu__notes, the map, .flow.flow--edit cards, .flow-menu__foot --></div>
-  </section>
+  <section class="panel" id="pc-chatbot"><!-- head: "Chatbot flows" + an Open Chatbot button; body: a hint and how many flows are on --></section>
 </form>
-<!-- no save bar of its own: the page's one save bar saves the channels and menus too -->
+<!-- no save bar of its own: the Persona page's one save bar saves the channel settings -->
 ```
 
 | Class | Role |
 |---|---|
-| `.flow-menu` (`.is-open`) | One menu, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, the head loses its bottom rule and the body (`[hidden]`, which needs `.flow-menu__body[hidden]` over `.form`'s grid) isn't drawn |
-| `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first menu with a matching keyword answers), the name, On/Off plus a `.pill--warn` "n to fix" or "n to check", and a muted line of keywords, size and 30-day usage (refusals in `.hint--warn`), under the name |
-| `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused, a clash in `.hint--warn`); "Sent n times" in a message card's head; the body's last row: Add message on the left, Duplicate and Remove menu on the right |
 | `.bot-channel` > `__name` / `__body` | One channel a row: its name over a Connected / Not connected pill, then whether the AI answers there and its start words. One column under 700px, the pill beside the name |
-| `.flow-map` > `__tree` / `__row` / `__list` > `__branch` | The menu's map: from message 1, each button (`__btn`, a quick-reply pill with →) and the message it leads to (`__msg`, a button with `.flow__index` and `__text`) on one `__row`, nested `__list`s drawn as a tree with hairlines. A message reached again is `__back` + `__msg--ref`; `__end` (gives way first on narrow screens) and `__note` (leads nowhere, `--warn-ink`) end a row; `__orphans` lists unreachable messages. Only the text shortens; a very deep tree scrolls inside the box |
-| `.flow__card.is-flash` | The message a map node, a From link or → just went to, ringed for a moment |
 
-Rules: the map, summaries and notes are redrawn as the draft changes, but never a field being typed in, and only when their HTML changed, so a button under the pointer isn't swapped out. Problems under fields show only after a refused save; the head's count is always live.
+#### Chatbot (`app/chatbot.js`)
+
+```html
+<div class="persona-studio">
+  <div class="persona-studio__main">
+    <section class="panel"><!-- intro --></section>
+    <form class="form chatbot-flows" id="chatbot-form">
+      <section class="panel flow-menu is-open" data-flow="0" id="cb-0">
+        <header class="panel__head flow-menu__head">
+          <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Appointments</span></button></h2>
+          <span class="flow-menu__pills"><span class="pill pill--ok">On</span></span>
+          <div class="panel__tools"><!-- ↑ ↓ --></div>
+          <p class="flow-menu__summary">book · agendar · 4 steps · WhatsApp, Website · Sent 191 times to 41 customers in the last 30 days</p>
+        </header>
+        <div class="panel__body form flow-menu__body">
+          <!-- name, On, channels, .tokens keywords, "When a reply isn't understood", then: -->
+          <div class="flow flow--edit">
+            <div class="flow__card" id="cb-0-0">
+              <div class="flow__card-head"><span class="flow__index">1</span><select class="sel"><!-- kind --></select><span class="flow__card-summary"><span class="muted">Starts here</span></span><span class="flow__card-tools"><!-- ↑ ↓ × --></span></div>
+              <!-- the kind's fields; a Message's options: -->
+              <div class="lines lines--options">
+                <div class="lines__head"><span>Option</span><span>Leads to</span><span>Other words that choose it</span><span></span></div>
+                <div class="line"><input class="inp" /><select class="sel"></select><input class="inp" /><button class="iconbtn">×</button></div>
+                <div class="lines__foot"><button class="btn btn--sm btn--ghost">+ Add option</button><span class="hint">2 of 13 options</span></div>
+              </div>
+            </div>
+            <div class="flow__connector"></div>
+            <!-- the next card -->
+          </div>
+          <div class="flow-menu__foot"><select class="sel"><!-- + Add a step --></select><span class="actions"><!-- Duplicate, Remove flow --></span></div>
+        </div>
+      </section>
+    </form>
+    <div class="savebar" data-chatbot-savebar><!-- status, Discard, Save --></div>
+  </div>
+  <aside class="persona-studio__test"><!-- the test chat: channel .sel, "Pretend it is" datetime-local, a .form__check, .chat__log, .chat__form --></aside>
+</div>
+```
+
+| Class | Role |
+|---|---|
+| `.flow-menu` (`.is-open`) | One flow, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, only the head shows |
+| `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first flow with a matching keyword answers), the name, an On / Off `.pill`, and one line of keywords, steps, channels and 30-day usage (what the channel refused in `.hint--warn`) |
+| `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused); "Sent n times" in a step card's head; the body's last row: the Add a step `.sel` on the left, Duplicate and Remove flow on the right |
+| `.flow__card` · `.flow__connector` | A step: a head (position, kind `.sel`, "Starts here" on the first, ↑ ↓ ×) over the fields of its kind. `.is-flash` rings the step a refused save points at |
+| `.lines--options` > `.line` | A message's options: title, where it leads (a `.sel`, with "New step…" which adds a step and links it), other words that choose it, ×. Four columns; on a phone the title and × share a row and the other two take a row each |
+| `.line--hours` | An opening-hours row: day `.sel`, two `type=time` inputs, ×. Three rows' worth of columns on a phone, the day on its own row |
+| `.bot-channel`, `.tokens` / `.token` | As in Channels and the Persona rules: keywords are tokens |
+
+Rules: a text field changes the draft as it is typed and redraws nothing (the summary line, a step's label in the others' selects and the bytes hint are updated in place); a choice, a checkbox, or a field that changes the shape of the page (the step kind, how options are offered, the key a question keeps) redraws, restoring the focused id. The test chat sends the unsaved flows with each turn and keeps where the customer was in the state the server hands back.
 
 ## Conversations inbox
 

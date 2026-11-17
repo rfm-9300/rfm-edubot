@@ -1,10 +1,10 @@
 /* Persona (/app → Persona): how the bot answers customers. On the left, tabs in the order a message meets
    them: Overview (the steps a message goes through, and what is set up), Profile (who it is, how it talks),
    Knowledge (business details, questions and answers, documents and the instructions), Rules (rules, off-topic
-   and unknown questions, what it can do, handing over), Channels (who it answers where, and the Instagram menus:
-   menus.js, MenusUI) and History. On the right, a test chat that uses the unsaved edits (state.personaDraft),
+   and unknown questions, what it can do, handing over), Channels (who it answers where, and its start words:
+   channels.js, ChannelsUI) and History. The fixed chat flows that answer before the AI are the Chatbot page's. On the right, a test chat that uses the unsaved edits (state.personaDraft),
    so a change can be tried before customers get it. One save bar saves every tab: the settings and the
-   instructions as one version (PUT /app/api/persona), then the channels and menus (MenusUI.save). */
+   instructions as one version (PUT /app/api/persona), then the channel settings (ChannelsUI.save). */
 
 let personaChatBusy = false;
 let personaSaving = false;
@@ -132,7 +132,7 @@ function personaDirtyAreas() {
     if (differs(PERSONA_RULES_FIELDS)) areas.add('rules');
   }
   if (draft.compiledInstructions != null) areas.add('knowledge');
-  if (window.MenusUI?.dirty()) areas.add('channels');
+  if (window.ChannelsUI?.dirty()) areas.add('channels');
   return PERSONA_TABS.filter(t => areas.has(t));
 }
 const personaPageDirty = () => personaDirtyAreas().length > 0;
@@ -147,7 +147,7 @@ function personaFaqIssues(b = personaBehavior()) {
     return null;
   }).filter(Boolean);
 }
-const personaFixCount = () => personaFaqIssues().length + (window.MenusUI?.problemCount() || 0);
+const personaFixCount = () => personaFaqIssues().length + (window.ChannelsUI?.problemCount() || 0);
 
 /** Leaving the dashboard drops the draft, so the browser asks first. Wired up once by app.js's init(). */
 function wirePersonaUnload() {
@@ -206,10 +206,10 @@ async function openPersonaTab(tab, focusId, jump = false) {
     render();
     await loadPersonaVersions().catch(err => { personaFail(err); state.personaVersions = []; });
   }
-  if (tab === 'channels' && (!state.personaFlows || state.personaFlows.failed)) {
-    state.personaFlows = null;
+  if (tab === 'channels' && (!state.personaChannels || state.personaChannels.failed)) {
+    state.personaChannels = null;
     render();
-    await window.MenusUI.load().catch(err => { personaFail(err); state.personaFlows = { failed: true }; });
+    await window.ChannelsUI.load().catch(err => { personaFail(err); state.personaChannels = { failed: true }; });
   }
   render();
   if (!jump) return;
@@ -226,7 +226,7 @@ async function openPersonaTab(tab, focusId, jump = false) {
 
 /** The channels where the AI answers customers now: connected, and not left to the team. */
 function personaAnswersOn(p) {
-  const off = state.personaFlows?.teamOnlyChannels || [];
+  const off = state.personaChannels?.teamOnlyChannels || [];
   const on = (p.channels || []).filter(c => c.connected && !off.includes(c.channel)).map(c => personaChannelLabel(c.channel));
   return on.length ? on.join(', ') : PS.answersNone;
 }
@@ -274,7 +274,7 @@ function personaPane(tab, p) {
   if (tab === 'profile') return personaProfilePane(p);
   if (tab === 'knowledge') return personaKnowledgePane(p);
   if (tab === 'rules') return personaRulesPane(p);
-  if (tab === 'channels') return window.MenusUI.render(p);
+  if (tab === 'channels') return window.ChannelsUI.render(p);
   if (tab === 'history') return personaHistoryPane(p);
   return personaOverviewPane(p);
 }
@@ -303,7 +303,7 @@ function personaOverviewPane(p) {
     : `<p class="bot-flow__text">${escapeHTML(PS.flowNoChannel)}</p>`;
   const settings = `<button type="button" class="btn btn--sm btn--ghost" data-persona-settings>${escapeHTML(PS.openSettings)}</button>`;
 
-  const menus = personaMenusLine(p);
+  const chatbot = personaChatbotLine();
   const ai = personaAiLines(p, b);
   const handoff = b.handoff || {};
   const reasons = (handoff.reasons || []).map(r => ps(`reasons.${r}`));
@@ -315,7 +315,7 @@ function personaOverviewPane(p) {
   const flow = personaPanel(escapeHTML(PS.flowTitle), `<p class="hint">${escapeHTML(PS.flowHint)}</p>
     <ol class="bot-flow">
       ${step(1, PS.flowChannelsTitle, step1, `${go('channels')}${anyConnected ? '' : settings}`, !anyConnected)}
-      ${step(2, PS.flowMenusTitle, `<p class="bot-flow__text">${escapeHTML(menus.text)}</p>`, go('channels', PS.flowMenusOpen), menus.off)}
+      ${step(2, PS.flowMenusTitle, `<p class="bot-flow__text">${escapeHTML(chatbot.text)}</p>`, `<button type="button" class="btn btn--sm btn--ghost" data-persona-chatbot>${escapeHTML(PS.flowMenusOpen)}</button>`, chatbot.off)}
       ${step(3, PS.flowAiTitle, list(ai), `${go('profile')}${go('knowledge')}${go('rules')}`)}
       ${step(4, PS.flowTeamTitle, team, go('rules', ps('tab.rules'), 'pb-handoff'), !handoff.enabled)}
     </ol>`, { id: 'persona-flow' });
@@ -336,7 +336,7 @@ function personaOverviewPane(p) {
 
 /** Each channel, and whom the AI answers there (from the draft when the channels have unsaved changes). */
 function personaChannelLines(p) {
-  const m = window.MenusUI?.current() || {};
+  const m = window.ChannelsUI?.current() || {};
   return (p.channels || []).map(c => {
     const label = personaChannelLabel(c.channel);
     if (!c.connected) return { label, text: PS.chNotConnected, muted: true };
@@ -347,13 +347,10 @@ function personaChannelLines(p) {
   });
 }
 
-function personaMenusLine(p) {
-  const ig = (p.channels || []).find(c => c.channel === 'INSTAGRAM');
-  const flows = window.MenusUI?.current()?.flows || [];
-  if (!ig?.connected) return { text: flows.length ? PS.flowMenusNoIgSome : PS.flowMenusNoIg, off: true };
-  if (!flows.length) return { text: PS.flowMenusNone, off: true };
-  const on = flows.filter(f => f.enabled).length;
-  return { text: ps('flowMenusOn', { n: fmtCount(on), total: fmtCount(flows.length) }), off: on === 0 };
+/** The Chatbot page's flows that answer before the AI: how many are on, from the saved ones. */
+function personaChatbotLine() {
+  const on = state.personaChannels?.flowsOn || 0;
+  return on ? { text: ps('flowMenusOn', { n: fmtCount(on) }), off: false } : { text: PS.flowMenusNone, off: true };
 }
 
 /** Who the AI is, what it knows and what it keeps to, a line each. */
@@ -627,9 +624,8 @@ function personaHistoryPane(p) {
     </section>`;
 }
 
-// Persona → Channels lives in menus.js (MenusUI); the test chat beside it shows what a menu answers.
-const PM = I18N.section('app.personaStudio.menus');
-const pm = (key, params) => I18N.t(`app.personaStudio.menus.${key}`, params);
+// Persona → Channels lives in channels.js (ChannelsUI); the test chat beside it says where the AI would stay quiet.
+const pc = (key, params) => I18N.t(`app.personaStudio.channels.${key}`, params);
 
 function personaBehaviorFacts(b = {}) {
   const choice = field => (b[field] ? ps(`options.${field}.${b[field]}`) : null);
@@ -820,8 +816,8 @@ function focusPersonaField(field, index) {
 
 async function savePersonaPage() {
   if (personaSaving || !state.persona?.canEdit) return;
-  // A start word or keyword still in its field is part of what is saved.
-  window.MenusUI?.commitPending();
+  // A start word still in its field is part of what is saved.
+  window.ChannelsUI?.commitPending();
   const areas = personaDirtyAreas();
   if (!areas.length) return;
   const issue = personaFaqIssues()[0];
@@ -831,12 +827,12 @@ async function savePersonaPage() {
     paintPersonaDraft();
     return focusPersonaField(issue.field, issue.index);
   }
-  const menusDirty = areas.includes('channels');
-  if (menusDirty) {
-    const problem = window.MenusUI.problem();
+  const channelsDirty = areas.includes('channels');
+  if (channelsDirty) {
+    const problem = window.ChannelsUI.problem();
     if (problem) {
       if (personaTabNow() !== 'channels') { state.personaTab = 'channels'; render(); }
-      return window.MenusUI.refuse(problem);
+      return window.ChannelsUI.refuse(problem);
     }
   }
   personaSaving = true;
@@ -865,7 +861,7 @@ async function savePersonaPage() {
       state.personaVersions = null;
       state.personaPreview = null;
     }
-    if (menusDirty && !(await window.MenusUI.save())) return;
+    if (channelsDirty && !(await window.ChannelsUI.save())) return;
     personaUi.checked = false;
     saved = true;
   } finally {
@@ -879,7 +875,7 @@ async function discardPersonaPage() {
   if (!(await confirmDialog({ title: PS.discardTitle, body: PS.discardBody, okLabel: PS.discard, danger: false }))) return;
   delete state.personaDraft.behavior;
   delete state.personaDraft.compiledInstructions;
-  window.MenusUI?.discard();
+  window.ChannelsUI?.discard();
   personaUi.checked = false;
   state.personaPreview = null;
   render();
@@ -887,8 +883,8 @@ async function discardPersonaPage() {
 
 // ── The test chat ──────────────────────────────────────────────────────────────────────────────────
 
-/** Whether test messages go with unsaved changes: settings, instructions or menus. */
-const personaTestDirty = () => !!personaDraftPayload() || !!window.MenusUI?.dirty();
+/** Whether test messages go with unsaved changes: settings or instructions. */
+const personaTestDirty = () => !!personaDraftPayload();
 
 function personaTestPanel() {
   const dirty = personaTestDirty();
@@ -916,26 +912,21 @@ function renderPersonaChatLog(busy = false) {
     return;
   }
   const names = channels => channels.map(c => personaChannelLabel(c)).join(' / ');
-  log.innerHTML = msgs.map((m, index) => {
+  log.innerHTML = msgs.map(m => {
     if (m.role === 'note') return `<div class="chat__note">${escapeHTML(m.content)}</div>`;
     const bubble = `<div class="chat__msg chat__msg--${m.role === 'user' ? 'user' : 'bot'}">${renderChatText(m.content)}</div>`;
-    // Like on Instagram, a menu's buttons only stay under its latest message.
-    const replies = index === msgs.length - 1 && !busy && m.quickReplies?.length
-      ? `<div class="chip-picks" role="group" aria-label="${escapeHTML(PM.repliesAria)}">${m.quickReplies.map((q, k) => `<button type="button" class="chip" data-quick-reply="${k}">${escapeHTML(q.title)}</button>`).join('')}</div>`
-      : '';
     const notes = [
       m.handoff && (m.reason ? ps('handoffNoteReason', { reason: m.reason }) : PS.handoffNote),
-      m.menu && pm('testMenu', { name: m.menu }),
-      m.aiOffChannels?.length && pm('testAiOff', { channels: names(m.aiOffChannels) }),
-      m.gatedChannels?.length && pm('testGated', { channels: names(m.gatedChannels) }),
+      m.aiOffChannels?.length && pc('testAiOff', { channels: names(m.aiOffChannels) }),
+      m.gatedChannels?.length && pc('testGated', { channels: names(m.gatedChannels) }),
     ].filter(Boolean);
-    return bubble + replies + notes.map(n => `<div class="chat__note">${escapeHTML(n)}</div>`).join('');
+    return bubble + notes.map(n => `<div class="chat__note">${escapeHTML(n)}</div>`).join('');
   }).join('') + (busy ? `<div class="chat__msg chat__msg--bot chat__typing">${escapeHTML(STR.typing)}</div>` : '');
   log.scrollTop = log.scrollHeight;
 }
 
-/** Sends a test message; [payload] is a tapped menu button's, which moves the menu on like on Instagram. */
-async function sendPersonaTest(text, payload) {
+/** Sends a test message to the AI, with the unsaved settings and instructions. */
+async function sendPersonaTest(text) {
   const content = (text || '').trim();
   if (personaChatBusy || !content) return;
   state.personaChat.push({ role: 'user', content });
@@ -944,16 +935,15 @@ async function sendPersonaTest(text, payload) {
   if (send) send.disabled = true;
   renderPersonaChatLog(true);
   const draft = personaDraftPayload();
-  const flows = window.MenusUI?.draftPayload();
   const tested = (state.personaChat || []).some(m => m.role === 'assistant');
   try {
     const messages = state.personaChat.filter(m => m.role === 'user' || m.role === 'assistant').map(({ role, content: c }) => ({ role, content: c }));
-    const body = { messages, ...(draft && { draft }), ...(flows && { flows }), ...(payload && { payload }) };
+    const body = { messages, ...(draft && { draft }) };
     const res = await api('/app/api/persona/test', { method: 'POST', body: JSON.stringify(body) });
-    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason, menu: res.menu, quickReplies: res.quickReplies || [], aiOffChannels: res.aiOffChannels || [], gatedChannels: res.gatedChannels || [] });
+    state.personaChat.push({ role: 'assistant', content: res.reply, handoff: res.handoff, reason: res.handoffReason, aiOffChannels: res.aiOffChannels || [], gatedChannels: res.gatedChannels || [] });
   } catch (err) {
     if (err?.message !== 'unauthorized') {
-      state.personaChat.push({ role: 'note', content: err?.code === 'menu_problem' ? window.MenusUI.errorText(err.body) : personaErrorText(err?.code, err) });
+      state.personaChat.push({ role: 'note', content: personaErrorText(err?.code, err) });
     }
   } finally {
     personaChatBusy = false;
@@ -967,20 +957,9 @@ async function sendPersonaTest(text, payload) {
   }
 }
 
-/** "Try it" on a menu: a new test conversation that starts with one of the menu's keywords. */
-function tryPersonaMenu(text) {
-  if (personaChatBusy) return;
-  state.personaChat = [];
-  renderPersonaChatLog();
-  const panel = $('.persona-studio__test');
-  const box = panel?.getBoundingClientRect();
-  if (box && (box.top >= window.innerHeight || box.bottom <= 0)) panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  sendPersonaTest(text);
-}
-
 /**
  * Keeps what follows the draft in step without a redraw: the test chat's "Unsaved changes" pill, the save
- * bar, counts, the strict-language box and notes that depend on other settings. MenusUI calls it too.
+ * bar, counts, the strict-language box and notes that depend on other settings. ChannelsUI calls it too.
  */
 function paintPersonaDraft() {
   const pill = $('#persona-test-draft');
@@ -1069,7 +1048,8 @@ function wirePersona(root, tab, p) {
     input?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     input?.focus({ preventScroll: true });
   });
-  if (tab === 'channels') window.MenusUI.wire(root);
+  if (tab === 'channels') window.ChannelsUI.wire(root);
+  $$('[data-persona-chatbot]', root).forEach(b => b.addEventListener('click', () => setActive('chatbot')));
   $$('[data-persona-compile]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(false)));
   $$('[data-persona-rebuild]', root).forEach(b => b.addEventListener('click', () => startPersonaSynthesis(true)));
 
@@ -1243,12 +1223,6 @@ function wirePersona(root, tab, p) {
   $$('[data-restore]', root).forEach(b => b.addEventListener('click', () => restorePersonaVersion(b.dataset.restore)));
 
   renderPersonaChatLog(personaChatBusy);
-  $('#persona-chat-log', root).addEventListener('click', e => {
-    const chip = e.target.closest('[data-quick-reply]');
-    const last = state.personaChat[state.personaChat.length - 1];
-    const reply = chip && last?.quickReplies?.[Number(chip.dataset.quickReply)];
-    if (reply) sendPersonaTest(reply.title, reply.payload);
-  });
   $('#persona-chat-clear', root).addEventListener('click', () => { state.personaChat = []; renderPersonaChatLog(); });
   $$('[data-persona-try]', root).forEach(b => b.addEventListener('click', () => sendPersonaTest(ps(`try.${b.dataset.personaTry}`))));
   $('#persona-chat-form', root).addEventListener('submit', e => {
