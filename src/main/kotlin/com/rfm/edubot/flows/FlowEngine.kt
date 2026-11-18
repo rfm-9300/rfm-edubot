@@ -37,7 +37,8 @@ data class FlowEffect(val action: ActionKind, val ok: Boolean, val detail: Strin
 /**
  * What a flow did with a message. [handled] false means no flow answers (or one gave the chat to the AI): carry on as if
  * none matched. Otherwise [messages] go out in order, [session] is where the customer waits (null: the flow ended or
- * the chat went to a person) and [handOver] is set when a person takes over.
+ * the chat went to a person) and [handOver] is set when a person takes over. [path] is the steps of flow [flowId] the
+ * message went through, in order (the step asked again, after a reply it couldn't read), for the Chatbot page's board.
  */
 data class FlowResult(
     val handled: Boolean,
@@ -46,6 +47,8 @@ data class FlowResult(
     val session: FlowSession? = null,
     val handOver: FlowHandOver? = null,
     val effects: List<FlowEffect> = emptyList(),
+    val flowId: String? = null,
+    val path: List<String> = emptyList(),
 ) {
     companion object {
         val UNHANDLED = FlowResult(handled = false)
@@ -184,6 +187,8 @@ class FlowEngine(
             flowName = flow.name,
             messages = listOf(message(flow, step, session.vars, retry = true)),
             session = session.copy(misses = misses, updatedAt = ctx.now),
+            flowId = flow.id,
+            path = listOf(step.id),
         )
     }
 
@@ -191,19 +196,21 @@ class FlowEngine(
     private suspend fun run(flow: ChatFlow, from: String, start: Map<String, String>, ctx: FlowContext): FlowResult {
         val out = mutableListOf<FlowMessage>()
         val effects = mutableListOf<FlowEffect>()
+        val path = mutableListOf<String>()
         val vars = start
         var id: String? = from
         repeat(MAX_HOPS) {
-            val step = id?.let(flow::step) ?: return finished(flow, out, effects)
+            val step = id?.let(flow::step) ?: return finished(flow, out, effects, path)
+            path += step.id
             when (step.kind) {
                 StepKind.MESSAGE -> {
                     out += message(flow, step, vars)
-                    if (step.buttons.isNotEmpty()) return waitingAt(flow, step, vars, out, effects, ctx)
+                    if (step.buttons.isNotEmpty()) return waitingAt(flow, step, vars, out, effects, path, ctx)
                     id = step.next
                 }
                 StepKind.ASK -> {
                     out += message(flow, step, vars)
-                    return waitingAt(flow, step, vars, out, effects, ctx)
+                    return waitingAt(flow, step, vars, out, effects, path, ctx)
                 }
                 StepKind.CONDITION -> id = if (holds(step, vars, ctx)) step.whenTrue else step.whenFalse
                 StepKind.ACTION -> {
@@ -211,26 +218,26 @@ class FlowEngine(
                     effects += FlowEffect(step.action, result.ok, result.detail)
                     if (result.ok && step.text.isNotBlank()) out += message(flow, step, vars)
                     // With nowhere to go when it fails, a person has to finish what the customer asked for.
-                    if (!result.ok && step.failNext == null) return handedOver(flow, out, effects, vars)
+                    if (!result.ok && step.failNext == null) return handedOver(flow, out, effects, vars, path)
                     id = if (result.ok) step.next else step.failNext
                 }
                 StepKind.HANDOFF -> {
                     if (step.text.isNotBlank()) out += message(flow, step, vars)
-                    return handedOver(flow, out, effects, vars)
+                    return handedOver(flow, out, effects, vars, path)
                 }
             }
         }
-        return finished(flow, out, effects)
+        return finished(flow, out, effects, path)
     }
 
-    private fun waitingAt(flow: ChatFlow, step: FlowStep, vars: Map<String, String>, out: List<FlowMessage>, effects: List<FlowEffect>, ctx: FlowContext) =
-        FlowResult(true, flow.name, out.toList(), FlowSession(flow.id, step.id, vars, 0, ctx.now), effects = effects.toList())
+    private fun waitingAt(flow: ChatFlow, step: FlowStep, vars: Map<String, String>, out: List<FlowMessage>, effects: List<FlowEffect>, path: List<String>, ctx: FlowContext) =
+        FlowResult(true, flow.name, out.toList(), FlowSession(flow.id, step.id, vars, 0, ctx.now), effects = effects.toList(), flowId = flow.id, path = path.toList())
 
-    private fun finished(flow: ChatFlow, out: List<FlowMessage>, effects: List<FlowEffect>) =
-        FlowResult(true, flow.name, out.toList(), session = null, effects = effects.toList())
+    private fun finished(flow: ChatFlow, out: List<FlowMessage>, effects: List<FlowEffect>, path: List<String> = emptyList()) =
+        FlowResult(true, flow.name, out.toList(), session = null, effects = effects.toList(), flowId = flow.id, path = path.toList())
 
-    private fun handedOver(flow: ChatFlow, out: List<FlowMessage>, effects: List<FlowEffect>, vars: Map<String, String>) =
-        FlowResult(true, flow.name, out.toList(), session = null, handOver = FlowHandOver(reasonFor(flow, vars)), effects = effects.toList())
+    private fun handedOver(flow: ChatFlow, out: List<FlowMessage>, effects: List<FlowEffect>, vars: Map<String, String>, path: List<String> = emptyList()) =
+        FlowResult(true, flow.name, out.toList(), session = null, handOver = FlowHandOver(reasonFor(flow, vars)), effects = effects.toList(), flowId = flow.id, path = path.toList())
 
     private fun message(flow: ChatFlow, step: FlowStep, vars: Map<String, String>, retry: Boolean = false): FlowMessage {
         val body = fillAnswers(step.text, vars)

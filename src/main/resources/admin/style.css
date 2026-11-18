@@ -1093,12 +1093,15 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
 .lines--breaks .lines__head,
 .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
 .lines--breaks .lines__head > span { text-align: left; }
-/* A Chatbot message's options (title, leads to, other words, remove) and a condition's opening hours (day, from, to, remove). */
-.lines--options .lines__head,
-.lines--options .line { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.2fr) minmax(0, 1fr) 32px; }
-.lines--options .lines__head > span { text-align: left; }
-.line--hours { grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr) 32px; }
-.chatbot-flows { display: grid; gap: 16px; }
+/* A Chatbot message's options and a condition's opening hours, in the narrow side panel beside the board: an option's
+   title with remove beside it, then where it leads and its other words, each on its own row; a day over its from and to. */
+.lines--options .lines__head { display: none; }
+.lines--options .line { grid-template-columns: minmax(0, 1fr) 32px; }
+.lines--options .line > :nth-child(1) { grid-column: 1; grid-row: 1; }
+.lines--options .line > :nth-child(4) { grid-column: 2; grid-row: 1; }
+.lines--options .line > :nth-child(2), .lines--options .line > :nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); border-right: 0; }
+.lines--hours .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
+.lines--hours .line > :nth-child(1) { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
 /* Phones: the description takes its own row, quantity, unit and price share the next one. */
 @media (max-width: 560px) {
   .lines__head, .line { grid-template-columns: 1fr 1fr 1fr 32px; }
@@ -1122,14 +1125,6 @@ html[data-theme="dark"] .lines__total .v { color: var(--accent); }
   .lines--installments .lines__head > span:first-child { grid-column: auto; }
   .lines--breaks .lines__head, .lines--breaks .line { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
   .lines--breaks .lines__head > span:first-child, .lines--breaks .line > input:first-child { grid-column: auto; }
-  /* An option on a phone: its title with remove beside it, then where it leads and its other words, each on its own row. */
-  .lines--options .lines__head { display: none; }
-  .lines--options .line { grid-template-columns: minmax(0, 1fr) 32px; }
-  .lines--options .line > :nth-child(1) { grid-column: 1; grid-row: 1; }
-  .lines--options .line > :nth-child(4) { grid-column: 2; grid-row: 1; }
-  .lines--options .line > :nth-child(2), .lines--options .line > :nth-child(3) { grid-column: 1 / -1; border-top: 1px solid var(--line-soft); border-right: 0; }
-  .line--hours { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 32px; }
-  .line--hours > :nth-child(1) { grid-column: 1 / -1; border-right: 0; border-bottom: 1px solid var(--line-soft); }
 }
 /* iOS zooms the page into a focused field whose text is under 16px. */
 @media (pointer: coarse) {
@@ -1480,32 +1475,226 @@ html[data-theme="dark"] .chat__log { background: var(--bg-deep); }
   .bot-channel__name { flex-direction: row; align-items: center; }
 }
 
-/* ── Persona → Menus (app/menus.js): menus that open in place, keyword tokens, a map of where buttons lead ── */
-.flow-menu__head { row-gap: 6px; cursor: pointer; }
-.flow-menu:not(.is-open) .flow-menu__head { border-bottom: 0; }
-.flow-menu__body[hidden] { display: none; }
-.flow-menu__title { flex: 1 1 260px; min-width: 0; margin: 0; }
-.flow-menu__toggle {
-  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 2px 0;
-  border: 0; border-radius: 6px; background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
-}
-.flow-menu__toggle:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.flow-menu__chevron {
-  flex: none; width: 16px; height: 16px; background: var(--ink-mute); transition: transform 140ms;
-  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m9 6 6 6-6 6'/></svg>") center / 16px no-repeat;
-          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='m9 6 6 6-6 6'/></svg>") center / 16px no-repeat;
-}
-.flow-menu.is-open .flow-menu__chevron { transform: rotate(90deg); }
-.flow-menu__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--display); font-size: 15px; font-weight: 600; letter-spacing: -0.005em; }
-.flow-menu__pills { display: flex; flex-wrap: wrap; gap: 6px; }
-/* Under the name: chevron (16) + gap (10) + position (24) + gap (10). */
-.flow-menu__summary { flex-basis: 100%; margin: 0; padding-left: 60px; color: var(--ink-mute); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
+/* ── Chatbot (app/chatbot.js on app/chatbot-board.js): a flow's steps on a board, beside a side panel that edits or tries them ── */
+.flow-menu__summary { margin: 0; color: var(--ink-mute); font-size: 12.5px; font-weight: 600; overflow-wrap: anywhere; }
 .flow-menu__foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
 .flow-menu__stat { color: var(--ink-mute); font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .flow-menu__notes { display: grid; gap: 4px; }
 .flow-menu__notes:empty { display: none; }
 @keyframes flow-flash { 0%, 50% { border-color: var(--focus-border); box-shadow: var(--focus-ring); } 100% { box-shadow: 0 0 0 transparent; } }
-.flow__card.is-flash { animation: flow-flash 1.6s ease-out; }
+.flow__card.is-flash, .flow-node.is-flash, .chatbot-inspector.is-flash { animation: flow-flash 1.6s ease-out; }
+
+/* The page: the board and the side panel fill the screen under the figures, so the board can take the scroll wheel. */
+.chatbot-studio {
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(320px, 400px); gap: 12px;
+  height: calc(100vh - 236px); height: calc(100dvh - 236px); min-height: 520px; margin-bottom: 12px;
+}
+/* A member has no save bar under it. */
+.chatbot-page:not(:has([data-chatbot-savebar])) .chatbot-studio { height: calc(100vh - 176px); height: calc(100dvh - 176px); }
+.chatbot-board { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.chatbot-board__bar { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 6px 8px; border-bottom: 1px solid var(--line-soft); }
+.chatbot-board__bar > .btn, .chatbot-board__bar > .hint { flex: none; }
+/* With no flow the bar only holds the phones' Try it. */
+@media (min-width: 921px) { .chatbot-board__bar:not(:has(.flow-tabs)) { display: none; } }
+.chatbot-board__try { display: none; margin-left: auto; }
+.chatbot-board__empty { display: grid; flex: 1; place-items: center; padding: 16px; }
+.flow-tabs { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.flow-tabs::-webkit-scrollbar { display: none; }
+.flow-tab {
+  display: inline-flex; flex: none; align-items: center; gap: 8px; max-width: 240px; height: 32px; padding: 0 10px 0 6px;
+  border: 0; border-radius: var(--r-sm); background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 500; cursor: pointer;
+}
+.flow-tab:hover { background: var(--nav-hover, var(--surface-2)); color: var(--ink); }
+.flow-tab.is-on { background: var(--nav-active, var(--surface-2)); color: var(--ink); font-weight: 600; }
+.flow-tab:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.flow-tab .flow__index { width: 20px; height: 20px; font-size: 10.5px; }
+.flow-tab__name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow-tab__state { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ink-faint); }
+.flow-tab__state.is-on { background: var(--ok); }
+.flow-tab__warn { flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--warn); transform: rotate(45deg); }
+.flow-tab__warn[hidden] { display: none; }
+
+/* The canvas: a dotted board (its grid follows the pan and zoom) holding the world, which chatbot-board.js moves. */
+/* clip, not hidden: a hidden box still scrolls when a card in it is focused or scrolled into view, which would slide
+   the world away from where chatbot-board.js thinks it is. */
+.flow-canvas {
+  position: relative; flex: 1; min-height: 0; overflow: hidden; overflow: clip; outline: none;
+  background-color: var(--bg); background-image: radial-gradient(circle, var(--hairline-strong) 1px, transparent 1.3px); background-size: 24px 24px;
+  touch-action: none; -webkit-user-select: none; user-select: none; cursor: grab;
+}
+.flow-canvas:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-border); }
+.flow-canvas.is-panning, .flow-canvas.is-dragging, .flow-canvas.is-dragging .flow-node { cursor: grabbing; }
+.flow-canvas__world { position: absolute; top: 0; left: 0; width: 0; height: 0; transform-origin: 0 0; }
+.flow-canvas__edges { position: absolute; overflow: visible; pointer-events: none; }
+.flow-canvas__tools {
+  position: absolute; z-index: 3; display: flex; align-items: center; gap: 4px; padding: 4px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-sm); cursor: default;
+}
+.flow-canvas__tools--edit { top: 10px; left: 10px; }
+.flow-canvas__tools--zoom { bottom: 10px; left: 10px; }
+.flow-canvas__tools .iconbtn { width: 30px; height: 30px; border-color: transparent; }
+.flow-canvas__tools .iconbtn:hover:not(:disabled) { border-color: var(--line); }
+.flow-canvas__tools .btn--sm { gap: 6px; }
+.flow-canvas__sep { width: 1px; height: 20px; margin: 0 2px; background: var(--line); }
+.flow-canvas__zoom {
+  min-width: 52px; height: 30px; padding: 0 6px; border: 0; border-radius: var(--r-sm); background: none;
+  color: var(--ink-2); font: inherit; font-size: 12px; font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.flow-canvas__zoom:hover { background: var(--surface-2); color: var(--ink); }
+.flow-canvas__zoom:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.flow-canvas__help {
+  position: absolute; right: 10px; bottom: 10px; z-index: 2; max-width: min(420px, 46%); margin: 0; padding: 5px 9px;
+  border: 1px solid var(--line-soft); border-radius: var(--r-sm); background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--ink-mute); font-size: 11.5px; line-height: 1.4; pointer-events: none;
+}
+.flow-canvas__unlink { position: absolute; z-index: 3; width: 28px; height: 28px; margin: -14px 0 0 -14px; border-color: var(--hairline-strong); border-radius: 50%; box-shadow: var(--shadow-sm); }
+.flow-canvas__unlink:hover { border-color: transparent; background: var(--bad-soft); color: var(--bad-ink); }
+.flow-canvas__unlink[hidden] { display: none; }
+
+/* The lines: out of a dot on a card's right, into the next card's left. "No" and "If it fails" are dashed. */
+.flow-edge { pointer-events: auto; cursor: pointer; }
+.flow-edge__hit { fill: none; stroke: transparent; stroke-width: 14; pointer-events: stroke; }
+.flow-edge__line { fill: none; stroke: var(--ink-faint); stroke-width: 1.6; marker-end: url(#flow-arrow); pointer-events: none; transition: stroke 120ms; }
+.flow-edge--alt .flow-edge__line { stroke-dasharray: 5 4; }
+.flow-edge:hover .flow-edge__line { stroke: var(--ink-2); marker-end: url(#flow-arrow-on); }
+.flow-edge.is-selected .flow-edge__line { stroke: var(--ink); stroke-width: 2.2; marker-end: url(#flow-arrow-on); }
+.flow-edge.is-trail .flow-edge__line { stroke: var(--accent-deep); stroke-width: 2.6; marker-end: url(#flow-arrow-trail); }
+.flow-edge.is-rewiring { opacity: 0.2; }
+.flow-edge__temp { display: none; fill: none; stroke: var(--ink); stroke-width: 1.8; stroke-dasharray: 6 5; marker-end: url(#flow-arrow-on); pointer-events: none; }
+.flow-arrow path { fill: var(--ink-faint); }
+.flow-arrow--on path { fill: var(--ink); }
+.flow-arrow--trail path { fill: var(--accent-deep); }
+
+/* A card: a head (kind, number), what it says or checks, its outputs with a dot each, and a foot (what to fix, use). */
+.flow-node {
+  --kind: var(--sky);
+  position: absolute; top: 0; left: 0; display: grid; width: 264px;
+  border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface); box-shadow: var(--shadow-sm);
+  color: var(--ink); font-size: 12.5px; cursor: pointer;
+}
+.flow-canvas.is-editable .flow-node { cursor: grab; }
+.flow-node--start { --kind: var(--accent); width: 232px; }
+.flow-node--ask, .flow-node__icon--ask { --kind: var(--grape); }
+.flow-node--condition, .flow-node__icon--condition { --kind: var(--sun); }
+.flow-node--action, .flow-node__icon--action { --kind: var(--mint); }
+.flow-node--handoff, .flow-node__icon--handoff { --kind: var(--coral); }
+.flow-node__icon--message { --kind: var(--sky); }
+.flow-node__icon--start { --kind: var(--accent); }
+.flow-node:hover { border-color: var(--hairline-strong); }
+.flow-node.is-unreached { border-style: dashed; }
+.flow-node.is-visited .flow-node__head { background: var(--accent-soft); }
+.flow-node.is-current { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent), var(--shadow-md); }
+.flow-node.is-selected, .flow-node.is-target { border-color: var(--focus-border); box-shadow: var(--focus-ring); }
+.flow-node.is-dragging { z-index: 2; box-shadow: var(--shadow-md); }
+.flow-node__in { position: absolute; top: 21px; left: -1px; width: 1px; height: 1px; }
+.flow-node__head {
+  display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; padding: 9px 12px 7px;
+  border: 0; border-radius: var(--r-lg) var(--r-lg) 0 0; background: none; color: var(--ink); font: inherit; text-align: left; cursor: inherit;
+}
+.flow-node__head:focus-visible { outline: none; box-shadow: inset 0 0 0 2px var(--focus-border); }
+.flow-node__icon {
+  display: inline-grid; flex: none; place-items: center; width: 24px; height: 24px; border-radius: var(--r-sm);
+  background: color-mix(in srgb, var(--kind) 24%, var(--surface)); color: var(--ink);
+}
+.flow-node__icon svg { width: 14px; height: 14px; }
+.flow-node__kind { color: var(--ink-2); font-size: 11.5px; font-weight: 600; }
+.flow-node__num { margin-left: auto; color: var(--ink-mute); font-family: var(--mono); font-size: 11px; }
+.flow-node__head .pill { margin-left: auto; }
+.flow-node__body { display: grid; gap: 6px; min-width: 0; padding: 0 12px 10px; }
+.flow-node__body:empty { display: none; }
+.flow-node__text {
+  display: -webkit-box; margin: 0; overflow: hidden; color: var(--ink); font-size: 12.5px; line-height: 1.45;
+  white-space: pre-line; overflow-wrap: anywhere; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+}
+.flow-node__text.is-empty { color: var(--ink-mute); font-style: italic; }
+.flow-node__lead { margin: 0; font-weight: 600; }
+.flow-node__meta { margin: 0; color: var(--ink-mute); font-size: 11.5px; line-height: 1.4; overflow-wrap: anywhere; }
+.flow-node__key { padding: 0 4px; border-radius: 4px; background: var(--surface-2); color: var(--ink-2); font-family: var(--mono); font-size: 11px; }
+.flow-node__missing { color: var(--warn-ink); }
+.flow-node__chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 0; }
+.flow-node__chip { max-width: 100%; padding: 1px 7px; overflow: hidden; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-2); color: var(--ink-2); font-size: 11.5px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.flow-node__chip.is-empty { border-style: dashed; background: none; color: var(--warn-ink); font-weight: 500; }
+.flow-node__more { align-self: center; color: var(--ink-mute); font-size: 11.5px; font-weight: 600; }
+.flow-node__outs { display: grid; margin: 0; padding: 2px 0; border-top: 1px solid var(--line-soft); list-style: none; }
+.flow-node__out { position: relative; display: flex; align-items: center; gap: 6px; min-height: 28px; padding: 3px 20px 3px 12px; }
+.flow-node__out + .flow-node__out { border-top: 1px dashed var(--line-soft); }
+.flow-node__label { min-width: 0; overflow: hidden; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.flow-node__label.is-blank { color: var(--ink-mute); font-style: italic; }
+.flow-node__out--alt .flow-node__label { color: var(--ink-2); }
+.flow-node__end { flex: none; margin-left: auto; color: var(--ink-mute); font-size: 11px; }
+.flow-node__out.is-missing .flow-node__end { color: var(--warn-ink); }
+.flow-port {
+  position: absolute; top: 50%; right: -7px; z-index: 1; width: 12px; height: 12px; margin-top: -6px;
+  border: 2px solid var(--ink-faint); border-radius: 50%; background: var(--surface); transition: transform 120ms, border-color 120ms, background 120ms;
+}
+.flow-port::before { position: absolute; inset: -9px; border-radius: 50%; content: ''; }
+.flow-port.is-linked { border-color: var(--ink-2); background: var(--ink-2); }
+.flow-port.is-missing { border-color: var(--warn); }
+.flow-canvas.is-editable .flow-port { cursor: crosshair; }
+.flow-canvas.is-editable .flow-port:hover, .flow-port.is-active { border-color: var(--ink); background: var(--accent); transform: scale(1.3); }
+.flow-node__foot { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 7px 12px 9px; border-top: 1px solid var(--line-soft); }
+.flow-node__stat { margin-left: auto; color: var(--ink-mute); font-size: 11px; font-variant-numeric: tabular-nums; }
+.flow-node__flag, .flow-node__here { padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+.flow-node__flag { background: var(--warn-soft); color: var(--warn-ink); }
+.flow-node__here { background: var(--accent); color: var(--accent-ink); }
+.flow-node__note { color: var(--ink-mute); font-size: 11px; }
+
+/* The add-a-step menu: where a line was dropped, under the toolbar's button, or beside an output. */
+.board-menu {
+  position: absolute; z-index: 4; display: grid; gap: 2px; width: 284px; padding: 6px;
+  border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface); box-shadow: var(--shadow-md); cursor: default;
+}
+.board-menu[hidden] { display: none; }
+.board-menu__title { margin: 2px 8px 4px; color: var(--ink-mute); font-size: 11.5px; font-weight: 600; }
+.board-menu__item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 8px;
+  border: 0; border-radius: var(--r-sm); background: none; color: var(--ink); font: inherit; text-align: left; cursor: pointer;
+}
+.board-menu__item:hover { background: var(--surface-2); }
+.board-menu__item:focus-visible { outline: none; background: var(--surface-2); box-shadow: inset 0 0 0 2px var(--focus-border); }
+.board-menu__item--quiet { margin-top: 2px; border-top: 1px solid var(--line-soft); border-radius: 0 0 var(--r-sm) var(--r-sm); color: var(--bad-ink); }
+.board-menu__text { display: grid; min-width: 0; }
+.board-menu__name { font-size: 13px; font-weight: 500; }
+.board-menu__desc { color: var(--ink-mute); font-size: 11.5px; }
+
+/* The side panel: Edit (the flow's settings, or the step picked) or Try it, each a panel whose body scrolls. */
+.chatbot-side { display: flex; flex-direction: column; gap: 8px; min-width: 0; min-height: 0; }
+.chatbot-side__top { display: flex; align-items: center; gap: 8px; }
+.chatbot-side__tabs { margin: 0; }
+.chatbot-side__back { display: none; }
+.chatbot-side__form { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.chatbot-side__panel { display: flex; flex: 1; flex-direction: column; min-height: 0; }
+.chatbot-side__panel > .panel__head { flex: none; }
+/* Rows take their content's height: in a scrolling grid of fixed height, auto rows would squeeze a box that clips (the options) to nothing. */
+.chatbot-side__scroll { display: grid; flex: 1; grid-auto-rows: max-content; align-content: start; gap: 16px; min-height: 0; overflow-y: auto; }
+.chatbot-side__issues:empty { display: none; }
+.chatbot-side p, .chatbot-side .notice { margin: 0; }
+.chatbot-inspector__title { gap: 8px; }
+.chatbot-inspector__crumb { max-width: 100%; min-width: 0; gap: 4px; padding-left: 8px; }
+.chatbot-inspector__crumb span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chatbot-inspector__kind { display: flex; align-items: center; gap: 8px; }
+.chatbot-inspector__kind .sel { flex: 1; min-width: 0; }
+.chatbot-try__body { display: flex; flex: 1; flex-direction: column; gap: 12px; min-height: 0; overflow-y: auto; }
+.chatbot-try .chat__log { flex: 1; min-height: 180px; max-height: none; }
+.chatbot-try .chat__form { margin-top: 0; }
+.chatbot-try .pill[hidden] { display: none; }
+
+@media (max-width: 1180px), (pointer: coarse) {
+  .flow-canvas__help { display: none; }
+}
+/* Phones and tablets: the board takes the screen; a card picked, or Try it, opens the side panel over it. */
+@media (max-width: 920px) {
+  .chatbot-studio { grid-template-columns: minmax(0, 1fr); height: calc(100vh - 200px); height: calc(100dvh - 200px); min-height: 440px; }
+  .chatbot-studio.is-side-open .chatbot-board, .chatbot-studio:not(.is-side-open) .chatbot-side { display: none; }
+  .chatbot-side__back, .chatbot-board__try { display: inline-flex; }
+}
+/* Phones: the board gets the screen instead of the figures, and Add flow is its + alone (its name stays its label). */
+@media (max-width: 560px) {
+  .chatbot-page > .view__hero.view__hero { display: none; }
+  .chatbot-studio { height: calc(100vh - 270px); height: calc(100dvh - 270px); min-height: 400px; }
+  .chatbot-page:not(:has([data-chatbot-savebar])) .chatbot-studio { height: calc(100vh - 128px); height: calc(100dvh - 128px); }
+  .chatbot-board__add { display: none; }
+}
 
 /* A message's buttons: title, leads to, go to that message, remove. */
 .line .l-go { display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--ink-mute); font-size: 14px; cursor: pointer; }
@@ -1555,8 +1744,6 @@ html:has(.savebar.is-dirty) .toast { bottom: 92px; }
 .line input[aria-invalid]:not(:focus), .lines .line .sel[aria-invalid]:not(:focus) { box-shadow: inset 0 0 0 1.5px var(--bad); }
 
 @media (max-width: 560px) {
-  .flow-menu__title { flex-basis: 100%; }
-  .flow-menu__summary { padding-left: 0; }
   .savebar { padding: 10px 12px; }
   .savebar .actions { width: 100%; }
   .savebar .actions .btn { flex: 1; }
@@ -2767,16 +2954,9 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 .flow__card-head .sel { width: auto; min-width: 220px; max-width: 100%; }
 .flow__card-summary { flex: 1; min-width: 160px; font-size: 12.5px; }
 .flow__card-tools { display: flex; gap: 4px; margin-left: auto; }
-/* A step folds to its head: the toggle's chevron points right when folded and down when open (an open flow's own
-   chevron rule would turn every one down), the head's summary becomes the step's one-line preview, the body hides. */
-/* Grid tracks grow to fit their content, so a long unwrapped preview would push a step's tools off a phone. */
+/* Grid tracks grow to fit their content, so a long unwrapped summary would push a card's tools off a phone. */
 .flow--edit, .flow--edit .flow__card { grid-template-columns: minmax(0, 1fr); }
 .flow__card-body { display: grid; gap: 12px; }
-.flow__card-body[hidden] { display: none; }
-.flow__card.is-folded .flow__card-toggle .flow-menu__chevron { transform: none; }
-.flow__card:not(.is-folded) .flow__card-toggle .flow-menu__chevron { transform: rotate(90deg); }
-.flow__card.is-folded .flow__card-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.flow__card-preview { color: var(--ink-2); }
 
 .builder { display: grid; gap: 16px; }
 .builder__section .panel__body { display: grid; gap: 12px; }

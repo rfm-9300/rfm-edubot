@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Dashboard frontend: how the dashboards' scripts are split
@@ -33,7 +33,9 @@ shared concern, without changing any code, then moved the helpers they shared in
   and never reads the global scope; `/app`'s `app.js` hands it helpers through `init(deps)`
   (`agentsDeps()`, `menusDeps()`…). That fits a feature that keeps to itself. Code that opens the rest
   of the dashboard (a client record, an invoice, a drawer trail) belongs in the shared scripts, where it
-  can call `openClientDrawer()` directly.
+  can call `openClientDrawer()` directly. `chatbot-board.js` (2026-11-18) is one such module without a
+  `*UI`: `window.FlowBoard`, the Chatbot page's canvas (pan, zoom, cards, lines, drags, layout), which knows
+  nothing about flows and which `chatbot.js` calls directly ([chatbot-flows.md](chatbot-flows.md)).
 - **`DashboardScriptsTest`** (`./gradlew test`) checks both pages, `admin/common.js` included: it fails
   when an `index.html` misses one of its folder's scripts or `/admin/common.js`, when two scripts in a
   page's scope declare the same top-level name, or when one of them has top-level code other than

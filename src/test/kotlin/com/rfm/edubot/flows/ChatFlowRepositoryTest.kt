@@ -191,10 +191,10 @@ class ChatFlowRepositoryTest {
         val repo = ChatFlowRepository(mongo, tenantId)
         val flow = ChatFlow(
             id = "marcar", name = "Marcar", channels = setOf(Platform.WHATSAPP, Platform.WEB), keywords = listOf("marcar"),
-            aiReads = true, afterMisses = AfterMisses.LET_AI, handoverText = "Já lhe respondemos.", retries = 2,
+            aiReads = true, afterMisses = AfterMisses.LET_AI, handoverText = "Já lhe respondemos.", retries = 2, startAt = BoardPoint(0, 48),
             steps = listOf(
-                FlowStep("menu", "Que serviço?", listOf(FlowButton("Unhas", "name", listOf("manicure", "gel")), FlowButton("Outro", "person")), show = OptionsDisplay.NUMBERED, listLabel = "Escolher", retryText = "Não percebi."),
-                FlowStep("name", "Nome?", kind = StepKind.ASK, key = "name", expect = Expect.NAME, next = "open"),
+                FlowStep("menu", "Que serviço?", listOf(FlowButton("Unhas", "name", listOf("manicure", "gel")), FlowButton("Outro", "person")), show = OptionsDisplay.NUMBERED, listLabel = "Escolher", retryText = "Não percebi.", at = BoardPoint(320, -40)),
+                FlowStep("name", "Nome?", kind = StepKind.ASK, key = "name", expect = Expect.NAME, next = "open", at = BoardPoint(680, 0)),
                 FlowStep("open", kind = StepKind.CONDITION, check = Check.HOURS, hours = listOf(HoursWindow(1, "09:00", "18:00"), HoursWindow(6, "10:00", "13:00")), whenTrue = "book", whenFalse = "late"),
                 FlowStep("book", "Marcado.", kind = StepKind.ACTION, action = ActionKind.CREATE_BOOKING, serviceId = "svc-1", key = "service", next = "known", failNext = "person"),
                 FlowStep("known", kind = StepKind.CONDITION, check = Check.ANSWER, answerKey = "name", answerIs = "Ana", whenTrue = "late", whenFalse = "late"),
@@ -219,6 +219,20 @@ class ChatFlowRepositoryTest {
         assertEquals(AfterMisses.LET_AI, read.afterMisses, "a reply it couldn't read always went to the AI")
         assertEquals(0, read.retries, "and at once")
         assertNull(read.handoverText)
+        assertNull(read.startAt, "a flow nobody arranged is laid out by the board")
+        assertTrue(read.steps.all { it.at == null })
+    }
+
+    @Test
+    fun `places on the board read back whatever number type they were stored as, and half a place is none`(): Unit = runBlocking {
+        val tenantId = ObjectId()
+        val placed = step("menu", "Qual serviço?", "Unhas" to "contacto").append("at", Document("x", 320.0).append("y", -40L))
+        val half = step("contacto", "Fale connosco").append("at", Document("x", 12))
+        collection.insertOne(Document("tenantId", tenantId).append("flows", listOf(flow("servicos", placed, half).append("startAt", Document("x", 0).append("y", 48)))))
+
+        val read = ChatFlowRepository(mongo, tenantId).find()!!.flows.single()
+        assertEquals(BoardPoint(0, 48), read.startAt)
+        assertEquals(listOf(BoardPoint(320, -40), null), read.steps.map { it.at })
     }
 
     @Test

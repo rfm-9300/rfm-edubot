@@ -8,6 +8,7 @@ import com.rfm.edubot.channel.ChannelCapabilities
 import com.rfm.edubot.flows.ActionKind
 import com.rfm.edubot.flows.AfterMisses
 import com.rfm.edubot.flows.AiFlowInterpreter
+import com.rfm.edubot.flows.BoardPoint
 import com.rfm.edubot.flows.ChatFlow
 import com.rfm.edubot.flows.ChatFlowLimits
 import com.rfm.edubot.flows.ChatFlowRepository
@@ -126,6 +127,8 @@ private fun Route.chatbotRoutes(mongo: MongoModule, aiClient: AiClient) {
                     reason = result.handOver?.reason,
                     effects = result.effects.map { EffectDto(it.action.name, it.ok, it.detail) },
                     aiAnswers = aiAnswers,
+                    flowId = result.flowId,
+                    path = result.path,
                 ),
             )
         }
@@ -184,9 +187,15 @@ internal data class FlowDto(
     val afterMisses: String = "HAND_OVER",
     val handoverText: String = "",
     val retries: Int = 1,
+    /** Where the start card sits on the board; left out while the board lays the flow out itself. */
+    val startX: Int? = null,
+    val startY: Int? = null,
 )
 
-/** A step with every field, empty where unused, so the page binds inputs without null checks. See [FlowStep] for what each kind uses. */
+/**
+ * A step with every field, empty where unused, so the page binds inputs without null checks. See [FlowStep] for what each kind uses.
+ * [x] and [y] place its card on the board, and are left out while the board lays the flow out itself.
+ */
 @Serializable
 internal data class FlowStepDto(
     val id: String,
@@ -208,6 +217,8 @@ internal data class FlowStepDto(
     val action: String,
     val serviceId: String,
     val failNext: String,
+    val x: Int? = null,
+    val y: Int? = null,
 )
 
 @Serializable
@@ -280,7 +291,10 @@ internal data class ChatbotTestRequest(
 @Serializable
 internal data class TestStateDto(val flowId: String, val stepId: String, val vars: Map<String, String> = emptyMap(), val misses: Int = 0)
 
-/** [handled] false: no flow answers, so the AI would (when [aiAnswers]) or the team. [effects] are what the actions would have done. */
+/**
+ * [handled] false: no flow answers, so the AI would (when [aiAnswers]) or the team. [effects] are what the actions would have done.
+ * [flowId] and [path] (the steps this turn went through, in order) let the board light up the way the customer took.
+ */
 @Serializable
 internal data class ChatbotTestDto(
     val handled: Boolean,
@@ -291,6 +305,8 @@ internal data class ChatbotTestDto(
     val reason: String?,
     val effects: List<EffectDto>,
     val aiAnswers: Boolean,
+    val flowId: String? = null,
+    val path: List<String> = emptyList(),
 )
 
 @Serializable
@@ -317,6 +333,7 @@ internal fun FlowDto.toFlow() = ChatFlow(
     afterMisses = afterMisses.enumOr(AfterMisses.HAND_OVER),
     handoverText = handoverText.orNull(),
     retries = retries,
+    startAt = BoardPoint.of(startX, startY),
 )
 
 private fun FlowStepDto.toStep() = FlowStep(
@@ -339,6 +356,7 @@ private fun FlowStepDto.toStep() = FlowStep(
     action = action.enumOr(ActionKind.NOTIFY_TEAM),
     serviceId = serviceId.orNull(),
     failNext = failNext.orNull(),
+    at = BoardPoint.of(x, y),
 )
 
 internal fun ChatFlow.dto() = FlowDto(
@@ -352,6 +370,8 @@ internal fun ChatFlow.dto() = FlowDto(
     afterMisses = afterMisses.name,
     handoverText = handoverText.orEmpty(),
     retries = retries,
+    startX = startAt?.x,
+    startY = startAt?.y,
 )
 
 private fun FlowStep.dto() = FlowStepDto(
@@ -374,4 +394,6 @@ private fun FlowStep.dto() = FlowStepDto(
     action = action.name,
     serviceId = serviceId.orEmpty(),
     failNext = failNext.orEmpty(),
+    x = at?.x,
+    y = at?.y,
 )

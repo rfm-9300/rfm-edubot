@@ -720,58 +720,77 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 |---|---|
 | `.bot-channel` > `__name` / `__body` | One channel a row: its name over a Connected / Not connected pill, then whether the AI answers there and its start words. One column under 700px, the pill beside the name |
 
-#### Chatbot (`app/chatbot.js`)
+#### Chatbot (`app/chatbot.js`, `app/chatbot-board.js`)
 
 ```html
-<div class="persona-studio">
-  <div class="persona-studio__main">
-    <section class="panel"><!-- intro --></section>
-    <form class="form chatbot-flows" id="chatbot-form">
-      <section class="panel flow-menu is-open" data-flow="0" id="cb-0">
-        <header class="panel__head flow-menu__head">
-          <h2 class="flow-menu__title"><button class="flow-menu__toggle" aria-expanded="true"><span class="flow-menu__chevron"></span><span class="flow__index">1</span><span class="flow-menu__name">Appointments</span></button></h2>
-          <span class="flow-menu__pills"><span class="pill pill--ok">On</span></span>
-          <div class="panel__tools"><!-- ↑ ↓ --></div>
-          <p class="flow-menu__summary">book · agendar · 4 steps · WhatsApp, Website · Sent 191 times to 41 customers in the last 30 days</p>
-        </header>
-        <div class="panel__body form flow-menu__body">
-          <!-- name, On, channels, .tokens keywords, "When a reply isn't understood", then: -->
-          <div class="flow flow--edit">
-            <div class="flow__card" id="cb-0-0">
-              <div class="flow__card-head"><button class="iconbtn flow__card-toggle" aria-expanded="true"><span class="flow-menu__chevron"></span></button><span class="flow__index">1</span><select class="sel"><!-- kind --></select><span class="flow__card-summary"><span class="muted">Starts here</span></span><span class="flow__card-tools"><!-- ↑ ↓ × --></span></div>
-              <div class="flow__card-body"><!-- the fields of its kind; hidden while the card is .is-folded --></div>
-              <!-- the kind's fields; a Message's options: -->
-              <div class="lines lines--options">
-                <div class="lines__head"><span>Option</span><span>Leads to</span><span>Other words that choose it</span><span></span></div>
-                <div class="line"><input class="inp" /><select class="sel"></select><input class="inp" /><button class="iconbtn">×</button></div>
-                <div class="lines__foot"><button class="btn btn--sm btn--ghost">+ Add option</button><span class="hint">2 of 13 options</span></div>
-              </div>
-            </div>
-            <div class="flow__connector"></div>
-            <!-- the next card -->
-          </div>
-          <div class="flow-menu__foot"><select class="sel"><!-- + Add a step --></select><span class="actions"><!-- Duplicate, Remove flow --></span></div>
+<div class="chatbot-page" data-chatbot>
+  <div class="view__hero"><!-- three figures --></div>
+  <div class="chatbot-studio">                               <!-- .is-side-open: on a phone, the side panel covers the board -->
+    <section class="panel chatbot-board">
+      <div class="chatbot-board__bar">
+        <div class="flow-tabs" role="tablist">
+          <button class="flow-tab is-on" role="tab" aria-selected="true"><span class="flow__index">1</span><span class="flow-tab__name">Appointments</span><span class="flow-tab__state is-on"></span><span class="flow-tab__warn" hidden></span></button>
         </div>
-      </section>
-    </form>
-    <div class="savebar" data-chatbot-savebar><!-- status, Discard, Save --></div>
+        <button class="btn btn--sm btn--ghost" data-flow-add>+ <span class="chatbot-board__add">Add flow</span></button>
+        <button class="btn btn--sm chatbot-board__try">Try it</button>  <!-- phones only -->
+      </div>
+      <div class="flow-canvas is-editable" data-board tabindex="0" role="group">
+        <div class="flow-canvas__world" data-world>              <!-- transform: translate() scale(), from chatbot-board.js -->
+          <svg class="flow-canvas__edges" data-edges><defs><!-- #flow-arrow, #flow-arrow-on, #flow-arrow-trail --></defs>
+            <g data-edge-layer><g class="flow-edge flow-edge--alt is-selected is-trail"><path class="flow-edge__hit"/><path class="flow-edge__line"/></g></g>
+            <path class="flow-edge__temp" data-temp-edge/></svg>
+          <div class="flow-node flow-node--start is-selected" data-node="__start"><!-- head, keywords as chips, channels, the "First step" output --></div>
+          <div class="flow-node flow-node--message has-issues is-visited is-current" data-node="s-1a2b3c">
+            <span class="flow-node__in" data-in></span>
+            <button class="flow-node__head"><span class="flow-node__icon"><svg/></span><span class="flow-node__kind">Message</span><span class="flow-node__num">2</span></button>
+            <div class="flow-node__body"><p class="flow-node__text">Hi! What do you need?</p><p class="flow-node__meta">Keeps the choice as <code class="flow-node__key">{area}</code></p></div>
+            <ul class="flow-node__outs"><li class="flow-node__out is-linked"><span class="flow-node__label">Nails</span><span class="flow-port is-linked" data-port="o:0"></span></li></ul>
+            <div class="flow-node__foot"><span class="flow-node__here">The customer is here</span><span class="flow-node__flag">1 to fix</span><span class="flow-node__stat">Sent 12 times</span></div>
+          </div>
+        </div>
+        <div class="flow-canvas__tools flow-canvas__tools--edit" data-board-ui><!-- + Add a step, undo, redo, Tidy up --></div>
+        <div class="flow-canvas__tools flow-canvas__tools--zoom" data-board-ui><!-- −, 100%, +, fit --></div>
+        <button class="iconbtn flow-canvas__unlink" data-board-ui data-edge-remove hidden>×</button>
+        <div class="board-menu" data-board-ui role="menu" hidden><!-- .board-menu__item per kind --></div>
+        <p class="flow-canvas__help">Drag a card to move it…</p>
+      </div>
+    </section>
+    <aside class="chatbot-side">
+      <div class="chatbot-side__top"><button class="btn btn--sm btn--ghost chatbot-side__back">Board</button><div class="settings-tabs chatbot-side__tabs"><!-- Edit, Try it --></div></div>
+      <form class="form chatbot-side__form" id="chatbot-form">
+        <section class="panel chatbot-side__panel chatbot-inspector" id="cb-0-1"><!-- the flow's settings (id cb-0) or step 2's fields -->
+          <header class="panel__head"><button class="btn btn--sm btn--ghost chatbot-inspector__crumb">‹ Appointments</button></header>
+          <div class="panel__body chatbot-side__scroll"><div class="chatbot-inspector__kind"><!-- icon, number, kind .sel --></div><div class="chatbot-side__issues"><!-- .notice--warn --></div><!-- fields --></div>
+        </section>
+      </form>
+      <!-- or, on Try it: <section class="panel chatbot-side__panel chatbot-try"> with .chatbot-try__body, the .chat__log and .chat__form -->
+    </aside>
   </div>
-  <aside class="persona-studio__test"><!-- the test chat: channel .sel, "Pretend it is" datetime-local, a .form__check, .chat__log, .chat__form --></aside>
+  <div class="savebar" data-chatbot-savebar><!-- status, Discard, Save --></div>
 </div>
 ```
 
 | Class | Role |
 |---|---|
-| `.flow-menu` (`.is-open`) | One flow, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, only the head shows |
-| `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first flow with a matching keyword answers), the name, an On / Off `.pill`, and one line of keywords, steps, channels and 30-day usage (what the channel refused in `.hint--warn`) |
-| `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused); "Sent n times" in a step card's head; the body's last row: the Add a step `.sel` on the left, Duplicate and Remove flow on the right |
-| `.flow__card` · `.flow__connector` | A step: a head (fold button, position, kind `.sel`, "Starts here" on the first, ↑ ↓ ×) over the fields of its kind in `.flow__card-body`. `.is-flash` rings the step a refused save points at |
-| `.flow__card.is-folded` · `.flow__card-toggle` · `.flow__card-preview` | A folded step: the body is `hidden`, the chevron points right (down while open: an open `.flow-menu`'s own chevron rule would turn every one down, so the toggle overrides it) and the head's summary becomes a one-line preview with an ellipsis. `.flow--edit` and its cards use `minmax(0, 1fr)` columns, because a grid track grows to fit a long unwrapped preview and would push the tools off a phone |
-| `.lines--options` > `.line` | A message's options: title, where it leads (a `.sel`, with "New step…" which adds a step and links it), other words that choose it, ×. Four columns; on a phone the title and × share a row and the other two take a row each |
-| `.line--hours` | An opening-hours row: day `.sel`, two `type=time` inputs, ×. Three rows' worth of columns on a phone, the day on its own row |
-| `.bot-channel`, `.tokens` / `.token` | As in Channels and the Persona rules: keywords are tokens |
+| `.chatbot-studio` (`.is-side-open`) | The board and the side panel, as tall as the screen under the figures (a member, with no save bar, gets that room too), so the board can take the scroll wheel. Under 920px one column: the board, or the side panel when a card or Try it opened it (`.is-side-open`, with `.chatbot-side__back` to return); under 560px the figures hide |
+| `.chatbot-board` · `__bar` · `__try` · `__add` · `__empty` | The board's panel: flow tabs, Add flow (its `+` alone on a phone, its name kept as `aria-label`), Try it on phones, the empty state |
+| `.flow-tabs` > `.flow-tab` (`.is-on`) · `__name` · `__state` (`.is-on`) · `__warn` | One tab per flow, in the order flows are checked: its number, name, an `--ok` dot when on (else `--ink-faint`), and a `--warn` diamond while something keeps it from saving. Arrow keys, Home and End move between them |
+| `.flow-canvas` (`.is-editable` `.is-panning` `.is-dragging`) · `__world` · `__edges` | The canvas: `--bg` with a dotted grid that follows the pan and zoom, `touch-action: none`, `overflow: clip` (never scrolled by a focused card). `__world` is moved by `chatbot-board.js` (`transform`, origin top left); `__edges` is the svg of lines, sized to the cards |
+| `.flow-canvas__tools` (`--edit` top left, `--zoom` bottom left) · `__sep` · `__zoom` · `__help` · `__unlink` | Floating toolbars on `--surface` (borderless `.iconbtn`s, the zoom as a % that resets to 100%); the help line (hidden under 1180px and on touch screens); the × in the middle of a picked line. Anything with `data-board-ui` is left out of the board's gestures |
+| `.flow-edge` (`--alt` `.is-selected` `.is-trail` `.is-rewiring`) · `__hit` · `__line` · `__temp` · `.flow-arrow` (`--on` `--trail`) | A line: a 14px invisible `__hit` stroke to click and a 1.6px `--ink-faint` `__line` ending in an arrow marker. No and If it fails are dashed (`--alt`); hover and a picked line turn `--ink`; the way a test went is `--accent-deep` and thicker; a line being moved elsewhere fades; `__temp` follows the pointer while one is drawn |
+| `.flow-node` (`--start` `--message` `--ask` `--condition` `--action` `--handoff`; `.is-selected` `.is-target` `.is-dragging` `.is-unreached` `.is-visited` `.is-current` `.has-issues` `.is-flash`) | A card, 264px (the start 232px), placed by `transform`. Its kind sets `--kind`, a personality tint (`--sky`, `--grape`, `--sun`, `--mint`, `--coral`; the start `--accent`) used only in the icon well. Open in the side panel or under a line being dropped: the focus ring. Nothing leads to it: a dashed border. On a test's way: the head on `--accent-soft`; where the customer waits: a 3px `--accent` ring |
+| `__in` · `__head` · `__icon` · `__kind` · `__num` | The input the lines arrive at (level with the head), and the head: a button that opens the card (Enter too), its kind in an icon well, its number |
+| `__body` · `__text` (`.is-empty`) · `__lead` · `__meta` · `__key` · `__missing` · `__chips` · `__chip` · `__more` | What the step says (four lines at most), what a condition or action does, what it keeps (`{name}` in mono), what is missing (`--warn-ink`), the start card's keywords |
+| `__outs` > `__out` (`--alt` `.is-linked` `.is-missing`) · `__label` · `__end` · `.flow-port` | One row per way out (an option, Then, Yes, No, If it worked, If it fails), its dot on the card's right edge: filled when linked, `--warn` ringed when it must lead somewhere and doesn't; an open one says where the customer goes instead ("ends the flow", "your team takes over"). Dragging from a dot draws a line; dropping it on a card links them, on the empty board opens the menu for a new step; a click opens the menu |
+| `__foot` · `__here` · `__flag` · `__stat` · `__note` | Under the outputs, only when there is something: where the test's customer waits (`--accent` fill), "n to fix" (`--warn-soft`, its title lists them), "Sent n times", "Nothing leads here" |
+| `.board-menu` · `__title` · `__item` (`--quiet`) · `__text` · `__name` · `__desc` | The add-a-step menu: each kind with its icon and a line on what it does, and Remove this link (`--quiet`, `--bad-ink`) for an output already linked. Arrow keys move through it, Escape closes it |
+| `.chatbot-side` · `__top` · `__back` · `__tabs` · `__form` · `__panel` · `__scroll` · `__issues` | The side panel: Edit (the flow's settings, which the start card opens, or the step open) and Try it, each one `.panel` whose body scrolls inside. `__scroll` rows take their content's height (`grid-auto-rows: max-content`): auto rows in a scrolling grid of fixed height would squeeze a box that clips, the options, to nothing. Its paragraphs have no margin |
+| `.chatbot-inspector` · `__title` · `__crumb` · `__kind` | A flow's settings (↑ ↓ for its place in the order) or a step's fields: back to the flow's settings in the head, then its icon, number and kind `.sel`, what to fix (`.notice--warn`), the fields, and Start the flow here · Duplicate step · Remove step |
+| `.chatbot-try` · `__body` | The test chat as a column: the hint, channel and pretended time, the known-client box, the `.chat__log` filling the rest, the composer |
+| `.lines--options` > `.line` · `.lines--hours` > `.line` | In the side panel: an option's title with × beside it, then where it leads and its other words, a row each; a day over its from and to |
+| `.tokens` / `.token` | As in Channels and the Persona rules: keywords are tokens |
 
-Rules: a text field changes the draft as it is typed and redraws nothing (the summary line, a step's label in the others' selects and the bytes hint are updated in place); a choice, a checkbox, or a field that changes the shape of the page (the step kind, how options are offered, the key a question keeps) redraws, restoring the focused id. The test chat sends the unsaved flows with each turn and keeps where the customer was in the state the server hands back.
+Rules: a text field changes the draft as it is typed and redraws nothing but the card it belongs to on the board (and the tab, the summary, what to fix and the bytes hint); a choice, a checkbox or a field that changes the shape of a step redraws the page, restoring the focused id. Moving a card redraws nothing: the board moves it and its lines. The test chat sends the unsaved flows with each turn, keeps where the customer was in the state the server hands back, and lights the board from each turn's `flowId` and `path`.
 
 ## Conversations inbox
 
