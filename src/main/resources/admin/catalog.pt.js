@@ -847,9 +847,10 @@ window.__I18N_CATALOGS['pt-PT'] = {
       noOptions: 'Sem opções: o fluxo segue em frente, ou termina aqui.', addOption: 'Adicionar opção', removeOption: 'Remover opção',
       optionsCount: '{n} de {max} opções · até {chars} caracteres cada',
       showLabel: 'Como as opções são oferecidas',
-      show: { AUTO: 'Automaticamente', NUMBERED: 'Sempre como números', HIDDEN: 'No meu próprio texto' },
+      show: { AUTO: 'Automaticamente', TAPS_AND_NUMBERS: 'Botões, com números de reserva', NUMBERED: 'Sempre como números', HIDDEN: 'No meu próprio texto' },
       showHint: {
         AUTO: 'Como botões onde o canal os tem (Instagram, e WhatsApp até 3, ou uma lista), e como linhas numeradas por baixo do texto onde não tem.',
+        TAPS_AND_NUMBERS: 'Como Automaticamente e, no Instagram, as linhas numeradas também por baixo do texto, porque o Instagram no browser não mostra botões. O WhatsApp fica só com os botões. O cliente toca, ou responde com o número ou com as palavras da opção.',
         NUMBERED: 'Linhas numeradas por baixo do texto em todos os canais. O cliente responde com o número ou com as palavras da opção.',
         HIDDEN: 'Não se acrescenta nada: a sua mensagem diz o que responder, por exemplo “Responda 1 para unhas, 2 para pestanas”. Números, títulos e palavras continuam a escolher a opção.',
       },

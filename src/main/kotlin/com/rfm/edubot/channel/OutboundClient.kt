@@ -9,10 +9,12 @@ data class ChannelCapabilities(
     val quickReplyTitleChars: Int = 20,
     /** The longest text a message with taps can have, in UTF-8 bytes. */
     val quickReplyBodyBytes: Int = 1000,
+    /** True where some customers' apps don't show taps (Instagram in a browser), so a message may also write its options out. */
+    val quickRepliesMayBeHidden: Boolean = false,
 ) {
     companion object {
         val WHATSAPP = ChannelCapabilities(supportsDocuments = true, quickReplies = 10, buttonReplies = 3, quickReplyTitleChars = 20, quickReplyBodyBytes = 1000)
-        val INSTAGRAM = ChannelCapabilities(supportsDocuments = false, quickReplies = 13)
+        val INSTAGRAM = ChannelCapabilities(supportsDocuments = false, quickReplies = 13, quickRepliesMayBeHidden = true)
         /** The website's chat has no taps: options go out as numbered lines. */
         val WEB = ChannelCapabilities()
     }

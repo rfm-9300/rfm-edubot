@@ -1538,7 +1538,9 @@ start words, read on every message, so a saved change applies at once.
 - **Options, typed or tapped.** `OptionsDisplay`: `AUTO` sends taps where the channel has them
   (`ChannelCapabilities`: Instagram 13, WhatsApp 3 buttons or up to 10 in a list when the step names
   the list's button) and numbered lines under the text where it doesn't (the website, or too many,
-  or too long); `NUMBERED` always numbers; `HIDDEN` adds nothing, for a message that says "reply 1 for
+  or too long); `TAPS_AND_NUMBERS` does the same and, where `ChannelCapabilities.quickRepliesMayBeHidden`
+  (Instagram, whose web inbox shows no buttons), writes the numbered lines under the text too when both
+  fit, and sends taps alone when they don't; `NUMBERED` always numbers; `HIDDEN` adds nothing, for a message that says "reply 1 for
   nails". Typed replies always work: `FlowOptions.match` takes a number, the title, or any extra word
   of an option, and nothing when two options match. A tap routes by its payload
   (`flow:<flow>:<step>:<option>`), never by its title.

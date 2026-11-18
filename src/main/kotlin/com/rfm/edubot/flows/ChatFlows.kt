@@ -144,8 +144,12 @@ data class FlowProblem(val code: String, val menu: Int? = null, val step: Int? =
 /** What a flow's step is: it waits for the customer ([MESSAGE] with options, [ASK]) or runs on to the next step. */
 enum class StepKind { MESSAGE, ASK, CONDITION, ACTION, HANDOFF }
 
-/** How a message offers its options. [AUTO] taps where the channel has them and numbered lines where it doesn't; [HIDDEN] leaves it to the message's own words. */
-enum class OptionsDisplay { AUTO, NUMBERED, HIDDEN }
+/**
+ * How a message offers its options. [AUTO] taps where the channel has them and numbered lines where it doesn't;
+ * [TAPS_AND_NUMBERS] does the same and, on a channel where taps may not show (Instagram in a browser), writes the numbered
+ * lines under the text as well; [NUMBERED] always writes the lines; [HIDDEN] leaves it to the message's own words.
+ */
+enum class OptionsDisplay { AUTO, TAPS_AND_NUMBERS, NUMBERED, HIDDEN }
 
 /** What a question expects, so an answer can be checked and kept in a usable form. */
 enum class Expect { TEXT, NAME, PHONE, EMAIL, NUMBER, DATE, TIME, YES_NO }

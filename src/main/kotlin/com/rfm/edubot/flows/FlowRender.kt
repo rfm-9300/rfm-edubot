@@ -16,19 +16,25 @@ data class FlowMessage(
 ) {
     /**
      * What goes out on a channel with [caps]: the options as taps when it has them (and they fit), else as numbered
-     * lines under the text, which a customer answers by typing the number. [OptionsDisplay.HIDDEN] sends the text as
-     * written.
+     * lines under the text, which a customer answers by typing the number. [OptionsDisplay.TAPS_AND_NUMBERS] also writes
+     * the lines under the text where taps may not show, when text and lines still fit beside the taps; [OptionsDisplay.HIDDEN]
+     * sends the text as written.
      */
     fun fitTo(caps: ChannelCapabilities): FlowOutgoing {
         if (options.isEmpty() || display == OptionsDisplay.HIDDEN) return FlowOutgoing(text, emptyList(), null)
-        val canTap = display == OptionsDisplay.AUTO &&
+        val numbered = "$text\n\n" + options.mapIndexed { i, option -> "${i + 1}. ${option.title}" }.joinToString("\n")
+        val canTap = display != OptionsDisplay.NUMBERED &&
             options.size <= caps.quickReplies &&
             (options.size <= caps.buttonReplies || !listLabel.isNullOrBlank()) &&
-            options.all { it.title.length <= caps.quickReplyTitleChars } &&
-            text.toByteArray().size <= caps.quickReplyBodyBytes
-        if (canTap) return FlowOutgoing(text, options.map { QuickReply(it.title, it.payload) }, listLabel?.takeIf { options.size > caps.buttonReplies })
-        val lines = options.mapIndexed { i, option -> "${i + 1}. ${option.title}" }.joinToString("\n")
-        return FlowOutgoing("$text\n\n$lines", emptyList(), null)
+            options.all { it.title.length <= caps.quickReplyTitleChars }
+        fun fits(body: String) = body.toByteArray().size <= caps.quickReplyBodyBytes
+        if (canTap) {
+            val replies = options.map { QuickReply(it.title, it.payload) }
+            val label = listLabel?.takeIf { options.size > caps.buttonReplies }
+            if (display == OptionsDisplay.TAPS_AND_NUMBERS && caps.quickRepliesMayBeHidden && fits(numbered)) return FlowOutgoing(numbered, replies, label)
+            if (fits(text)) return FlowOutgoing(text, replies, label)
+        }
+        return FlowOutgoing(numbered, emptyList(), null)
     }
 }
 
