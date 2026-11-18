@@ -248,6 +248,27 @@ class FlowEngineTest {
     }
 
     @Test
+    fun `a result names the flow and the steps the message went through, for the Chatbot page's board`() {
+        val walk = flow(
+            step("who") { it.copy(kind = StepKind.CONDITION, check = Check.KNOWN_CLIENT, whenTrue = "back", whenFalse = "menu") },
+            step("back", "Bem-vinda de volta.") { it.copy(next = "menu") },
+            step("menu", "O que deseja?", FlowButton("Unhas", "name")),
+            step("name", "Como se chama?") { it.copy(kind = StepKind.ASK, key = "name", expect = Expect.NAME, next = "tell") },
+            step("tell") { it.copy(kind = StepKind.ACTION, action = ActionKind.NOTIFY_TEAM, next = "bye") },
+            step("bye", "Obrigada, {name}."),
+        )
+        val chat = Chat(ChatFlows(listOf(walk)), Actions(known = true))
+        val first = chat.say("olá")
+        assertEquals("f", first.flowId)
+        assertEquals(listOf("who", "back", "menu"), first.path, "silent steps are on the way too")
+        assertEquals(listOf("menu"), chat.say("banana").path, "a reply it can't read asks the same step again")
+        assertEquals(listOf("name"), chat.say("1").path)
+        assertEquals(listOf("tell", "bye"), chat.say("Maria Costa").path)
+        assertNull(chat.session)
+        assertEquals(emptyList(), Chat(ChatFlows(listOf(walk))).say("bom dia").path, "no flow, no path")
+    }
+
+    @Test
     fun `a condition can ask whether the customer is already a client, or look at an earlier answer`() {
         val known = flow(
             step("who") { it.copy(kind = StepKind.CONDITION, check = Check.KNOWN_CLIENT, whenTrue = "back", whenFalse = "new") },

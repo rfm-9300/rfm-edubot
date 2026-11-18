@@ -126,6 +126,7 @@ private fun Document.toFlow() = ChatFlow(
     afterMisses = enumOf(getString("afterMisses"), AfterMisses.LET_AI),
     handoverText = getString("handoverText")?.takeIf { it.isNotBlank() },
     retries = getInteger("retries") ?: 0,
+    startAt = point("startAt"),
 )
 
 /** A step saved before steps had kinds is a message with buttons, which is all it needs. */
@@ -149,6 +150,7 @@ private fun Document.toStep() = FlowStep(
     action = enumOf(getString("action"), ActionKind.NOTIFY_TEAM),
     serviceId = getString("serviceId")?.takeIf { it.isNotBlank() },
     failNext = getString("failNext")?.takeIf { it.isNotBlank() },
+    at = point("at"),
 )
 
 private fun ChatFlow.toDocument() = Document("id", id)
@@ -161,6 +163,7 @@ private fun ChatFlow.toDocument() = Document("id", id)
     .append("afterMisses", afterMisses.name)
     .append("handoverText", handoverText)
     .append("retries", retries)
+    .append("startAt", startAt?.toDocument())
 
 private fun FlowStep.toDocument() = Document("id", id)
     .append("kind", kind.name)
@@ -181,6 +184,15 @@ private fun FlowStep.toDocument() = Document("id", id)
     .append("action", action.name)
     .append("serviceId", serviceId)
     .append("failNext", failNext)
+    .append("at", at?.toDocument())
+
+private fun BoardPoint.toDocument() = Document("x", x).append("y", y)
+
+/** A place on the Chatbot page's board, read as any number type (a document edited in mongosh may hold doubles). */
+private fun Document.point(key: String): BoardPoint? {
+    val at = get(key) as? Document ?: return null
+    return BoardPoint.of((at["x"] as? Number)?.toInt(), (at["y"] as? Number)?.toInt())
+}
 
 private inline fun <reified E : Enum<E>> enumOf(name: String?, default: E): E = enumValues<E>().firstOrNull { it.name == name } ?: default
 

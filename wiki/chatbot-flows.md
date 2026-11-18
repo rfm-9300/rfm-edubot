@@ -6,8 +6,9 @@ updated: 2026-11-18
 
 Fixed bots that answer customers before the AI: a keyword starts a flow that offers options, asks
 questions, checks opening hours, creates clients and bookings and hands over to a person, with no model
-involved unless the company switches one small use on. `docs/architecture.md` → "Chat flows" has the
-routing, the endpoints and the diagram; `design-system/patterns.md` → "Chatbot" has the screen. Before
+involved unless the company switches one small use on. The Chatbot page draws each flow on a board, its
+steps as cards joined by lines. `docs/architecture.md` → "Chat flows" has the routing, the endpoints and
+the diagram; `design-system/patterns.md` → "Chatbot" has the screen. Before
 this, the only fixed-bot feature was the Instagram menus ([ai-persona-and-bot.md](ai-persona-and-bot.md)
 has that history); the same `flows/` engine grew from them.
 
@@ -56,13 +57,37 @@ the team does.
 
 ## Decisions and why
 
-- **Steps fold (2026-11-18).** Rodrigo asked for options to fold and expand a flow's messages (the page calls them
-  steps), so each step has a fold button and a flow has Fold all and Expand all (`ui.folded`, a set of step ids, so a step keeps its fold when it moves).
-  Folding is a view state, not an edit: nothing is saved or marked unsaved, members can do it, and every
-  step starts open. A folded step keeps its fields in the page, `hidden`, so typing, the bytes hint and the
-  step labels in other steps' selects still work; its head shows a one-line preview. A refused save opens the
-  step it names. Gotcha: `.flow--edit` and its cards need `minmax(0, 1fr)` columns, or a long unwrapped
-  preview widens the grid track and pushes the step's tools off a phone.
+- **A board instead of a list (2026-11-18).** The page first listed a flow's steps as long forms, one under the
+  other (folding them, the same day, only shortened the list). Rodrigo asked for something more interactive, "a
+  kind of whiteboard where we can better see all the flow". Each flow is now a board: a start card (its keywords)
+  and a card per step, each output a dot on the card's edge with a line to where it leads, and the step's fields
+  open in a side panel beside it, whose other tab is the test chat. What it does and why:
+  - **Every edit still has a field.** Linking by dragging a dot, adding a step where a line is dropped, moving
+    cards and unlinking a line are shortcuts; the side panel's selects ("Leads to", "Then go to", with "New
+    step…") do the same, so keyboards and screen readers lose nothing. Folding went: a card is already short.
+  - **Places are saved, but only once someone arranges a flow.** A step's `at` and a flow's `startAt`
+    (`BoardPoint`, sent as `x`/`y` and `startX`/`startY`) are optional. A flow with none (every flow made before,
+    and flows written through the API) is laid out by the board each time (`FlowBoard.layout`: columns by the
+    longest way from the start, lines that go back ignored, each card level with what leads to it, cards nothing
+    reaches in a band underneath), so it stays tidy as steps are added. The first card moved writes every card's
+    place into the draft, so the arrangement is saved whole; Tidy up drops them all again. Moving cards is an
+    edit like any other: unsaved, undoable, saved by Save.
+  - **The board is its own module.** `chatbot-board.js` (`window.FlowBoard`) knows nothing about flows: it
+    measures the cards `chatbot.js` draws, places them, draws the lines in one svg, and turns pointer and wheel
+    gestures into callbacks (select, move, connect, drop on the empty board). `chatbot.js` keeps the flows, the
+    side panel, the test chat and saving, and redraws the page after any change except a move or typing.
+  - **Undo and redo** keep copies of the draft (and which flow and step were open), one per change, one per
+    field typed in, up to 100. Discard clears them.
+  - **The test chat lights the board.** Each test turn returns its `flowId` and `path`, the steps it went
+    through (`FlowResult.path`, silent conditions and actions included, which messages alone can't show). The
+    page lights the lines between consecutive steps (all of them when two options of one step lead to the same
+    place: it can't tell which was typed), shows that flow, rings the card where the customer waits and pans to it.
+  - **Flagged before saving.** Cards and tabs mark what the server would refuse (no text, an option leading
+    nowhere, a question without a name, no keywords…), from the page's own reading of `ChatFlow.problems()`;
+    the server still checks on save, and a refused save opens the step it names.
+  - **Wheel and height.** The board takes the scroll wheel (pan; Ctrl or a pinch zooms), so the page is sized to
+    the screen like Conversations' and doesn't scroll under it. Phones get the board full width; a card tapped
+    opens the side panel over it.
 
 - **The AI never writes to the customer inside a flow.** Rodrigo asked for a hybrid: when we can't read an
   answer, an AI model says only how to interpret it and what to do. `AiFlowInterpreter` sends the question,
@@ -122,15 +147,29 @@ the team does.
   messages the channel refused apart from the ones it sent.
 - **Local runs read `.env` from the working directory**, which overrides the environment: to point the
   app at a scratch Mongo, run the built jar from a directory without one.
+- **The server leaves defaults out of the flows it sends** (kotlinx `encodeDefaults` is off), so a flow with
+  `retries = 1` came without `retries`, and the page showed "Don't ask again" for it until it was saved. The page
+  now fills the left-out flow fields (`FLOW_DEFAULTS` in `chatbot.js`); a new field with a default needs adding there.
+- **Board gestures (2026-11-18):** capturing the pointer on press sends the next `click` to the capturing canvas, not
+  to the card or line clicked, so every click on a line read as a click on the empty board; the board captures only
+  once a press becomes a drag. The board is `overflow: clip`, not `hidden`: a hidden box still scrolls when a card in
+  it is focused or scrolled into view, and the world would slide away from where `FlowBoard` thinks it is. A click
+  that redraws the page reaches the old board on its way up, so `FlowBoard` ignores events once its canvas left the
+  page (a menu item emptied by the redraw read as a click on the empty board and closed the step just added).
+- **A scrolling grid of fixed height squeezes a box that clips.** Auto rows may shrink an `overflow: hidden` item to
+  nothing when the grid is too short for its content: the side panel's options list vanished. `.chatbot-side__scroll`
+  sets `grid-auto-rows: max-content`.
 
 ## Checking it
 
-- Unit tests: `FlowEngineTest` (the engine against a fake world), `FlowAnswersTest`, `FlowRenderTest`,
-  `AiFlowInterpreterTest`, `ChatFlowsTest`; with Mongo: `ChatFlowRepositoryTest`, `ChatbotPipelineTest`
+- Unit tests: `FlowEngineTest` (the engine against a fake world, the path of a turn), `FlowAnswersTest`, `FlowRenderTest`,
+  `AiFlowInterpreterTest`, `ChatFlowsTest`; with Mongo: `ChatFlowRepositoryTest` (places on the board too), `ChatbotPipelineTest`
   (the real pipeline factory: taps and numbered lines, sessions, clients, notices, hand-overs, a refusing
   channel, the AI reading), `ChatbotRoutesTest`; `WhatsAppInteractiveTest` for the Graph payloads.
-- Browser: `scripts/chatbot-e2e/walkthrough.mjs` builds a flow by hand, tries it unsaved, saves it, folds and
-  expands its steps, and runs a richer one with signed WhatsApp webhooks; `scripts/persona-e2e/walkthrough.mjs` covers Persona →
-  Channels. Commands are in the repo `CLAUDE.md`.
+- Browser: `scripts/chatbot-e2e/walkthrough.mjs` builds a flow on the board by hand (cards opened beside it,
+  dots dragged onto cards, a card moved with undo and redo, a line dropped on the empty board, a line unlinked),
+  tries it unsaved while the board lights the way, saves it with its places, checks a refused save and Tidy up,
+  and runs a richer one with signed WhatsApp webhooks; a phone and a member's read-only board close it.
+  `scripts/persona-e2e/walkthrough.mjs` covers Persona → Channels. Commands are in the repo `CLAUDE.md`.
 - Not exercised against Meta: the interactive buttons and lists are checked against the documented
   payloads and the recorded request bodies, not a live WhatsApp number.

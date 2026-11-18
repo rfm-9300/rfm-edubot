@@ -1,13 +1,16 @@
 // Browser walkthrough of the Chatbot page against a running app, checking each step.
 //
 // It creates its own company and users through the backoffice API, then drives Chrome through the page's
-// empty state, building a flow by hand (keywords as tokens, a message with options that lead to new steps, a
-// question that keeps its answer, a client-creating action and a hand-over), trying it unsaved in the test
-// chat on WhatsApp and on the website (taps versus numbered lines), saving it, a refused save, a reload, and
-// the Persona → Channels pointer. It then installs a richer flow through the API (opening hours, a known
-// client, questions with checks, a client, a booking request and a team notice) and runs it with signed
-// WhatsApp webhooks, reading back what the bot stored, the client it created, the notice in the bell and a
-// hand-over that pauses the chat. Last: dark theme, a phone, and a member's read-only view.
+// empty state and builds a flow on the board by hand (keywords as tokens, a message with options that lead to
+// new steps, a question that keeps its answer, a client-creating action and a hand-over), opening cards beside
+// the board, linking them by dragging a card's dot onto another, moving cards with undo and redo, dropping a line
+// on the empty board for a new step and unlinking a line. It tries the flow unsaved in the test chat on WhatsApp
+// and on the website (taps versus numbered lines) while the board lights up the way the customer went, saves it
+// with its cards' places, checks a refused save, a reload, Tidy up and the Persona → Channels pointer. It then
+// installs a richer flow through the API (opening hours, a known client, questions with checks, a client, a
+// booking request and a team notice) and runs it with signed WhatsApp webhooks, reading back what the bot stored,
+// the client it created, the notice in the bell and a hand-over that pauses the chat. Last: dark theme, a phone,
+// and a member's read-only view.
 //
 // Run the app with a password for the backoffice (its Mongo and OpenRouter can be fakes: no flow here calls
 // the model), then:
@@ -191,6 +194,49 @@ const login = async ({ email, password }) => {
   await pause(1000);
 };
 
+// The board: step j of the first flow is card `#cb-node-0-j` (the start card `#cb-node-0-start`); a line is
+// `[data-edge="<step id>|<output>"]`, an output being `o:<n>` (an option), next, yes, no or fail.
+const card = (j, flow = 0) => `#cb-node-${flow}-${j}`;
+const stepId = j => page.$eval(card(j), el => el.dataset.node);
+/** Opens a card in the side panel, as a click on it does. */
+const openCard = async (sel, wait = 500) => { await page.waitForSelector(`${sel} .flow-node__head`, { timeout: 15000 }); await page.$eval(`${sel} .flow-node__head`, el => el.click()); await pause(wait); };
+const openSettings = () => openCard(card('start'));
+const sideTab = tab => click(`.chatbot-side__tabs [data-side-go="${tab}"]`, 500);
+const fitBoard = async () => { await page.$eval('[data-board-fit]', el => el.click()); await pause(300); };
+const centerOf = sel => page.$eval(sel, el => { const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; });
+const edges = () => page.$$eval('[data-edge]', gs => gs.map(g => g.dataset.edge));
+const unsaved = () => page.$eval('[data-chatbot-savebar]', el => el.classList.contains('is-dirty'));
+const placeOf = sel => page.$eval(sel, el => el.style.transform);
+/** Presses at [from], moves to [to] in small steps and lets go: a real drag, as a mouse makes it. */
+const drag = async (from, to, steps = 14) => {
+  await page.mouse.move(from.x, from.y);
+  await page.mouse.down();
+  for (let i = 1; i <= steps; i++) await page.mouse.move(from.x + (to.x - from.x) * i / steps, from.y + (to.y - from.y) * i / steps);
+  await page.mouse.up();
+  await pause(500);
+};
+/** A point of the board with nothing on it, clear of its toolbars. */
+const emptySpot = () => page.$eval('[data-board]', canvas => {
+  const r = canvas.getBoundingClientRect();
+  for (let y = r.bottom - 90; y > r.top + 70; y -= 24) {
+    for (let x = r.right - 60; x > r.left + 60; x -= 24) {
+      const under = document.elementFromPoint(x, y);
+      if (under === canvas) return { x, y };
+    }
+  }
+  return null;
+});
+/** The middle of a line, on screen. */
+const lineMiddle = id => page.$eval(`[data-edge="${id}"] .flow-edge__line`, p => {
+  const at = p.getPointAtLength(p.getTotalLength() / 2);
+  const m = p.getScreenCTM();
+  return { x: at.x * m.a + m.e, y: at.y * m.d + m.f };
+});
+const lit = () => page.evaluate(() => ({
+  current: [...document.querySelectorAll('.flow-node.is-current')].map(e => e.id),
+  trail: [...document.querySelectorAll('.flow-edge.is-trail')].map(e => e.dataset.edge),
+}));
+
 try {
   note('1. The Chatbot page, empty');
   await login(company.admin);
@@ -198,13 +244,15 @@ try {
   await openChatbot();
   expect((await text('.view__title, h1')).includes('Chatbot'), 'the page is called Chatbot');
   expect((await text('.empty__title')) === 'No flows yet', 'a new company has no flows');
-  expect((await text('.persona-studio__main')).includes('Anything no flow answers goes to the AI'), 'the intro says what answers what is left');
+  expect((await text('.chatbot-side')).includes('Anything no flow answers goes to the AI'), 'the side panel says how the chatbot works and what answers what is left');
   expect(await page.$eval('[data-chatbot-savebar]', el => !el.classList.contains('is-dirty')), 'the save bar rests with nothing unsaved');
   await shot('empty');
 
-  note('2. Building a flow by hand');
+  note('2. Building a flow on the board');
   await click('[data-flow-add]', 800);
-  expect(await page.evaluate(() => document.activeElement?.id) === 'cb-0-name', 'Add flow opens the flow with the cursor in its name');
+  expect(await page.evaluate(() => document.activeElement?.id) === 'cb-0-name', 'Add flow opens the flow’s settings with the cursor in its name');
+  expect((await page.$$('[data-node]')).length === 2, 'a new flow is a start card and one message on the board');
+  expect((await text(card('start'))).includes('No keywords yet') && (await text(card('start'))).includes('2 to fix'), 'the start card says what the flow still needs');
   await type('#cb-0-name', 'Appointments');
   await type('#cb-0-keywords', 'book');
   await page.keyboard.press('Enter');
@@ -213,57 +261,121 @@ try {
   await page.keyboard.press('Enter');
   await pause(300);
   expect((await page.$$eval('[data-tokens="0"] .token__text', ts => ts.map(t => t.innerText.trim()))).join(',') === 'book,agendar', 'keywords become tokens');
+  expect((await page.$$eval(`${card('start')} .flow-node__chip`, cs => cs.map(c => c.innerText.trim()))).join(',') === 'book,agendar', 'and show on the start card');
   await type('#cb-0-keywords', 'BOOK!');
   await page.keyboard.press('Enter');
   await pause(300);
   expect((await text('[data-kw-notes="0"]')).includes('already a keyword'), 'a repeated keyword is refused with a note');
   await click('#cb-0-enabled', 300);
-  expect((await text('[data-flow-pills="0"]')) === 'On', 'turning the flow on shows in its head at once');
+  expect(await page.$eval('[data-flow-pills="0"]', el => el.classList.contains('is-on')), 'turning the flow on shows on its tab at once');
   expect((await text('[data-chatbot-status]')).includes('Unsaved changes'), 'the save bar says there are unsaved changes');
   expect(await page.$eval('#cb-0-retries', el => el.value) === '1' && await page.$eval('#cb-0-after', el => el.value) === 'HAND_OVER', 'a new flow asks once more, then hands over');
 
+  await openCard(card(0));
+  expect(await page.$eval('.chatbot-inspector', el => el.dataset.step) === '0:0', 'clicking a card opens its step beside the board');
   await type('#cb-0-0-text', 'Hi! What do you need?');
+  expect((await text(`${card(0)} .flow-node__text`)) === 'Hi! What do you need?', 'the card shows the text as it is typed');
   await click('[data-option-add="0:0"]', 400);
   await type('#cb-0-0-o0', 'Nails');
   await choose('#cb-0-0 [data-option="0:0:0"] select', 'New step');
-  expect(await page.evaluate(() => document.activeElement?.id) === 'cb-0-1-text', 'choosing “New step…” adds a step and puts the cursor in its text');
+  expect(await page.evaluate(() => document.activeElement?.id) === 'cb-0-1-text', 'choosing “New step…” adds a step, opens it and puts the cursor in its text');
+  const [first, second] = [await stepId(0), await stepId(1)];
+  expect((await edges()).includes(`${first}|o:0`), 'and the board draws the line from the option to it');
   await choose('#cb-0-1-kind', 'Question');
   await type('#cb-0-1-text', 'What is your name?');
   await type('#cb-0-1-key', 'name');
   await page.keyboard.press('Tab');
   await pause(600);
   expect(await page.$eval('#cb-0-1-expect', el => el.value) === 'NAME', 'a question named “name” expects a name');
+  await openCard(card(0));
   await click('[data-option-add="0:0"]', 400);
   await type('#cb-0-0-o1', 'Talk to a person');
   await choose('#cb-0-0 [data-option="0:0:1"] select', 'New step');
   await choose('#cb-0-2-kind', 'Hand over');
   await type('#cb-0-2-text', 'A colleague will reply shortly.');
-  await choose('[data-step-add="0"]', 'Action');
+  await click('[data-board-add]', 400);
+  expect((await page.$$eval('[data-board-menu] [data-menu-kind]', ms => ms.map(m => m.dataset.menuKind))).join(',') === 'MESSAGE,ASK,CONDITION,ACTION,HANDOFF', 'Add a step offers every kind of step');
+  await click('[data-board-menu] [data-menu-kind="ACTION"]', 700);
+  expect(await page.$eval('.chatbot-inspector', el => el.dataset.step) === '0:3', 'and opens the new one');
   await choose('#cb-0-3-action', 'Create a client');
   await type('#cb-0-3-text', 'Thanks {name}, you are on our list!');
-  await choose('#cb-0-1-next', '4 · Thanks');
-  expect((await text('[data-flow-summary="0"]')).includes('4 steps') && (await text('[data-flow-summary="0"]')).includes('WhatsApp'), 'the head sums the flow up: keywords, steps, channels');
-  await page.$eval('#cb-0-ai', el => el.scrollIntoView({ block: 'center' }));
-  await pause(300);
-  await shot('flow-settings');
+  const action = await stepId(3);
+  await fitBoard();
+  await drag(await centerOf(`${card(1)} [data-port="next"]`), await centerOf(`${card(3)} .flow-node__head`));
+  expect((await edges()).includes(`${second}|next`), 'dragging the question’s dot onto the action’s card links them');
+  await openCard(card(1));
+  expect((await page.$eval('#cb-0-1-next', el => el.selectedOptions[0]?.textContent || '')).startsWith('4 · Thanks'), 'and the question’s “Then go to” says so');
+  await openSettings();
+  expect((await text('[data-flow-summary="0"]')).includes('4 steps') && (await text('[data-flow-summary="0"]')).includes('WhatsApp'), 'the flow’s settings sum it up: keywords, steps, channels');
   await shot('built');
 
-  note('3. Trying it unsaved on WhatsApp and on the website');
+  note('2b. Arranging the board');
+  await fitBoard();
+  const handover = card(2);
+  const before = await placeOf(handover);
+  const head = await centerOf(`${handover} .flow-node__head`);
+  await drag(head, { x: head.x + 40, y: head.y + 90 });
+  expect((await placeOf(handover)) !== before, 'dragging a card moves it');
+  await click('[data-board-undo]', 500);
+  expect((await placeOf(handover)) === before, 'undo puts it back');
+  await click('[data-board-redo]', 500);
+  const moved = await placeOf(handover);
+  expect(moved !== before, 'redo moves it again');
+  await fitBoard();
+  const spot = await emptySpot();
+  await drag(await centerOf(`${card(3)} [data-port="fail"]`), spot);
+  expect(await page.$eval('[data-board-menu]', m => !m.hidden && m.textContent.includes('Lead to a new step')), 'a line dropped on the empty board asks for a new step');
+  await shot('drop-menu');
+  await click('[data-board-menu] [data-menu-kind="MESSAGE"]', 700);
+  const sorry = await stepId(4);
+  expect((await edges()).includes(`${action}|fail`) && await page.$eval(`[data-edge="${action}|fail"]`, (g, id) => g.ownerDocument.querySelector(`[data-node="${id}"]`) != null, sorry), 'and the new step is linked from the dot the line came from');
+  expect(await page.$eval('.chatbot-inspector', el => el.dataset.step) === '0:4', 'the new step opens beside the board');
+  await type('#cb-0-4-text', 'Sorry, we could not save your details.');
+  await fitBoard();
+  const failLine = `${action}|fail`;
+  const middle = await lineMiddle(failLine);
+  await page.mouse.click(middle.x, middle.y);
+  await pause(400);
+  expect(await page.$eval(`[data-edge="${failLine}"]`, g => g.classList.contains('is-selected')) && await page.$eval('[data-edge-remove]', b => !b.hidden), 'clicking a line picks it and offers to unlink it');
+  await click('[data-edge-remove]', 500);
+  expect(!(await edges()).includes(failLine), 'unlinking removes the line');
+  expect(await page.$eval(`${card(3)} [data-port="fail"]`, p => !p.classList.contains('is-linked')), 'and empties its dot');
+  await page.$eval('[data-board]', el => el.focus());
+  await page.keyboard.down('Control');
+  await page.keyboard.press('z');
+  await page.keyboard.up('Control');
+  await pause(500);
+  expect((await edges()).includes(failLine), 'Ctrl+Z on the board brings the line back');
+  await shot('arranged');
+
+  note('3. Trying it unsaved on WhatsApp and on the website, while the board follows');
+  await sideTab('try');
   expect(await page.$eval('#chatbot-test-draft', el => !el.hidden), 'the test chat says it uses unsaved changes');
   let log = await chat('I want to book');
   expect(log.includes('Hi! What do you need?'), 'a keyword starts the flow in the test chat');
+  let way = await lit();
+  expect(way.current.join() === 'cb-node-0-0' && way.trail.includes('__start|start'), 'the board lights the start and the message the customer waits at');
+  expect((await text(card(0))).includes('The customer is here'), 'and says so on its card');
   expect((await page.$$eval('#chatbot-chat-log .chip', cs => cs.map(c => c.innerText.trim()))).join(',') === 'Nails,Talk to a person', 'WhatsApp gets its two options as taps');
   await click('#chatbot-chat-log .chip', 1500);
   log = await bubbles();
   expect(log.includes('Nails') && log.includes('What is your name?'), 'tapping an option moves the flow on');
+  way = await lit();
+  expect(way.current.join() === 'cb-node-0-1' && way.trail.includes(`${first}|o:0`), 'and the light follows the option taken');
   log = await chat('Maria Costa', 2200);
   expect(log.some(l => l.includes('Thanks Maria Costa, you are on our list!')), 'the answer is filled into the next message');
   expect(log.some(l => l.startsWith('Would create a client: Maria Costa')), 'the test chat says what the action would do, without doing it');
   expect(log.includes('The flow ended.'), 'and that the flow ended');
+  expect((await lit()).trail.includes(`${second}|next`), 'the board shows the whole way, to the action');
   expect((await api('GET', '/app/api/crm/clients')).length === 0, 'trying a flow created no client');
   await shot('test-chat-whatsapp');
   await click('#chatbot-chat-clear', 300);
+  way = await lit();
+  expect(!way.current.length && !way.trail.length, 'Start over clears the way lit on the board');
+  await sideTab('edit');
+  await openSettings();
   await click('#cb-0 [data-channel="WEB"]', 300);
+  await sideTab('try');
   await page.select('#chatbot-channel', 'WEB');
   await pause(300);
   log = await chat('book');
@@ -281,11 +393,13 @@ try {
   await click('#chatbot-chat-clear', 300);
 
   note('4. Saving, and a save the server refuses');
+  await sideTab('edit');
+  await openSettings();
   await click('[data-kw-remove="0:1"]', 300);
   await click('[data-kw-remove="0:0"]', 300);
   await click('[data-chatbot-save]', 900);
   expect((await toast()).includes('add at least one keyword'), `a flow with no keyword is refused, saying so (“${await toast()}”)`);
-  expect(await page.evaluate(() => document.activeElement?.closest('.flow-menu') != null), 'and the cursor goes to the flow');
+  expect(await page.evaluate(() => document.activeElement?.id) === 'cb-0-keywords', 'and the cursor goes to the flow’s keywords');
   await type('#cb-0-keywords', 'book');
   await page.keyboard.press('Enter');
   await pause(300);
@@ -293,48 +407,32 @@ try {
   expect((await toast()) === 'Saved', 'saving works once it is fixed');
   expect(await page.$eval('[data-chatbot-savebar]', el => !el.classList.contains('is-dirty')), 'and the save bar rests again');
   const saved = await api('GET', '/app/api/chatbot/flows');
-  expect(saved.flows.length === 1 && saved.flows[0].steps.length === 4 && saved.flows[0].keywords.join(',') === 'book', 'the flow is stored with its four steps');
+  expect(saved.flows.length === 1 && saved.flows[0].steps.length === 5 && saved.flows[0].keywords.join(',') === 'book', 'the flow is stored with its five steps');
+  expect(Number.isFinite(saved.flows[0].startX) && saved.flows[0].steps.every(s => Number.isFinite(s.x) && Number.isFinite(s.y)), 'with where each card sits on the board');
   await page.reload({ waitUntil: 'networkidle2' });
   await page.waitForSelector('.nav__item[data-tab="chatbot"]');
   await pause(1500);
-  expect((await text('[data-flow-title="0"]')) === 'Appointments' && (await text('[data-flow-pills="0"]')) === 'On', 'after a reload the page is on Chatbot and shows the saved flow');
+  expect((await text('[data-flow-title="0"]')) === 'Appointments' && await page.$eval('[data-flow-pills="0"]', el => el.classList.contains('is-on')), 'after a reload the page is on Chatbot and shows the saved flow');
+  expect((await placeOf(handover)) === moved, 'with its cards where they were put');
   await shot('saved');
 
-  note('4b. Folding and expanding the steps of a flow');
-  const stepFolded = j => page.$eval(`#cb-0-${j}`, el => el.classList.contains('is-folded'));
-  const nothingUnsaved = () => page.$eval('[data-chatbot-savebar]', el => !el.classList.contains('is-dirty'));
-  expect(await page.$$eval('.flow__card-toggle', bs => bs.length === 4 && bs.every(b => b.getAttribute('aria-expanded') === 'true')), 'every step has a fold button and starts open');
-  expect(await page.$eval('[data-step-expand-all="0"]', el => el.disabled) && !(await page.$eval('[data-step-fold-all="0"]', el => el.disabled)), 'Expand all waits until something is folded');
-  await click('#cb-0-1-toggle', 500);
-  expect(await stepFolded(1), 'the fold button folds a step');
-  expect(await page.$eval('#cb-0-1-body', el => el.hidden) && await page.$eval('#cb-0-1-toggle', el => el.getAttribute('aria-expanded') === 'false'), 'its fields hide and the button says so');
-  expect((await text('#cb-0-1 [data-step-preview]')).includes('What is your name?'), 'a folded step shows the start of its text');
-  expect(!(await page.$eval('#cb-0-0-body', el => el.hidden)), 'the other steps stay open');
-  expect(await nothingUnsaved(), 'folding is not an edit: nothing is unsaved');
-  await click('#cb-0-1-toggle', 500);
-  expect(!(await stepFolded(1)) && !(await page.$eval('#cb-0-1-body', el => el.hidden)), 'the same button opens it again');
-  await click('[data-step-fold-all="0"]', 500);
-  expect((await page.$$eval('#chatbot-form .flow__card.is-folded', cs => cs.length)) === 4, 'Fold all folds every step of the flow');
-  const optionsPreview = await text('#cb-0-0 [data-step-preview]');
-  expect(optionsPreview.includes('Hi! What do you need?') && optionsPreview.includes('2 options'), 'a message with options says how many in its preview');
-  expect((await text('#cb-0-3 [data-step-preview]')).includes('Create a client'), 'an action says what it does');
-  expect(await page.$eval('[data-step-fold-all="0"]', el => el.disabled) && !(await page.$eval('[data-step-expand-all="0"]', el => el.disabled)), 'Fold all waits until something is open');
-  await shot('steps-folded');
-  await click('#cb-0-2-toggle', 500);
-  expect(!(await stepFolded(2)) && await stepFolded(1), 'one folded step opens on its own');
-  await click('[data-step-expand-all="0"]', 500);
-  expect((await page.$$eval('#chatbot-form .flow__card.is-folded', cs => cs.length)) === 0, 'Expand all opens them again');
-  expect(await nothingUnsaved(), 'still nothing unsaved');
-  // A step folded after a bad edit opens again when the server refuses it, with the cursor in it.
+  note('4b. A refused save opens the step it names; Tidy up');
+  await openCard(card(1));
   await page.$eval('#cb-0-1-text', el => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
-  await click('#cb-0-1-toggle', 400);
-  expect(await stepFolded(1) && !(await nothingUnsaved()), 'a step can be folded with an unsaved edit in it');
+  await pause(300);
+  expect((await text(`${card(1)} .flow-node__flag`)) === '1 to fix' && (await text('[data-step-issues]')).includes('Write the message.'), 'the board flags a step that can’t be saved before trying');
+  await openSettings();
   await click('[data-chatbot-save]', 1000);
   expect((await toast()).includes('step 2'), `the refused save names step 2 (“${await toast()}”)`);
-  expect(!(await stepFolded(1)) && await page.evaluate(() => document.activeElement?.closest('#cb-0-1') != null), 'and opens that step with the cursor in it');
+  expect(await page.evaluate(() => document.activeElement?.closest('#cb-0-1') != null), 'and opens that step with the cursor in it');
   await click('[data-chatbot-discard]', 300);
   await confirm();
-  expect(await nothingUnsaved() && (await page.$eval('#cb-0-1-text', el => el.value)) === 'What is your name?', 'discarding brings the text back');
+  await openCard(card(1));
+  expect(!(await unsaved()) && (await page.$eval('#cb-0-1-text', el => el.value)) === 'What is your name?', 'discarding brings the text back');
+  await click('[data-board-tidy]', 600);
+  expect(await unsaved() && (await placeOf(handover)) !== moved, 'Tidy up lays the cards out again, a change to save');
+  await click('[data-board-undo]', 500);
+  expect(!(await unsaved()) && (await placeOf(handover)) === moved, 'and undo puts them back');
 
   note('5. Persona → Channels points at the chatbot and leaves the flows alone');
   await click('.nav__item[data-tab="persona"]', 1500);
@@ -395,8 +493,10 @@ try {
   expect(handed.convo && handed.convo.autoReplyPausedBy === 'bot:handoff', 'and pauses the chat for the team');
   await openChatbot();
   await pause(800);
-  expect((await text('[data-flow-summary="1"]')).includes('Sent'), 'the flow’s head counts what it sent in the last 30 days');
-  await click('[data-flow-toggle="1"]', 600);
+  await click('[data-flow-pick="1"]', 800);
+  expect((await text('[data-flow-summary="1"]')).includes('Sent'), 'the flow’s settings count what it sent in the last 30 days');
+  expect((await text('[data-node="menu"] .flow-node__stat')).startsWith('Sent'), 'and each card what its step sent');
+  expect((await page.$$('[data-node]')).length === 12, 'a flow made through the API, with no places, is laid out by the board: its start and its eleven steps');
   await shot('rich-flow');
 
   note('6b. A campaign flow: choices kept as answers');
@@ -436,18 +536,28 @@ try {
   await page.reload({ waitUntil: 'networkidle2' });
   await pause(1500);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'on a phone the page doesn’t scroll sideways');
-  await click('[data-flow-toggle="0"]', 600);
+  await shot('phone-board');
+  await openCard(card(0), 700);
+  const shows = sel => page.$eval(sel, el => getComputedStyle(el).display !== 'none');
+  expect(!(await shows('.chatbot-board')) && await shows('.chatbot-side'), 'a card tapped on a phone opens over the board');
   await shot('phone');
-  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'an open flow fits too');
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), 'and fits too');
+  await click('[data-side-close]', 700);
+  expect(await shows('.chatbot-board') && !(await shows('.chatbot-side')), '“Board” goes back to the board');
   await page.setViewport({ width: 1600, height: 1100, isMobile: false, hasTouch: false });
 
   note('8. A member only reads');
   await page.evaluate(() => { localStorage.removeItem('dashboardToken'); });
   await login(company.member);
   await openChatbot();
-  expect(!(await page.$('[data-chatbot-savebar]')) && !(await page.$('[data-flow-add]')), 'a member sees no save bar and no Add flow');
-  await click('[data-flow-toggle="0"]', 600);
-  expect(await page.$$eval('.flow-menu__body input:not([type=checkbox]), .flow-menu__body textarea, .flow-menu__body select', els => els.length > 0 && els.every(e => e.disabled)), 'every field in an open flow is read-only');
+  expect(!(await page.$('[data-chatbot-savebar]')) && !(await page.$('[data-flow-add]')) && !(await page.$('[data-board-add]')), 'a member sees no save bar, no Add flow and no Add a step');
+  await fitBoard();
+  const where = await placeOf(card(0));
+  const grip = await centerOf(`${card(0)} .flow-node__head`);
+  await drag(grip, { x: grip.x + 60, y: grip.y + 60 });
+  expect((await placeOf(card(0))) === where, 'cards stay where they are when a member drags them (the board pans instead)');
+  await openCard(card(0));
+  expect(await page.$$eval('.chatbot-inspector input:not([type=checkbox]), .chatbot-inspector textarea, .chatbot-inspector select', els => els.length > 0 && els.every(e => e.disabled)), 'a step opens read-only');
   await shot('member');
   expect(errors.length === 0, `no page errors (${errors.join(' | ').slice(0, 300)})`);
 } catch (err) {

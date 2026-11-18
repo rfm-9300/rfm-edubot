@@ -193,6 +193,8 @@ data class ChatFlow(
     val handoverText: String? = null,
     /** How many times a step asks again after a reply it couldn't read, before [afterMisses] applies. Flows saved before it read as 0. */
     val retries: Int = 1,
+    /** Where the flow's start card sits on the Chatbot page's board, like [FlowStep.at]. */
+    val startAt: BoardPoint? = null,
 ) {
     fun step(id: String): FlowStep? = steps.firstOrNull { it.id == id }
 
@@ -294,7 +296,7 @@ data class ChatFlow(
  * - [StepKind.CONDITION]: the [check] decides between [whenTrue] and [whenFalse].
  * - [StepKind.ACTION]: does [action], sends [text] when it worked, goes to [next], or to [failNext] when it didn't.
  * - [StepKind.HANDOFF]: sends [text] and passes the chat to a person.
- * A null [next] ends the flow.
+ * A null [next] ends the flow. [at] is only where the Chatbot page draws it.
  */
 data class FlowStep(
     val id: String,
@@ -319,7 +321,21 @@ data class FlowStep(
     /** [ActionKind.CREATE_BOOKING]: the bookable service, or null to take it from the answer kept under [key]. */
     val serviceId: String? = null,
     val failNext: String? = null,
+    /** Where the step's card sits on the Chatbot page's board. Null until someone arranges the flow by hand: the board lays it out itself. Customers never see it. */
+    val at: BoardPoint? = null,
 )
+
+/** A place on the Chatbot page's board, in its pixels at 100%: the top left corner of a card. */
+data class BoardPoint(val x: Int, val y: Int) {
+    companion object {
+        /** Farther than anyone drags; a value past it is pulled back, so a bad request can't store a huge number. */
+        const val LIMIT = 100_000
+
+        /** The point, or null unless both coordinates are given. */
+        fun of(x: Int?, y: Int?): BoardPoint? =
+            if (x == null || y == null) null else BoardPoint(x.coerceIn(-LIMIT, LIMIT), y.coerceIn(-LIMIT, LIMIT))
+    }
+}
 
 /**
  * An option under a step's message: choosing it moves the customer to step [next]. A customer chooses by tapping,

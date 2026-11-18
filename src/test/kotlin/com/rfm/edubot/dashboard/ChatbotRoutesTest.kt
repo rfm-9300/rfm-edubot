@@ -7,6 +7,7 @@ import com.rfm.edubot.config.AppConfig
 import com.rfm.edubot.config.RuntimeConfig
 import com.rfm.edubot.dashboard.model.DashboardUser
 import com.rfm.edubot.dashboard.model.DashboardUserRole
+import com.rfm.edubot.flows.BoardPoint
 import com.rfm.edubot.flows.ChatFlow
 import com.rfm.edubot.flows.ChatFlowLimits
 import com.rfm.edubot.flows.ChatFlowRepository
@@ -186,7 +187,7 @@ class ChatbotRoutesTest {
     private fun step(
         id: String, text: String = "", kind: String = "MESSAGE", options: List<JsonObject> = emptyList(), next: String = "", key: String = "", expect: String = "TEXT",
         check: String = "HOURS", hours: List<JsonObject> = emptyList(), whenTrue: String = "", whenFalse: String = "", action: String = "NOTIFY_TEAM", failNext: String = "",
-        show: String = "AUTO", retryText: String = "",
+        show: String = "AUTO", retryText: String = "", at: Pair<Int, Int>? = null,
     ) = buildJsonObject {
         put("id", id); put("kind", kind); put("text", text)
         putJsonArray("options") { options.forEach { add(it) } }
@@ -194,18 +195,20 @@ class ChatbotRoutesTest {
         put("check", check)
         putJsonArray("hours") { hours.forEach { add(it) } }
         put("answerKey", ""); put("answerIs", ""); put("whenTrue", whenTrue); put("whenFalse", whenFalse); put("action", action); put("serviceId", ""); put("failNext", failNext)
+        if (at != null) { put("x", at.first); put("y", at.second) }
     }
 
     private fun flow(
         id: String = "marcar", name: String = "Marcações", keywords: List<String> = listOf("Olá"), channels: List<String> = listOf("WHATSAPP", "WEB"),
         steps: List<JsonObject> = listOf(step("menu", "Qual serviço?", options = listOf(option("Unhas", "fim", "manicure"))), step("fim", "Fale connosco")),
-        aiReads: Boolean = false,
+        aiReads: Boolean = false, startAt: Pair<Int, Int>? = null,
     ) = buildJsonObject {
         put("id", id); put("name", name); put("enabled", true)
         putJsonArray("channels") { channels.forEach { add(it) } }
         putJsonArray("keywords") { keywords.forEach { add(it) } }
         putJsonArray("steps") { steps.forEach { add(it) } }
         put("aiReads", aiReads); put("afterMisses", "HAND_OVER"); put("handoverText", "")
+        if (startAt != null) { put("startX", startAt.first); put("startY", startAt.second) }
     }
 
     private fun flows(vararg flows: JsonObject) = buildJsonObject { putJsonArray("flows") { flows.forEach { add(it) } } }
@@ -273,6 +276,24 @@ class ChatbotRoutesTest {
         val again = send("PUT", "/app/api/persona/channels", admin, buildJsonObject { putJsonArray("teamOnlyChannels") { } })
         assertEquals(HttpStatusCode.OK, again.status)
         assertEquals(1, ChatFlowRepository(mongo, c.id).load()!!.flows.size, "saving the channels leaves the flows")
+    }
+
+    @Test
+    fun `where the cards sit on the board is saved with the flows, and a flow nobody arranged has no places`() = chatbotTest {
+        val c = company()
+        val token = token(c.admin.email)
+        val unplaced = send("PUT", "/app/api/chatbot/flows", token, flows(flow())).obj().array("flows").single().jsonObject
+        assertNull(unplaced["startX"], "left out while the board lays the flow out itself")
+        assertNull(unplaced.array("steps")[0].jsonObject["x"])
+
+        val arranged = flow(
+            startAt = 0 to 48,
+            steps = listOf(step("menu", "Qual serviço?", options = listOf(option("Unhas", "fim")), at = 320 to -40), step("fim", "Fale connosco", at = 9_000_000 to 16)),
+        )
+        val saved = send("PUT", "/app/api/chatbot/flows", token, flows(arranged)).obj().array("flows").single().jsonObject
+        assertEquals(0 to 48, saved.int("startX") to saved.int("startY"))
+        assertEquals(listOf(320 to -40, BoardPoint.LIMIT to 16), saved.array("steps").map { it.jsonObject.int("x") to it.jsonObject.int("y") }, "a place past the board's edge is pulled back")
+        assertEquals(BoardPoint(320, -40), ChatFlowRepository(mongo, c.id).find()!!.flows.single().steps.first().at)
     }
 
     @Test
@@ -352,10 +373,12 @@ class ChatbotRoutesTest {
         assertEquals(listOf("Unhas" to "flow:marcar:fim:0"), message.array("replies").map { it.jsonObject.text("title") to it.jsonObject.text("payload") }, "WhatsApp gets taps")
         val state = opened.obj("state")
         assertEquals("menu", state.text("stepId"))
+        assertEquals("marcar" to listOf("menu"), opened.text("flowId") to opened.strings("path"), "the board lights up the way the customer took")
 
         val typed = send("POST", "/app/api/chatbot/test", token, turn("manicure", state = state)).obj()
         assertEquals("Fale connosco", typed.array("messages").single().jsonObject.text("text"))
         assertNull(typed["state"]!!.takeUnless { it.toString() == "null" }, "the flow ended")
+        assertEquals(listOf("fim"), typed.strings("path"))
 
         val web = send("POST", "/app/api/chatbot/test", token, turn("olá", channel = "WEB")).obj()
         assertEquals("Qual serviço?\n\n1. Unhas", web.array("messages").single().jsonObject.text("text"), "the website has no taps")
