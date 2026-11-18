@@ -3,10 +3,12 @@ package com.rfm.edubot.dashboard.crm
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.testing.DashboardApi
+import com.rfm.edubot.testing.Reply
 import com.rfm.edubot.testing.TestCompany
 import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
 import io.ktor.http.HttpStatusCode
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.addJsonObject
 import kotlinx.serialization.json.jsonObject
@@ -19,6 +21,7 @@ import org.junit.jupiter.api.BeforeAll
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertNull
 
 /** `/app/api/crm/payments` over HTTP: its gate and the payee's, isolation between companies, error codes. */
 class PaymentApiTest {
@@ -81,6 +84,69 @@ class PaymentApiTest {
         assertEquals("employee not found", b.post(base) { bill(employeeId = employeeId) }.error)
         assertFalse(id in b.get(base).ids())
         assertEquals("PENDING", a.get("$base/$id").text("status"))
+    }
+
+    private fun Reply.rowsByDue() = array.map { it.jsonObject }.sortedBy { it["dueDate"]!!.jsonPrimitive.content }
+
+    private fun JsonObject.field(name: String) = this[name]!!.jsonPrimitive.content
+
+    @Test
+    fun `a repeating bill makes one payment per date, each with its own number and its own life`() = dashboardApiTest(mongo) {
+        val a = company()
+        val supplierId = supplier(a)
+        val first = a.post(base) { bill(supplierId, due = "2026-01-31"); put("repeatEvery", "monthly"); put("repeatTimes", 3) }
+        assertEquals(HttpStatusCode.Created, first.status, first.toString())
+        assertEquals("1", first.text("seriesPosition"), "the answer is the first payment")
+        val rows = a.get(base).rowsByDue()
+        assertEquals(listOf("2026-01-31", "2026-02-28", "2026-03-31"), rows.map { it.field("dueDate") }, "the 31st falls on the 28th and goes back")
+        assertEquals(3, rows.map { it.field("number") }.toSet().size, "each payment has its own number")
+        assertEquals(1, rows.map { it.field("seriesId") }.toSet().size, "they share a series")
+        assertEquals(listOf("1", "2", "3"), rows.map { it.field("seriesPosition") })
+        assertEquals(setOf("3"), rows.map { it.field("seriesSize") }.toSet())
+        assertEquals(setOf("monthly"), rows.map { it.field("repeatEvery") }.toSet())
+        assertEquals(setOf("PENDING"), rows.map { it.field("status") }.toSet())
+
+        val second = rows[1].field("id")
+        assertEquals("PAID", a.patch("$base/$second/paid").text("status"))
+        assertEquals(listOf("PENDING", "PAID", "PENDING"), a.get(base).rowsByDue().map { it.field("status") }, "paying one leaves the others")
+        assertEquals("2", a.get("$base/$second").text("seriesPosition"))
+    }
+
+    @Test
+    fun `a payment without repeat fields, or with a blank one, is a single payment with no series`() = dashboardApiTest(mongo) {
+        val a = company()
+        val supplierId = supplier(a)
+        val one = a.post(base) { bill(supplierId) }
+        assertEquals(HttpStatusCode.Created, one.status)
+        assertNull(one.text("seriesId"))
+        val blank = a.post(base) { bill(supplierId); put("repeatEvery", ""); put("repeatTimes", 6) }
+        assertEquals(HttpStatusCode.Created, blank.status)
+        assertNull(blank.text("seriesId"))
+        assertEquals(2, a.get(base).array.size)
+    }
+
+    @Test
+    fun `a repeating bill needs a known frequency and between 2 and 24 payments, and makes none when refused`() = dashboardApiTest(mongo) {
+        val a = company()
+        val supplierId = supplier(a)
+        assertEquals("repeat every weekly, monthly, quarterly or yearly", a.post(base) { bill(supplierId); put("repeatEvery", "daily"); put("repeatTimes", 3) }.error)
+        val range = "repeat times between 2 and 24"
+        assertEquals(range, a.post(base) { bill(supplierId); put("repeatEvery", "monthly") }.error)
+        assertEquals(range, a.post(base) { bill(supplierId); put("repeatEvery", "monthly"); put("repeatTimes", 1) }.error)
+        assertEquals(range, a.post(base) { bill(supplierId); put("repeatEvery", "monthly"); put("repeatTimes", 25) }.error)
+        assertEquals(0, a.get(base).array.size)
+        assertEquals(HttpStatusCode.Created, a.post(base) { bill(supplierId); put("repeatEvery", "weekly"); put("repeatTimes", 24) }.status)
+        assertEquals(24, a.get(base).array.size)
+    }
+
+    @Test
+    fun `an employee can be paid on repeat too`() = dashboardApiTest(mongo) {
+        val a = company()
+        val employeeId = employee(a)
+        assertEquals(HttpStatusCode.Created, a.post(base) { bill(employeeId = employeeId); put("repeatEvery", "monthly"); put("repeatTimes", 2) }.status)
+        val rows = a.get(base).rowsByDue()
+        assertEquals(2, rows.size)
+        assertEquals(setOf("Rui Costa"), rows.map { it.field("employeeName") }.toSet())
     }
 
     @Test

@@ -1,10 +1,33 @@
 ---
-updated: 2026-11-10
+updated: 2026-11-18
 ---
 
 # Quotes, invoices, payments and PDFs
 
-Documents and money: quotes and invoices, installments and cancelling, payments to suppliers and employees, and the generated PDFs. The Serviços rows that invoices bill are in [catalog-services-bookings.md](catalog-services-bookings.md).
+Documents and money: quotes and invoices, installments and cancelling, payments to suppliers and employees (also repeating ones, and the month filter), and the generated PDFs. The Serviços rows that invoices bill are in [catalog-services-bookings.md](catalog-services-bookings.md).
+
+## Repeating payments and the month filter (2026-11-18)
+
+Rodrigo asked for a month filter on Payments and for payments that repeat. Decisions:
+
+- **A repeating bill is N ordinary payments made at once**, not a rule that makes the next one later. The form's
+  Repeat (weekly, monthly, every 3 months, yearly) and a count (2 to 24, the installments' cap) become
+  `repeatEvery` and `repeatTimes` on `POST /crm/payments`; `PaymentRepository.createRepeating` numbers each
+  `PAG-…`, writes them with `insertMany` and appends a `payment.created` per payment. Why upfront: nothing runs
+  in the background, and the next months show in the list and the month filter right away. The cost is that
+  a bill with no end can't be made (pick 24 and make more later) and that agents' `payment.created` triggers
+  fire once per payment. The answer is the first payment, so a caller expecting one payment still gets one.
+- **Each payment keeps its own life.** They share a `series` (`seriesId`, position, size, how often; flat
+  fields on the document, absent on older payments) that only labels them: paying, cancelling, deleting or
+  changing one touches no other. Nothing stops a series as a whole yet ("cancel the rest" was left out
+  because it wasn't asked for).
+- **Dates count from the first, not from the one before** (`PaymentRecurrence.dueDates`, with
+  `addMonthsKey` and `paymentDueDates` in the browser as its twins), so a bill due on the 31st falls on the
+  28th of February and goes back to the 31st in March. `PaymentRecurrenceTest` pins it.
+- **The month filter is client-side**, like the page's other filters: a `.sel` of All months and the months
+  payments fall due in (this month always there), ‹ › through that list, a This month chip, and the three
+  stats follow it. The list endpoint still caps at 200 payments, oldest due date first, so a company past
+  200 would not see its newest in the month filter either; raise or page it before that is a real case.
 
 ## Construction projects (2026-10-21)
 

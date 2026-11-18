@@ -1,6 +1,19 @@
 /* Payments (/app → Payments): what the company pays its suppliers and employees. The list, the payment
    form, and a payment's detail: marking it paid, the client and project an expense was for, cancelling and
-   deleting. */
+   deleting. A bill can repeat (weekly to yearly, 2 to 24 payments made at once as a series), and the list can be
+   narrowed to the payments due in one month. */
+
+// How often a bill can repeat and how many payments it makes: the server's PaymentRecurrence says the same.
+const REPEAT_EVERY = ['weekly', 'monthly', 'quarterly', 'yearly'];
+const REPEAT_MIN = 2;
+const REPEAT_MAX = 24;
+
+// The due dates of a bill that repeats. Each is counted from the first, as the server does, so one due on
+// the 31st falls on a short month's last day and goes back to the 31st after it.
+function paymentDueDates(first, every, times) {
+  const months = { monthly: 1, quarterly: 3, yearly: 12 }[every];
+  return Array.from({ length: times }, (_, n) => (every === 'weekly' ? addDayKey(first, n * 7) : addMonthsKey(first, n * months)));
+}
 
 // `opts.items`, `opts.dueDate` and `opts.notes` start it from a bill someone received, `opts.projectId` for a
 // project; `opts.onSaved(payment)` runs after it is created instead of showing the payments list.
@@ -43,6 +56,11 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       ${employeesOn ? employeeSelect(employees, presetEmployeeId || '') : ''}
       <div class="form__row"><label class="lbl" for="p-due">${escapeHTML(t.thDueDate)} <span class="req">●</span></label>
         <input class="inp inp--mono" id="p-due" type="date" required value="${due}" /></div>
+      <div class="form__row"><label class="lbl" for="p-repeat">${escapeHTML(t.repeat)}</label>
+        <select class="sel" id="p-repeat"><option value="">${escapeHTML(t.repeatNone)}</option>${REPEAT_EVERY.map(v => `<option value="${v}">${escapeHTML(t[`repeat_${v}`])}</option>`).join('')}</select></div>
+      <div class="form__row" id="p-times-row" hidden><label class="lbl" for="p-times">${escapeHTML(t.repeatTimes)}</label>
+        <input class="inp inp--mono" id="p-times" type="number" inputmode="numeric" min="${REPEAT_MIN}" max="${REPEAT_MAX}" step="1" value="12" /></div>
+      <p class="hint form__row--full" id="p-repeat-hint" aria-live="polite" hidden></p>
       ${clientsOn ? paymentClientSelect(clients, presetClient?.id || '') : ''}
       ${projectsOn ? paymentProjectSelect(opts.projectId || '') : ''}
       <div class="form__row form__row--full" id="payee-services" hidden></div>
@@ -120,6 +138,25 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     lines.recalc();
     renderServices();
   });
+  // A bill that repeats asks how many payments to make, and says when the first and the last fall due.
+  const repeatTimes = () => {
+    const raw = $('#p-times', form).value.trim();
+    const n = Number(raw);
+    return raw && Number.isInteger(n) && n >= REPEAT_MIN && n <= REPEAT_MAX ? n : 0;
+  };
+  const showRepeat = () => {
+    const every = $('#p-repeat', form).value;
+    const first = $('#p-due', form).value;
+    const n = repeatTimes();
+    const hint = $('#p-repeat-hint', form);
+    $('#p-times-row', form).hidden = !every;
+    hint.hidden = !every || !n || !first;
+    hint.textContent = hint.hidden ? '' : t.repeatHint({
+      n, every: t[`repeat_${every}`].toLocaleLowerCase(uiLocale()),
+      first: fmtDay(first), last: fmtDay(paymentDueDates(first, every, n).at(-1)),
+    });
+  };
+  ['#p-repeat', '#p-times', '#p-due'].forEach(sel => $(sel, form).addEventListener(sel === '#p-repeat' ? 'change' : 'input', showRepeat));
   form.addEventListener('submit', async e => {
     e.preventDefault();
     const dueDate = $('#p-due', form).value;
@@ -129,6 +166,9 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       if (!employeeId) return toast(t.chooseEmployee);
     } else if (!supplierId) return toast(t.chooseSupplier);
     if (!dueDate) return toast(t.enterDueDate);
+    const every = $('#p-repeat', form).value;
+    const times = every ? repeatTimes() : 0;
+    if (every && !times) return toast(t.repeatTimesInvalid({ min: REPEAT_MIN, max: REPEAT_MAX }));
     let items;
     if (payee === 'employee') {
       const amount = Number($('#p-amount', form).value || 0);
@@ -143,26 +183,35 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
     btn.disabled = true;
     const clientId = $('#p-client', form)?.value || null;
     const projectId = $('#p-project', form)?.value || null;
-    const body = payee === 'employee'
-      ? { employeeId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId, projectId }
-      : { supplierId, items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId, projectId };
+    const body = {
+      ...(payee === 'employee' ? { employeeId } : { supplierId }),
+      items, dueDate, notes: $('#p-notes', form).value.trim() || null, clientId, projectId,
+      ...(every && { repeatEvery: every, repeatTimes: times }),
+    };
+    const created = times > 1 ? t.createdMany({ n: times }) : t.created;
     try {
       const saved = await api('/app/api/crm/payments', { method: 'POST', body: JSON.stringify(body) });
       closeDrawer();
-      if (opts.onSaved) { toast(t.created); return opts.onSaved(saved); }
+      if (opts.onSaved) { toast(created); return opts.onSaved(saved); }
       await loadModule('payments');
       render();
-      toast(t.created);
+      toast(created);
     } catch { btn.disabled = false; toast(t.saveFailed); }
   });
   openDrawer(t.formTitle, form, true);
+}
+
+// "3 of 12 · every month" for a payment made as one of a repeating bill.
+function paymentRepeatText(p) {
+  const t = CRM.payments;
+  return t.repeatDetail({ n: p.seriesPosition, total: p.seriesSize, every: (t[`repeat_${p.repeatEvery}`] || '').toLocaleLowerCase(uiLocale()) });
 }
 
 function paymentColumns() {
   const t = CRM.payments;
   const canMarkPaid = p => p.status === 'PENDING' || p.status === 'OVERDUE';
   return [
-    { id: 'number', label: t.thNumber, cell: p => `<td class="id">${escapeHTML(p.number)}</td>` },
+    { id: 'number', label: t.thNumber, cell: p => `<td class="id">${escapeHTML(p.number)}${p.seriesId ? ` <span class="muted" title="${escapeHTML(paymentRepeatText(p))}">↻ ${p.seriesPosition}/${p.seriesSize}</span>` : ''}</td>` },
     { id: 'payee', label: t.thPayee, cell: p => `<td class="name">${escapeHTML(payeeName(p))}${p.clientName ? ` <span class="muted">· ${escapeHTML(p.clientName)}</span>` : ''}</td>` },
     { id: 'status', label: t.thStatus, cell: p => `<td>${paymentPill(p.status)}</td>` },
     ...tagsColumnIfUsed('payments'),
@@ -185,7 +234,15 @@ function renderPayments(root) {
   }
   if (state.filterPaymentSupplier && !names.has(state.filterPaymentSupplier)) state.filterPaymentSupplier = '';
   const supplierId = state.filterPaymentSupplier || '';
-  const scoped = (supplierId ? all.filter(p => payeeId(p) === supplierId) : all).filter(p => matchesTagFilter('payments', p.id));
+  // The months payments fall due in, with this one always there, so "this month" is one tap away.
+  const nowMonth = currentPeriodKey('month');
+  const months = [...new Set([...all.map(p => String(p.dueDate || '').slice(0, 7)).filter(Boolean), nowMonth])].sort();
+  if (state.filterPaymentMonth && !months.includes(state.filterPaymentMonth)) state.filterPaymentMonth = '';
+  const month = state.filterPaymentMonth || '';
+  const monthAt = months.indexOf(month);
+  const scoped = (supplierId ? all.filter(p => payeeId(p) === supplierId) : all)
+    .filter(p => !month || String(p.dueDate || '').startsWith(month))
+    .filter(p => matchesTagFilter('payments', p.id));
   const columns = orderedColumns('payments', paymentColumns());
   const rowClass = p => (p.status === 'PAID' ? 'is-paid' : p.status === 'OVERDUE' ? 'is-overdue' : p.status === 'CANCELLED' ? 'is-draft' : '');
   const rows = scoped
@@ -200,11 +257,16 @@ function renderPayments(root) {
   const supplierFilter = supplierOptions.length
     ? `<select class="sel" data-filter-pay-supplier aria-label="${escapeHTML(t.thPayee)}"><option value="">${escapeHTML(t.filterPayeeAll)}</option>${supplierOptions.map(([id, name]) => `<option value="${escapeHTML(id)}" ${id === supplierId ? 'selected' : ''}>${escapeHTML(name)}</option>`).join('')}</select>`
     : '';
-  const tools = supplierFilter + tagFilterHtml('payments')
+  const step = (dir, label, glyph) => `<button class="btn btn--sm" type="button" aria-label="${escapeHTML(label)}" data-pay-month-step="${dir}"${month && months[monthAt + dir] ? '' : ' disabled'}>${glyph}</button>`;
+  const monthFilter = `<span class="period-nav" role="group" aria-label="${escapeHTML(t.filterMonthAria)}">${step(-1, t.monthPrev, '‹')}`
+    + `<select class="sel" data-filter-pay-month aria-label="${escapeHTML(t.filterMonthAria)}"><option value="">${escapeHTML(t.filterMonthAll)}</option>${months.map(m => `<option value="${m}" ${m === month ? 'selected' : ''}>${escapeHTML(capFirst(periodLabel(m, 'month')))}</option>`).join('')}</select>`
+    + `${step(1, t.monthNext, '›')}</span>`
+    + `<button class="chip ${month === nowMonth ? 'is-on' : ''}" type="button" aria-pressed="${month === nowMonth}" data-pay-month-now>${escapeHTML(t.monthCurrent)}</button>`;
+  const tools = supplierFilter + tagFilterHtml('payments') + monthFilter
     + `<button class="chip ${!state.filterPaymentStatus ? 'is-on' : ''}" data-filter-pay="">${escapeHTML(t.filterAll)}</button>`
     + INVOICE_STATUSES.map(s => `<button class="chip ${state.filterPaymentStatus === s ? 'is-on' : ''}" data-filter-pay="${s}">${escapeHTML(paymentStatusLabel(s))}</button>`).join('')
     + columnOrderButton('payments');
-  const filtered = Boolean(supplierId || tagFilterOf('payments') || state.filterPaymentStatus || q);
+  const filtered = Boolean(supplierId || month || tagFilterOf('payments') || state.filterPaymentStatus || q);
   root.innerHTML = hero(labels.payments, CRM.tabs.pagamentos.desc, statCards([
     { label: t.paid, value: fmtEUR(paid) },
     { label: t.pending, value: fmtEUR(pending) },
@@ -222,6 +284,12 @@ function renderPayments(root) {
   wireTagFilter(root, 'payments');
   $$('[data-filter-pay]', root).forEach(btn => btn.addEventListener('click', () => { state.filterPaymentStatus = btn.dataset.filterPay; render(); }));
   $('[data-filter-pay-supplier]', root)?.addEventListener('change', e => { state.filterPaymentSupplier = e.target.value; render(); });
+  $('[data-filter-pay-month]', root).addEventListener('change', e => { state.filterPaymentMonth = e.target.value; render(); });
+  $$('[data-pay-month-step]', root).forEach(btn => btn.addEventListener('click', () => {
+    state.filterPaymentMonth = months[monthAt + Number(btn.dataset.payMonthStep)] || month;
+    render();
+  }));
+  $('[data-pay-month-now]', root).addEventListener('click', () => { state.filterPaymentMonth = month === nowMonth ? '' : nowMonth; render(); });
   $$('[data-mark-payment]', root).forEach(btn => btn.addEventListener('click', e => {
     e.stopPropagation();
     markPaymentPaid(btn.dataset.markPayment);
@@ -309,6 +377,7 @@ async function openPaymentDetail(id) {
       [STR.detailCreated, escapeHTML(fmtDay(pay.createdAt))],
       [t.thDueDate, escapeHTML(canMarkPaid ? `${fmtDay(pay.dueDate)} · ${dueWhenText(pay.dueDate, status === 'OVERDUE')}` : fmtDay(pay.dueDate))],
       pay.status === 'PAID' && pay.paidAt ? [STR.paidOnLabel, escapeHTML(fmtDay(pay.paidAt))] : null,
+      pay.seriesId ? [t.repeats, escapeHTML(paymentRepeatText(pay))] : null,
       clientsOn ? [t.client, escapeHTML(pay.clientName || t.noClient)] : null,
       projectsOn ? [t.project, escapeHTML(pay.projectLabel || t.noProject)] : null,
       [t.thTotal, recordFigureHtml(fmtEUR(pay.totalEur)), tone],

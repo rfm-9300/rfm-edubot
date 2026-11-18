@@ -26,10 +26,11 @@
   const KEYS = { name: 'NAME', phone: 'PHONE', email: 'EMAIL', service: 'TEXT', date: 'DATE', time: 'TIME', note: 'TEXT' };
   const DAYS = [1, 2, 3, 4, 5, 6, 7];
 
-  // The unsaved flows (null: nothing changed yet), which flows are open, and the test chat. None of it is saved.
+  // The unsaved flows (null: nothing changed yet), which flows are open, which steps are folded (by step id, so a step
+  // keeps its fold when it moves), and the test chat. None of it is saved.
   let draft = null;
   let guard = false;
-  const ui = { open: new Set(), seeded: null, checked: false, saving: false, pending: {}, note: null, flash: null, chat: [], chatState: null, busy: false, channel: 'WHATSAPP', at: '', known: false };
+  const ui = { open: new Set(), folded: new Set(), seeded: null, checked: false, saving: false, pending: {}, note: null, flash: null, chat: [], chatState: null, busy: false, channel: 'WHATSAPP', at: '', known: false };
 
   const utf8Bytes = text => new TextEncoder().encode(text || '').length;
   const words = text => (text || '').toLowerCase().normalize('NFD').replace(/\p{M}+/gu, '').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
@@ -241,7 +242,9 @@
             <p class="hint">${esc(T.handoverHint)}</p></div>` : ''}
         </div>
       </div>
-      <div class="form__row form__row--full"><span class="lbl">${esc(T.steps)}</span><p class="hint">${esc(T.stepsHint)}</p></div>
+      <div class="form__row form__row--full">
+        <div class="form__row-head"><span class="lbl">${esc(T.steps)}</span>${foldAllHtml(f, i)}</div>
+        <p class="hint">${esc(T.stepsHint)}</p></div>
       <div class="flow flow--edit">${steps.map((s, j) => stepCard(f, i, s, j, edit)).join('')}</div>
       ${foot}`;
   }
@@ -270,11 +273,33 @@
     return `<select class="sel" ${id ? `id="${id}"` : ''} ${bind(c, at, field, rr)}${off(edit)}>${options}</select>`;
   }
 
+  /** Fold all / Expand all for a flow's steps, when there is more than one to fold. */
+  function foldAllHtml(f, i) {
+    const steps = f.steps || [];
+    if (steps.length < 2) return '';
+    const folded = steps.filter(s => ui.folded.has(s.id)).length;
+    return `<span class="actions">
+        <button type="button" class="btn btn--sm btn--ghost" data-step-fold-all="${i}"${folded === steps.length ? ' disabled' : ''}>${esc(T.foldAll)}</button>
+        <button type="button" class="btn btn--sm btn--ghost" data-step-expand-all="${i}"${folded ? '' : ' disabled'}>${esc(T.expandAll)}</button>
+      </span>`;
+  }
+
+  /** What a folded step says in its head: what it does and the start of what it says, enough to tell steps apart. */
+  function stepPreview(step) {
+    const parts = [
+      step.kind === 'CONDITION' ? tr(`check.${step.check}`) : step.kind === 'ACTION' ? tr(`action.${step.action}`) : '',
+      firstLine(step.text, 70),
+      step.kind === 'MESSAGE' && (step.options || []).length ? tr('previewOptions', { n: step.options.length }) : '',
+    ];
+    return parts.filter(Boolean).join(' · ');
+  }
+
   function stepCard(f, i, step, j, edit) {
     const id = `cb-${i}-${j}`;
     const at = `${i}.${j}`;
     const steps = f.steps;
     const limits = limitsOf();
+    const folded = ui.folded.has(step.id);
     const tools = edit ? `<span class="flow__card-tools">
         <button class="iconbtn" type="button" data-step-up="${i}:${j}"${j ? '' : ' disabled'} aria-label="${esc(T.moveUp)}" title="${esc(T.moveUp)}">↑</button>
         <button class="iconbtn" type="button" data-step-down="${i}:${j}"${j < steps.length - 1 ? '' : ' disabled'} aria-label="${esc(T.moveDown)}" title="${esc(T.moveDown)}">↓</button>
@@ -284,11 +309,15 @@
     const kind = edit
       ? `<select class="sel" id="${id}-kind" ${bind('s', at, 'kind', true)} aria-label="${esc(T.kindLabel)}">${KINDS.map(k => `<option value="${k}"${step.kind === k ? ' selected' : ''}>${esc(tr(`kind.${k}`))}</option>`).join('')}</select>`
       : `<span class="pill">${esc(tr(`kind.${step.kind}`))}</span>`;
-    return `${j ? '<div class="flow__connector" aria-hidden="true"></div>' : ''}<div class="flow__card" id="${id}" data-step="${i}:${j}">
-      <div class="flow__card-head"><span class="flow__index">${j + 1}</span>${kind}
-        <span class="flow__card-summary">${j === 0 ? `<span class="muted">${esc(T.first)}</span>` : ''}</span>
+    const toggleLabel = tr(folded ? 'expandStep' : 'foldStep', { n: j + 1 });
+    const preview = folded ? stepPreview(step) : '';
+    return `${j ? '<div class="flow__connector" aria-hidden="true"></div>' : ''}<div class="flow__card${folded ? ' is-folded' : ''}" id="${id}" data-step="${i}:${j}">
+      <div class="flow__card-head">
+        <button type="button" class="iconbtn flow__card-toggle" id="${id}-toggle" data-step-toggle="${i}:${j}" aria-expanded="${!folded}" aria-controls="${id}-body" aria-label="${esc(toggleLabel)}" title="${esc(toggleLabel)}"><span class="flow-menu__chevron" aria-hidden="true"></span></button>
+        <span class="flow__index">${j + 1}</span>${kind}
+        <span class="flow__card-summary">${j === 0 ? `<span class="muted">${esc(T.first)}</span>${preview ? ' · ' : ''}` : ''}${preview ? `<span class="flow__card-preview" data-step-preview="${i}:${j}">${esc(preview)}</span>` : ''}</span>
         ${sent ? `<span class="flow-menu__stat">${esc(tr('stepSent', { n: sent }))}</span>` : ''}${tools}</div>
-      ${stepBody(f, i, step, j, edit, id, at, limits)}
+      <div class="flow__card-body" id="${id}-body"${folded ? ' hidden' : ''}>${stepBody(f, i, step, j, edit, id, at, limits)}</div>
     </div>`;
   }
 
@@ -539,6 +568,8 @@
     d.toast(errorText(problem));
     const f = flows()[problem?.flow];
     if (f) ui.open.add(f.id);
+    const at = f?.steps?.[problem.step];
+    if (at) ui.folded.delete(at.id);
     d.render();
     if (!f) return;
     const card = problem.step != null ? $(`#cb-${problem.flow}-${problem.step}`) : $(`#cb-${problem.flow}`);
@@ -780,6 +811,22 @@
         const i = Number(el.dataset.flowHead);
         const id = flows()[i].id;
         ui.open.has(id) ? ui.open.delete(id) : ui.open.add(id);
+        return redraw(`cb-${i}-toggle`);
+      }
+      if ((el = hit('[data-step-toggle]'))) {
+        const [i, j] = el.dataset.stepToggle.split(':').map(Number);
+        const id = flows()[i].steps[j].id;
+        ui.folded.has(id) ? ui.folded.delete(id) : ui.folded.add(id);
+        return redraw(`cb-${i}-${j}-toggle`);
+      }
+      if ((el = hit('[data-step-fold-all]'))) {
+        const i = Number(el.dataset.stepFoldAll);
+        flows()[i].steps.forEach(s => ui.folded.add(s.id));
+        return redraw(`cb-${i}-toggle`);
+      }
+      if ((el = hit('[data-step-expand-all]'))) {
+        const i = Number(el.dataset.stepExpandAll);
+        flows()[i].steps.forEach(s => ui.folded.delete(s.id));
         return redraw(`cb-${i}-toggle`);
       }
       if (!edit) return;

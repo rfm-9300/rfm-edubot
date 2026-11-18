@@ -14,7 +14,7 @@ let state = {
   clientServices: [], filterServiceStatus: '', filterServiceClient: '', filterServiceEmployee: '', filterServicePeriod: '', filterServicePeriodKey: '',
   filterInvoicePeriod: '', filterInvoicePeriodKey: '',
   filterFinanceiroPeriod: '', filterFinanceiroPeriodKey: '', filterFinanceiroType: '', filterFinanceiroClient: '',
-  suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterSupplierType: '',
+  suppliers: [], employees: [], payments: [], filterPaymentStatus: '', filterPaymentSupplier: '', filterPaymentMonth: '', filterSupplierType: '',
   // pendingSubmissions: services employees registered that wait for the team (Employees page, nav count).
   // portal: an employee's own session — their submissions and what they pick from.
   pendingSubmissions: [], portal: { submissions: [], clients: [], catalog: [] }, filterSubmissionStatus: '', mySites: [],
