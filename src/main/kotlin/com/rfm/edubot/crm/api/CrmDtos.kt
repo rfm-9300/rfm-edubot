@@ -146,6 +146,11 @@ internal data class PaymentDto(
     val paidAt: String? = null,
     val items: List<LineItemDto> = emptyList(),
     val createdAt: String,
+    /** Set on a payment made as one of a repeating bill: which one it is, how many there are and how often. */
+    val seriesId: String? = null,
+    val seriesPosition: Int? = null,
+    val seriesSize: Int? = null,
+    val repeatEvery: String? = null,
 )
 
 @Serializable
@@ -356,4 +361,8 @@ internal fun Payment.dto(supplier: Supplier?, employee: Employee? = null, client
     paidAt = paidAt?.toString(),
     items = items.map { LineItemDto(it.description, it.quantity, it.unit, it.unitPriceCents / 100.0) },
     createdAt = createdAt.toString(),
+    seriesId = series?.id?.toHexString(),
+    seriesPosition = series?.position,
+    seriesSize = series?.size,
+    repeatEvery = series?.every?.name?.lowercase(),
 )

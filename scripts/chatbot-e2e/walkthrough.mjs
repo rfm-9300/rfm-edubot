@@ -300,6 +300,42 @@ try {
   expect((await text('[data-flow-title="0"]')) === 'Appointments' && (await text('[data-flow-pills="0"]')) === 'On', 'after a reload the page is on Chatbot and shows the saved flow');
   await shot('saved');
 
+  note('4b. Folding and expanding the steps of a flow');
+  const stepFolded = j => page.$eval(`#cb-0-${j}`, el => el.classList.contains('is-folded'));
+  const nothingUnsaved = () => page.$eval('[data-chatbot-savebar]', el => !el.classList.contains('is-dirty'));
+  expect(await page.$$eval('.flow__card-toggle', bs => bs.length === 4 && bs.every(b => b.getAttribute('aria-expanded') === 'true')), 'every step has a fold button and starts open');
+  expect(await page.$eval('[data-step-expand-all="0"]', el => el.disabled) && !(await page.$eval('[data-step-fold-all="0"]', el => el.disabled)), 'Expand all waits until something is folded');
+  await click('#cb-0-1-toggle', 500);
+  expect(await stepFolded(1), 'the fold button folds a step');
+  expect(await page.$eval('#cb-0-1-body', el => el.hidden) && await page.$eval('#cb-0-1-toggle', el => el.getAttribute('aria-expanded') === 'false'), 'its fields hide and the button says so');
+  expect((await text('#cb-0-1 [data-step-preview]')).includes('What is your name?'), 'a folded step shows the start of its text');
+  expect(!(await page.$eval('#cb-0-0-body', el => el.hidden)), 'the other steps stay open');
+  expect(await nothingUnsaved(), 'folding is not an edit: nothing is unsaved');
+  await click('#cb-0-1-toggle', 500);
+  expect(!(await stepFolded(1)) && !(await page.$eval('#cb-0-1-body', el => el.hidden)), 'the same button opens it again');
+  await click('[data-step-fold-all="0"]', 500);
+  expect((await page.$$eval('#chatbot-form .flow__card.is-folded', cs => cs.length)) === 4, 'Fold all folds every step of the flow');
+  const optionsPreview = await text('#cb-0-0 [data-step-preview]');
+  expect(optionsPreview.includes('Hi! What do you need?') && optionsPreview.includes('2 options'), 'a message with options says how many in its preview');
+  expect((await text('#cb-0-3 [data-step-preview]')).includes('Create a client'), 'an action says what it does');
+  expect(await page.$eval('[data-step-fold-all="0"]', el => el.disabled) && !(await page.$eval('[data-step-expand-all="0"]', el => el.disabled)), 'Fold all waits until something is open');
+  await shot('steps-folded');
+  await click('#cb-0-2-toggle', 500);
+  expect(!(await stepFolded(2)) && await stepFolded(1), 'one folded step opens on its own');
+  await click('[data-step-expand-all="0"]', 500);
+  expect((await page.$$eval('#chatbot-form .flow__card.is-folded', cs => cs.length)) === 0, 'Expand all opens them again');
+  expect(await nothingUnsaved(), 'still nothing unsaved');
+  // A step folded after a bad edit opens again when the server refuses it, with the cursor in it.
+  await page.$eval('#cb-0-1-text', el => { el.value = ''; el.dispatchEvent(new Event('input', { bubbles: true })); });
+  await click('#cb-0-1-toggle', 400);
+  expect(await stepFolded(1) && !(await nothingUnsaved()), 'a step can be folded with an unsaved edit in it');
+  await click('[data-chatbot-save]', 1000);
+  expect((await toast()).includes('step 2'), `the refused save names step 2 (“${await toast()}”)`);
+  expect(!(await stepFolded(1)) && await page.evaluate(() => document.activeElement?.closest('#cb-0-1') != null), 'and opens that step with the cursor in it');
+  await click('[data-chatbot-discard]', 300);
+  await confirm();
+  expect(await nothingUnsaved() && (await page.$eval('#cb-0-1-text', el => el.value)) === 'What is your name?', 'discarding brings the text back');
+
   note('5. Persona → Channels points at the chatbot and leaves the flows alone');
   await click('.nav__item[data-tab="persona"]', 1500);
   await click('[data-persona-tab="channels"]', 1500);

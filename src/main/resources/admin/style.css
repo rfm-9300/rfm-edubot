@@ -2767,6 +2767,16 @@ html[data-layout="minimal"] .tbl .tbl__input--pct { width: 76px; }
 .flow__card-head .sel { width: auto; min-width: 220px; max-width: 100%; }
 .flow__card-summary { flex: 1; min-width: 160px; font-size: 12.5px; }
 .flow__card-tools { display: flex; gap: 4px; margin-left: auto; }
+/* A step folds to its head: the toggle's chevron points right when folded and down when open (an open flow's own
+   chevron rule would turn every one down), the head's summary becomes the step's one-line preview, the body hides. */
+/* Grid tracks grow to fit their content, so a long unwrapped preview would push a step's tools off a phone. */
+.flow--edit, .flow--edit .flow__card { grid-template-columns: minmax(0, 1fr); }
+.flow__card-body { display: grid; gap: 12px; }
+.flow__card-body[hidden] { display: none; }
+.flow__card.is-folded .flow__card-toggle .flow-menu__chevron { transform: none; }
+.flow__card:not(.is-folded) .flow__card-toggle .flow-menu__chevron { transform: rotate(90deg); }
+.flow__card.is-folded .flow__card-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.flow__card-preview { color: var(--ink-2); }
 
 .builder { display: grid; gap: 16px; }
 .builder__section .panel__body { display: grid; gap: 12px; }

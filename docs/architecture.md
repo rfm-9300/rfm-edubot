@@ -458,6 +458,11 @@ module (`crm.payments`, numbers `PAG-nnn`). Payments are outgoing bills attached
 line items, due date, and PENDING/PAID/OVERDUE/CANCELLED — the inverse of client invoices, without
 PDF in v1. Enabling `payments` also enables `suppliers`. Surfaces: `/app/api/crm/suppliers`,
 `/app/api/crm/payments`, Home snapshots, and an attention queue for overdue / due-soon payables.
+A payment can repeat: `POST /app/api/crm/payments` with `repeatEvery` (`weekly`, `monthly`, `quarterly`,
+`yearly`) and `repeatTimes` (2 to 24) makes that many ordinary payments at once, each with its own number,
+sharing a `series` (`seriesId`, `seriesPosition`, `seriesSize`, `repeatEvery` in the DTO). The dates are
+PaymentRecurrence's: each counted from the first, so a bill due on the 31st falls on the last day of a
+shorter month. The answer is the first payment.
 A supplier has an optional free-text `type` (materials, subcontractor…): the form suggests the types
 already in use and the directory filters by it. `PATCH` keeps the type when omitted and clears it on
 an empty string.

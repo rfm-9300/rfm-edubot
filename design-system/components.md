@@ -738,7 +738,8 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
           <!-- name, On, channels, .tokens keywords, "When a reply isn't understood", then: -->
           <div class="flow flow--edit">
             <div class="flow__card" id="cb-0-0">
-              <div class="flow__card-head"><span class="flow__index">1</span><select class="sel"><!-- kind --></select><span class="flow__card-summary"><span class="muted">Starts here</span></span><span class="flow__card-tools"><!-- ↑ ↓ × --></span></div>
+              <div class="flow__card-head"><button class="iconbtn flow__card-toggle" aria-expanded="true"><span class="flow-menu__chevron"></span></button><span class="flow__index">1</span><select class="sel"><!-- kind --></select><span class="flow__card-summary"><span class="muted">Starts here</span></span><span class="flow__card-tools"><!-- ↑ ↓ × --></span></div>
+              <div class="flow__card-body"><!-- the fields of its kind; hidden while the card is .is-folded --></div>
               <!-- the kind's fields; a Message's options: -->
               <div class="lines lines--options">
                 <div class="lines__head"><span>Option</span><span>Leads to</span><span>Other words that choose it</span><span></span></div>
@@ -764,7 +765,8 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 | `.flow-menu` (`.is-open`) | One flow, a `.panel` that opens in place. The whole head toggles it (a click outside its buttons), keyboards use `.flow-menu__toggle` inside the `h2`, with `aria-expanded`. Folded, only the head shows |
 | `__chevron` `__name` `__pills` `__summary` | Turning chevron, the position (`.flow__index`: the first flow with a matching keyword answers), the name, an On / Off `.pill`, and one line of keywords, steps, channels and 30-day usage (what the channel refused in `.hint--warn`) |
 | `__notes` · `__stat` · `__foot` | Lines under the keywords (a repeat refused); "Sent n times" in a step card's head; the body's last row: the Add a step `.sel` on the left, Duplicate and Remove flow on the right |
-| `.flow__card` · `.flow__connector` | A step: a head (position, kind `.sel`, "Starts here" on the first, ↑ ↓ ×) over the fields of its kind. `.is-flash` rings the step a refused save points at |
+| `.flow__card` · `.flow__connector` | A step: a head (fold button, position, kind `.sel`, "Starts here" on the first, ↑ ↓ ×) over the fields of its kind in `.flow__card-body`. `.is-flash` rings the step a refused save points at |
+| `.flow__card.is-folded` · `.flow__card-toggle` · `.flow__card-preview` | A folded step: the body is `hidden`, the chevron points right (down while open: an open `.flow-menu`'s own chevron rule would turn every one down, so the toggle overrides it) and the head's summary becomes a one-line preview with an ellipsis. `.flow--edit` and its cards use `minmax(0, 1fr)` columns, because a grid track grows to fit a long unwrapped preview and would push the tools off a phone |
 | `.lines--options` > `.line` | A message's options: title, where it leads (a `.sel`, with "New step…" which adds a step and links it), other words that choose it, ×. Four columns; on a phone the title and × share a row and the other two take a row each |
 | `.line--hours` | An opening-hours row: day `.sel`, two `type=time` inputs, ×. Three rows' worth of columns on a phone, the day on its own row |
 | `.bot-channel`, `.tokens` / `.token` | As in Channels and the Persona rules: keywords are tokens |

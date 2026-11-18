@@ -225,6 +225,9 @@ internal data class CreatePaymentRequest(
     val notes: String? = null,
     val clientId: String? = null,
     val projectId: String? = null,
+    /** `weekly`, `monthly`, `quarterly` or `yearly`: the bill falls due again that often, [repeatTimes] payments in all. */
+    val repeatEvery: String? = null,
+    val repeatTimes: Int? = null,
 )
 
 /** Without [items] the row is the one line [name], [quantity], [unit] and [unitPriceEur] describe. */

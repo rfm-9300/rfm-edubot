@@ -137,6 +137,7 @@ async function setActive(tab) {
   state.filterFinanceiroClient = '';
   state.filterPaymentStatus = '';
   state.filterPaymentSupplier = '';
+  state.filterPaymentMonth = '';
   state.filterSupplierType = '';
   state.filterSubmissionStatus = '';
   state.archivedView = '';
