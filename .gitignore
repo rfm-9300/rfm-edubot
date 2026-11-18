@@ -13,6 +13,7 @@ build/
 mobile/local.properties
 mobile/build/
 mobile/.kotlin
+.claude/worktrees/
 
 *.iml
 .DS_Store
