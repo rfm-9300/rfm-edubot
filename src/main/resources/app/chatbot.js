@@ -20,7 +20,7 @@
   const EXPECTS = ['TEXT', 'NAME', 'PHONE', 'EMAIL', 'NUMBER', 'DATE', 'TIME', 'YES_NO'];
   const CHECKS = ['HOURS', 'KNOWN_CLIENT', 'ANSWER'];
   const ACTIONS = ['CREATE_CLIENT', 'CREATE_BOOKING', 'NOTIFY_TEAM'];
-  const SHOWS = ['AUTO', 'NUMBERED', 'HIDDEN'];
+  const SHOWS = ['AUTO', 'TAPS_AND_NUMBERS', 'NUMBERED', 'HIDDEN'];
   const CHANNELS = ['WHATSAPP', 'INSTAGRAM', 'WEB'];
   /** Answers other steps read by name; picking one also sets what the question expects. */
   const KEYS = { name: 'NAME', phone: 'PHONE', email: 'EMAIL', service: 'TEXT', date: 'DATE', time: 'TIME', note: 'TEXT' };
@@ -352,7 +352,7 @@
     const show = options.length ? `<div class="form__row"><label class="lbl" for="${id}-show">${esc(T.showLabel)}</label>
         <select class="sel" id="${id}-show" ${bind('s', at, 'show', true)}${off(edit)}>${SHOWS.map(v => `<option value="${v}"${step.show === v ? ' selected' : ''}>${esc(tr(`show.${v}`))}</option>`).join('')}</select>
         <p class="hint">${esc(tr(`showHint.${step.show}`))}</p></div>
-      ${options.length > 3 && step.show === 'AUTO' ? `<div class="form__row"><label class="lbl" for="${id}-list">${esc(T.listLabel)}</label>
+      ${options.length > 3 && (step.show === 'AUTO' || step.show === 'TAPS_AND_NUMBERS') ? `<div class="form__row"><label class="lbl" for="${id}-list">${esc(T.listLabel)}</label>
         <input class="inp" id="${id}-list" ${bind('s', at, 'listLabel')} maxlength="${limits.listLabelChars || 20}" autocomplete="off" placeholder="${esc(T.listLabelPh)}" value="${esc(step.listLabel || '')}"${off(edit)} />
         <p class="hint">${esc(T.listLabelHint)}</p></div>` : ''}
       <div class="form__row"><label class="lbl" for="${id}-key">${esc(T.keepChoice)}</label>

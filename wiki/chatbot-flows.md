@@ -33,7 +33,8 @@ the team does.
 - **Options, tapped or typed.** A message's options go out as taps where the channel has them
   (Instagram; WhatsApp reply buttons for up to 3, or a list of up to 10 when the step names the list's
   button) and as numbered lines where it doesn't (the website, or too many or too long). The author can
-  choose "always numbers" or "my own text" (nothing is added, the message says what to reply). Whatever the
+  choose "buttons, with numbers as a backup" (Instagram also gets the lines), "always numbers" or "my own text"
+  (nothing is added, the message says what to reply). Whatever the
   display, a customer can type the number, the title or any extra word the author gave the option.
 - **Choices that are kept.** A message with options can name a key ("Keep the choice as"): whichever way the
   customer chooses (tap, number, title, extra word, or the AI reading the reply), that option's *title* is kept
@@ -109,6 +110,12 @@ the team does.
   and the inbox could list them in any order (seen with a reply followed by the next question).
 - **A flow whose silent steps lead back to each other** is refused (`loop`): they would send messages
   until the 12-step cap each time.
+- **Instagram in a browser shows no quick-reply buttons** (reported by Rodrigo, 2026-11-18), while the Instagram
+  app does. "Buttons, with numbers as a backup" (`TAPS_AND_NUMBERS`) is for that: Instagram gets the buttons and
+  the numbered lines under the text, WhatsApp only its buttons (`ChannelCapabilities.quickRepliesMayBeHidden`),
+  so one flow can serve both. "Always numbers" (`NUMBERED`) also covers the browser but takes the buttons from
+  the app too, and is per step, so it takes WhatsApp's buttons as well. The lines are dropped, keeping the
+  buttons, when text and lines together pass Instagram's 1000 bytes.
 - **WhatsApp lists need a label.** A list's button has a name the author gives in their language; without
   one, more than 3 options go out as numbered lines instead.
 - **Delivery failures show in the numbers**, not as errors: the flow's head on the Chatbot page counts

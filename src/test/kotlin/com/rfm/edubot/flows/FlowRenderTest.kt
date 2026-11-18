@@ -53,6 +53,34 @@ class FlowRenderTest {
     }
 
     @Test
+    fun `taps and numbers writes the lines too on Instagram, where taps may not show`() {
+        val out = message(2, OptionsDisplay.TAPS_AND_NUMBERS).fitTo(ChannelCapabilities.INSTAGRAM)
+        assertEquals("Escolha:\n\n1. Opção 1\n2. Opção 2", out.text)
+        assertEquals(listOf(QuickReply("Opção 1", "flow:f:s0:0"), QuickReply("Opção 2", "flow:f:s1:1")), out.replies)
+    }
+
+    @Test
+    fun `taps and numbers leaves WhatsApp with its buttons alone, and the website with its lines`() {
+        assertEquals(FlowOutgoing("Escolha:", message(2).fitTo(ChannelCapabilities.WHATSAPP).replies, null), message(2, OptionsDisplay.TAPS_AND_NUMBERS).fitTo(ChannelCapabilities.WHATSAPP))
+        assertEquals(message(2).fitTo(ChannelCapabilities.WEB), message(2, OptionsDisplay.TAPS_AND_NUMBERS).fitTo(ChannelCapabilities.WEB))
+    }
+
+    @Test
+    fun `taps and numbers drops the lines before it drops the taps when both don't fit`() {
+        val text = "ã".repeat(490) // 980 bytes: fits a tap message, but not with the two lines (27 bytes) under it
+        val out = message(2, OptionsDisplay.TAPS_AND_NUMBERS, text = text).fitTo(ChannelCapabilities.INSTAGRAM)
+        assertEquals(text, out.text)
+        assertEquals(2, out.replies.size)
+    }
+
+    @Test
+    fun `taps and numbers numbers a message whose options can't be taps`() {
+        val out = message(2, OptionsDisplay.TAPS_AND_NUMBERS) { "Um título bem comprido demais" }.fitTo(ChannelCapabilities.INSTAGRAM)
+        assertEquals(emptyList(), out.replies)
+        assertEquals("Escolha:\n\n1. Um título bem comprido demais\n2. Um título bem comprido demais", out.text)
+    }
+
+    @Test
     fun `a message with no options goes out as it is`() {
         assertEquals(FlowOutgoing("Obrigado!", emptyList(), null), message(0, text = "Obrigado!").fitTo(ChannelCapabilities.WHATSAPP))
     }
