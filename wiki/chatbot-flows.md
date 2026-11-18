@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-17
+updated: 2026-11-18
 ---
 
 # Chatbot flows: the fixed, no-AI bot
@@ -54,6 +54,14 @@ the team does.
   what a reply means.
 
 ## Decisions and why
+
+- **Steps fold (2026-11-18).** Rodrigo asked for options to fold and expand a flow's messages (the page calls them
+  steps), so each step has a fold button and a flow has Fold all and Expand all (`ui.folded`, a set of step ids, so a step keeps its fold when it moves).
+  Folding is a view state, not an edit: nothing is saved or marked unsaved, members can do it, and every
+  step starts open. A folded step keeps its fields in the page, `hidden`, so typing, the bytes hint and the
+  step labels in other steps' selects still work; its head shows a one-line preview. A refused save opens the
+  step it names. Gotcha: `.flow--edit` and its cards need `minmax(0, 1fr)` columns, or a long unwrapped
+  preview widens the grid track and pushes the step's tools off a phone.
 
 - **The AI never writes to the customer inside a flow.** Rodrigo asked for a hybrid: when we can't read an
   answer, an AI model says only how to interpret it and what to do. `AiFlowInterpreter` sends the question,
@@ -114,8 +122,8 @@ the team does.
   `AiFlowInterpreterTest`, `ChatFlowsTest`; with Mongo: `ChatFlowRepositoryTest`, `ChatbotPipelineTest`
   (the real pipeline factory: taps and numbered lines, sessions, clients, notices, hand-overs, a refusing
   channel, the AI reading), `ChatbotRoutesTest`; `WhatsAppInteractiveTest` for the Graph payloads.
-- Browser: `scripts/chatbot-e2e/walkthrough.mjs` builds a flow by hand, tries it unsaved, saves it, and runs
-  a richer one with signed WhatsApp webhooks; `scripts/persona-e2e/walkthrough.mjs` covers Persona →
+- Browser: `scripts/chatbot-e2e/walkthrough.mjs` builds a flow by hand, tries it unsaved, saves it, folds and
+  expands its steps, and runs a richer one with signed WhatsApp webhooks; `scripts/persona-e2e/walkthrough.mjs` covers Persona →
   Channels. Commands are in the repo `CLAUDE.md`.
 - Not exercised against Meta: the interactive buttons and lists are checked against the documented
   payloads and the recorded request bodies, not a live WhatsApp number.

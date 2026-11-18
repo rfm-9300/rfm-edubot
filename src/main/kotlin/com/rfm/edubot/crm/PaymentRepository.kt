@@ -6,6 +6,8 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.LineItem
 import com.rfm.edubot.crm.model.Payment
+import com.rfm.edubot.crm.model.PaymentRepeat
+import com.rfm.edubot.crm.model.PaymentSeries
 import com.rfm.edubot.crm.model.PaymentStatus
 import com.rfm.edubot.events.DomainEventLog
 import com.rfm.edubot.events.DomainEventTypes
@@ -62,24 +64,65 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         clientId: ObjectId? = null,
         projectId: ObjectId? = null,
     ): Payment {
-        val now = SystemClock.now()
-        val payment = Payment(
-            tenantId = tenantId,
-            number = "PAG-${sequences.next("payment_number").toString().padStart(3, '0')}",
-            supplierId = supplierId,
-            employeeId = employeeId,
-            clientId = clientId,
-            projectId = projectId,
-            items = items,
-            notes = notes?.trim()?.takeIf { it.isNotBlank() },
-            dueDate = dueDate,
-            totalCents = items.sumOf { it.totalCents },
-            createdAt = now,
-            updatedAt = now,
-        )
+        val payment = build(supplierId, employeeId, items, dueDate, notes, clientId, projectId, SystemClock.now(), series = null)
         collection.insertOne(payment.toDocument())
-        events.append(tenantId, DomainEventTypes.PAYMENT_CREATED, SubjectRef.of(SubjectTypes.PAYMENT, payment.id), EventPayloads.payment(payment), payment.relatedRefs())
+        appendCreated(payment)
         return payment
+    }
+
+    /**
+     * [times] payments for one repeating bill, the first due on [dueDate] and the next ones [every] after it,
+     * made together as a series. Each has its own number and is paid, cancelled or deleted on its own.
+     */
+    suspend fun createRepeating(
+        supplierId: ObjectId?,
+        employeeId: ObjectId?,
+        items: List<LineItem>,
+        dueDate: LocalDate,
+        notes: String?,
+        every: PaymentRepeat,
+        times: Int,
+        clientId: ObjectId? = null,
+        projectId: ObjectId? = null,
+    ): List<Payment> {
+        val now = SystemClock.now()
+        val seriesId = ObjectId()
+        val payments = PaymentRecurrence.dueDates(dueDate, every, times).mapIndexed { n, due ->
+            build(supplierId, employeeId, items, due, notes, clientId, projectId, now, PaymentSeries(seriesId, n + 1, times, every))
+        }
+        collection.insertMany(payments.map { it.toDocument() })
+        payments.forEach { appendCreated(it) }
+        return payments
+    }
+
+    private suspend fun build(
+        supplierId: ObjectId?,
+        employeeId: ObjectId?,
+        items: List<LineItem>,
+        dueDate: LocalDate,
+        notes: String?,
+        clientId: ObjectId?,
+        projectId: ObjectId?,
+        now: Instant,
+        series: PaymentSeries?,
+    ) = Payment(
+        tenantId = tenantId,
+        number = "PAG-${sequences.next("payment_number").toString().padStart(3, '0')}",
+        supplierId = supplierId,
+        employeeId = employeeId,
+        clientId = clientId,
+        projectId = projectId,
+        series = series,
+        items = items,
+        notes = notes?.trim()?.takeIf { it.isNotBlank() },
+        dueDate = dueDate,
+        totalCents = items.sumOf { it.totalCents },
+        createdAt = now,
+        updatedAt = now,
+    )
+
+    private suspend fun appendCreated(payment: Payment) {
+        events.append(tenantId, DomainEventTypes.PAYMENT_CREATED, SubjectRef.of(SubjectTypes.PAYMENT, payment.id), EventPayloads.payment(payment), payment.relatedRefs())
     }
 
     /** A paid or cancelled payment comes back unchanged. */
@@ -153,6 +196,7 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         employeeId = get("employeeId", ObjectId::class.java),
         clientId = get("clientId", ObjectId::class.java),
         projectId = get("projectId", ObjectId::class.java),
+        series = toSeries(),
         items = getList("items", Document::class.java).orEmpty().map { it.toLineItem() },
         notes = getString("notes"),
         status = parsePaymentStatus(getString("status")),
@@ -163,6 +207,15 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         updatedAt = getInstant("updatedAt"),
     )
 
+    /** The series a stored payment belongs to; payments made before repeating bills existed have none. */
+    private fun Document.toSeries(): PaymentSeries? {
+        val id = get("seriesId", ObjectId::class.java) ?: return null
+        val position = (get("seriesPosition") as? Number)?.toInt() ?: return null
+        val size = (get("seriesSize") as? Number)?.toInt() ?: return null
+        val every = PaymentRecurrence.parse(getString("seriesEvery")) ?: return null
+        return PaymentSeries(id, position, size, every)
+    }
+
     private fun Payment.toDocument() = Document("_id", id)
         .append("tenantId", tenantId)
         .append("number", number)
@@ -170,6 +223,10 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         .append("employeeId", employeeId)
         .append("clientId", clientId)
         .append("projectId", projectId)
+        .append("seriesId", series?.id)
+        .append("seriesPosition", series?.position)
+        .append("seriesSize", series?.size)
+        .append("seriesEvery", series?.every?.name)
         .append("items", items.map { it.toDocument() })
         .append("notes", notes)
         .append("status", status.name)

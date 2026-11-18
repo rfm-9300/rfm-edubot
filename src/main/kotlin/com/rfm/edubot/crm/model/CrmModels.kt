@@ -53,6 +53,15 @@ enum class ClientServiceStatus { OPEN, INVOICED, CANCELLED }
 
 enum class PaymentStatus { PENDING, PAID, OVERDUE, CANCELLED }
 
+/** How often a repeating bill falls due again. */
+enum class PaymentRepeat { WEEKLY, MONTHLY, QUARTERLY, YEARLY }
+
+/**
+ * Where a payment sits in a repeating bill: payment [position] of [size], one every [every], all sharing [id].
+ * The payments are ordinary ones made together; changing, paying or cancelling one leaves the others alone.
+ */
+data class PaymentSeries(val id: ObjectId, val position: Int, val size: Int, val every: PaymentRepeat)
+
 /** Vendor the tenant buys from. Payments attach to a supplier. */
 data class Supplier(
     @BsonId val id: ObjectId = ObjectId(),
@@ -111,6 +120,8 @@ data class Payment(
     val clientId: ObjectId? = null,
     /** Construction project the expense was for, if any; its costs count it. */
     val projectId: ObjectId? = null,
+    /** Set when the payment was made as one of a repeating bill. */
+    val series: PaymentSeries? = null,
     val items: List<LineItem>,
     val notes: String? = null,
     val status: PaymentStatus = PaymentStatus.PENDING,

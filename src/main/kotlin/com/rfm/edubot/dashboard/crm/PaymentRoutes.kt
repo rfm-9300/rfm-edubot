@@ -1,6 +1,7 @@
 package com.rfm.edubot.dashboard.crm
 
 import com.rfm.edubot.crm.PaymentCancel
+import com.rfm.edubot.crm.PaymentRecurrence
 import com.rfm.edubot.crm.api.CreatePaymentRequest
 import com.rfm.edubot.crm.api.dto
 import com.rfm.edubot.crm.api.dtos
@@ -57,15 +58,29 @@ internal object PaymentRoutes : DashboardFeature(DashboardModules.PAYMENTS) {
                 val clientId = request.clientId?.takeIf { it.isNotBlank() }?.let { call.paymentClient(ctx, crm, it) ?: return@post }
                 val projectId = request.projectId?.takeIf { it.isNotBlank() }?.let { call.paymentProject(ctx, crm, it) ?: return@post }
                 val items = request.items.map { it.toLineItem() }
-                val payment = if (employeeRaw != null) {
+                val repeatEvery = request.repeatEvery?.takeIf { it.isNotBlank() }?.let {
+                    PaymentRecurrence.parse(it) ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "repeat every weekly, monthly, quarterly or yearly"))
+                }
+                if (repeatEvery != null && !PaymentRecurrence.validTimes(request.repeatTimes)) {
+                    return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "repeat times between ${PaymentRecurrence.MIN_TIMES} and ${PaymentRecurrence.MAX_TIMES}"))
+                }
+                val supplierId: ObjectId?
+                val employeeId: ObjectId?
+                if (employeeRaw != null) {
                     if (!ctx.requireModule(DashboardModules.EMPLOYEES)) return@post call.respond(HttpStatusCode.Forbidden)
-                    val employeeId = runCatching { ObjectId(employeeRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee required"))
+                    employeeId = runCatching { ObjectId(employeeRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee required"))
                     if (crm.employees.findById(employeeId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "employee not found"))
-                    crm.payments.create(supplierId = null, employeeId = employeeId, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId, projectId = projectId)
+                    supplierId = null
                 } else {
-                    val supplierId = runCatching { ObjectId(supplierRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier required"))
+                    supplierId = runCatching { ObjectId(supplierRaw) }.getOrNull() ?: return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier required"))
                     if (crm.suppliers.findById(supplierId) == null) return@post call.respond(HttpStatusCode.BadRequest, mapOf("error" to "supplier not found"))
-                    crm.payments.create(supplierId = supplierId, employeeId = null, items = items, dueDate = dueDate, notes = request.notes, clientId = clientId, projectId = projectId)
+                    employeeId = null
+                }
+                // A repeating bill answers with its first payment, so a caller that expects one payment still gets one.
+                val payment = if (repeatEvery != null) {
+                    crm.payments.createRepeating(supplierId, employeeId, items, dueDate, request.notes, repeatEvery, request.repeatTimes!!, clientId, projectId).first()
+                } else {
+                    crm.payments.create(supplierId, employeeId, items, dueDate, request.notes, clientId, projectId)
                 }
                 call.respond(HttpStatusCode.Created, crm.paymentDto(payment))
             }
