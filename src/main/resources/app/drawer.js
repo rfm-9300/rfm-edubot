@@ -29,10 +29,20 @@ function placeDrawerPage() {
   const bar = $('.topbar');
   if (bar) $('#drawer').style.setProperty('--drawer-page-top', `${Math.max(0, Math.round(bar.getBoundingClientRect().bottom))}px`);
 }
+// A page-style drawer isn't modal: a click on blank space leaves focus on <body>, where Escape would never reach the
+// drawer's own handler. So while one shows, Escape is heard on the whole document, unless it was already used (the
+// drawer's handler, a tag being typed) or something above the page has it (the confirm dialog, the phone menu).
+function pageEscape(e) {
+  if (e.key !== 'Escape' || e.defaultPrevented || !drawerShowsPage()) return;
+  if ($('#confirm')?.hidden === false || document.body.classList.contains('nav-open')) return;
+  e.preventDefault();
+  closeDrawer({ dismissed: true });
+}
 function watchDrawerPage(on) {
   const act = on ? 'addEventListener' : 'removeEventListener';
   window[act]('resize', placeDrawerPage);
   window[act]('scroll', placeDrawerPage, { passive: true });
+  document[act]('keydown', pageEscape);
 }
 function drawerShowsPage() {
   const root = $('#drawer');
@@ -88,9 +98,31 @@ function closeDrawer(opts = {}) {
   if (opts.restoreFocus !== false && prev && typeof prev.focus === 'function') prev.focus();
 }
 
+// Full page: the head's eyebrow is a breadcrumb saying where this page sits. First the list it opened over, whose
+// link is the way back (closing the page); then each record it was opened from, a click on one going back to it;
+// then what this is (the eyebrow's text: the kind and number), plain. The drawer's title stays the heading.
+function renderDrawerCrumbs(el, text) {
+  // A record redraws its eyebrow once it has loaded; a link the keyboard is on must not vanish from under it.
+  const focused = el.contains(document.activeElement) ? document.activeElement.dataset.crumb : undefined;
+  const ancestors = [labels[state.active] || STR.dashboardWord, ...drawerTrail.map(t => t.label)];
+  const link = (label, i) => `<li><button class="drawer__crumb${i === 0 ? ' drawer__crumb--back' : ''}" type="button" data-crumb="${i}" title="${escapeHTML(label)}" aria-label="${escapeHTML(STR.clientBackAria({ name: label }))}">${escapeHTML(label)}</button></li>`;
+  el.innerHTML = `<nav aria-label="${escapeHTML(STR.drawerCrumbsAria)}"><ol class="drawer__crumbs">${ancestors.map(link).join('')}${text ? `<li aria-current="page">${escapeHTML(text)}</li>` : ''}</ol></nav>`;
+  $$('[data-crumb]', el).forEach(b => b.addEventListener('click', () => {
+    const i = Number(b.dataset.crumb);
+    if (i === 0) return closeDrawer({ dismissed: true });
+    // The trail's entry i - 1 is the record to go back to; what was opened from it after goes with this page.
+    const back = drawerTrail[i - 1];
+    drawerTrail = drawerTrail.slice(0, i - 1);
+    back.open();
+  }));
+  if (focused !== undefined) $(`[data-crumb="${focused}"]`, el)?.focus();
+}
+
 function renderDrawerEyebrow(text) {
   const el = $('#drawer .drawer__eyebrow');
   if (!el) return;
+  // The class is set before the drawer is shown, and records redraw their eyebrow once loaded, so ask the class, not `hidden`.
+  if ($('#drawer').classList.contains('drawer--page')) return renderDrawerCrumbs(el, text);
   const back = trailTop();
   if (!back) { el.textContent = text || STR.dashboardWord; return; }
   el.innerHTML = `<button class="drawer__back" type="button" aria-label="${escapeHTML(STR.clientBackAria({ name: back.label }))}">${escapeHTML(back.label)}</button>`;

@@ -384,6 +384,7 @@ window.__I18N_CATALOGS['pt-PT'] = {
     drawerModeHint: 'Como se abre um cliente, orçamento, fatura, projeto ou outro registo, e os formulários para o criar ou editar. Guardado neste navegador.',
     drawerModeSide: 'Painel lateral', drawerModeSideDesc: 'Desliza da direita, por cima da página em que está.',
     drawerModePage: 'Página inteira', drawerModePageDesc: 'Ocupa a página ao lado do menu, com mais espaço para trabalhar.',
+    drawerCrumbsAria: 'Onde está',
     openInbox: 'Abrir inbox', viewInvoices: 'Ver faturas', viewBookings: 'Ver marcações',
     waiting: 'À espera', noThread: 'Selecione uma conversa', noThreadDesc: 'Escolha um cliente à esquerda para ler e responder.',
     quoteMarkSent: 'Marcar enviado', quoteAccept: 'Aceitar', quoteConvert: 'Converter em fatura',
