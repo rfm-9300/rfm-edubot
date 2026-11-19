@@ -506,7 +506,7 @@
     body.className = 'record';
     body.innerHTML = `<p class="hint">${esc(d.CRM.loading)}</p>`;
     const known = data.agents.find(a => a.id === id);
-    const gen = d.openDrawer(known?.name || d.CRM.loading, body, true, { eyebrow: d.labels.agents });
+    const gen = d.openDrawer(known?.name || d.CRM.loading, body, true, { page: true, eyebrow: d.labels.agents });
     let agent;
     let runs;
     try {
@@ -898,7 +898,7 @@
     const body = document.createElement('div');
     body.className = 'record';
     body.innerHTML = `<p class="hint">${esc(d.CRM.loading)}</p>`;
-    const gen = d.openDrawer(tr('run.title'), body, true, { eyebrow: d.labels.agents });
+    const gen = d.openDrawer(tr('run.title'), body, true, { page: true, eyebrow: d.labels.agents });
     try {
       const [run] = await Promise.all([d.api(`/app/api/agents/runs/${encodeURIComponent(id)}`), ensureCatalog()]);
       if (gen !== d.drawerGen()) return;
@@ -1415,7 +1415,7 @@
       }
     });
     draw();
-    d.openDrawer(A.editTitle, body, true, { eyebrow: agent.name });
+    d.openDrawer(A.editTitle, body, true, { page: true, eyebrow: agent.name });
   }
 
   /** Selects whose value is a shape (quiet hours, an exit rule's status), and fields whose change voids others. */

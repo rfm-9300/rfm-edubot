@@ -348,7 +348,7 @@ async function openServiceForm(service, presetClientId, presetEmployeeId) {
       toast(editing ? t.updated : t.created);
     } catch (err) { btn.disabled = false; toast(err?.code === 'employee_not_found' ? t.employeeNotFound : t.saveFailed); }
   });
-  openDrawer(editing ? t.editTitle : t.formTitle, form, true);
+  openDrawer(editing ? t.editTitle : t.formTitle, form, true, { page: true });
 }
 
 // "One service per line": each line is saved as its own service, named after it unless a name was typed.
@@ -492,7 +492,7 @@ async function openServiceDetail(ref) {
       openServiceDetail(service.id);
     } catch (err) { btn.disabled = false; toast(err?.code === 'quote_billed' ? t.reopenQuoteBilled : t.reopenFailed); }
   });
-  openDrawer(service.name, body, false, { eyebrow: STR.eyebrowService, tags: { kind: 'services', id: service.id } });
+  openDrawer(service.name, body, false, { page: true, eyebrow: STR.eyebrowService, tags: { kind: 'services', id: service.id } });
 }
 
 async function invoiceSelectedServices() {

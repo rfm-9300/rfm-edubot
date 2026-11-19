@@ -116,6 +116,7 @@ function renderNav() {
 
 async function setActive(tab) {
   if (isPortal() && !state.me.modules.includes(tab)) tab = state.me.modules[0] || PORTAL_TAB;
+  closePageDrawer();
   if (tab !== 'conversations') stopInboxPolling();
   if (tab !== 'email') window.EmailUI?.stop();
   state.active = tab;
@@ -593,7 +594,7 @@ async function init(relayed = false) {
   $('#btn-account').addEventListener('click', () => { drawerTrail = []; openAccount(); });
   $('#btn-notifications').addEventListener('click', () => { drawerTrail = []; openNotifications(); });
   $('#brand').addEventListener('click', () => { drawerTrail = []; openCompanySwitcher(); });
-  $('#search').addEventListener('input', e => { state.search = e.target.value; render(); });
+  $('#search').addEventListener('input', e => { closePageDrawer(); state.search = e.target.value; render(); });
   $('#btn-new').addEventListener('click', () => {
     if (state.active === PORTAL_TAB) return openSubmissionForm();
     if (state.active === 'timesheets') return window.TimesheetsUI.newShift();

@@ -109,7 +109,7 @@ async function openChangeForm(change = null, opts = {}) {
       toast(buildingErrorText(err, BLD.saveFailed));
     }
   });
-  openDrawer(change ? change.number : BLD.changeNew, form, true, { eyebrow: change ? change.projectName : labels['change-orders'] });
+  openDrawer(change ? change.number : BLD.changeNew, form, true, { page: true, eyebrow: change ? change.projectName : labels['change-orders'] });
 }
 
 // The client's answer, in their name or the team member who heard it.
@@ -222,5 +222,5 @@ async function openChangeDetail(id) {
       refreshBuildingPage();
     } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   });
-  openDrawer(c.title, body, true, { eyebrow: `${c.number} · ${changeKindLabel(c.kind)}` });
+  openDrawer(c.title, body, true, { page: true, eyebrow: `${c.number} · ${changeKindLabel(c.kind)}` });
 }

@@ -259,7 +259,7 @@ async function openBookingDetail(b) {
   };
   $('[data-detail-link]', body)?.addEventListener('click', () => openFrom(here, () => openClientDrawer(b.clientId)));
   $('[data-booking-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(b.clientServiceId)));
-  openDrawer(bookingServiceName(b) || STR.bookingsEdit, body, false, { eyebrow: STR.clientKindBooking });
+  openDrawer(bookingServiceName(b) || STR.bookingsEdit, body, false, { page: true, eyebrow: STR.clientKindBooking });
   mountRecordAutomations(body, { type: 'booking', id: b.id }, here);
 }
 
@@ -465,7 +465,7 @@ function openBookingForm(booking = null, opts = {}) {
   renderClientHint();
   refreshSlots();
   checkHours();
-  openDrawer(editing ? STR.bookingsEdit : STR.bookingsNew, form);
+  openDrawer(editing ? STR.bookingsEdit : STR.bookingsNew, form, false, { page: true });
 }
 
 function openBookingServicesForm() {

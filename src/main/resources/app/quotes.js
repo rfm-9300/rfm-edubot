@@ -44,7 +44,7 @@ async function openQuoteForm(opts = {}) {
       toast(STR.quoteCreated);
     } catch { btn.disabled = false; toast(STR.quoteCreateFailed); }
   });
-  openDrawer(STR.quoteFormTitle, form, true);
+  openDrawer(STR.quoteFormTitle, form, true, { page: true });
 }
 
 function quoteColumns() {
@@ -204,7 +204,7 @@ async function openQuoteDetail(id) {
   });
   $('[data-q-delete]', form)?.addEventListener('click', () => deleteQuote(quote));
   wirePdfButtons(form);
-  openDrawer(quote.number, form, false, { eyebrow: STR.eyebrowQuote, tags: { kind: 'quotes', id: quote.id } });
+  openDrawer(quote.number, form, false, { page: true, eyebrow: STR.eyebrowQuote, tags: { kind: 'quotes', id: quote.id } });
   mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
 }
 

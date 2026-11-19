@@ -118,7 +118,7 @@ async function openAccount() {
       </button></li>`).join('')}</ul>
     </section>
     ${hint ? `<p class="hint">${escapeHTML(hint)}</p>` : ''}`;
-  openDrawer(STR.accountTitle, body, false, { eyebrow: state.me?.tenant?.name });
+  openDrawer(STR.accountTitle, body, false, { page: false, eyebrow: state.me?.tenant?.name });
   $$('[data-account-open]', body).forEach(b => b.addEventListener('click', () => {
     openFrom(accountTrail(), () => (b.dataset.accountOpen === 'google' ? openAccountGoogle() : openAccountPassword()));
   }));

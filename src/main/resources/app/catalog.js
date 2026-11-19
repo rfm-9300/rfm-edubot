@@ -135,7 +135,7 @@ async function openCatalogForm(itemId) {
       toast(editing ? t.updated({ code: ref }) : !client ? t.created({ code: ref }) : linked ? t.createdLinked({ code: ref, client: client.name }) : t.linkFailed({ code: ref, client: client.name }));
     } catch (err) { btn.disabled = false; toast(err?.code === 'code_taken' ? t.codeTaken : err?.code === 'code_invalid' ? t.codeInvalid : err?.code === 'name_too_long' ? t.catTooLong : STR.catalogCreateFailed); }
   });
-  openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form, false, { eyebrow: t.eyebrow });
+  openDrawer(editing ? t.editTitleFull({ code: editing.code || editing.title }) : t.newTitle, form, false, { page: true, eyebrow: t.eyebrow });
 }
 
 const catalogTrailEntry = item => ({ key: `catalog:${item.id}`, label: item.title, open: () => openCatalogDetail(item.id) });
@@ -168,7 +168,7 @@ function openCatalogDetail(id) {
       <button class="btn btn--sm btn--primary" type="button" data-cat-edit>${escapeHTML(STR.clientEditAction)}</button>`)}`;
   $('[data-cat-edit]', body).addEventListener('click', () => openFrom(here, () => openCatalogForm(item.id)));
   $('[data-cat-delete]', body).addEventListener('click', () => deleteCatalogItem(item.id));
-  openDrawer(item.title, body, false, { eyebrow: service ? t.service : t.material, tags: { kind: 'catalog', id: item.id } });
+  openDrawer(item.title, body, false, { page: true, eyebrow: service ? t.service : t.material, tags: { kind: 'catalog', id: item.id } });
   // The drawer focuses its first button, which here is Delete; Edit is the safer start (after the drawer's own frame).
   requestAnimationFrame(() => $('[data-cat-edit]', body)?.focus());
 }

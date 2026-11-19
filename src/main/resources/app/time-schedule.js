@@ -185,7 +185,7 @@
         after();
       } catch (err) { if (err.message !== 'unauthorized') k.d.toast(k.errorText(err)); }
     });
-    k.d.openDrawer(k.dayText(p.day), body, false, { eyebrow: `${k.T.planEyebrow}${p.employeeNumber ? ` · ${p.employeeNumber}` : ''}` });
+    k.d.openDrawer(k.dayText(p.day), body, false, { page: true, eyebrow: `${k.T.planEyebrow}${p.employeeNumber ? ` · ${p.employeeNumber}` : ''}` });
   }
 
   function openExcuse(p, after) {

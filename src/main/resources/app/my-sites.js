@@ -77,7 +77,7 @@ async function openMySite(id) {
     if (issue) openFrom(here, () => openMySiteIssueForm(s, issue, saved));
   }));
   $('[data-site-photos]', body).addEventListener('click', () => addPhotosTo(s.id, today ? { logId: today.id } : {}, () => { saved(); openMySite(s.id); }));
-  openDrawer(s.name, body, true, { eyebrow: [labels['my-sites'], s.number].join(' · ') });
+  openDrawer(s.name, body, true, { page: true, eyebrow: [labels['my-sites'], s.number].join(' · ') });
 }
 
 // Logs an issue on the site, or moves one: started, fixed, or edited.
@@ -134,5 +134,5 @@ function openMySiteIssueForm(site, issue, onSaved) {
       description: $('#mi-desc', form).value.trim(),
     }, issue ? BLD.issueUpdated : BLD.issueSaved, $('button[type=submit]', form));
   });
-  openDrawer(issue ? i.title : BLD.issueNew, form, true, { eyebrow: projectLabel(site) });
+  openDrawer(issue ? i.title : BLD.issueNew, form, true, { page: true, eyebrow: projectLabel(site) });
 }

@@ -3976,6 +3976,35 @@ html[data-shell="compact"] .drawer__foot { margin: 0 -16px; padding: 8px 12px; b
 html[data-shell="compact"] .confirm__panel { border-radius: var(--r-lg); }
 html[data-shell="compact"] .toast { border-radius: var(--r-md); }
 
+/* Full page (Settings → Appearance): a feature's record or form fills the page area, under the top bar and beside
+   the menu, both still usable. drawer.js adds .drawer--page and measures --drawer-page-top (the top bar's bottom);
+   --sidebar follows the folded menu. Under 561px every drawer is already full screen, so nothing changes there. */
+@media (min-width: 561px) {
+  html[data-shell="compact"] .drawer--page { z-index: 10; pointer-events: none; }
+  html[data-shell="compact"] .drawer--page .drawer__scrim { display: none; }
+  html[data-shell="compact"] .drawer--page .drawer__panel,
+  html[data-shell="compact"] .drawer--page .drawer__panel--wide {
+    top: var(--drawer-page-top, 53px); right: 8px; bottom: 8px; left: var(--sidebar); width: auto;
+    pointer-events: auto; background: var(--surface); border-top: 0; border-radius: 0 0 var(--r-lg) var(--r-lg);
+    box-shadow: none; animation: scrim-in 160ms ease;
+  }
+  html[data-shell="compact"] .drawer--page .drawer__body { overscroll-behavior: contain; }
+  /* On a wide screen the content stays a readable column, centered, rather than stretching edge to edge: --dp-pad is
+     the side padding (16px until the panel is wider than 1200px), and the head and the sticky foot follow it. cqw is
+     the panel's width, so the foot's negative margins always cancel the body's padding. */
+  html[data-shell="compact"] .drawer--page .drawer__panel { container-type: inline-size; --dp-pad: max(16px, calc((100cqw - 1200px) / 2)); }
+  html[data-shell="compact"] .drawer--page .drawer__head { padding-left: var(--dp-pad); padding-right: max(10px, calc(var(--dp-pad) - 6px)); }
+  html[data-shell="compact"] .drawer--page .drawer__body { padding-left: var(--dp-pad); padding-right: var(--dp-pad); }
+  html[data-shell="compact"] .drawer--page .drawer__foot { margin-left: calc(var(--dp-pad) * -1); margin-right: calc(var(--dp-pad) * -1); padding-left: var(--dp-pad); padding-right: var(--dp-pad); }
+  /* A small action dialog opened from a record follows it into the page but stays form-sized, under the title. */
+  html[data-shell="compact"] .drawer--page-quick .drawer__body > .form { max-width: 720px; }
+}
+/* Where the menu slides over the page instead of sitting beside it, the page area is the whole window. */
+@media (min-width: 561px) and (max-width: 920px) {
+  html[data-shell="compact"] .drawer--page .drawer__panel,
+  html[data-shell="compact"] .drawer--page .drawer__panel--wide { right: 0; bottom: 0; left: 0; border: 0; border-radius: 0; }
+}
+
 /* The page bar's record count, and a list head that is only view tabs (buttons pushed to its end) */
 .crumb__count { color: var(--ink-mute); font-weight: 600; }
 .crumb__count::before { content: "·"; margin-right: 6px; }
