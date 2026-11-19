@@ -456,7 +456,7 @@
         if (err.message !== 'unauthorized') d.toast(errorText(err));
       }
     });
-    d.openDrawer(dayText(s.day), body, false, { eyebrow: forTeam ? `${T.detailEyebrow} · ${s.employeeNumber || ''}`.replace(/ · $/, '') : T.detailEyebrow });
+    d.openDrawer(dayText(s.day), body, false, { page: true, eyebrow: forTeam ? `${T.detailEyebrow} · ${s.employeeNumber || ''}`.replace(/ · $/, '') : T.detailEyebrow });
   }
 
   /** "08:00–16:00 · 12 min late · left 1 h early" against the planned shift. */

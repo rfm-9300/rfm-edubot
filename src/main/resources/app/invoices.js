@@ -46,7 +46,7 @@ async function openInvoiceForm(opts = {}) {
       toast(STR.invoiceCreated);
     } catch (err) { btn.disabled = false; toast(invoiceErrorText(err, STR.invoiceCreateFailed)); }
   });
-  openDrawer(STR.invoiceFormTitle, form, true);
+  openDrawer(STR.invoiceFormTitle, form, true, { page: true });
 }
 
 function invoiceColumns() {
@@ -317,7 +317,7 @@ async function openInvoiceDetail(id) {
   $('[data-inv-delete]', form)?.addEventListener('click', () => deleteInvoice(inv));
   $('[data-send-email]', form)?.addEventListener('click', () => openFrom(here, () => openSendEmail('invoice', inv.id, inv.number)));
   wirePdfButtons(form);
-  openDrawer(inv.number, form, false, { eyebrow: STR.eyebrowInvoice, tags: { kind: 'invoices', id: inv.id } });
+  openDrawer(inv.number, form, false, { page: true, eyebrow: STR.eyebrowInvoice, tags: { kind: 'invoices', id: inv.id } });
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
 }
 

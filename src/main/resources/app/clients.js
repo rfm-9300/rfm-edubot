@@ -669,7 +669,7 @@ async function openClientDrawer(ref, tab) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = c => [STR.clientEyebrow, c?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known), tags: { kind: 'clients', id } });
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { page: true, eyebrow: eyebrow(known), tags: { kind: 'clients', id } });
   const record = await loadClientRecord(id);
   if (gen !== drawerGen) return;
   if (!record.client) { closeDrawer({ dismissed: true }); return toast(STR.loadFailed); }
@@ -1001,5 +1001,5 @@ async function openClientForm(client, opts = {}) {
       toast(await clientSaveErrorText(err, editing ? STR.clientUpdateFailed : STR.clientCreateFailed));
     }
   });
-  openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { eyebrow: STR.clientEyebrow });
+  openDrawer(editing ? STR.clientEdit : STR.clientFormTitle, form, false, { page: true, eyebrow: STR.clientEyebrow });
 }

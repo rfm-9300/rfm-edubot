@@ -130,7 +130,7 @@ async function openProjectDrawer(id, tab) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = p => [BLD.eyebrow, p?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, true, { eyebrow: eyebrow(known), tags: { kind: 'projects', id } });
+  const gen = openDrawer(known?.name || CRM.loading, body, true, { page: true, eyebrow: eyebrow(known), tags: { kind: 'projects', id } });
   let record;
   try { record = await loadProjectRecord(id); } catch { record = null; }
   if (gen !== drawerGen) return;
@@ -812,7 +812,7 @@ async function openProjectForm(project = null, opts = {}) {
       toast(buildingErrorText(err, BLD.saveFailed));
     }
   });
-  openDrawer(project ? bt('formEditTitle', { name: p.name }) : (fromQuote ? bt('formFromQuoteTitle', { number: quote.number }) : BLD.formNewTitle), form, true, { eyebrow: BLD.eyebrow });
+  openDrawer(project ? bt('formEditTitle', { name: p.name }) : (fromQuote ? bt('formFromQuoteTitle', { number: quote.number }) : BLD.formNewTitle), form, true, { page: true, eyebrow: BLD.eyebrow });
 }
 
 // ── Phases ───────────────────────────────────────────────────────────────────────────────────────

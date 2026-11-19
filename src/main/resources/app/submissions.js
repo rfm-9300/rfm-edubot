@@ -242,7 +242,7 @@ async function openSubmissionForm(submission = null, { review = false } = {}) {
       if (err?.message !== 'unauthorized') toast(submissionErrorText(err));
     }
   });
-  openDrawer(review ? SUB.changeTitle : editing ? PORTAL.editTitle : PORTAL.newTitle, form, true);
+  openDrawer(review ? SUB.changeTitle : editing ? PORTAL.editTitle : PORTAL.newTitle, form, true, { page: true });
 }
 
 // The employee sees their own submission (change or withdraw it while pending); the team sees whose it is
@@ -325,7 +325,7 @@ async function openSubmissionDetail(ref) {
   $('[data-sub-reject]', body)?.addEventListener('click', () => openFrom(here, () => openRejectForm(s)));
   $('[data-sub-service]', body)?.addEventListener('click', () => openFrom(here, () => openServiceDetail(s.serviceId)));
   $('[data-sub-employee]', body)?.addEventListener('click', () => openFrom(here, () => openPayeeDrawer('employee', s.employeeId)));
-  openDrawer(s.name, body, false, { eyebrow: SUB.eyebrow });
+  openDrawer(s.name, body, false, { page: true, eyebrow: SUB.eyebrow });
 }
 
 function openRejectForm(s) {

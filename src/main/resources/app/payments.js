@@ -198,7 +198,7 @@ async function openPaymentForm(presetSupplierId, presetEmployeeId, presetClient 
       toast(created);
     } catch { btn.disabled = false; toast(t.saveFailed); }
   });
-  openDrawer(t.formTitle, form, true);
+  openDrawer(t.formTitle, form, true, { page: true });
 }
 
 // "3 of 12 · every month" for a payment made as one of a repeating bill.
@@ -403,7 +403,7 @@ async function openPaymentDetail(id) {
   $('#pay-paid', form)?.addEventListener('click', () => markPaymentPaid(pay.id, pay.number));
   $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
   $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
-  openDrawer(pay.number, form, false, { eyebrow: STR.eyebrowPayment, tags: { kind: 'payments', id: pay.id } });
+  openDrawer(pay.number, form, false, { page: true, eyebrow: STR.eyebrowPayment, tags: { kind: 'payments', id: pay.id } });
 }
 
 // Links a payment to the client it was for, or unlinks it.

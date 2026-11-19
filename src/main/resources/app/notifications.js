@@ -142,7 +142,7 @@ async function openNotifications() {
   const body = document.createElement('div');
   body.className = 'record';
   fillNotifications(body);
-  notificationsShown.drawer = openDrawer(NOTIFY.title, body, false, { eyebrow: state.me?.tenant?.name });
+  notificationsShown.drawer = openDrawer(NOTIFY.title, body, false, { page: false, eyebrow: state.me?.tenant?.name });
 }
 
 function markNotificationRead(n) {

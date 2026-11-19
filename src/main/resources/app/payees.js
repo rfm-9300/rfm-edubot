@@ -169,7 +169,7 @@ async function openPayeeDrawer(kind, ref) {
   body.className = 'record';
   body.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
   const eyebrow = p => [cfg.eyebrow(), p?.number].filter(Boolean).join(' · ');
-  const gen = openDrawer(known?.name || CRM.loading, body, false, { eyebrow: eyebrow(known), tags: { kind: `${kind}s`, id } });
+  const gen = openDrawer(known?.name || CRM.loading, body, false, { page: true, eyebrow: eyebrow(known), tags: { kind: `${kind}s`, id } });
   const q = encodeURIComponent(id);
   const work = kind === 'employee' && submissionsOn();
   const signIn = kind === 'employee' && employeePortalOn();
@@ -818,7 +818,7 @@ async function openSupplierForm(supplier, opts = {}) {
       toast(err?.code === 'phone_taken' ? STR.supplierPhoneTaken : (err?.code && t[`err_${err.code}`]) || t.saveFailed);
     }
   });
-  openDrawer(editing ? t.editTitle : t.formTitle, form);
+  openDrawer(editing ? t.editTitle : t.formTitle, form, false, { page: true });
 }
 
 async function openEmployeeForm(employee) {
@@ -873,5 +873,5 @@ async function openEmployeeForm(employee) {
       toast(err?.code === 'phone_taken' ? STR.employeePhoneTaken : err?.code === 'invalid_birth_date' ? t.invalidBirthDate : err?.code === 'invalid_email' ? t.invalidEmail : t.saveFailed);
     }
   });
-  openDrawer(editing ? t.editTitle : t.formTitle, form);
+  openDrawer(editing ? t.editTitle : t.formTitle, form, false, { page: true });
 }

@@ -229,7 +229,7 @@ async function openDiaryForm(entry = null, opts = {}) {
     }
   });
   const eyebrow = site ? projectLabel(site) : entry ? projectLabel({ number: entry.projectNumber, name: entry.projectName }) : labels['site-diary'];
-  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { eyebrow });
+  openDrawer(entry ? bt('diaryEditTitle', { day: fmtDay(entry.day) }) : BLD.diaryNew, form, true, { page: true, eyebrow });
 }
 
 async function openDiaryEntry(id) {
@@ -281,5 +281,5 @@ async function openDiaryEntry(id) {
     refreshBuildingPage();
   };
   draw();
-  openDrawer(capFirst(dayKeyDate(entry.day).toLocaleDateString(uiLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })), body, true, { eyebrow: projectLabel({ number: entry.projectNumber, name: entry.projectName }) });
+  openDrawer(capFirst(dayKeyDate(entry.day).toLocaleDateString(uiLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'UTC' })), body, true, { page: true, eyebrow: projectLabel({ number: entry.projectNumber, name: entry.projectName }) });
 }

@@ -1,4 +1,4 @@
-/* Settings (/app → Settings): Home's cards, appearance (the company's logo and the theme), channels, WhatsApp
+/* Settings (/app → Settings): Home's cards, appearance (the company's logo, the theme and how records open), channels, WhatsApp
    templates, the website widget, language, the quote and invoice template (doc-template.js) and companies.
    Connecting channels is in integrations.js, templates in whatsapp-templates.js and companies in companies.js. */
 
@@ -54,9 +54,12 @@ function appearancePanel() {
   const theme = prefs ? prefs.theme() : 'light';
   const choice = (group, id, title, detail, on) => `<button type="button" class="queue__item choice ${on ? 'is-on' : ''}" data-appearance-${group}="${id}" aria-pressed="${on}"><div><strong>${escapeHTML(title)}</strong><span>${escapeHTML(detail)}</span></div><span class="queue__meta">${on ? `<span class="pill pill--ok">${escapeHTML(STR.appearanceActive)}</span>` : ''}</span></button>`;
   const section = (title, hint, choices) => `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(title)}</h2></header><div class="panel__body"><div class="form">${hint ? `<div class="hint">${escapeHTML(hint)}</div>` : ''}<div class="choice-list">${choices}</div></div></div></section>`;
+  const mode = drawerMode();
   return `<div class="settings-stack">${logoPanel()}${section(STR.appearanceThemeTitle, '',
     choice('theme', 'light', STR.themeLight, STR.themeLightDesc, theme === 'light')
-    + choice('theme', 'dark', STR.themeDark, STR.themeDarkDesc, theme === 'dark'))}</div>`;
+    + choice('theme', 'dark', STR.themeDark, STR.themeDarkDesc, theme === 'dark'))}${section(STR.drawerModeTitle, STR.drawerModeHint,
+    choice('drawer', 'side', STR.drawerModeSide, STR.drawerModeSideDesc, mode === 'side')
+    + choice('drawer', 'page', STR.drawerModePage, STR.drawerModePageDesc, mode === 'page'))}</div>`;
 }
 
 // One logo per company: the sidebar shows it and quotes and invoices print it (doc-template.js changes it too).
@@ -326,6 +329,7 @@ function renderSettings(root) {
   $$('[data-settings]', root).forEach(b => b.addEventListener('click', () => { state.settingsSection = b.dataset.settings; render(); }));
   $$('[data-home-card]', root).forEach(b => b.addEventListener('click', () => toggleHomeCard(b.dataset.homeCard)));
   $$('[data-appearance-theme]', root).forEach(b => b.addEventListener('click', () => { window.UIPrefs?.setTheme(b.dataset.appearanceTheme); toast(STR.appearanceSaved); }));
+  $$('[data-appearance-drawer]', root).forEach(b => b.addEventListener('click', () => { setDrawerMode(b.dataset.appearanceDrawer); toast(STR.appearanceSaved); render(); }));
   $('#wa-connect')?.addEventListener('click', connectWhatsApp);
   $('#ig-connect')?.addEventListener('click', connectInstagram);
   $('#ig-disconnect')?.addEventListener('click', () => disconnectInstagram(ig));

@@ -90,7 +90,7 @@ async function openMeasurementCreateForm() {
     if (!projectId) return toast(BLD.chooseProject);
     startMeasurement(projectId, null, $('#ms-end', form).value);
   });
-  openDrawer(BLD.measurementNew, form, false, { eyebrow: labels.measurements });
+  openDrawer(BLD.measurementNew, form, false, { page: true, eyebrow: labels.measurements });
 }
 
 // What a line is worth at [qty], in cents, as the server counts it: the whole total once fully done.
@@ -254,5 +254,5 @@ async function openMeasurementDetail(id) {
       refreshBuildingPage();
     } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   });
-  openDrawer(bt('measurementTitle', { n: m.number, project: m.projectNumber }), body, true, { eyebrow: labels.measurements });
+  openDrawer(bt('measurementTitle', { n: m.number, project: m.projectNumber }), body, true, { page: true, eyebrow: labels.measurements });
 }

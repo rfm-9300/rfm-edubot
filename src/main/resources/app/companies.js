@@ -64,7 +64,7 @@ function openCompanySwitcher() {
   body.className = 'record';
   body.innerHTML = `<section class="panel"><ul class="worklist">${companies.map(c => companyRow(c, state.me.tenant.id, true)).join('')}</ul></section>
     ${hasModule('settings') ? `<div class="actions"><button class="btn btn--ghost" type="button" data-company-manage>${escapeHTML(STR.companiesManage)}</button></div>` : ''}`;
-  openDrawer(STR.companiesSwitchTitle, body, false, { eyebrow: state.me.tenant.name });
+  openDrawer(STR.companiesSwitchTitle, body, false, { page: false, eyebrow: state.me.tenant.name });
   $$('[data-company]', body).forEach(b => b.addEventListener('click', () => switchCompany(b)));
   $('[data-company-manage]', body)?.addEventListener('click', () => {
     closeDrawer({ dismissed: true });

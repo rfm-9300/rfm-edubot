@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-13
+updated: 2026-11-19
 ---
 
 # Dashboard UI decisions
@@ -409,3 +409,48 @@ dark/light toggle (2026-11-12). Decisions:
   Assistant's answers, notes) and the exported CSV of ticked rows, which is a file the person chose to make. Bar heights and chart shapes still show proportions, as on Home before.
 - **Home's service insights card** has its body built later (`loadInsights`); the observer covers it with
   the rest.
+
+## Records open at the side or as a page (2026-11-19)
+
+A record or form opened in the drawer on the right (600px, 880px "wide"). Rodrigo asked for the option of
+opening it in the whole page of the feature for more room, keeping both, chosen in Settings, for every
+feature. Settings → Appearance → **Opening records** has two cards, *Side panel* (the default) and
+*Full page*. Decisions:
+
+- **One drawer, two presentations; no router.** Full page is the same `#drawer`, laid over the page area,
+  so the trail, Escape, focus handling, the `gen` guards that redraw a record in place and all ~100 call
+  sites keep working. A real route per record would have needed per-feature routing and history; it was
+  not built, so the browser's Back button does nothing for a page-style drawer, as for a side one.
+- **The choice is per browser**, in `localStorage` (`ui:drawerMode`: `side` | `page`), like the theme and
+  the folded menu. It is not a company or account setting: there is no backend for it.
+- **How it is laid out** (`drawer.js`, `.drawer--page` in the compact shell's block of `style.css`): the
+  panel is `position: fixed` from the menu's edge (`left: var(--sidebar)`, so it follows the folded menu)
+  to the main card's right and bottom edge, and starts at the top bar's bottom, which `placeDrawerPage()`
+  measures (the bar sticks to the window and wraps on narrow screens) on opening, resize and scroll. No
+  scrim, the root takes no pointer events, `aria-modal` is `false` and Tab isn't trapped, so the menu and
+  the top bar stay usable. `z-index` 10, under the phone menu (40, its scrim 35) and the confirm dialog (80).
+- **What opens as a page** is decided at each call: `openDrawer(…, { page: true })` on every feature's
+  record and its main create / edit form (clients, suppliers, employees, projects, quotes, invoices,
+  payments, services, catalog items, bookings, employees' registered services, change orders, site issues,
+  measurements, diary entries, My sites, an agent's record, editor and run, shifts and plans).
+  `{ page: false }` keeps a drawer at the side whatever is chosen: the account, the bell, the company
+  switcher. **Left out, a drawer follows what is on screen**: a quick action opened from a page-style
+  record (installments, "turn into a service"…) stays in the page instead of the record vanishing for a
+  side panel and coming back; those get `.drawer--page-quick`, which keeps their form to 720px under the
+  title. Opened from the list, the same dialog is a side panel. Read at call time, so
+  `closeDrawer(); openDrawer(…)` with no flag opens at the side; give such a drawer `page: true`.
+- **Leaving:** ×, Escape, the trail's back link, and what stands in for a page: a menu link
+  (`setActive()` calls `closePageDrawer()`) and typing in the search box (the list behind it filters, so
+  it is shown). `closePageDrawer()` skips restoring focus, which would jump back to a stale row.
+- **Wide screens:** the content is a centered column up to 1200px. `--dp-pad` (side padding, 16px until
+  the panel is wider than 1200px) uses `cqw`, the panel being a size container, so the head, the body and
+  the sticky foot all line up and the foot's negative margins always cancel the body's padding. Don't
+  switch that to `%`, which would resolve against a different box in each of the three.
+- **Phones:** under 561px nothing changes, every drawer is already full screen. From 561 to 920px (the
+  menu slides over the page) the page spans the window under the top bar.
+- **A new drawer** that is a feature's record or its main form gets `page: true`; a utility dialog gets
+  nothing; a panel opened from the top bar gets `page: false`. The Settings strings are
+  `app.drawerMode*` in the three catalogs.
+- Checked in headless Chrome against the real files and a stub API: 1440, 1920, 820 and 400px, folded and
+  open menu, light and dark, record → form → Escape, menu link, search, trail, quick dialog, and the
+  account panel over an open page.

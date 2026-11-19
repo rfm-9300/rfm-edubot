@@ -142,7 +142,7 @@ async function openIssueForm(issue = null, opts = {}) {
       toast(buildingErrorText(err, BLD.saveFailed));
     }
   });
-  openDrawer(issue ? issue.number : BLD.issueNew, form, true, { eyebrow: issue ? issue.projectName : labels['site-issues'] });
+  openDrawer(issue ? issue.number : BLD.issueNew, form, true, { page: true, eyebrow: issue ? issue.projectName : labels['site-issues'] });
 }
 
 // The next steps an issue can take from its status.
@@ -217,5 +217,5 @@ async function openIssueDetail(id) {
     wirePhotoGrid(body, issue.photos, here, reload);
   };
   draw();
-  openDrawer(issue.title, body, true, { eyebrow: `${issue.number} · ${issueKindLabel(issue.kind)}` });
+  openDrawer(issue.title, body, true, { page: true, eyebrow: `${issue.number} · ${issueKindLabel(issue.kind)}` });
 }
