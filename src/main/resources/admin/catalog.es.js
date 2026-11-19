@@ -907,6 +907,8 @@ window.__I18N_CATALOGS['es'] = {
         help: 'Arrastra una tarjeta para moverla, y desde su punto hasta el paso al que lleva. Usa la rueda o el trackpad para desplazarte; Ctrl + rueda (o pellizcar) hace zoom.',
         helpRead: 'Usa la rueda o el trackpad para desplazarte; Ctrl + rueda (o pellizcar) hace zoom. Elige una tarjeta para leerla.',
         edit: 'Editar', tryIt: 'Probar', backToBoard: 'Tablero', needsWork: 'Hay algo que corregir',
+        view: { board: 'Tablero', list: 'Lista' }, viewAria: 'Mostrar el flujo como', listAria: 'Pasos del flujo',
+        viewHint: { board: 'Tarjetas y líneas que puedes mover y conectar', list: 'Cada paso como un formulario, uno debajo de otro' },
         zoomIn: 'Acercar', zoomOut: 'Alejar', zoomReset: 'Volver al 100 %', fit: 'Mostrar todo el flujo',
         undo: 'Deshacer', redo: 'Rehacer', undoTitle: 'Deshacer (Ctrl+Z)', redoTitle: 'Rehacer (Ctrl+Mayús+Z)',
         tidy: 'Ordenar', tidyTitle: 'Colocar los pasos de nuevo, en columnas desde el inicio',

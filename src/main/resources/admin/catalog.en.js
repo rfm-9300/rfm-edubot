@@ -908,6 +908,8 @@ window.__I18N_CATALOGS['en'] = {
         help: 'Drag a card to move it, and from its dot to the step it leads to. Scroll to move around; Ctrl + scroll (or a pinch) zooms.',
         helpRead: 'Scroll to move around; Ctrl + scroll (or a pinch) zooms. Pick a card to read it.',
         edit: 'Edit', tryIt: 'Try it', backToBoard: 'Board', needsWork: 'Something to fix',
+        view: { board: 'Board', list: 'List' }, viewAria: 'Show the flow as', listAria: 'Flow steps',
+        viewHint: { board: 'Cards and lines you can move and link', list: 'Every step as a form, one under the other' },
         zoomIn: 'Zoom in', zoomOut: 'Zoom out', zoomReset: 'Back to 100%', fit: 'Show the whole flow',
         undo: 'Undo', redo: 'Redo', undoTitle: 'Undo (Ctrl+Z)', redoTitle: 'Redo (Ctrl+Shift+Z)',
         tidy: 'Tidy up', tidyTitle: 'Lay the steps out again, in columns from the start',
