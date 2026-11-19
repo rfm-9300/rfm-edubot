@@ -732,8 +732,15 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
           <button class="flow-tab is-on" role="tab" aria-selected="true"><span class="flow__index">1</span><span class="flow-tab__name">Appointments</span><span class="flow-tab__state is-on"></span><span class="flow-tab__warn" hidden></span></button>
         </div>
         <button class="btn btn--sm btn--ghost" data-flow-add>+ <span class="chatbot-board__add">Add flow</span></button>
+        <span class="chatbot-board__tools"><!-- undo, redo: the list only --></span>
+        <div class="chatbot-view" role="group"><button class="chatbot-view__btn is-on" data-view="board" aria-pressed="true"><svg/><span class="chatbot-view__label">Board</span></button><button class="chatbot-view__btn" data-view="list" aria-pressed="false"><svg/><span class="chatbot-view__label">List</span></button></div>
         <button class="btn btn--sm chatbot-board__try">Try it</button>  <!-- phones only -->
       </div>
+      <!-- the board, or in List: <div class="chatbot-list" data-list-scroll><form class="form chatbot-list__form" id="chatbot-form">
+             <section class="panel chatbot-list__card chatbot-inspector"><!-- the flow settings --></section>
+             <section class="panel chatbot-list__card chatbot-inspector is-current" data-list-step="s-1a2b3c"><header class="panel__head chatbot-list__head"><div class="chatbot-inspector__kind"/><span class="chatbot-list__flags"/></header><div class="panel__body chatbot-list__body"/></section>
+             <div class="chatbot-list__add"><span class="lbl">Add a step</span><div class="chatbot-list__kinds"><!-- a .btn per kind --></div></div>
+           </form></div> -->
       <div class="flow-canvas is-editable" data-board tabindex="0" role="group">
         <div class="flow-canvas__world" data-world>              <!-- transform: translate() scale(), from chatbot-board.js -->
           <svg class="flow-canvas__edges" data-edges><defs><!-- #flow-arrow, #flow-arrow-on, #flow-arrow-trail --></defs>
@@ -773,7 +780,9 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 | Class | Role |
 |---|---|
 | `.chatbot-studio` (`.is-side-open`) | The board and the side panel, as tall as the screen under the figures (a member, with no save bar, gets that room too), so the board can take the scroll wheel. Under 920px one column: the board, or the side panel when a card or Try it opened it (`.is-side-open`, with `.chatbot-side__back` to return); under 560px the figures hide |
-| `.chatbot-board` · `__bar` · `__try` · `__add` · `__empty` | The board's panel: flow tabs, Add flow (its `+` alone on a phone, its name kept as `aria-label`), Try it on phones, the empty state |
+| `.chatbot-board` (`.is-list`) · `__bar` · `__tools` · `__try` · `__add` · `__empty` | The board's panel: flow tabs, Add flow (its `+` alone on a phone, its name kept as `aria-label`), the list's undo and redo, Try it on phones, the empty state |
+| `.chatbot-view` · `__btn` (`.is-on`) · `__label` | Board / List at the end of the bar: two `aria-pressed` buttons in a `--surface-2` well, the one on raised on `--surface`. Under 560px the labels are visually hidden, the icons stay |
+| `.chatbot-list` · `__form` · `__card` (`.is-unreached` `.is-visited` `.is-current` `.is-flash`) · `__head` · `__flags` · `__body` · `__add` · `__kinds` | The list: on `--bg`, scrolling inside the studio, at most 820px wide. The flow's settings and each step are `.panel`s built by the side panel's own functions (`flowPanel`, `stepPanel` with `inList`), so fields and ids are the same (`cb-0-2-text`). A step nothing leads to is dashed; on a test's way its head is `--accent-soft`; where the customer waits a 2px `--accent` ring. Add a step is one `.btn` per kind with its icon well |
 | `.flow-tabs` > `.flow-tab` (`.is-on`) · `__name` · `__state` (`.is-on`) · `__warn` | One tab per flow, in the order flows are checked: its number, name, an `--ok` dot when on (else `--ink-faint`), and a `--warn` diamond while something keeps it from saving. Arrow keys, Home and End move between them |
 | `.flow-canvas` (`.is-editable` `.is-panning` `.is-dragging`) · `__world` · `__edges` | The canvas: `--bg` with a dotted grid that follows the pan and zoom, `touch-action: none`, `overflow: clip` (never scrolled by a focused card). `__world` is moved by `chatbot-board.js` (`transform`, origin top left); `__edges` is the svg of lines, sized to the cards |
 | `.flow-canvas__tools` (`--edit` top left, `--zoom` bottom left) · `__sep` · `__zoom` · `__help` · `__unlink` | Floating toolbars on `--surface` (borderless `.iconbtn`s, the zoom as a % that resets to 100%); the help line (hidden under 1180px and on touch screens); the × in the middle of a picked line. Anything with `data-board-ui` is left out of the board's gestures |
@@ -790,7 +799,7 @@ Two columns (editor, test chat at up to 400px) with the chat sticky at the top; 
 | `.lines--options` > `.line` · `.lines--hours` > `.line` | In the side panel: an option's title with × beside it, then where it leads and its other words, a row each; a day over its from and to |
 | `.tokens` / `.token` | As in Channels and the Persona rules: keywords are tokens |
 
-Rules: a text field changes the draft as it is typed and redraws nothing but the card it belongs to on the board (and the tab, the summary, what to fix and the bytes hint); a choice, a checkbox or a field that changes the shape of a step redraws the page, restoring the focused id. Moving a card redraws nothing: the board moves it and its lines. The test chat sends the unsaved flows with each turn, keeps where the customer was in the state the server hands back, and lights the board from each turn's `flowId` and `path`.
+Rules: `.chatbot-list`, `.chatbot-side__scroll` and `.chatbot-try__body` are `position: relative`, so the visually hidden labels in them (absolutely positioned) are clipped with their scroll instead of stretching the page. A text field changes the draft as it is typed and redraws nothing but the card it belongs to on the board (and the tab, the summary, what to fix and the bytes hint); a choice, a checkbox or a field that changes the shape of a step redraws the page, restoring the focused id. Moving a card redraws nothing: the board moves it and its lines. The test chat sends the unsaved flows with each turn, keeps where the customer was in the state the server hands back, and lights the board from each turn's `flowId` and `path`.
 
 ## Conversations inbox
 

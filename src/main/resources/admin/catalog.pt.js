@@ -908,6 +908,8 @@ window.__I18N_CATALOGS['pt-PT'] = {
         help: 'Arraste um cartão para o mover, e do seu ponto até ao passo a que leva. Use a roda do rato ou o trackpad para se deslocar; Ctrl + roda (ou aproximar os dedos) faz zoom.',
         helpRead: 'Use a roda do rato ou o trackpad para se deslocar; Ctrl + roda (ou aproximar os dedos) faz zoom. Escolha um cartão para o ler.',
         edit: 'Editar', tryIt: 'Experimentar', backToBoard: 'Quadro', needsWork: 'Há algo a corrigir',
+        view: { board: 'Quadro', list: 'Lista' }, viewAria: 'Mostrar o fluxo como', listAria: 'Passos do fluxo',
+        viewHint: { board: 'Cartões e linhas que pode mover e ligar', list: 'Cada passo como um formulário, uns por baixo dos outros' },
         zoomIn: 'Aproximar', zoomOut: 'Afastar', zoomReset: 'Voltar a 100%', fit: 'Mostrar o fluxo todo',
         undo: 'Anular', redo: 'Refazer', undoTitle: 'Anular (Ctrl+Z)', redoTitle: 'Refazer (Ctrl+Shift+Z)',
         tidy: 'Arrumar', tidyTitle: 'Dispor os passos de novo, em colunas a partir do início',

@@ -58,18 +58,26 @@
     minus: icon('<path d="M5 12h14"/>'),
     unlink: icon('<path d="M7 7l10 10M17 7 7 17"/>'),
     back: icon('<path d="M15 5l-7 7 7 7"/>'),
+    board: icon('<rect x="3.5" y="4.5" width="7.5" height="5.5" rx="1.5"/><rect x="13" y="14" width="7.5" height="5.5" rx="1.5"/><path d="M11 7.2h2.2a2 2 0 0 1 2 2V14"/>'),
+    list: icon('<path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/>'),
   };
   const MARKERS = `<defs>${['', '-on', '-trail'].map(v => `<marker id="flow-arrow${v}" class="flow-arrow${v ? ` flow-arrow--${v.slice(1)}` : ''}" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="9" markerHeight="9" markerUnits="userSpaceOnUse" orient="auto"><path d="M1,1.5 L9,5 L1,8.5 z"/></marker>`).join('')}</defs>`;
 
-  // The unsaved flows (null: nothing changed yet) and what the page shows: the flow on the board, the step open in the
-  // side panel (null: the flow's own settings), the line picked, each flow's pan and zoom, the add-a-step menu, the test
-  // chat and the way it went on the board. None of it is saved.
+  /** Board or List, as this browser last showed the flows: a convenience, so it may be forgotten. */
+  const VIEW_KEY = 'chatbot.view';
+  function storedView() {
+    try { return localStorage.getItem(VIEW_KEY) === 'list' ? 'list' : 'board'; } catch { return 'board'; }
+  }
+
+  // The unsaved flows (null: nothing changed yet) and what the page shows: the board or the list, the flow shown, the
+  // step open in the side panel (null: the flow's own settings), the line picked, each flow's pan and zoom, the
+  // add-a-step menu, the test chat and the way it went. None of it is saved.
   let draft = null;
   let guard = false;
   let board = null;
   const history = { past: [], future: [] };
   const ui = {
-    flowId: null, sel: null, edge: null, side: 'edit', sideOpen: false, views: {}, menu: null, typing: null, nudge: null, trail: null,
+    view: storedView(), flowId: null, sel: null, edge: null, side: 'edit', sideOpen: false, views: {}, menu: null, typing: null, nudge: null, trail: null,
     saving: false, pending: {}, note: null, chat: [], chatState: null, busy: false, channel: 'WHATSAPP', at: '', known: false,
   };
 
@@ -244,12 +252,14 @@
     }
     seed();
     board = null;
-    const kept = $('[data-side-scroll]', root);
-    const scroll = kept ? { key: kept.dataset.sideScroll, top: kept.scrollTop } : null;
+    const keep = sel => { const el = $(sel, root); return el ? { key: el.dataset.sideScroll || el.dataset.listScroll, top: el.scrollTop } : null; };
+    const scroll = keep('[data-side-scroll]');
+    const listScroll = keep('[data-list-scroll]');
     const list = flows();
     const edit = canEdit();
     const i = flowIndex();
     const f = list[i];
+    const listing = ui.view === 'list' && !!f;
     const on = list.filter(x => x.enabled).length;
     const used = saved().usage?.flows || [];
     const stats = statCards([
@@ -259,14 +269,16 @@
     ]);
     root.innerHTML = `<div class="chatbot-page" data-chatbot>${hero(labels.chatbot, T.desc, stats)}
       <div class="chatbot-studio${ui.sideOpen ? ' is-side-open' : ''}">
-        <section class="panel chatbot-board" aria-label="${esc(B.boardAria)}">${barHtml(list, i, edit)}${f ? canvasHtml(f, i, edit) : emptyState(edit)}</section>
-        <aside class="chatbot-side" aria-label="${esc(B.sideAria)}">${sideHtml(f, i, edit)}</aside>
+        <section class="panel chatbot-board${listing ? ' is-list' : ''}" aria-label="${esc(listing ? B.listAria : B.boardAria)}">${barHtml(list, i, edit)}${!f ? emptyState(edit) : listing ? listHtml(f, i, edit) : canvasHtml(f, i, edit)}</section>
+        <aside class="chatbot-side" aria-label="${esc(listing ? T.testTitle : B.sideAria)}">${sideHtml(f, i, edit)}</aside>
       </div>
       ${edit ? savebarHtml() : ''}</div>`;
     wire(root);
     mountBoard(root);
     const side = $('[data-side-scroll]', root);
     if (side && scroll && side.dataset.sideScroll === scroll.key) side.scrollTop = scroll.top;
+    const steps = $('[data-list-scroll]', root);
+    if (steps && listScroll && steps.dataset.listScroll === listScroll.key) steps.scrollTop = listScroll.top;
   }
 
   /** Keeps what the page shows pointing at flows and steps that exist. */
@@ -315,10 +327,63 @@
     const add = !edit ? '' : room
       ? `<button type="button" class="btn btn--sm btn--ghost" data-flow-add aria-label="${esc(T.add)}" title="${esc(T.add)}"><span class="btn__plus">+</span><span class="chatbot-board__add">${esc(T.add)}</span></button>`
       : `<span class="hint">${esc(tr('flowsFull', { max: count(limitsOf().flows || 10) }))}</span>`;
+    // The list has no toolbar of its own, so its undo and redo sit here.
+    const tools = edit && ui.view === 'list' ? `<span class="chatbot-board__tools">
+        <button type="button" class="iconbtn" data-board-undo aria-label="${esc(B.undo)}" title="${esc(B.undoTitle)}"${history.past.length ? '' : ' disabled'}>${ICON.undo}</button>
+        <button type="button" class="iconbtn" data-board-redo aria-label="${esc(B.redo)}" title="${esc(B.redoTitle)}"${history.future.length ? '' : ' disabled'}>${ICON.redo}</button>
+      </span>` : '';
+    const views = `<div class="chatbot-view" role="group" aria-label="${esc(B.viewAria)}">${['board', 'list'].map(v => `<button type="button" class="chatbot-view__btn${ui.view === v ? ' is-on' : ''}" data-view="${v}" aria-pressed="${ui.view === v}" title="${esc(tr(`board.viewHint.${v}`))}">${ICON[v]}<span class="chatbot-view__label">${esc(tr(`board.view.${v}`))}</span></button>`).join('')}</div>`;
     return `<div class="chatbot-board__bar">
-        ${list.length ? `<div class="flow-tabs" role="tablist" aria-label="${esc(B.flowsAria)}">${tabs}</div>${add}` : ''}
+        ${list.length ? `<div class="flow-tabs" role="tablist" aria-label="${esc(B.flowsAria)}">${tabs}</div>${add}${tools}${views}` : ''}
         <button type="button" class="btn btn--sm chatbot-board__try" data-side-go="try">${esc(B.tryIt)}</button>
       </div>`;
+  }
+
+  // ── The list: the same flow as forms, one under the other ─────────────────────────────────────
+
+  /** The flow's settings, then every step's fields in their order, then buttons that add a step of each kind. */
+  function listHtml(f, i, edit) {
+    const steps = f.steps || [];
+    const max = limitsOf().steps || 60;
+    const room = steps.length < max;
+    const add = edit ? `<div class="chatbot-list__add">
+        <span class="lbl">${esc(T.addStep)}</span>
+        <div class="chatbot-list__kinds">${KINDS.map(k => `<button type="button" class="btn btn--sm" data-list-add="${k}"${room ? '' : ' disabled'}><span class="flow-node__icon flow-node__icon--${k.toLowerCase()}" aria-hidden="true">${ICON[k]}</span>${esc(tr(`board.kind.${k}`))}</button>`).join('')}</div>
+        ${room ? '' : `<p class="hint">${esc(tr('stepsFull', { max: count(max) }))}</p>`}
+      </div>` : '';
+    return `<div class="chatbot-list" data-list-scroll="${esc(f.id)}" role="region" aria-label="${esc(tr('board.aria', { name: flowName(f, i) }))}">
+      <form class="form chatbot-list__form" id="chatbot-form" novalidate>
+        ${flowPanel(f, i, edit, true)}
+        ${steps.map((s, j) => stepPanel(f, i, edit, j, true)).join('')}
+        ${add}
+      </form>
+    </div>`;
+  }
+
+  const listCard = id => $(`[data-list-step="${CSS.escape(id)}"]`);
+
+  /** The list's cards follow the test chat as the board's do: the steps gone through, and the one the customer is at. */
+  function paintListTrail(f) {
+    const t = trailOf(f);
+    $$('[data-list-step]').forEach(card => {
+      const id = card.dataset.listStep;
+      card.classList.toggle('is-current', t?.current === id);
+      card.classList.toggle('is-visited', !!t && t.current !== id && t.seen.has(id));
+      $('[data-list-here]', card)?.toggleAttribute('hidden', t?.current !== id);
+    });
+  }
+
+  function setView(view) {
+    if (view === ui.view) return;
+    ui.view = view;
+    try { localStorage.setItem(VIEW_KEY, view); } catch { /* not remembered, then */ }
+    ui.sideOpen = false;
+    ui.edge = null;
+    closeMenu();
+    d.render();
+    $(`[data-view="${view}"]`)?.focus({ preventScroll: true });
+    // The step open on the board is where the list starts, and the other way round.
+    if (view === 'list' && ui.sel) listCard(ui.sel)?.scrollIntoView({ block: 'start' });
   }
 
   // ── The board ──────────────────────────────────────────────────────────────────────────────────
@@ -897,6 +962,11 @@
   // ── The side panel ─────────────────────────────────────────────────────────────────────────────
 
   function sideHtml(f, i, edit) {
+    // The list edits every step itself, so beside it the side panel only tries the flows.
+    if (ui.view === 'list' && f) {
+      const back = narrow() ? `<div class="chatbot-side__top"><button type="button" class="btn btn--sm btn--ghost chatbot-side__back" data-side-close>${ICON.back}<span>${esc(tr('board.view.list'))}</span></button></div>` : '';
+      return back + testPanel();
+    }
     const tab = (key, label) => `<button type="button" class="chip${ui.side === key ? ' is-on' : ''}" role="tab" aria-selected="${ui.side === key}" data-side-go="${key}">${esc(label)}</button>`;
     const body = ui.side === 'try' ? testPanel()
       : !f ? introPanel()
@@ -923,8 +993,12 @@
   const notice = issues => (issues.length ? `<div class="notice notice--warn"><div class="notice__text"><strong>${esc(B.toFixTitle)}</strong>
       <ul class="notice__list">${issues.map(code => `<li>${esc(issueText(code))}</li>`).join('')}</ul></div></div>` : '');
 
-  /** The flow's own settings, which the start card opens: name, on or off, channels, keywords, and replies not understood. */
-  function flowPanel(f, i, edit) {
+  /** A panel of the side panel, whose body scrolls, or a card of the list, which scrolls as a whole. */
+  const panelClass = inList => (inList ? 'panel chatbot-list__card chatbot-inspector' : 'panel chatbot-side__panel chatbot-inspector');
+  const bodyAttrs = (inList, key) => (inList ? 'class="panel__body chatbot-list__body"' : `class="panel__body chatbot-side__scroll" data-side-scroll="${esc(key)}"`);
+
+  /** The flow's own settings, which the start card opens (or the list starts with): name, on or off, channels, keywords, and replies not understood. */
+  function flowPanel(f, i, edit, inList = false) {
     const id = `cb-${i}`;
     const limits = limitsOf();
     const list = flows();
@@ -938,12 +1012,12 @@
     const channelsRow = CHANNELS.map(ch => `<label class="form__check"><input type="checkbox" ${bind('c', i, ch)} data-channel="${ch}"${(f.channels || []).includes(ch) ? ' checked' : ''}${off(edit)} /> ${esc(channelName(ch))}${connected.includes(ch) ? '' : ` <span class="hint">· ${esc(T.notConnected)}</span>`}</label>`).join('');
     const foot = edit ? `<div class="flow-menu__foot"><span class="actions">${room ? `<button type="button" class="btn btn--sm btn--ghost" data-flow-duplicate="${i}">${esc(T.duplicate)}</button>` : ''}
         <button type="button" class="btn btn--sm btn--ghost" data-flow-remove="${i}">${esc(T.remove)}</button></span></div>` : '';
-    return `<section class="panel chatbot-side__panel chatbot-inspector" id="${id}" data-side-flow="${i}">
+    return `<section class="${panelClass(inList)}" id="${id}" data-side-flow="${i}">
       <header class="panel__head">
         <h2 class="panel__title chatbot-inspector__title"><span class="flow-node__icon flow-node__icon--start" aria-hidden="true">${ICON.START}</span>${esc(B.flowSettings)}</h2>
         ${order}
       </header>
-      <div class="panel__body chatbot-side__scroll" data-side-scroll="flow:${esc(f.id)}">
+      <div ${bodyAttrs(inList, `flow:${f.id}`)}>
         <p class="flow-menu__summary" data-flow-summary="${i}">${flowSummary(f)}</p>
         ${list.length > 1 ? `<p class="hint">${esc(tr('board.order', { n: i + 1, total: list.length }))} ${esc(T.orderHint)}</p>` : ''}
         ${offChannels.length ? `<p class="hint"><strong>${esc(tr('aiOff', { channels: offChannels.join(', ') }))}</strong></p>` : ''}
@@ -999,8 +1073,8 @@
     return `<select class="sel" ${id ? `id="${id}"` : ''} ${bind(c, at, field, rr)}${off(edit)}>${options}</select>`;
   }
 
-  function stepPanel(f, i, edit) {
-    const j = f.steps.findIndex(s => s.id === ui.sel);
+  /** Step [j] of the flow (in the side panel, the one open there): its kind, what to fix, its fields, and its tools. */
+  function stepPanel(f, i, edit, j = f.steps.findIndex(s => s.id === ui.sel), inList = false) {
     const step = f.steps[j];
     const id = `cb-${i}-${j}`;
     const at = `${i}.${j}`;
@@ -1009,25 +1083,43 @@
     const kind = edit
       ? `<select class="sel" id="${id}-kind" ${bind('s', at, 'kind', true)} aria-label="${esc(T.kindLabel)}">${KINDS.map(k => `<option value="${k}"${step.kind === k ? ' selected' : ''}>${esc(tr(`kind.${k}`))}</option>`).join('')}</select>`
       : `<span class="pill">${esc(tr(`kind.${step.kind}`))}</span>`;
+    const kindRow = `<div class="chatbot-inspector__kind">
+          <span class="flow-node__icon flow-node__icon--${step.kind.toLowerCase()}" aria-hidden="true">${ICON[step.kind]}</span>
+          <span class="flow__index" title="${esc(B.stepNumber)}">${j + 1}</span>${kind}
+          ${j === 0 ? `<span class="pill">${esc(T.first)}</span>` : ''}
+        </div>`;
     const foot = edit ? `<div class="flow-menu__foot"><span class="actions">
         ${j ? `<button type="button" class="btn btn--sm btn--ghost" data-step-first="${i}:${j}">${esc(B.makeFirst)}</button>` : ''}
         ${f.steps.length < (limits.steps || 60) ? `<button type="button" class="btn btn--sm btn--ghost" data-step-duplicate="${i}:${j}">${esc(B.duplicateStep)}</button>` : ''}
         <button type="button" class="btn btn--sm btn--ghost" data-step-remove="${i}:${j}"${f.steps.length > 1 ? '' : ' disabled'}>${esc(T.removeStep)}</button>
       </span></div>` : '';
-    return `<section class="panel chatbot-side__panel chatbot-inspector" id="${id}" data-step="${i}:${j}">
+    const body = `<div class="chatbot-side__issues" data-step-issues="${j}">${notice(stepIssues(f, step))}</div>
+        ${stepBody(f, i, step, j, edit, id, at, limits)}
+        ${foot}`;
+    if (inList) {
+      const t = trailOf(f);
+      const reached = reachOf(f).has(step.id);
+      const state = `${reached ? '' : ' is-unreached'}${t?.current === step.id ? ' is-current' : t?.seen.has(step.id) ? ' is-visited' : ''}`;
+      return `<section class="${panelClass(true)}${state}" id="${id}" data-step="${i}:${j}" data-list-step="${esc(step.id)}">
+        <header class="panel__head chatbot-list__head">
+          ${kindRow}
+          <span class="chatbot-list__flags">
+            <span class="flow-node__here" data-list-here${t?.current === step.id ? '' : ' hidden'}>${esc(B.here)}</span>
+            ${reached ? '' : `<span class="flow-node__note">${esc(B.unreached)}</span>`}
+            ${sent ? `<span class="flow-menu__stat">${esc(tr('stepSent', { n: sent }))}</span>` : ''}
+          </span>
+        </header>
+        <div ${bodyAttrs(true)}>${body}</div>
+      </section>`;
+    }
+    return `<section class="${panelClass(false)}" id="${id}" data-step="${i}:${j}">
       <header class="panel__head">
         <button type="button" class="btn btn--sm btn--ghost chatbot-inspector__crumb" data-sel-flow title="${esc(B.flowSettings)}">${ICON.back}<span>${esc(flowName(f, i))}</span></button>
         ${sent ? `<span class="flow-menu__stat">${esc(tr('stepSent', { n: sent }))}</span>` : ''}
       </header>
-      <div class="panel__body chatbot-side__scroll" data-side-scroll="step:${esc(step.id)}">
-        <div class="chatbot-inspector__kind">
-          <span class="flow-node__icon flow-node__icon--${step.kind.toLowerCase()}" aria-hidden="true">${ICON[step.kind]}</span>
-          <span class="flow__index" title="${esc(B.stepNumber)}">${j + 1}</span>${kind}
-          ${j === 0 ? `<span class="pill">${esc(T.first)}</span>` : ''}
-        </div>
-        <div class="chatbot-side__issues" data-step-issues>${notice(stepIssues(f, step))}</div>
-        ${stepBody(f, i, step, j, edit, id, at, limits)}
-        ${foot}
+      <div ${bodyAttrs(false, `step:${step.id}`)}>
+        ${kindRow}
+        ${body}
       </div>
     </section>`;
   }
@@ -1257,13 +1349,14 @@
     } else {
       paintTrail();
     }
-    if (t.current) board?.reveal(t.current);
+    if (t.current) board ? board.reveal(t.current) : listCard(t.current)?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 
   function paintTrail() {
     const f = current();
-    if (!f || !board) return;
-    refreshNodes([START, ...f.steps.map(s => s.id)]);
+    if (!f) return;
+    if (board) refreshNodes([START, ...f.steps.map(s => s.id)]);
+    else paintListTrail(f);
   }
 
   function restartChat() {
@@ -1323,12 +1416,13 @@
     ui.flowId = f.id;
     ui.sel = s ? s.id : null;
     ui.side = 'edit';
-    ui.sideOpen = true;
+    // On a phone the side panel opens over the board; the list has the step itself.
+    ui.sideOpen = ui.view !== 'list';
     ui.edge = null;
     d.render();
-    const panel = $('.chatbot-inspector');
     const suffix = PROBLEM_FIELD[problem.problem];
     const base = s ? `cb-${i}-${problem.step}` : `cb-${i}`;
+    const panel = document.getElementById(base);
     const field = (suffix && document.getElementById(`${base}-${suffix}`)) || (panel && $('input:not([type=checkbox]), textarea, select', panel));
     panel?.classList.add('is-flash');
     if (s) {
@@ -1463,11 +1557,14 @@
     if (field === 'key' && c === 's' && obj.kind === 'ASK' && KEYS[obj.key] && (obj.expect || 'TEXT') === 'TEXT') obj.expect = KEYS[obj.key];
     settle();
     if (el.hasAttribute('data-rr') || c === 't' || c === 'o' && field === 'next') return redraw(el.id);
-    paint();
+    paint(c === 'f' || c === 'c' ? -1 : Number(String(b).split('.')[1]));
   }
 
-  /** Brings what summarises the draft in step with it (tabs, the card being edited, hints) without redrawing the fields being typed in. */
-  function paint() {
+  /**
+   * Brings what summarises the draft in step with it (tabs, the card being edited, hints) without redrawing the fields
+   * being typed in. [j] is the step edited (-1: the flow's settings); left out, the one open in the side panel.
+   */
+  function paint(j = null) {
     const f = current();
     const i = flowIndex();
     if (f) {
@@ -1486,10 +1583,10 @@
       if (counter) counter.textContent = tr('keywordsCount', { n: count((f.keywords || []).length), max: count(limitsOf().keywords || 50) });
       const flowNotes = $('[data-flow-issues]');
       if (flowNotes) flowNotes.innerHTML = notice(flowIssues(f));
-      const step = ui.sel && f.steps.find(s => s.id === ui.sel);
-      const j = step ? f.steps.indexOf(step) : -1;
+      if (j == null) j = ui.sel ? f.steps.findIndex(s => s.id === ui.sel) : -1;
+      const step = f.steps[j];
       if (step) {
-        const notes = $('[data-step-issues]');
+        const notes = $(`[data-step-issues="${j}"]`);
         if (notes) notes.innerHTML = notice(stepIssues(f, step));
         const hint = $(`[data-size="cb-${i}-${j}-text"]`);
         if (hint) {
@@ -1622,8 +1719,22 @@
     $('[data-side-close]', root)?.addEventListener('click', () => {
       ui.sideOpen = false;
       d.render();
-      $('[data-board]')?.focus({ preventScroll: true });
+      ($('[data-board]') || $('[data-side-go="try"]'))?.focus({ preventScroll: true });
     });
+    $$('[data-view]', root).forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
+    $$('[data-board-undo]', root).forEach(btn => btn.addEventListener('click', undo));
+    $$('[data-board-redo]', root).forEach(btn => btn.addEventListener('click', redo));
+
+    const listed = $('[data-list-scroll]', root);
+    if (listed) {
+      $$('[data-list-add]', listed).forEach(btn => btn.addEventListener('click', () => addStep(btn.dataset.listAdd)));
+      // The card being worked on in the list is the one the board opens when it comes back.
+      listed.addEventListener('focusin', e => {
+        const card = e.target.closest('[data-list-step]');
+        if (card) ui.sel = card.dataset.listStep;
+        else if (e.target.closest('[data-side-flow]')) ui.sel = null;
+      });
+    }
 
     if (canvas) {
       canvas.addEventListener('keydown', boardKeys);
@@ -1632,8 +1743,6 @@
         const r = e.currentTarget.getBoundingClientRect();
         openMenu({ client: { x: r.left - 8, y: r.bottom - 4 } });
       });
-      $('[data-board-undo]', canvas)?.addEventListener('click', undo);
-      $('[data-board-redo]', canvas)?.addEventListener('click', redo);
       $('[data-board-tidy]', canvas)?.addEventListener('click', tidy);
       $('[data-board-fit]', canvas)?.addEventListener('click', () => board?.fit());
       $$('[data-board-zoom]', canvas).forEach(btn => btn.addEventListener('click', () => {
@@ -1728,6 +1837,7 @@
       if ((el = hit('[data-step-remove]'))) {
         const [i, j] = el.dataset.stepRemove.split(':').map(Number);
         removeStep(i, j);
+        if (ui.view === 'list') return redraw(j ? `cb-${i}-${j - 1}-kind` : `cb-${i}-0-kind`);
         d.render();
         return $('[data-board]')?.focus({ preventScroll: true });
       }

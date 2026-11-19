@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Chatbot flows: the fixed, no-AI bot
@@ -88,6 +88,17 @@ the team does.
   - **Wheel and height.** The board takes the scroll wheel (pan; Ctrl or a pinch zooms), so the page is sized to
     the screen like Conversations' and doesn't scroll under it. Phones get the board full width; a card tapped
     opens the side panel over it.
+- **The list came back beside the board (2026-11-19).** Once the board shipped, Rodrigo missed configuring "the
+  old way", every step's form one under the other. A **Board / List** switch in the bar now shows either, and he
+  chose both over going back. List is not the old page: it is the side panel's own markup (`flowPanel` and
+  `stepPanel` with `inList`) for every step at once, so a field added to a step shows in both without a second
+  copy, ids stay the same (`cb-0-2-text`), and a refused save finds its field in either. The draft, undo and redo,
+  the save bar and the test chat are shared, so switching keeps every edit; the step worked on in one view is the
+  one the other opens. Beside the list the side panel only tries the flows (the list is the editor), and the test
+  chat rings the step the customer is at there too. Steps keep their order and "Start the flow here" (no ↑ ↓: the
+  order only ever decided the first step); Add a step is a button per kind at the end. A step added in the list has
+  no place, so an arranged flow's board puts it in a row under the others. The view is remembered per browser
+  (`localStorage`, `chatbot.view`): it is a convenience, not something saved with the flows.
 
 - **The AI never writes to the customer inside a flow.** Rodrigo asked for a hybrid: when we can't read an
   answer, an AI model says only how to interpret it and what to do. `AiFlowInterpreter` sends the question,
@@ -159,6 +170,13 @@ the team does.
 - **A scrolling grid of fixed height squeezes a box that clips.** Auto rows may shrink an `overflow: hidden` item to
   nothing when the grid is too short for its content: the side panel's options list vanished. `.chatbot-side__scroll`
   sets `grid-auto-rows: max-content`.
+- **A visually hidden label escapes a scrolling box that isn't positioned.** `.visually-hidden` is `position: absolute`,
+  so its containing block is the nearest positioned ancestor, far above the list: the list scrolled as it should, but
+  the labels deep in it still made the page 5,600px tall. `.chatbot-list` (and the side panel's scrolling bodies) are
+  `position: relative`, which clips them with the scroll.
+- **The walkthrough's richer flow is open from 00:00 to 23:59**, so its messages sent in the last minute of the day
+  (Lisbon time) are answered "We are closed right now" and section 6 fails (seen 2026-11-18, a run at midnight). Run it
+  again.
 
 ## Checking it
 
@@ -169,6 +187,8 @@ the team does.
 - Browser: `scripts/chatbot-e2e/walkthrough.mjs` builds a flow on the board by hand (cards opened beside it,
   dots dragged onto cards, a card moved with undo and redo, a line dropped on the empty board, a line unlinked),
   tries it unsaved while the board lights the way, saves it with its places, checks a refused save and Tidy up,
+  shows the same flow as a list (what to fix as it is typed, a step added, undo and redo, the test chat, back to the
+  board, the view kept over a reload),
   and runs a richer one with signed WhatsApp webhooks; a phone and a member's read-only board close it.
   `scripts/persona-e2e/walkthrough.mjs` covers Persona → Channels. Commands are in the repo `CLAUDE.md`.
 - Not exercised against Meta: the interactive buttons and lists are checked against the documented

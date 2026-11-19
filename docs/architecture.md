@@ -1529,7 +1529,7 @@ Code: `flows/` (`ChatFlows` the model, `FlowEngine` the runner, `FlowAnswers` an
 readers, `FlowRender` the channel fitting, `FlowSessions` where a customer is, `AiFlowInterpreter` the
 optional AI reading, `TenantFlowActions` the actions, `ChatFlowRepository` the storage), the flow
 branch of `MessagePipeline`, the channels' `sendQuickReplies` (`InstagramClient`, `WhatsAppClient`),
-the **Chatbot** page (`dashboard/ChatbotRoutes.kt`, `app/chatbot.js` on the board `app/chatbot-board.js` draws) and Persona → **Channels**
+the **Chatbot** page (`dashboard/ChatbotRoutes.kt`, `app/chatbot.js` on the board `app/chatbot-board.js` draws, or as a list of forms) and Persona → **Channels**
 (`dashboard/PersonaChannels.kt`, `app/channels.js`). [wiki/chatbot-flows.md](../wiki/chatbot-flows.md)
 has the decisions and traps. A company's flows are one `chat_flows` document with its AI switch and
 start words, read on every message, so a saved change applies at once.

@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-18
+updated: 2026-11-19
 ---
 
 # Cross-cutting gotchas
@@ -110,7 +110,7 @@ when any changes) failed and emptied part of `build/resources`. Syncing resource
   missing key reads as `undefined`. The `STR` / `SUB` section proxies return the key path instead. Use
   `obj[key] || fallback` on nested objects and `catalogTextOr` only on proxies.
 
-## Dragging in the dashboards (pointer capture, clipped boxes)
+## Dragging and scrolling boxes in the dashboards (pointer capture, clipped boxes, hidden labels)
 
 Found building the Chatbot page's board (2026-11-18, details in [chatbot-flows.md](chatbot-flows.md)): a
 `setPointerCapture()` on press sends the `click` that follows to the capturing element, not to what was
@@ -118,6 +118,11 @@ clicked, so capture only once a press has moved; a box with `overflow: hidden` s
 it is focused or scrolled into view, so a canvas that positions its content itself wants `overflow: clip`; and
 a click whose handler redraws the page still bubbles through the old, detached elements, so their own
 listeners must ignore it.
+
+A box that scrolls on its own (`overflow: auto` inside a page sized to the screen) should also be `position: relative`.
+`.visually-hidden` is absolutely positioned, so a label inside a box that isn't positioned belongs to an ancestor far
+above it: the box scrolls, but the labels deep in its content still stretch the page. The Chatbot page's list made
+the page 5,600px tall that way (2026-11-19).
 
 ## The `hidden` attribute loses to `display` rules
 
