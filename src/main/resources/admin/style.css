@@ -812,6 +812,19 @@ html[data-theme="dark"] .drawer__eyebrow { color: var(--accent); }
 .drawer__back::before { content: "←"; letter-spacing: 0; }
 .drawer__back:hover { text-decoration: underline; }
 .drawer__back:focus-visible { outline: none; border-radius: 6px; box-shadow: var(--focus-ring); }
+/* Full page: the eyebrow is a breadcrumb (drawer.js renderDrawerCrumbs): the list with its way back, the records this
+   page was opened from, then what this is. It keeps the eyebrow's type; a long name is cut with an ellipsis. */
+.drawer__crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; margin: 0; padding: 0; list-style: none; }
+.drawer__crumbs li { display: inline-flex; align-items: baseline; min-width: 0; max-width: 100%; }
+.drawer__crumbs li + li::before { content: "/"; margin: 0 8px; color: var(--ink-faint); font-weight: 400; }
+.drawer__crumbs li[aria-current] { color: var(--ink-mute); }
+.drawer__crumb {
+  max-width: 28ch; padding: 0; border: 0; background: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: inherit; font: inherit; letter-spacing: inherit; text-transform: inherit; text-align: left; cursor: pointer;
+}
+.drawer__crumb--back::before { content: "←"; margin-right: 6px; letter-spacing: 0; }
+.drawer__crumb:hover { color: var(--ink); text-decoration: underline; }
+.drawer__crumb:focus-visible { outline: none; border-radius: 6px; box-shadow: var(--focus-ring); }
 .drawer__title   { font-family: var(--display); font-size: 20px; font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .drawer__body    { flex: 1; overflow-y: auto; padding: 22px 26px 28px; }
 /* Sticky offsets are measured inside the scroller's padding: with bottom padding the stuck footer
@@ -3495,7 +3508,7 @@ html[data-layout="minimal"][data-theme="dark"] .queue__item.choice.is-on { backg
   html[data-layout="minimal"] :is(.btn--sm, .chip, .panel__tools .sel, .panel__filters .sel) { height: 36px; }
   .drawer__head .iconbtn,
   html[data-layout="minimal"] .drawer__head .iconbtn { width: 40px; height: 40px; }
-  .drawer__back { padding: 8px 0; margin: -8px 0; }
+  .drawer__back, .drawer__crumb { padding: 8px 0; margin: -8px 0; }
   /* A box's label is its target, so it takes the height the row gap had. */
   .form__checks { row-gap: 4px; }
   .form__check { min-height: 32px; }

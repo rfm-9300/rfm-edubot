@@ -439,9 +439,26 @@ feature. Settings → Appearance → **Opening records** has two cards, *Side pa
   side panel and coming back; those get `.drawer--page-quick`, which keeps their form to 720px under the
   title. Opened from the list, the same dialog is a side panel. Read at call time, so
   `closeDrawer(); openDrawer(…)` with no flag opens at the side; give such a drawer `page: true`.
-- **Leaving:** ×, Escape, the trail's back link, and what stands in for a page: a menu link
+- **Where you are (the breadcrumb).** In a page the head's eyebrow is a breadcrumb (`renderDrawerCrumbs()`,
+  `.drawer__crumbs`): the list the page opened over with a `←`, which is the way back (it closes the page,
+  and reads Home over Home); each record it was opened from (`drawerTrail`), a click going back to that one
+  and dropping what was opened after it; then the eyebrow's text (kind and number), plain and
+  `aria-current`. The title stays the heading, so the current record isn't said twice. A long name is cut
+  with an ellipsis (the title attribute has it whole). Side mode keeps its single `← name` link. Asked for
+  "a navigation system" for the page, Rodrigo picked this piece. Real URLs with the browser's Back, and
+  previous / next through the list, were offered and stay possible later (a record has no address of its
+  own yet).
+- **Leaving:** the breadcrumb's first link, ×, Escape, and what stands in for a page: a menu link
   (`setActive()` calls `closePageDrawer()`) and typing in the search box (the list behind it filters, so
   it is shown). `closePageDrawer()` skips restoring focus, which would jump back to a stale row.
+- **Escape is heard on the whole document** while a page shows (`pageEscape()`), because the page isn't
+  modal: a click on blank space leaves focus on `<body>`, where the drawer's own handler (on `#drawer`)
+  never sees it. It stands aside when the event was already used (a tag being typed), a confirmation is
+  open (it has no Escape of its own) or the phone menu is.
+- **Gotcha: redrawing the eyebrow takes the keyboard with it.** Records call `renderDrawerEyebrow()` again
+  once loaded, and a drawer's first focus lands on the first link in the head, now a crumb. Rewriting it
+  with `innerHTML` dropped focus to `<body>` and Escape went dead; `renderDrawerCrumbs()` puts focus back
+  on the same crumb. Anything new that redraws part of the head must do the same.
 - **Wide screens:** the content is a centered column up to 1200px. `--dp-pad` (side padding, 16px until
   the panel is wider than 1200px) uses `cqw`, the panel being a size container, so the head, the body and
   the sticky foot all line up and the foot's negative margins always cancel the body's padding. Don't
