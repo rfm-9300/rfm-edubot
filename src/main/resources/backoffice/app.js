@@ -121,6 +121,7 @@ async function init() {
   if (!token) return renderLogin();
   try {
     await loadAll();
+    paintCliSessionButton(() => token);
     const view = location.hash.replace(/^#/, '') || 'tenants';
     setView(view);
   } catch (e) {

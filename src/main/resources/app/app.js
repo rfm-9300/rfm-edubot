@@ -11,6 +11,7 @@ async function bootAuthed() {
   // refresh the static chrome that was rendered before /me resolved.
   I18N.applyTenantDefault(state.me.tenant.locale);
   I18N.applyDom(document);
+  paintCliSessionButton(() => token);
   document.documentElement.lang = I18N.locale();
   window.refreshThemeLabels?.();
   paintSidebarCollapsed(document.body.classList.contains('sidebar-collapsed'));

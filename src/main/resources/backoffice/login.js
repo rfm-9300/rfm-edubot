@@ -7,6 +7,7 @@ function showSessionControls(on) {
   $('#btn-nav').hidden = !on;
   $('.topbar .crumb').hidden = !on;
   $('#btn-logout').hidden = !on;
+  paintCliSessionButton(on ? () => token : null);
   if (!on) {
     $('.topbar__search').hidden = true;
     $('#btn-new').hidden = true;

@@ -24,6 +24,7 @@ async function startDashboardSession(newToken) {
 }
 
 async function renderLogin() {
+  paintCliSessionButton();
   stopInboxPolling();
   stopNotifications();
   $('#nav').innerHTML = '';

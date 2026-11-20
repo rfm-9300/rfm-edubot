@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -18,7 +18,12 @@ const fixture = createServer(async (request, response) => {
   const chunks = [];
   for await (const chunk of request) chunks.push(chunk);
   const raw = Buffer.concat(chunks).toString();
-  requests.push({ method: request.method, url: request.url, auth: request.headers.authorization, body: raw ? JSON.parse(raw) : undefined });
+  const multipart = request.headers['content-type']?.startsWith('multipart/form-data');
+  const entry = { method: request.method, url: request.url, auth: request.headers.authorization,
+    body: raw && !multipart ? JSON.parse(raw) : undefined };
+  if (multipart) entry.multipart = raw;
+  if (request.headers['x-vault-auth']) entry.vault = request.headers['x-vault-auth'];
+  requests.push(entry);
 
   const path = new URL(request.url, 'http://localhost').pathname;
   function json(status, data) {
@@ -27,11 +32,29 @@ const fixture = createServer(async (request, response) => {
   }
   if (path === '/health') return json(200, { status: 'ok' });
   if (path.startsWith('/app/auth/')) return json(200, { token: 'signed.token' });
-  if (request.headers.authorization !== 'Bearer test.token') return json(401, { error: 'expired_session' });
+  if (path.startsWith('/admin/auth/')) return json(200, { token: 'admin.token' });
+  if (path.startsWith('/app/share/')) {
+    return request.headers.authorization ? json(400, { error: 'unexpected_token' }) : json(200, { decision: 'APPROVED' });
+  }
+  const backoffice = path.startsWith('/admin/api/');
+  const bearer = request.headers.authorization;
+  if (backoffice ? bearer !== 'Bearer admin.token' : !['Bearer test.token', 'Bearer switched.token', 'Bearer impersonated.token'].includes(bearer)) {
+    return json(401, { error: 'expired_session' });
+  }
 
   switch (path) {
     case '/app/api/me':
-      return json(200, { tenant: { id: companyId }, modules: ['overview', 'clients'] });
+      return json(200, { tenant: { id: bearer === 'Bearer test.token' ? companyId : recordId }, modules: ['overview', 'clients'] });
+    case '/admin/api/admins':
+      return json(200, { admins: [] });
+    case '/admin/api/tenants/sample/impersonate':
+      return json(200, { token: 'impersonated.token' });
+    case '/admin/api/vault/entries':
+      return entry.vault === 'dmF1bHQ=' ? json(200, []) : json(403, { error: 'vault_locked' });
+    case '/app/api/settings/document-template/logo':
+      return json(200, { hasLogo: true });
+    case `/app/api/crm/invoices/${recordId}/paid`:
+      return json(200, { status: 'PAID' });
     case '/app/api/crm/clients':
       return request.method === 'GET' ? json(200, [{ id: recordId }]) : json(201, { id: recordId });
     case '/app/api/crm/clients/fields':
@@ -73,8 +96,8 @@ after(async () => {
   await new Promise((resolve) => fixture.close(resolve));
 });
 
-function cli(args, { input = '', token = 'test.token' } = {}) {
-  const env = { ...process.env, EDUBOT_URL: url, EDUBOT_TOKEN: token };
+function cli(args, { input = '', token = 'test.token', adminToken = '', vaultToken = '' } = {}) {
+  const env = { ...process.env, EDUBOT_URL: url, EDUBOT_TOKEN: token, EDUBOT_ADMIN_TOKEN: adminToken, EDUBOT_VAULT_TOKEN: vaultToken };
   const child = spawn(process.execPath, [cliPath, ...args], { env });
   return new Promise((resolve, reject) => {
     let stdout = '';
@@ -87,13 +110,13 @@ function cli(args, { input = '', token = 'test.token' } = {}) {
   });
 }
 
-async function connectMcp(testContext, allowWrites = '0') {
+async function connectMcp(testContext, allowWrites = '0', env = {}) {
   const client = new Client({ name: 'edubot-test', version: '1.0.0' });
   testContext.after(() => client.close());
   await client.connect(new StdioClientTransport({
     command: process.execPath,
     args: [mcpPath],
-    env: { EDUBOT_URL: url, EDUBOT_TOKEN: 'test.token', EDUBOT_MCP_ALLOW_WRITES: allowWrites },
+    env: { EDUBOT_URL: url, EDUBOT_TOKEN: 'test.token', EDUBOT_MCP_ALLOW_WRITES: allowWrites, ...env },
   }));
   return client;
 }
@@ -159,7 +182,7 @@ test('CLI refuses unsafe paths, does not follow redirects, and can export a PDF'
   for (const path of ['https://example.test/app/api/me', '/app/api/%2e%2e/admin', '/app/api/%252fadmin', '/app/api/..%5cadmin']) {
     const result = await cli(['request', 'GET', path]);
     assert.equal(result.code, 1);
-    assert.match(result.stderr, /path under \/app\/api/);
+    assert.match(result.stderr, /edubot API or share path/);
   }
   assert.equal(requests.length, count);
 
@@ -182,7 +205,8 @@ test('MCP discovers and calls tools, resources and prompts over stdio', async (t
   const { tools } = await client.listTools();
   assert.ok(tools.some(({ name, annotations }) => name === 'list_clients' && annotations.readOnlyHint));
   assert.ok(!tools.some(({ name }) => name === 'create_client'));
-  assert.ok(!tools.some(({ name }) => name === 'request'));
+  assert.ok(tools.some(({ name }) => name === 'read_operation'));
+  assert.ok(!tools.some(({ name }) => name === 'write_operation'));
 
   const result = await client.callTool({ name: 'list_clients', arguments: { q: 'A&B', archived: true } });
   assert.deepEqual(result.structuredContent, { data: [{ id: recordId }] });
@@ -234,4 +258,107 @@ test('MCP exposes writes only when enabled and handles empty success responses',
   const marked = await client.callTool({ name: 'mark_notification_read', arguments: { id: recordId } });
   assert.deepEqual(marked.structuredContent, { data: null });
   assert.equal(requests.at(-1).url, `/app/api/notifications/${recordId}/read`);
+});
+
+test('CLI discovers all API scopes and uses each route’s matching credential', async () => {
+  const catalog = await cli(['catalog', '--scope', 'backoffice', '--search', 'impersonate']);
+  assert.equal(catalog.code, 0);
+  assert.equal(JSON.parse(catalog.stdout).operations[0].operation, 'POST /admin/api/tenants/{slug}/impersonate');
+
+  const signed = await cli(['login', '--backoffice'], { input: 'example password' });
+  assert.equal(signed.stdout, 'admin.token\n');
+  assert.deepEqual(requests.at(-1), {
+    method: 'POST', url: '/admin/auth/login', auth: undefined, body: { password: 'example password' },
+  });
+  const reused = await cli(['login', '--backoffice', '--session'], { input: 'admin.token\n' });
+  assert.equal(reused.stdout, 'admin.token\n');
+  assert.equal(requests.at(-1).auth, 'Bearer admin.token');
+  assert.match((await cli(['request', 'GET', '/admin/api/admins'])).stderr, /EDUBOT_ADMIN_TOKEN/);
+
+  const admin = await cli(['call', 'GET /admin/api/admins', '--query', '{"group":["a","b"]}'], { adminToken: 'admin.token' });
+  assert.equal(admin.code, 0);
+  assert.equal(requests.at(-1).url, '/admin/api/admins?group=a&group=b');
+  assert.equal(requests.at(-1).auth, 'Bearer admin.token');
+
+  const vault = await cli(['call', 'GET /admin/api/vault/entries'], { adminToken: 'admin.token', vaultToken: 'dmF1bHQ=' });
+  assert.equal(vault.code, 0);
+  assert.equal(requests.at(-1).vault, 'dmF1bHQ=');
+  const share = await cli(['call', 'GET /app/share/change/{token}/data', '--params', '{"token":"share-code"}']);
+  assert.equal(share.code, 0);
+  assert.equal(requests.at(-1).auth, undefined);
+  const workflow = await cli(['open', 'time-clock', '--print']);
+  assert.equal(workflow.stdout, `${url}/app/#my-hours\n`);
+});
+
+test('CLI and MCP can upload multipart data and stage authenticated downloads', async (t) => {
+  const folder = await mkdtemp(join(tmpdir(), 'edubot-transfer-'));
+  t.after(() => rm(folder, { recursive: true }));
+  const sample = join(folder, 'sample.png');
+  await writeFile(sample, 'fixture data');
+  const command = ['call', 'POST /app/api/settings/document-template/logo', '--confirm', '--file', `file=${sample}`, '--field', 'caption=A&B'];
+  assert.equal((await cli(command)).code, 0);
+  assert.match(requests.at(-1).multipart, /filename="sample.png"/);
+  assert.match(requests.at(-1).multipart, /image\/png/);
+  assert.match(requests.at(-1).multipart, /A&B/);
+
+  const mcp = await connectMcp(t, '1', { EDUBOT_MCP_FILES_DIR: folder });
+  const uploaded = await mcp.callTool({ name: 'write_operation', arguments: {
+    operation: command[1], confirm: true,
+    multipart: { files: [{ name: 'file', filename: 'sample.png', staged: 'sample.png' }] },
+  } });
+  assert.deepEqual(uploaded.structuredContent, { data: { hasLogo: true } });
+  assert.match(requests.at(-1).multipart, /fixture data/);
+
+  await symlink(sample, join(folder, 'alias.png'));
+  const count = requests.length;
+  const blocked = await mcp.callTool({ name: 'write_operation', arguments: {
+    operation: command[1], confirm: true,
+    multipart: { files: [{ name: 'file', filename: 'sample.png', staged: 'alias.png' }] },
+  } });
+  assert.equal(blocked.isError, true);
+  assert.equal(requests.length, count);
+
+  const download = { operation: 'GET /app/api/crm/quotes/{id}/pdf', params: { id: recordId }, output: 'quote.pdf' };
+  const downloaded = await mcp.callTool({ name: 'read_operation', arguments: download });
+  assert.deepEqual(downloaded.structuredContent, { data: { contentType: 'application/pdf', file: 'quote.pdf' } });
+  assert.equal(await readFile(join(folder, 'quote.pdf'), 'utf8'), '%PDF-fixture');
+  assert.equal((await mcp.callTool({ name: 'read_operation', arguments: download })).isError, true);
+  assert.equal((await mcp.callTool({ name: 'read_operation', arguments: { ...download, output: '../quote.pdf' } })).isError, true);
+});
+
+test('MCP discovers and executes API operations without exposing session credentials', async (t) => {
+  const readOnly = await connectMcp(t);
+  const listing = await readOnly.callTool({ name: 'list_operations' });
+  assert.ok(listing.structuredContent.data.total > 90);
+  assert.ok(listing.structuredContent.data.operations.every(({ method, scope }) => method === 'GET' && scope !== 'backoffice'));
+  const failed = await readOnly.callTool({ name: 'read_operation', arguments: { operation: 'GET /admin/api/admins' } });
+  assert.match(failed.content[0].text, /EDUBOT_ADMIN_TOKEN/);
+
+  const mcp = await connectMcp(t, '1', { EDUBOT_ADMIN_TOKEN: 'admin.token' });
+  const count = requests.length;
+  const denied = await mcp.callTool({ name: 'write_operation', arguments: {
+    operation: 'PATCH /app/api/crm/invoices/{id}/paid', params: { id: recordId }, confirm: false,
+  } });
+  assert.equal(denied.isError, true);
+  assert.equal(requests.length, count);
+  const paid = await mcp.callTool({ name: 'write_operation', arguments: {
+    operation: 'PATCH /app/api/crm/invoices/{id}/paid', params: { id: recordId }, confirm: true,
+  } });
+  assert.deepEqual(paid.structuredContent, { data: { status: 'PAID' } });
+
+  const credential = await mcp.callTool({ name: 'write_operation', arguments: {
+    operation: 'POST /admin/api/tenants/{slug}/impersonate', params: { slug: 'sample' }, confirm: true,
+  } });
+  assert.equal(credential.isError, true);
+  assert.match(credential.content[0].text, /select_dashboard_session/);
+  const company = await mcp.callTool({ name: 'select_dashboard_session', arguments: { tenantSlug: 'sample' } });
+  assert.equal(company.structuredContent.data.tenant.id, recordId);
+  assert.ok(!JSON.stringify(company).includes('impersonated.token'));
+  await mcp.callTool({ name: 'whoami' });
+  assert.equal(requests.at(-1).auth, 'Bearer impersonated.token');
+  const restored = await mcp.callTool({ name: 'select_dashboard_session', arguments: { restore: true } });
+  assert.equal(restored.structuredContent.data.tenant.id, companyId);
+  assert.equal(requests.at(-1).auth, 'Bearer test.token');
+  const link = await mcp.callTool({ name: 'browser_workflow', arguments: { workflow: 'password-vault' } });
+  assert.equal(link.structuredContent.data.url, `${url}/backoffice/#vault`);
 });

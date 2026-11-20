@@ -1,7 +1,7 @@
-const DASHBOARD_PREFIX = '/app/api/';
 export const REQUEST_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
-const SESSION_ROUTES = ['/app/auth/login', '/app/auth/google'];
-const PUBLIC_ROUTES = ['/health', '/ready'];
+const SESSION_ROUTES = ['/app/auth/login', '/app/auth/google', '/admin/auth/login', '/admin/auth/google'];
+const PUBLIC_ROUTES = ['/health', '/ready', '/app/auth/config', '/admin/auth/config'];
+const PROVIDER_ROUTES = ['/admin/api/instagram/callback', '/admin/api/instagram/deauthorize', '/admin/api/instagram/data-deletion'];
 const LOOPBACK = ['localhost', '127.0.0.1', '[::1]'];
 
 export class ApiError extends Error {
@@ -28,21 +28,24 @@ function originFrom(value) {
   return url.origin;
 }
 
-export function dashboardPath(path) {
+export function apiPath(path) {
   try {
     const pathname = path.split('?')[0];
-    if (!pathname.startsWith(DASHBOARD_PREFIX) || path.includes('#') || /[\u0000-\u0020\u007f]/.test(path)) {
+    if (!['/app/api/', '/admin/api/', '/app/share/'].some((prefix) => pathname.startsWith(prefix)) ||
+        path.includes('#') || /[\u0000-\u0020\u007f]/.test(path)) {
       throw new Error();
     }
-    for (const segment of pathname.split('/')) {
-      const decoded = decodeURIComponent(segment);
+    const decodedSegments = pathname.split('/').map(decodeURIComponent);
+    if (decodedSegments.slice(1, -1).includes('')) throw new Error();
+    if (PROVIDER_ROUTES.includes(decodedSegments.join('/').replace(/\/$/, ''))) throw new Error();
+    for (const decoded of decodedSegments) {
       if (decoded === '.' || decoded === '..' || /[/\\%\u0000-\u001f\u007f]/.test(decoded)) {
         throw new Error();
       }
     }
     return path;
   } catch {
-    throw new Error('Use a path under /app/api/ with URL-encoded query values and no dot segments.');
+    throw new Error('Use an edubot API or share path with URL-encoded values and no dot segments.');
   }
 }
 
@@ -50,7 +53,7 @@ function errorText(value) {
   if (typeof value === 'string' && /^[a-z0-9_. -]{1,100}$/i.test(value)) return value;
 }
 
-function isJson(response) {
+export function isJson(response) {
   const mime = response.headers.get('content-type')?.split(';')[0].trim().toLowerCase();
   return mime === 'application/json' || mime?.endsWith('+json');
 }
@@ -69,31 +72,51 @@ export async function jsonResponse(response) {
   }
 }
 
-export function createApi({ url = process.env.EDUBOT_URL, token = process.env.EDUBOT_TOKEN } = {}) {
-  const origin = originFrom(url);
-  if (token && !/^[a-zA-Z0-9._~-]+$/.test(token)) {
-    throw new Error('EDUBOT_TOKEN must contain a dashboard bearer token.');
-  }
+function bearer(value, name) {
+  if (value !== undefined && value !== '' &&
+      (typeof value !== 'string' || !/^[a-zA-Z0-9._~-]+$/.test(value))) throw new Error(`Invalid ${name}.`);
+  return value;
+}
 
-  async function request(path, { method = 'GET', query = {}, body, signal, accept = 'application/json' } = {}) {
+export function createApi({
+  url = process.env.EDUBOT_URL,
+  token = process.env.EDUBOT_TOKEN,
+  adminToken = process.env.EDUBOT_ADMIN_TOKEN,
+  vaultToken = process.env.EDUBOT_VAULT_TOKEN,
+} = {}) {
+  const origin = originFrom(url);
+  let dashboardToken = bearer(token, 'EDUBOT_TOKEN');
+  bearer(adminToken, 'EDUBOT_ADMIN_TOKEN');
+  if (vaultToken && !/^[a-zA-Z0-9+/]+={0,2}$/.test(vaultToken)) throw new Error('Invalid EDUBOT_VAULT_TOKEN.');
+
+  async function request(path, { method = 'GET', query = {}, body, signal, vaultSession = vaultToken, accept = 'application/json' } = {}) {
     if (!REQUEST_METHODS.includes(method)) throw new Error(`Unsupported method: ${method}`);
     const publicRequest = (method === 'GET' && PUBLIC_ROUTES.includes(path)) ||
       (method === 'POST' && SESSION_ROUTES.includes(path));
-    const target = new URL(publicRequest ? path : dashboardPath(path), origin);
+    const target = new URL(publicRequest ? path : apiPath(path), origin);
     const headers = { accept };
-    if (!publicRequest) {
-      if (!token) throw new Error('Set EDUBOT_TOKEN to a dashboard session token.');
-      headers.authorization = `Bearer ${token}`;
+    const scope = target.pathname.startsWith('/admin/api/') ? 'backoffice' :
+      target.pathname.startsWith('/app/api/') ? 'dashboard' : 'public';
+    if (scope !== 'public') {
+      const credential = scope === 'backoffice' ? adminToken : dashboardToken;
+      if (!credential) throw new Error(`Set ${scope === 'backoffice' ? 'EDUBOT_ADMIN_TOKEN' : 'EDUBOT_TOKEN'} to a ${scope} session token.`);
+      headers.authorization = `Bearer ${credential}`;
+    }
+    if (vaultSession && (target.pathname === '/admin/api/vault' || target.pathname.startsWith('/admin/api/vault/'))) {
+      headers['X-Vault-Auth'] = vaultSession;
     }
     for (const [key, value] of Object.entries(query)) {
-      if (value !== undefined) target.searchParams.set(key, String(value));
+      for (const item of Array.isArray(value) ? value : [value]) {
+        if (item !== undefined) target.searchParams.append(key, String(item));
+      }
     }
-    if (body !== undefined) headers['content-type'] = 'application/json';
+    const multipart = body instanceof FormData;
+    if (body !== undefined && !multipart) headers['content-type'] = 'application/json';
     const timeout = AbortSignal.timeout(30_000);
     const response = await fetch(target, {
       method,
       headers,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: body === undefined || multipart ? body : JSON.stringify(body),
       redirect: 'manual',
       signal: signal ? AbortSignal.any([timeout, signal]) : timeout,
     });
@@ -107,8 +130,25 @@ export function createApi({ url = process.env.EDUBOT_URL, token = process.env.ED
     throw new ApiError(response.status, errorText(failure?.error), errorText(failure?.detail));
   }
 
+  async function selectToken(nextToken, signal) {
+    const candidate = bearer(nextToken, 'dashboard session token');
+    const selected = candidate
+      ? await createApi({ url: origin, token: candidate, adminToken, vaultToken }).json('/app/api/me', { signal })
+      : null;
+    dashboardToken = candidate;
+    return selected;
+  }
+
   return {
+    origin,
     request,
+    hasBackoffice: Boolean(adminToken),
+    async selectDashboardSession(path, signal) {
+      const session = await jsonResponse(await request(path, { method: 'POST', signal }));
+      if (!session?.token) throw new Error('The dashboard did not return a session token.');
+      return selectToken(session.token, signal);
+    },
+    restoreDashboardSession: (signal) => selectToken(token, signal),
     async json(path, options) {
       return jsonResponse(await request(path, options));
     },
