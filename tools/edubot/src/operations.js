@@ -59,6 +59,7 @@ export const operations = {
 
   list_clients: directory('Search the current company’s client directory.', '/app/api/crm/clients'),
   get_client: detail('Get a client by ID.', '/app/api/crm/clients/'),
+  get_client_fields: read('Get the company’s required and custom client fields.', '/app/api/crm/clients/fields'),
   list_suppliers: directory('Search the supplier directory.', '/app/api/crm/suppliers'),
   get_supplier: detail('Get a supplier by ID.', '/app/api/crm/suppliers/'),
   list_employees: directory('Search the employee directory.', '/app/api/crm/employees'),
@@ -103,7 +104,8 @@ export const operations = {
   list_chatbot_flows: read('List the company’s configured chatbot flows.', '/app/api/chatbot/flows'),
   get_agent_overview: read('Get the Agents module’s automation overview.', '/app/api/agents/overview'),
 
-  create_client: write('Create a client in the current company.', 'POST', () => '/app/api/crm/clients',
+  create_client: write('Create a client in the current company. Use get_client_fields to check its required fields.',
+    'POST', () => '/app/api/crm/clients',
     clientFields, (input) => input),
   send_conversation_reply: write('Send a customer-facing text reply to an existing conversation.', 'POST',
     ({ id }) => `/app/api/conversations/${id}/messages`, { id, text }, ({ text }) => ({ text })),

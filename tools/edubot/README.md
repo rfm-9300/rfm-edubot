@@ -43,6 +43,7 @@ node src/cli.js overview
 node src/cli.js help list-clients
 node src/cli.js list-clients --args '{"q":"Example"}'
 node src/cli.js list-invoices --args '{"status":"PAID"}'
+node src/cli.js get-client-fields
 node src/cli.js create-client --confirm --args - < client.json
 node src/cli.js request GET "/app/api/crm/quotes/$QUOTE_ID/pdf" --output quote.pdf
 ```
@@ -51,6 +52,9 @@ Named commands have JSON schemas in `edubot help <command>`. Use `request` for o
 endpoints. It accepts URL query parameters, JSON request bodies and raw file downloads. JSON results
 go to stdout and failures go to stderr with a nonzero exit code. Commands that change dashboard
 data require `--confirm`.
+
+Use `get-client-fields` before creating a client. By default, the dashboard requires `name`,
+`phone`, `taxId` and `address`. Each company can specify its own required and custom fields.
 
 Use `whoami` to find the current and available company IDs. `switch-company <id>` prints a
 replacement token with the original session expiry. Capture it into `EDUBOT_TOKEN` for subsequent

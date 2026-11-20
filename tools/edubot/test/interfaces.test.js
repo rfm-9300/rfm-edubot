@@ -34,6 +34,8 @@ const fixture = createServer(async (request, response) => {
       return json(200, { tenant: { id: companyId }, modules: ['overview', 'clients'] });
     case '/app/api/crm/clients':
       return request.method === 'GET' ? json(200, [{ id: recordId }]) : json(201, { id: recordId });
+    case '/app/api/crm/clients/fields':
+      return json(200, { standard: [{ key: 'taxId', required: true }], custom: [] });
     case '/app/api/overview':
       return json(200, { attention: [] });
     case '/app/api/building/projects':
@@ -186,6 +188,10 @@ test('MCP discovers and calls tools, resources and prompts over stdio', async (t
   assert.deepEqual(result.structuredContent, { data: [{ id: recordId }] });
   assert.equal(requests.at(-1).url, '/app/api/crm/clients?q=A%26B&archived=1');
   assert.equal(requests.at(-1).auth, 'Bearer test.token');
+
+
+  const fields = await client.callTool({ name: 'get_client_fields' });
+  assert.deepEqual(fields.structuredContent.data.standard, [{ key: 'taxId', required: true }]);
 
   const count = requests.length;
   const invalid = await client.callTool({ name: 'get_client', arguments: { id: '../bad' } });
