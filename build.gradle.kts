@@ -55,7 +55,7 @@ dependencies {
 
     implementation("net.logstash.logback:logstash-logback-encoder:8.0")
 
-    implementation("ch.qos.logback:logback-classic:1.5.12")
+    implementation("ch.qos.logback:logback-classic:1.6.7")
 
     // Reads the raw MIME of the mail forwarded to a company's address (MailboxInbound); the tests also
     // parse what MimeMessageBuilder writes with it, so they don't grade the builder with its own reading.
