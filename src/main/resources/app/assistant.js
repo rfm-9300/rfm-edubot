@@ -5,7 +5,7 @@
 (function () {
   let d = null;
   const T = I18N.section('app.assistant');
-  const ui = { threads: [], current: null, settings: null, busy: false, query: '', draft: '', older: false, keepScroll: null };
+  const ui = { threads: [], current: null, settings: null, busy: false, switching: false, query: '', draft: '', older: false, keepScroll: null };
 
   const AGENT_TOOLS = new Set(['run_agent', 'pause_agent', 'activate_agent', 'approve_agent_item', 'draft_agent']);
   const STATUS_TONES = { PENDING: 'pill--warn', EXECUTING: 'pill--info', CONFIRMED: 'pill--ok', FAILED: 'pill--bad' };
@@ -21,6 +21,8 @@
   const threadPath = id => `/app/api/assistant/threads/${encodeURIComponent(id)}`;
   const view = () => document.getElementById('view');
   const repaint = () => { if (d.state.active === 'ai-assistant') render(view()); };
+  const locked = () => ui.busy || ui.switching;
+  const disabled = () => locked() ? ' disabled' : '';
 
   // ── Markdown: escape first, then turn a known subset into tags ──
 
@@ -93,9 +95,14 @@
     ]);
     ui.threads = threads;
     ui.settings = settings;
-    if (ui.current && !threads.some(t => t.id === ui.current.thread.id)) ui.current = null;
-    const id = ui.current?.thread.id || threads[0]?.id;
-    ui.current = id ? await d.api(threadPath(id)) : null;
+    if (locked()) return;
+    const current = ui.current;
+    const id = threads.find(t => t.id === current?.thread.id)?.id || threads[0]?.id;
+    const detail = id ? await d.api(threadPath(id)) : null;
+    if (!locked() && ui.current === current) {
+      ui.current = detail;
+      if (current && id !== current.thread.id) ui.draft = '';
+    }
   }
 
   async function refreshThreads() {
@@ -103,82 +110,109 @@
   }
 
   async function openThread(id) {
-    if (ui.busy) return;
-    ui.current = await d.api(threadPath(id));
-    ui.draft = '';
-    repaint();
-    focusComposer();
+    if (id === ui.current?.thread.id) return;
+    await switchThread(() => d.api(threadPath(id)), d.STR.loadFailed);
   }
 
   async function newThread() {
     const thread = await d.api('/app/api/assistant/threads', { method: 'POST', body: JSON.stringify({ title: d.STR.assistantNewThread }) });
     ui.threads = [thread, ...ui.threads.filter(t => t.id !== thread.id)];
-    ui.current = { thread, messages: [] };
-    return thread;
+    return { thread, messages: [] };
+  }
+
+  async function switchThread(loadThread, errorMessage) {
+    if (locked()) return;
+    ui.switching = true;
+    repaint();
+    try {
+      ui.current = await loadThread();
+      ui.draft = '';
+    } catch (err) {
+      d.toast(err.code === 'thread_busy' ? T.errThreadBusy : errorMessage);
+    } finally {
+      ui.switching = false;
+      repaint();
+      focusComposer();
+    }
   }
 
   async function send(content) {
     const text = content.trim();
-    if (!text || ui.busy) return;
+    if (!text || locked()) return;
     if (text.length > MAX_MESSAGE) return d.toast(T.errMessage);
+    const draft = ui.draft;
     ui.busy = true;
+    repaint();
+    let previous = ui.current;
     try {
-      if (!ui.current) await newThread();
-      ui.current.messages.push({ id: `local-${Date.now()}`, role: 'user', content: text });
+      if (!previous) previous = await newThread();
+      const optimistic = { id: `local-${Date.now()}`, role: 'user', content: text };
+      ui.current = { ...previous, messages: [...previous.messages, optimistic] };
       ui.draft = '';
       repaint();
-      ui.current = await d.api(`${threadPath(ui.current.thread.id)}/messages`, { method: 'POST', body: JSON.stringify({ content: text }) });
+      ui.current = await d.api(`${threadPath(previous.thread.id)}/messages`, { method: 'POST', body: JSON.stringify({ content: text }) });
     } catch (err) {
-      d.toast(err.code === 'invalid_message' ? T.errMessage : d.STR.assistantError);
-      if (ui.current?.thread) ui.current = await d.api(threadPath(ui.current.thread.id)).catch(() => ui.current);
+      d.toast({ invalid_message: T.errMessage, thread_busy: T.errThreadBusy }[err.code] || d.STR.assistantError);
+      ui.current = previous ? await d.api(threadPath(previous.thread.id)).catch(() => previous) : null;
+      const known = new Set(previous?.messages.map(m => m.id));
+      const saved = err.code !== 'thread_busy' && ui.current?.messages.some(m => !known.has(m.id) && m.role === 'user' && m.content === text);
+      ui.draft = saved ? '' : draft || text;
     } finally {
-      ui.busy = false;
       await refreshThreads();
+      ui.busy = false;
       repaint();
       focusComposer();
     }
   }
 
   async function retry() {
-    if (ui.busy || !ui.current) return;
+    if (locked() || !ui.current) return;
     ui.busy = true;
     repaint();
     try {
       ui.current = await d.api(`${threadPath(ui.current.thread.id)}/retry`, { method: 'POST', body: '{}' });
-    } catch {
-      d.toast(d.STR.assistantError);
+    } catch (err) {
+      d.toast(err.code === 'thread_busy' ? T.errThreadBusy : d.STR.assistantError);
+      ui.current = await d.api(threadPath(ui.current.thread.id)).catch(() => ui.current);
     } finally {
+      await refreshThreads();
       ui.busy = false;
       repaint();
     }
   }
 
   async function decide(actionId, decision) {
-    if (ui.busy || !ui.current) return;
+    if (locked() || !ui.current) return;
     ui.busy = true;
     repaint();
     try {
       ui.current = await d.api(`${threadPath(ui.current.thread.id)}/actions/${encodeURIComponent(actionId)}/${decision}`, { method: 'POST', body: '{}' });
     } catch (err) {
-      d.toast({ action_not_pending: T.errActionNotPending, changes_off: T.errChangesOff }[err.code] || d.STR.assistantActionError);
+      d.toast({ action_not_pending: T.errActionNotPending, changes_off: T.errChangesOff, thread_busy: T.errThreadBusy }[err.code] || d.STR.assistantActionError);
+      if (err.code === 'changes_off') {
+        ui.settings = await d.api('/app/api/assistant/settings').catch(() => ui.settings);
+      }
       ui.current = await d.api(threadPath(ui.current.thread.id)).catch(() => ui.current);
     } finally {
-      ui.busy = false;
       await refreshThreads();
+      ui.busy = false;
       repaint();
       d.onChange?.();
     }
   }
 
   async function loadOlder() {
-    const first = ui.current?.messages[0];
-    if (!first || ui.older) return;
+    const current = ui.current;
+    const first = current?.messages[0];
+    if (!first || ui.older || locked()) return;
     ui.older = true;
-    const log = document.getElementById('assistant-log');
-    ui.keepScroll = log ? log.scrollHeight - log.scrollTop : null;
+    document.getElementById('assistant-older').disabled = true;
     try {
-      const page = await d.api(`${threadPath(ui.current.thread.id)}?before=${encodeURIComponent(first.id)}`);
-      ui.current = { ...ui.current, messages: [...page.messages, ...ui.current.messages], hasMore: page.hasMore };
+      const page = await d.api(`${threadPath(current.thread.id)}?before=${encodeURIComponent(first.id)}`);
+      if (ui.current !== current) return;
+      const log = document.getElementById('assistant-log');
+      ui.keepScroll = log ? log.scrollHeight - log.scrollTop : null;
+      ui.current = { ...current, messages: [...page.messages, ...current.messages], hasMore: page.hasMore };
     } catch {
       d.toast(d.STR.loadFailed);
     } finally {
@@ -189,7 +223,7 @@
 
   function renameThread() {
     const thread = ui.current?.thread;
-    if (!thread) return;
+    if (!thread || locked()) return;
     const form = document.createElement('form');
     form.className = 'form';
     form.innerHTML = `
@@ -203,16 +237,20 @@
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const title = form.querySelector('#as-title').value.trim();
-      if (!title) return;
+      const button = form.querySelector('button[type=submit]');
+      if (!title || button.disabled) return;
+      button.disabled = true;
       try {
         const renamed = await d.api(threadPath(thread.id), { method: 'PATCH', body: JSON.stringify({ title }) });
-        ui.current = { ...ui.current, thread: { ...ui.current.thread, ...renamed } };
-        ui.threads = ui.threads.map(t => (t.id === renamed.id ? { ...t, ...renamed } : t));
+        const changes = { title: renamed.title };
+        if (ui.current?.thread.id === renamed.id) ui.current = { ...ui.current, thread: { ...ui.current.thread, ...changes } };
+        ui.threads = ui.threads.map(t => (t.id === renamed.id ? { ...t, ...changes } : t));
         d.closeDrawer();
         d.toast(T.renamed);
         repaint();
       } catch {
         d.toast(T.renameFailed);
+        button.disabled = false;
       }
     });
     d.openDrawer(T.renameTitle, form, false, { eyebrow: T.settingsEyebrow });
@@ -220,18 +258,16 @@
 
   async function removeThread() {
     const thread = ui.current?.thread;
-    if (!thread) return;
+    if (!thread || locked()) return;
     const ok = await d.confirmDialog({ title: T.removeTitle, body: T.removeBody, okLabel: T.removeOk });
     if (!ok) return;
-    try {
+    if (ui.current?.thread.id !== thread.id) return;
+    await switchThread(async () => {
       await d.api(threadPath(thread.id), { method: 'DELETE' });
       ui.threads = ui.threads.filter(t => t.id !== thread.id);
-      ui.current = ui.threads[0] ? await d.api(threadPath(ui.threads[0].id)) : null;
       d.toast(T.removed);
-      repaint();
-    } catch {
-      d.toast(T.removeFailed);
-    }
+      return ui.threads[0] ? d.api(threadPath(ui.threads[0].id)).catch(() => null) : null;
+    }, T.removeFailed);
   }
 
   async function copy(text) {
@@ -479,8 +515,10 @@
       ${p.window_open === false && status === 'PENDING' ? `<p class="hint hint--warn">${esc(T.windowClosed)}</p>` : ''}
       ${note ? `<p class="hint${status === 'FAILED' ? ' hint--bad' : ''}">${esc(note)}</p>` : ''}
       ${status === 'PENDING' ? `<div class="assistant__action-buttons">
-        <button class="btn btn--sm btn--ghost" type="button" data-assistant-cancel="${esc(action.id)}"${ui.busy ? ' disabled' : ''}>${esc(d.STR.assistantCancel)}</button>
-        <button class="btn btn--sm btn--primary" type="button" data-assistant-confirm="${esc(action.id)}"${ui.busy ? ' disabled' : ''}>${esc(d.STR.assistantConfirm)}</button></div>` : ''}
+        <button class="btn btn--sm btn--ghost" type="button" data-assistant-cancel="${esc(action.id)}"${disabled()}>${esc(d.STR.assistantCancel)}</button>
+        ${ui.settings?.allowChanges === false
+          ? `<span class="hint">${esc(T.errChangesOff)}</span>`
+          : `<button class="btn btn--sm btn--primary" type="button" data-assistant-confirm="${esc(action.id)}"${disabled()}>${esc(d.STR.assistantConfirm)}</button>`}</div>` : ''}
       ${actionLinks(action)}
     </div>`;
   }
@@ -501,8 +539,12 @@
     const retryable = last && m.error !== 'budget_exceeded';
     return `<div class="assistant__turn">
       <div class="chat__msg chat__msg--bot assistant__failed" role="alert">${esc(text)}</div>
-      ${retryable ? `<div class="assistant__meta"><button class="btn btn--sm" type="button" data-assistant-retry${ui.busy ? ' disabled' : ''}>${esc(T.retry)}</button></div>` : ''}
+      ${retryable ? retryButton() : ''}
     </div>`;
+  }
+
+  function retryButton() {
+    return `<div class="assistant__meta"><button class="btn btn--sm" type="button" data-assistant-retry${disabled()}>${esc(T.retry)}</button></div>`;
   }
 
   function messageHtml(m, index, all) {
@@ -530,14 +572,14 @@
     return `<div class="assistant__welcome">
       <p class="assistant__welcome-title">${esc(T.welcomeTitle)}</p>
       <p>${esc(T.welcomeDesc)}</p>
-      <div class="assistant__starters">${starters().map(q => `<button class="btn btn--sm" type="button" data-assistant-starter="${esc(q)}"${ui.busy ? ' disabled' : ''}>${esc(q)}</button>`).join('')}</div>
+      <div class="assistant__starters">${starters().map(q => `<button class="btn btn--sm" type="button" data-assistant-starter="${esc(q)}"${disabled()}>${esc(q)}</button>`).join('')}</div>
     </div>`;
   }
 
   function threadRow(t) {
     const active = ui.current?.thread.id === t.id;
     const pending = t.pending ? `<span class="pill pill--warn assistant__pending" aria-label="${esc(T.pendingAria({ n: t.pending }))}">${t.pending}</span>` : '';
-    return `<button class="assistant__thread${active ? ' is-active' : ''}" type="button" data-assistant-thread="${esc(t.id)}"${active ? ' aria-current="true"' : ''}>
+    return `<button class="assistant__thread${active ? ' is-active' : ''}" type="button" data-assistant-thread="${esc(t.id)}"${active ? ' aria-current="true"' : ''}${disabled()}>
       <strong>${esc(t.title)}</strong><span>${esc(d.relTime(t.updatedAt))}</span>${pending}</button>`;
   }
 
@@ -554,16 +596,16 @@
     const head = current ? `<div class="assistant__head">
         <p class="assistant__title" title="${esc(current.thread.title)}">${esc(current.thread.title)}</p>
         <div class="actions">${s && !s.allowChanges ? `<span class="pill" title="${esc(T.readOnlyHint)}">${esc(T.readOnly)}</span>` : ''}
-          <button class="btn btn--sm btn--ghost" type="button" id="assistant-rename">${esc(T.rename)}</button>
-          <button class="btn btn--sm btn--ghost" type="button" id="assistant-delete">${esc(T.remove)}</button></div>
+          <button class="btn btn--sm btn--ghost" type="button" id="assistant-rename"${disabled()}>${esc(T.rename)}</button>
+          <button class="btn btn--sm btn--ghost" type="button" id="assistant-delete"${disabled()}>${esc(T.remove)}</button></div>
       </div>` : (s && !s.allowChanges ? `<div class="assistant__head"><span></span><span class="pill" title="${esc(T.readOnlyHint)}">${esc(T.readOnly)}</span></div>` : '');
     const log = messages.length
-      ? `${current.hasMore ? `<button class="btn btn--sm btn--ghost assistant__older" type="button" id="assistant-older"${ui.older ? ' disabled' : ''}>${esc(T.earlier)}</button>` : ''}${messages.map(messageHtml).join('')}`
+      ? `${current.hasMore ? `<button class="btn btn--sm btn--ghost assistant__older" type="button" id="assistant-older"${ui.older ? ' disabled' : disabled()}>${esc(T.earlier)}</button>` : ''}${messages.map(messageHtml).join('')}${!ui.busy && messages.at(-1).role === 'user' ? retryButton() : ''}`
       : welcome();
     root.innerHTML = `${d.hero(d.labels['ai-assistant'], d.STR.assistantDesc, settingsButton)}
       <div class="assistant">
         <aside class="assistant__sidebar">
-          <button class="btn btn--primary" id="assistant-new" type="button"${ui.busy ? ' disabled' : ''}>${esc(d.STR.assistantNewThread)}</button>
+          <button class="btn btn--primary" id="assistant-new" type="button"${disabled()}>${esc(d.STR.assistantNewThread)}</button>
           ${searchable ? `<input class="inp assistant__search" id="assistant-search" type="search" placeholder="${esc(T.search)}" aria-label="${esc(T.search)}" value="${esc(ui.query)}" />` : ''}
           <div class="assistant__threads">${threads.map(threadRow).join('') || `<p class="chat__empty">${esc(ui.query ? T.searchEmpty : d.STR.assistantNoThreads)}</p>`}</div>
         </aside>
@@ -571,8 +613,8 @@
           ${head}
           <div class="chat__log assistant__log" id="assistant-log" role="log" aria-live="polite">${log}${ui.busy ? `<div class="chat__msg chat__msg--bot chat__typing">${esc(d.STR.typing)}</div>` : ''}</div>
           <form class="chat__form" id="assistant-form">
-            <textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="${MAX_MESSAGE}" aria-label="${esc(T.composerLabel)}" placeholder="${esc(d.STR.assistantPlaceholder)}"${ui.busy ? ' disabled' : ''}>${esc(ui.draft)}</textarea>
-            <button class="btn btn--primary" type="submit"${ui.busy ? ' disabled' : ''}>${esc(d.STR.send)}</button>
+            <textarea class="inp chat__input assistant__input" id="assistant-input" rows="1" maxlength="${MAX_MESSAGE}" aria-label="${esc(T.composerLabel)}" placeholder="${esc(d.STR.assistantPlaceholder)}"${disabled()}>${esc(ui.draft)}</textarea>
+            <button class="btn btn--primary" type="submit"${disabled()}>${esc(d.STR.send)}</button>
           </form>
           <p class="assistant__composer-hint"><span>${esc(T.composerHint)}</span><span id="assistant-count"></span></p>
         </div>
@@ -584,13 +626,7 @@
     const $ = sel => root.querySelector(sel);
     const $$ = sel => [...root.querySelectorAll(sel)];
     $('#assistant-settings').addEventListener('click', openSettings);
-    $('#assistant-new').addEventListener('click', async () => {
-      if (ui.busy) return;
-      try { await newThread(); } catch { return d.toast(d.STR.assistantError); }
-      ui.draft = '';
-      repaint();
-      focusComposer();
-    });
+    $('#assistant-new').addEventListener('click', () => switchThread(newThread, d.STR.assistantError));
     $('#assistant-search')?.addEventListener('input', e => {
       ui.query = e.target.value;
       const list = $('.assistant__threads');

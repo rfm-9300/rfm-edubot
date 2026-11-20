@@ -764,6 +764,7 @@ window.__I18N_CATALOGS['en'] = {
       error_empty_reply: 'The assistant didn’t come up with an answer. Try again, or ask in other words.',
       errActionNotPending: 'That change is no longer waiting for a decision.',
       errChangesOff: 'Changes are switched off in the assistant’s settings.',
+      errThreadBusy: 'This conversation is already processing a request. Try again in a moment.',
       errMessage: 'Messages can have up to 4,000 characters.',
       statusEXPIRED: 'Not done',
       expiredHint: 'You moved on before deciding, so nothing changed. Ask again if you still want it.',

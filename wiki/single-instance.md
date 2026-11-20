@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-19
+updated: 2026-11-20
 ---
 
 # Running as one instance
@@ -46,6 +46,9 @@ included, needs the work below first.
 - `BookingScheduler` checks for an overlap and inserts under a per-company `Mutex`, and
   `CompanyService` counts companies and creates one under a per-tenant `Mutex`. Each would need a lock
   document or a conditional write in Mongo.
+- The dashboard AI Assistant keeps its in-flight thread operations in the app process to prevent
+  overlapping turns and deletion during a write. A second app instance would need a shared lock
+  or queue per thread.
 - `OAuthState` remembers the OAuth states it has consumed, per process. One-time use across instances
   needs a collection with a unique state and a TTL.
 
