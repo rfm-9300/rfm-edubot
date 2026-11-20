@@ -66,6 +66,7 @@ sequenceDiagram
 
 ```mermaid
 graph TD
+    Tools[CLI and stdio MCP server]
     subgraph HTTP["HTTP Layer (Ktor/Netty :8080)"]
         WR[WebhookRoutes<br/>WhatsApp + Instagram]
         DR[Dashboard API /app/api<br/>feature registry + module gate]
@@ -125,6 +126,7 @@ graph TD
         Mongo[(MongoDB<br/>wabot · wabot_platform · wabot_runtime)]
     end
 
+    Tools -->|Dashboard bearer token| DR
     WR --> WV
     WR --> DS
     WR --> MQ
@@ -239,6 +241,9 @@ flowchart LR
   and anything else 500 `{"error":"Internal server error"}`. Domain refusals keep their own codes
   (`phone_taken`, `already_invoiced`, …). Ktor's engine answers an unreadable body with a bare 415
   before StatusPages runs, so `configureStatusPages` converts that exception first.
+
+The [CLI and stdio MCP server](../tools/edubot/README.md) call the dashboard API with a dashboard
+session. The API applies the same company, role and module checks for both clients.
 
 Details, reasons and the test harness: [wiki/dashboard-api.md](../wiki/dashboard-api.md).
 

@@ -1,5 +1,5 @@
 ---
-updated: 2026-10-21
+updated: 2026-11-20
 ---
 
 # Dashboard API structure
@@ -142,6 +142,16 @@ Every refusal is `{"error": code, "detail": field}`, `detail` only when it names
   415, so StatusPages never sees it. `configureStatusPages` intercepts the same phase, inside the
   engine's interceptor, and rethrows it as `invalid_body` (JSON content type) or
   `unsupported_media_type`.
+
+## CLI and MCP clients
+
+[`tools/edubot`](../tools/edubot/README.md) is a Node package that runs separately from Ktor.
+Its CLI and stdio MCP server share operation schemas and an HTTP client. Both forward the
+dashboard bearer token to the configured origin, so the dashboard still decides company scope,
+role and module access. Sessions, company switching and domain validation reuse the existing
+routes. The MCP server advertises the named operations and starts with reads enabled. The CLI
+also accepts direct requests under `/app/api/` for the dashboard's other JSON endpoints and
+downloads. Each MCP process uses the company in its startup token.
 
 ## HTTP tests
 
