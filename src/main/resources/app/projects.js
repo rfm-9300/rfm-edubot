@@ -998,8 +998,10 @@ async function openProjectShare(project) {
         <div class="actions">
           <button class="btn btn--sm btn--primary" type="button" data-share-copy>${escapeHTML(bt('share.copy'))}</button>
           <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(p.clientName ? bt('share.whatsappTo', { name: p.clientName }) : bt('share.whatsapp'))}</a>
+          ${linkEmailButtonHtml(`/app/api/building/projects/${encodeURIComponent(p.id)}/share/email`)}
           <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
         </div>
+        ${linkEmailSlotHtml(`/app/api/building/projects/${encodeURIComponent(p.id)}/share/email`)}
         ${budgetHtml}
         ${seesHtml}
         <div class="drawer__foot"><button class="btn btn--sm btn--ghost" type="button" data-share-rotate>${escapeHTML(bt('share.rotate'))}</button><button class="btn btn--sm btn--ghost" type="button" data-share-off>${escapeHTML(bt('share.off'))}</button></div>`
@@ -1009,6 +1011,7 @@ async function openProjectShare(project) {
     $('[data-share-copy]', body)?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(url); toast(bt('share.copied')); } catch { $('#sh-url', body).select(); }
     });
+    wireLinkEmail(body);
     $('[data-share-on]', body)?.addEventListener('click', () => change('POST', '', bt('share.turnedOn')));
     $('[data-share-budget]', body)?.addEventListener('change', async e => {
       const show = e.target.checked;

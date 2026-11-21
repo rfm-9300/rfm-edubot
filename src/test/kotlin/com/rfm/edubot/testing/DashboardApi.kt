@@ -36,7 +36,12 @@ import com.rfm.edubot.integrations.aws.SnsVerifier
 import com.rfm.edubot.integrations.email.EmailMessageRepository
 import com.rfm.edubot.integrations.email.EmailService
 import com.rfm.edubot.integrations.email.ReceivedEmails
+import com.rfm.edubot.integrations.IntegrationConnection
+import com.rfm.edubot.integrations.IntegrationProviders
+import com.rfm.edubot.integrations.TokenCipher
+import com.rfm.edubot.integrations.google.FakeGoogle
 import com.rfm.edubot.integrations.google.GoogleIntegration
+import com.rfm.edubot.integrations.google.GoogleScopes
 import com.rfm.edubot.integrations.mailbox.MailboxInbound
 import com.rfm.edubot.integrations.mailbox.MailboxIntegration
 import com.rfm.edubot.messaging.DeduplicationService
@@ -126,6 +131,7 @@ internal class DashboardApi(
     private val config: AppConfig.AdminConfig,
     val routes: RoutingRoot,
     val model: FakeModel,
+    private val sender: GmailSender? = null,
 ) {
     val tenants = TenantRepository(mongo)
     val users = DashboardUserRepository(mongo)
@@ -140,6 +146,9 @@ internal class DashboardApi(
         val operator = dashboardToken(config, tenant, DashboardAccessPolicy.OPERATOR_IMPERSONATION, 1)
         return TestCompany(tenant, admin, dashboardToken(config, admin, DashboardAccessPolicy.TENANT_USER, 1), dashboardToken(config, member, DashboardAccessPolicy.TENANT_USER, 1), operator)
     }
+
+    /** Gives [company] a Gmail account that can send, through the [FakeGoogle] the test passed in. */
+    suspend fun connectGmail(company: TestCompany): IntegrationConnection = sender!!.connect(company)
 
     /** A sign-in for [employeeId] of [company], as the employee portal's. */
     suspend fun employeeToken(company: TestCompany, employeeId: ObjectId): String {
@@ -215,7 +224,7 @@ internal class DashboardApi(
 }
 
 /** Runs [block] against the whole server: StatusPages, the `dashboard` and `admin-jwt` sign-ins, and every route. */
-internal fun dashboardApiTest(mongo: MongoModule, block: suspend DashboardApi.() -> Unit): Unit = testApplication {
+internal fun dashboardApiTest(mongo: MongoModule, google: FakeGoogle? = null, block: suspend DashboardApi.() -> Unit): Unit = testApplication {
     val config = AppConfig.AdminConfig(jwtSecret = "test-secret")
     val runtime = RuntimeConfig(
         AppConfig(
@@ -234,15 +243,16 @@ internal fun dashboardApiTest(mongo: MongoModule, block: suspend DashboardApi.()
     val lookup: EmployeeLookup = { tenantId, id -> EmployeeRepository(mongo, tenantId).findById(id) }
     val model = FakeModel()
     lateinit var root: RoutingRoot
+    val sender = google?.let { GmailSender(it, mongo) }
     application {
         configureSerialization()
         configureStatusPages()
         configureWebSockets()
         configureAdminAuth(runtime, tenants, users, lookup)
-        root = routing { installRoutes(testServices(mongo, runtime, tenants, users, lookup, model)) }
+        root = routing { installRoutes(testServices(mongo, runtime, tenants, users, lookup, model, sender)) }
     }
     startApplication()
-    DashboardApi(mongo, client, config, root, model).block()
+    DashboardApi(mongo, client, config, root, model, sender).block()
 }
 
 /** The application's services, with nothing reaching Meta, Google or OpenRouter. */
@@ -253,6 +263,7 @@ private fun testServices(
     users: DashboardUserRepository,
     lookup: EmployeeLookup,
     model: FakeModel,
+    sender: GmailSender?,
 ): AppServices {
     val offline = HttpClient(MockEngine) { engine { addHandler { respond("{}", HttpStatusCode.ServiceUnavailable) } } }
     val deduplication = DeduplicationService(mongo)
@@ -261,7 +272,7 @@ private fun testServices(
     val registry = TenantRegistry(tenants)
     val notifications = NotificationRepository(mongo)
     val agents = AgentsModule(mongo, AgentRegistry(AgentActions.builtIn, TriggerTypes.all), AgentServices(mongo, model.client))
-    val google = GoogleIntegration.create(mongo, { AppConfig.GoogleConfig() }, null, offline, notifications)
+    val google = sender?.integration ?: GoogleIntegration.create(mongo, { AppConfig.GoogleConfig() }, null, offline, notifications)
     val mailboxConfig = { AppConfig.MailboxConfig() }
     val mailbox = MailboxIntegration(mailboxConfig, google.connections, SesClient(offline, mailboxConfig), S3Client(offline, mailboxConfig))
     val backups = Files.createTempDirectory("backups")
@@ -303,5 +314,23 @@ private fun testServices(
         ),
         snsVerifier = SnsVerifier(offline),
         awsHttpClient = offline,
+    )
+}
+
+/** A company's Gmail for tests: a [FakeGoogle] behind the real integration, with a token key, so sending goes through the real sender. */
+internal class GmailSender(google: FakeGoogle, mongo: MongoModule) {
+    private val cipher = TokenCipher.fromConfig(java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 5 }))!!
+    val integration: GoogleIntegration = GoogleIntegration.create(mongo, { google.config }, cipher, google.http, NotificationRepository(mongo))
+
+    suspend fun connect(company: TestCompany): IntegrationConnection = integration.connections.connect(
+        tenantId = company.tenant.id,
+        provider = IntegrationProviders.GOOGLE,
+        accountEmail = "obras@example.pt",
+        scopes = listOf(GoogleScopes.GMAIL_SEND),
+        accessToken = cipher.seal("access-1"),
+        refreshToken = cipher.seal("refresh-1"),
+        accessTokenExpiresAt = Clock.System.now() + kotlin.time.Duration.parse("1h"),
+        connectedByUserId = "u1",
+        connectedByEmail = "admin@example.pt",
     )
 }

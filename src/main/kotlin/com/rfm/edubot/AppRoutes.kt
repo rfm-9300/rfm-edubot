@@ -28,6 +28,7 @@ import com.rfm.edubot.dashboard.building.changeApprovalRoutes
 import com.rfm.edubot.dashboard.building.measurementApprovalRoutes
 import com.rfm.edubot.dashboard.building.mySitesRoutes
 import com.rfm.edubot.dashboard.building.projectShareRoutes
+import com.rfm.edubot.dashboard.building.shareEmailRoutes
 import com.rfm.edubot.dashboard.building.supplierIssueRoutes
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
@@ -213,6 +214,7 @@ internal fun Routing.installRoutes(s: AppServices) {
     )
     mailboxInboundRoutes(s.mailbox, s.mailboxInbound, s.snsVerifier, s.awsHttpClient)
     emailRoutes(s.email, s.mongo)
+    shareEmailRoutes(s.email, s.mongo)
     emailInboxRoutes(EmailInbox(s.mongo, s.email, s.google, EmailInsightsService(s.aiClient, s.mongo)))
     whatsAppSignupRoutes(
         configProvider = { s.runtimeConfig.get().whatsapp },

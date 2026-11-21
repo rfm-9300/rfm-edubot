@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-20
+updated: 2026-11-21
 ---
 
 # Building: projects and their progress
@@ -175,7 +175,8 @@ handover, an extra still to sign.
   `.retention_invoiced`; `site_log.updated` and `.deleted`; `site_photo.added`, `.updated` and `.deleted`;
   `site_issue.updated` and `.deleted`; `change_order.created`, `.updated`, `.deleted` and `.reopened`;
   `measurement.created`, `.updated`, `.reopened` and `.deleted`; `report.posted`, `.updated` and `.deleted`;
-  `supplier.link_changed`. Each names the project and its client as related records, so the client's timeline shows
+  `supplier.link_changed`; `change_order.link_emailed`, `measurement.link_emailed`, `project.link_emailed` and
+  `supplier.link_emailed` (a link sent by email, with `to`). Each names the project and its client as related records, so the client's timeline shows
   it and an agent's WhatsApp, task or notice has the client.
 - Health is computed, not stored, so `ProjectHealthWatch` (hourly, on a lease, like the agents'
   scheduler) keeps each running project's last-seen health in `watchedHealth`, written without a new
@@ -242,6 +243,27 @@ handover, an extra still to sign.
 - Photos of the work go to the issue, inside the team (not shared), shrunk in the browser like the team's.
 - Renewing ends the old address at once; turning it off, archiving the supplier or the company not being active
   makes it answer 404.
+
+## Sending the links by email
+
+- Each link panel (`linkPanelHtml`, and the project's share drawer) has **Send by email** beside Copy and WhatsApp.
+  It opens a small form inside the panel: the recipient (the client's address on record, editable; suppliers have no
+  email on record, so it starts empty), the email as it will go, and where it goes out from.
+- `ShareEmailRoutes` (`dashboard/building`): `GET|POST /building/changes/{id}/link/email`,
+  `/measurements/{id}/link/email`, `/suppliers/{id}/link/email` and `/projects/{id}/share/email`, each gated by the
+  link's own module (change orders, measurements, site issues, projects), not by email. `GET` drafts (to, subject,
+  text, `from`, `canSend`, and the last send); `POST {to, origin, requestId}` sends. The record must have a live link
+  (a sent change, a measurement waiting for its client, a supplier's link, the project's page on), else 409 `link_off`.
+- It sends through the same `EmailService` as quotes and invoices: the company's own address on the platform's mail
+  domain, else its Google account, with the daily allowance and the one-send-per-key rule (`requestId`).
+  A company with no account gets 409 `no_email_account`, and the form says so (and points admins to Settings →
+  Channels) instead of failing quietly.
+- The text is the platform's (`EmailCopy`, en/pt/es by the company's locale), never typed by the sender, so the
+  endpoint can't be used to send arbitrary mail: it names the company, the item and the link, and **no money** (a
+  change's page shows its price, the email doesn't). The link is `origin` + the record's own path: `origin` is the
+  scheme and host the dashboard is open on (validated, no path), because the server doesn't know its public address.
+- A send appends the history-only event above, by the signed-in person (the activity log's "Sent the link by
+  email"); the panel shows "Sent by email on {date} to {address} by {who}" from the latest one.
 
 ## Releasing the retention
 

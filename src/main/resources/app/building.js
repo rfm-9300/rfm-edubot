@@ -230,10 +230,11 @@ function proofHtml(ip, device) {
 
 /**
  * A link the company sends someone outside it (a client approving a change or a measurement, a supplier and their
- * issues): the address to copy, WhatsApp to [phone] (or to anyone) with [message], and the page itself. [tools] adds
- * buttons, like renewing or turning the link off. Wire it with [wireLinkPanel].
+ * issues): the address to copy, WhatsApp to [phone] (or to anyone) with [message], email through [emailPath] (the
+ * link's `…/email` route), and the page itself. [tools] adds buttons, like renewing or turning the link off. Wire it
+ * with [wireLinkPanel].
  */
-function linkPanelHtml({ title, intro, url, message, phone = '', name = '', tools = '' }) {
+function linkPanelHtml({ title, intro, url, message, phone = '', name = '', tools = '', emailPath = '' }) {
   const text = encodeURIComponent(message);
   const wa = phone ? `${waHref(phone)}?text=${text}` : `https://wa.me/?text=${text}`;
   return `<section class="panel" data-link-panel><header class="panel__head"><h2 class="panel__title">${escapeHTML(title)}</h2></header><div class="panel__body">
@@ -242,9 +243,11 @@ function linkPanelHtml({ title, intro, url, message, phone = '', name = '', tool
     <div class="actions">
       <button class="btn btn--sm btn--primary" type="button" data-link-copy>${escapeHTML(bt('share.copy'))}</button>
       <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(name ? bt('share.whatsappTo', { name }) : bt('share.whatsapp'))}</a>
+      ${linkEmailButtonHtml(emailPath)}
       <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
       ${tools}
-    </div></div></section>`;
+    </div>
+    ${linkEmailSlotHtml(emailPath)}</div></section>`;
 }
 function wireLinkPanel(root) {
   $$('[data-link-panel]', root).forEach(panel => {
@@ -252,6 +255,85 @@ function wireLinkPanel(root) {
     $('[data-link-copy]', panel)?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(input.value); toast(bt('share.copied')); } catch { input.select(); }
     });
+    wireLinkEmail(panel);
+  });
+}
+
+// "Send by email" beside a link's other ways out: the button, and the place its recipient form opens and what was last sent shows.
+function linkEmailButtonHtml(emailPath) {
+  return emailPath ? `<button class="btn btn--sm" type="button" data-link-email="${escapeHTML(emailPath)}">${escapeHTML(bt('share.email'))}</button>` : '';
+}
+function linkEmailSlotHtml(emailPath) {
+  return emailPath ? '<p class="hint" data-link-email-last hidden></p><form class="form" data-link-email-form hidden></form>' : '';
+}
+const linkEmailQuery = () => `?origin=${encodeURIComponent(location.origin)}`;
+const linkEmailLast = d => d.lastSentAt
+  ? bt('share.emailLast', { date: fmtDay(d.lastSentAt), to: d.lastSentTo || '—', who: d.lastSentBy || '—' })
+  : '';
+
+// Opens the recipient form of a panel with an email button: the address on record to edit, the email as it will go, and what stops it.
+function wireLinkEmail(panel) {
+  const button = $('[data-link-email]', panel);
+  if (!button) return;
+  const path = button.dataset.linkEmail;
+  const form = $('[data-link-email-form]', panel);
+  const last = $('[data-link-email-last]', panel);
+  const showLast = d => { const t = linkEmailLast(d); last.textContent = t; last.hidden = !t; };
+  const admin = state.me?.principalType === 'tenant' && state.me?.user?.role === 'TENANT_ADMIN';
+  // What was last sent shows without opening the form; a failed lookup only leaves it out.
+  api(`${path}${linkEmailQuery()}`).then(showLast).catch(() => {});
+  button.addEventListener('click', async () => {
+    if (!form.hidden) { form.hidden = true; return; }
+    form.innerHTML = `<p class="hint">${escapeHTML(CRM.loading)}</p>`;
+    form.hidden = false;
+    let draft;
+    try { draft = await api(`${path}${linkEmailQuery()}`); }
+    catch (err) {
+      form.hidden = true;
+      if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+      return;
+    }
+    showLast(draft);
+    const requestId = newRequestId();
+    // `from` without `canSend`: the company's sending account is there but Google stopped accepting it.
+    const blocked = draft.canSend ? null : draft.from
+      ? { title: googleText('sendReconnectTitle', { account: draft.from }), desc: admin ? GOOGLE.sendReconnectDesc : GOOGLE.sendReconnectMember }
+      : { title: GOOGLE.noAccountTitle, desc: admin ? GOOGLE.noAccountDesc : GOOGLE.noAccountMember };
+    const id = `le-${requestId.slice(0, 8)}`;
+    form.innerHTML = `
+      ${!blocked ? '' : `<div class="notice notice--warn" role="status"><div class="notice__text"><strong>${escapeHTML(blocked.title)}</strong><span>${escapeHTML(blocked.desc)}</span></div>
+        ${hasModule('settings') ? `<div class="notice__actions"><button class="btn btn--sm" type="button" data-le-settings>${escapeHTML(GOOGLE.openSettings)}</button></div>` : ''}</div>`}
+      <div class="form__row"><label class="lbl" for="${id}-to">${escapeHTML(bt('share.emailTo'))} <span class="req">●</span></label>
+        <input class="inp" id="${id}-to" type="email" required maxlength="254" autocomplete="off" value="${escapeHTML(draft.to || '')}" />
+        ${draft.to ? '' : `<p class="hint hint--warn">${escapeHTML(bt('share.emailNoAddress'))}</p>`}</div>
+      <div class="form__row"><span class="lbl">${escapeHTML(bt('share.emailSays'))}</span>
+        <p class="panel__text"><strong>${escapeHTML(draft.subject)}</strong></p>
+        <p class="panel__text">${escapeHTML(draft.text)}</p></div>
+      ${draft.from && draft.canSend ? `<p class="hint">${escapeHTML(googleText('from', { account: draft.from }))}</p>` : ''}
+      <div class="actions"><button class="btn btn--sm btn--ghost" type="button" data-le-cancel>${escapeHTML(BLD.cancel)}</button>
+        <button class="btn btn--sm btn--primary" type="submit" ${draft.canSend ? '' : 'disabled'}>${escapeHTML(GOOGLE.send)}</button></div>`;
+    $('[data-le-cancel]', form).addEventListener('click', () => { form.hidden = true; });
+    $('[data-le-settings]', form)?.addEventListener('click', () => {
+      closeDrawer({ dismissed: true });
+      state.settingsSection = 'channels';
+      setActive('settings');
+    });
+    form.onsubmit = async e => {
+      e.preventDefault();
+      const to = $(`#${id}-to`, form).value.trim();
+      if (!to) return toast(googleText('sendErrors.no_email'));
+      const btn = $('button[type=submit]', form);
+      btn.disabled = true;
+      try {
+        const sent = await api(path, { method: 'POST', body: JSON.stringify({ to, origin: location.origin, requestId }) });
+        toast(sent.alreadySent ? GOOGLE.alreadySent : googleText('sent', { to: sent.to }));
+        form.hidden = true;
+        showLast({ lastSentAt: new Date().toISOString(), lastSentTo: sent.to, lastSentBy: state.me?.user?.email });
+      } catch (err) {
+        btn.disabled = false;
+        if (err.message !== 'unauthorized') toast(googleTextOr(`sendErrors.${err.code || ''}`, GOOGLE.sendFailed));
+      }
+    };
   });
 }
 

@@ -175,6 +175,11 @@ object DomainEventTypes {
     const val MEASUREMENT_UPDATED = "measurement.updated"
     const val MEASUREMENT_REOPENED = "measurement.reopened"
     const val MEASUREMENT_DELETED = "measurement.deleted"
+    /** A link for someone outside the company was sent by email (`to`): a change's, a measurement's, the client's project page, a supplier's issues. */
+    const val CHANGE_ORDER_LINK_EMAILED = "change_order.link_emailed"
+    const val MEASUREMENT_LINK_EMAILED = "measurement.link_emailed"
+    const val PROJECT_LINK_EMAILED = "project.link_emailed"
+    const val SUPPLIER_LINK_EMAILED = "supplier.link_emailed"
     const val REPORT_POSTED = "report.posted"
     const val REPORT_UPDATED = "report.updated"
     const val REPORT_DELETED = "report.deleted"
