@@ -8,6 +8,33 @@ const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => [...root.querySelectorAll(sel)];
 const escapeHTML = (s = '') => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 
+// The CLI requests this control on a dedicated visit to the normal sign-in page.
+function paintCliSessionButton(currentToken) {
+  const existing = $('#btn-copy-cli-session');
+  if (!currentToken || new URLSearchParams(location.search).get('cli') !== '1') {
+    existing?.remove();
+    return;
+  }
+  if (existing) return;
+  const button = document.createElement('button');
+  button.id = 'btn-copy-cli-session';
+  button.type = 'button';
+  button.className = 'btn btn--sm btn--ghost';
+  button.dataset.i18n = 'common.cliSession.copy';
+  button.textContent = I18N.t(button.dataset.i18n);
+  button.addEventListener('click', async () => {
+    const token = currentToken();
+    if (!token) return;
+    try {
+      await navigator.clipboard.writeText(token);
+      toast(I18N.t('common.cliSession.copied'));
+    } catch {
+      toast(I18N.t('common.cliSession.failed'));
+    }
+  });
+  $('.topbar__actions').prepend(button);
+}
+
 let toastTimer;
 function toast(msg) {
   const el = $('#toast');

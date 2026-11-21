@@ -1,8 +1,8 @@
 name: CI
 
-# Tests the server and its bundled web UIs (/app, /backoffice, shared /admin assets, widget, legal)
-# on pull requests and on main. Merging to main deploys nothing: production changes only when a
-# release tag is pushed (release.yml). Mobile has its own workflow (mobile-ci.yml).
+# Tests the server, bundled web UIs, CLI and MCP server on pull requests and on main.
+# Merging to main deploys nothing: production changes only when a release tag is pushed (release.yml).
+# Mobile has its own workflow (mobile-ci.yml).
 
 on:
   pull_request:
@@ -46,3 +46,20 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Unit tests
         run: ./gradlew test --no-daemon
+
+  edubot-tools:
+    name: CLI and MCP
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: tools/edubot
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: tools/edubot/package-lock.json
+      - run: npm ci
+      - run: npm test
