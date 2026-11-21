@@ -689,6 +689,22 @@ Phase 2 (PR #89) adds:
 - **My sites** (`MySitesRoutes`, `/app/api/portal/sites`): an employee page for the projects they
   manage, writing the diary, photos and issues through the same services.
 
+The third parties' round (2026-11-20) adds:
+
+- **The client's page as a portal**: what waits for their answer (sent changes and measurements, each
+  answered on its own page), the changes decided, and the budget only when the team turns it on
+  (`share.showBudget`, `PATCH /building/projects/{id}/share`).
+- **Each change's page shows its effect** on the contract and the planned end, and prints as a PDF
+  (`BuildingPdf.changeOrder`, `/building/changes/{id}/pdf` and `/app/share/change/{token}/pdf`).
+- **The client approves or disputes a measurement** at `/app/share/measurement/{token}`
+  (`MeasurementApprovalRoutes`) after `POST /building/measurements/{id}/send`; still a draft until then.
+- **A supplier's link** `/app/share/issues/{token}` (`SupplierIssueRoutes`, `building.supplier_links`): the
+  issues assigned to them across the company's projects, started or fixed with a note and photos, as the
+  `SUPPLIER` actor.
+- **Proof** (`LinkProof`): the address and browser behind every answer from a link, for the team only.
+- **The activity log** reads the same events ([wiki/activity-log.md](../wiki/activity-log.md)); Building's
+  edits, deletes and link changes append history-only ones.
+
 Photos are shrunk in the browser and stored on the PDF volume (`<PDF_STORAGE_PATH>/<slug>/building/`),
 outside the Mongo backups. Home shows a Projects card and Needs-you rows for delayed projects, overdue
 issues, changes waiting for the client and measurements to invoice.
@@ -709,6 +725,23 @@ sequenceDiagram
     CS->>E: change_order.decided (via CLIENT_LINK, actor CLIENT)
     CS->>N: change_order_decided, to every user
     C->>CS: a second answer → 409 already_decided
+```
+
+```mermaid
+sequenceDiagram
+    participant U as Dashboard
+    participant C as Client (no account)
+    participant MS as MeasurementService
+    participant M as MongoDB (wabot)
+    participant E as domain_events
+    U->>MS: POST /building/measurements/{id}/send
+    MS->>M: approval.token on the draft (still DRAFT, awaitingClient)
+    MS->>E: measurement.sent
+    U-->>C: the link, copied or sent by WhatsApp
+    C->>MS: POST /app/share/measurement/{token}/decision<br/>(APPROVED, or DISPUTED with a note; name, address, browser)
+    MS->>M: replace only over the status and updatedAt it read
+    MS->>E: measurement.approved (via CLIENT_LINK) or measurement.disputed, actor CLIENT
+    U->>MS: a dispute: fix the quantities, send again (new link)
 ```
 
 ```mermaid
@@ -957,16 +990,17 @@ flowchart LR
 | `timesheets.sites` | Work sites: name, address, optional client, centre and radius | `tenantId+name` |
 | `timesheets.devices` | Employees' phone keys for the time clock: key id, public key, platform, name, active or revoked (by whom) | unique `(tenantId, employeeId, keyId)`; `tenantId+employeeId+active` |
 | `timesheets.settings` | A company's time clock rules | `_id` = tenant id |
-| `building.projects` | Projects: status, client, quote, manager, address, planned and actual dates, `contract[]` lines, retention and its `retentionReleases[]`, cost budget, labour rate, the time clock's `siteIds`, `phases[]` (dates, progress, weight), the client's link (`share.token`, enabled), `watchedHealth`, `version` | unique `(tenantId, number)`; `tenantId+status+updatedAt`; `tenantId+clientId`; `tenantId+quoteId`; unique partial `share.token` |
+| `building.projects` | Projects: status, client, quote, manager, address, planned and actual dates, `contract[]` lines, retention and its `retentionReleases[]`, cost budget, labour rate, the time clock's `siteIds`, `phases[]` (dates, progress, weight), the client's link (`share.token`, enabled, `showBudget`), `watchedHealth`, `version` | unique `(tenantId, number)`; `tenantId+status+updatedAt`; `tenantId+clientId`; `tenantId+quoteId`; unique partial `share.token` |
 | `building.site_logs` | Site diary entries, one per project and company-local `day`: weather, workers, work done, other notes, lost hours, `shared`, `progress[]` (phase from → to) | unique `(tenantId, projectId, day)`; `tenantId+day` |
 | `building.photos` | Photo metadata (the files are on the PDF volume): project, diary day, issue or phase, caption, day, `shared`, paths, size | `tenantId+projectId+day`; `tenantId+logId`; `tenantId+issueId` |
-| `building.issues` | Issues: kind, priority, status, phase, employee or supplier, due date, `history[]` | unique `(tenantId, number)`; `tenantId+projectId+status`; `tenantId+status+dueDate` |
-| `building.change_orders` | Change orders: kind (addition, omission), `items[]`, total, days, status, who decided, when and how (`decidedVia`), the client's approval link (`approval.token`) | unique `(tenantId, number)`; `tenantId+projectId+status`; unique partial `approval.token` |
+| `building.issues` | Issues: kind, priority, status, phase, employee or supplier, due date, `history[]` (each step's `via` and, from the supplier's link, `proof`) | unique `(tenantId, number)`; `tenantId+projectId+status`; `tenantId+status+dueDate` |
+| `building.change_orders` | Change orders: kind (addition, omission), `items[]`, total, days, status, who decided, when, how (`decidedVia`) and from where (`decisionProof`), the client's approval link (`approval.token`) | unique `(tenantId, number)`; `tenantId+projectId+status`; unique partial `approval.token` |
 | `building.reports` | Updates for a project's client: period, text, who posted it and when | `tenantId+projectId+postedAt` |
-| `building.measurements` | Measurements: number per project, period end, `lines[]` (quantity contracted, previous and to date), retention, totals, status, the invoice | unique `(tenantId, projectId, number)`; `tenantId+status`; `tenantId+invoiceId` |
+| `building.measurements` | Measurements: number per project, period end, `lines[]` (quantity contracted, previous and to date), retention, totals, status, who approved it and how (`approvedVia`, `approvalProof`), the client's link (`approval.token`) and `dispute`, the invoice | unique `(tenantId, projectId, number)`; `tenantId+status`; `tenantId+invoiceId`; unique partial `approval.token` |
+| `building.supplier_links` | A supplier's link to the issues assigned to them: supplier, `token`, who made it and when | unique `(tenantId, supplierId)`; unique `token` |
 | `instagram.media` | Cached Instagram posts for the comments inbox | unique `(tenantId, mediaId)` |
 | `instagram.comments` | Comments on connected-account media | unique `(tenantId, commentId)` |
-| `domain_events` | Business event outbox: type, subject, related records, actor (dashboard user, operator, bot, agent, system, a client through a link), payload, depth, dispatch state | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; TTL 365 days |
+| `domain_events` | Business event outbox and the activity log: type, subject, related records, actor (dashboard user, operator, bot, agent, system, a client or a supplier through a link; `via` the assistant), payload, depth, dispatch state (`NONE` for history-only types) | `dispatch.status+occurredAt`; `tenantId+subject+occurredAt`; `tenantId+actor.type+occurredAt`; `tenantId+occurredAt+_id`; `tenantId+actor.id+occurredAt`; TTL 365 days |
 | `agents` | Agent definitions (triggers, steps, policy), status, run stats, next schedule | `tenantId+status+updatedAt`; `tenantId+eventTypes`; `status+nextFireAt` |
 | `agent_runs` | One run per trigger firing: a copy of the definition, step results, status, `resumeAt` | unique `(tenantId, agentId, dedupeKey)`; `status+resumeAt`; `tenantId+clientId+createdAt`; TTL 180 days on `finishedAt` |
 | `agent_approvals` | Actions waiting for a person, with the preview they approve | unique `(runId, stepId, seq)`; `status+expiresAt` |

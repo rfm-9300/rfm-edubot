@@ -21,8 +21,9 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 
 /**
- * The domain event outbox (`domain_events`). Repositories append to it after their own write; the
- * agent dispatcher claims pending events from it; record drawers read it as an activity timeline.
+ * The domain event outbox (`domain_events`), which is also the company's activity log. Repositories and services
+ * append to it after their own write, attributed to [currentActor]; the agent dispatcher claims the pending events
+ * of the types agents can react to; the Activity page and the records' History read it.
  */
 class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {
     private val collection = mongo.database.getCollection<Document>(COLLECTION)
@@ -48,8 +49,9 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
                 depth = actor.depth,
                 occurredAt = clock(),
             )
-            collection.insertOne(event.toDocument())
-            DomainEventSignal.nudge()
+            val dispatched = DomainEventTypes.dispatched(type)
+            collection.insertOne(event.toDocument(dispatched))
+            if (dispatched) DomainEventSignal.nudge()
             event
         } catch (e: Exception) {
             log.warn("Could not record domain event {} on {} {}: {}", type, subject.type, subject.id, e.message)
@@ -119,13 +121,36 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
         }
     }
 
+    /**
+     * A page of the company's activity, newest first: what [filter] selects, older than [before] (an event's
+     * id, which breaks ties between events of the same millisecond). What customers sent in isn't activity.
+     */
+    suspend fun activity(tenantId: ObjectId, filter: ActivityFilter, before: DomainEvent? = null, limit: Int = 50): List<DomainEvent> {
+        val clauses = mutableListOf(Filters.eq("tenantId", tenantId), Filters.nin("type", DomainEventTypes.inbound))
+        filter.actorType?.let { clauses += Filters.eq("actor.type", it.name) }
+        filter.actorId?.let { clauses += Filters.eq("actor.id", it) }
+        if (filter.subjectTypes.isNotEmpty()) clauses += Filters.`in`("subject.type", filter.subjectTypes)
+        filter.from?.let { clauses += Filters.gte("occurredAt", it.toDate()) }
+        filter.until?.let { clauses += Filters.lt("occurredAt", it.toDate()) }
+        if (before != null) {
+            val at = before.occurredAt.toDate()
+            clauses += Filters.or(Filters.lt("occurredAt", at), Filters.and(Filters.eq("occurredAt", at), Filters.lt("_id", before.id)))
+        }
+        return collection.find(Filters.and(clauses))
+            .sort(Document("occurredAt", -1).append("_id", -1))
+            .limit(limit.coerceIn(1, MAX_PAGE))
+            .toList()
+            .map { it.toEvent() }
+    }
+
     /** Recent events caused by agents, for the Home activity and the Agents module. */
     suspend fun recentByActorType(tenantId: ObjectId, type: ActorType, since: Instant, limit: Int = 50): List<DomainEvent> =
         collection.find(
             Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("actor.type", type.name), Filters.gte("occurredAt", since.toDate())),
         ).sort(Document("occurredAt", -1)).limit(limit).toList().map { it.toEvent() }
 
-    private fun DomainEvent.toDocument() = Document("_id", id)
+    /** Only events agents can react to wait for the dispatcher; the others are history from the start. */
+    private fun DomainEvent.toDocument(dispatched: Boolean) = Document("_id", id)
         .append("tenantId", tenantId)
         .append("type", type)
         .append("subject", subject.toDocument())
@@ -133,11 +158,11 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
         .append("payload", BsonJson.toDocument(payload))
         .append(
             "actor",
-            Document("type", actor.type.name).append("id", actor.id).append("name", actor.name).append("runId", actor.runId),
+            Document("type", actor.type.name).append("id", actor.id).append("name", actor.name).append("runId", actor.runId).append("via", actor.via),
         )
         .append("depth", depth)
         .append("occurredAt", occurredAt.toDate())
-        .append("dispatch", Document("status", PENDING).append("attempts", 0))
+        .append("dispatch", Document("status", if (dispatched) PENDING else NONE).append("attempts", 0))
 
     companion object {
         const val COLLECTION = "domain_events"
@@ -145,6 +170,10 @@ class DomainEventLog(mongo: MongoModule, private val clock: () -> Instant = Syst
         const val CLAIMED = "CLAIMED"
         const val DONE = "DONE"
         const val FAILED = "FAILED"
+
+        /** History only: no agent can react to its type, so nothing claims it. */
+        const val NONE = "NONE"
+        const val MAX_PAGE = 200
         private const val MAX_DISPATCH_ATTEMPTS = 5
         private const val REDACT_CHUNK = 500
         private val log = LoggerFactory.getLogger("DomainEventLog")
@@ -169,6 +198,7 @@ internal fun Document.toEvent(): DomainEvent {
             id = actorDoc?.getString("id"),
             name = actorDoc?.getString("name"),
             runId = actorDoc?.getString("runId"),
+            via = actorDoc?.getString("via"),
         ),
         depth = getInteger("depth") ?: 0,
         occurredAt = Instant.fromEpochMilliseconds(getDate("occurredAt").time),
@@ -176,6 +206,18 @@ internal fun Document.toEvent(): DomainEvent {
 }
 
 private fun Instant.toDate(): Date = Date(toEpochMilliseconds())
+
+/**
+ * Which events of a company the Activity page lists: by whom ([actorType], and [actorId] for one user), about which
+ * kinds of record ([subjectTypes], all when empty), and when (from [from], before [until]).
+ */
+data class ActivityFilter(
+    val actorType: ActorType? = null,
+    val actorId: String? = null,
+    val subjectTypes: List<String> = emptyList(),
+    val from: Instant? = null,
+    val until: Instant? = null,
+)
 
 /** Wakes the dispatcher right after an event is written instead of waiting for its next poll. */
 object DomainEventSignal {

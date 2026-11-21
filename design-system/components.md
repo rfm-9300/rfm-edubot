@@ -1264,15 +1264,68 @@ The Building pages' parts ([patterns.md](patterns.md#building-projects-and-their
 - **Client updates tab**: a `.worklist--wrap` of posted updates (period as title, the first paragraph as detail, `relDay` as when). The form drafts into a `textarea.txt` (10 rows) from **Draft with AI** (a `btn--sm` that reads "Writing…" while it waits) and says what the draft came from in a `.hint`; the detail renders the text as `.panel__text` paragraphs with Copy (`btn--primary`) and the WhatsApp link.
 - **Retention** (Measurements tab): a `.panel` with held and released as `.dash-facts--row`, the invoice button in `.panel__tools` (`btn--accent`, only once the project is finished), a `.hint` when it isn't yet, and a table of the releases' invoices.
 - **PDF buttons** for Building's documents are `pdfUrlButton(url, label, downloadName)` (billing.js), the CRM's `.pdf` button for any URL; the diary's period form is a drawer with two dates.
+- **Links for people outside the company** (a change's or a measurement's client, an issue's supplier) are one
+  `.panel` from `linkPanelHtml()` (building.js): an intro `.hint`, the read-only `inp--mono` address, and `.actions`
+  with Copy (`btn--primary`), WhatsApp to the person (`waHref`), the page itself (`btn--ghost`) and any tools (New
+  link, Turn the link off, both through `.confirm`). `wireLinkPanel(root)` wires Copy. A supplier without a link gets
+  the same panel with only "Create the link".
+- **Proof** of an answer from a link is a `.hint` under the decision ("From 85.240.1.2 · Safari · iPhone"), the raw
+  browser text as its `title` (`proofHtml`). A measurement's dispute is a `.notice--warn` (who and when in
+  `<strong>`, the note, what to do) above it; the pill is `measurementPill(m)`: "Waiting for the client" (`warn`)
+  or "Disputed by the client" (`bad`) before the status.
+- **The share drawer's budget switch** is a `.panel` with one `.form__check` and its `.hint`, above "What the
+  client sees", whose last line follows the switch.
 - **My sites** (an employee's page): a `.worklist` of their sites (`ok` when today's diary is written, `warn` when not, with the same Written / To write pills as the Site diary board); a site opens a `.record` drawer with the record card, a Today on site panel, the phases as `.progress-cell` rows, the issues as a `.worklist` and the photos grid.
 
 ### The client's page (`/app/share/{token}`)
 
 `body.share-page` with one `main.share` column (760px, no sidebar or topbar): `.share__head` (the company's logo on `--doc-page` in `.share__logo`, the company's name, the project's number as `.share__eyebrow`, `.share__title`, `.share__sub` with status and address), a `.panel` with `.share__figure` (the percentage at 40px) over the 12px `.progress` and `.dash-facts` (planned start, end, started), **News from the team** when the team posted updates (`.share__update` with the period as heading and the text as `.panel__text` paragraphs), a **Plan** panel of `.share__phase` rows (name and dates, bar, state pill: never "late", which is the team's word), **Updates** (`.share__update`: the day, weather, work done as `.panel__text`, its photos in a `.photo-grid`), all shared **Photos**, and `.share__foot` (updated when, "made with"). Photos open in `dialog.share-viewer` (previous, close, next; arrow keys and Escape) over the house scrim, darker. The page is in the company's language unless the visitor chose another on that browser, and in the visitor's theme; it sends `noindex`.
 
+Since 2026-11-20 the page opens with **Waiting for your answer** when the company sent something: a `.worklist--wrap`
+of `a.worklist__item` rows (`warn`), each the change's or the measurement's title, when it was sent and, with the
+budget on, its amount, and a `btn--primary`-looking "Review and answer" in `.worklist__side`; the link goes to that
+item's own page. **Changes to the project** lists the decided ones (`ok`/`bad`, a `pill--ok`/`pill--bad`), rows that
+link when the change still has its page and `div.worklist__item` otherwise. **Budget** (only when the team shows
+it) is a `.share__figure` of the current total over `.dash-facts--row` (contract, approved changes, waiting for an
+answer, measured with its %, invoiced, paid).
+
 ### The change approval page (`/app/share/change/{token}`)
 
-The same shell (`body.share-page`, `main.share`, `.share__head` with the change's title, number, project and an addition/omission pill), a `.panel` with `.share__figure` (the amount, "added to" or "taken off the price") over `.dash-facts` (time, sent), the lines as a `.tbl.tbl--stack`, and a **Your decision** panel. While the change waits: a `form.form` with the name (required, `autocomplete="name"`), an optional note, the consent `.hint`, a `.notice.notice--warn` for errors (`role="alert"`, hidden until needed) and `.share__decide` with **Approve** (`btn--primary`) and **Reject** (`btn--ghost`), both `type="button"` so Enter in a field never decides. Once decided: `.share__decided`, the pill (`pill--ok` approved, `pill--bad` rejected), `.share__decided-by` (who and when) and the note; a `.notice.notice--info` thanks the client right after they answer.
+The same shell (`body.share-page`, `main.share`, `.share__head` with the change's title, number, project and an addition/omission pill), a `.panel` with `.share__figure` (the amount, "added to" or "taken off the price") over `.dash-facts` (time, sent), the lines as a `.tbl.tbl--stack`, and a **Your decision** panel. While the change waits: a `form.form` with the name (required, `autocomplete="name"`), an optional note, the consent `.hint`, a `.notice.notice--warn` for errors (`role="alert"`, hidden until needed) and `.share__decide` with **Approve** (`btn--primary`) and **Reject** (`btn--ghost`), both `type="button"` so Enter in a field never decides. Once decided: `.share__decided`, the pill (`pill--ok` approved, `pill--bad` rejected), `.share__decided-by` (who and when) and the note; a `.notice.notice--info` thanks the client right after they answer. Between the figure and the lines, **What it does to your project** is `.dash-facts--row` (the contract before and after, and the planned completion before and after when it moves; the "after" values `<strong>`), left out for a rejected change; the lines panel ends in a `.panel__foot` with **Download PDF** (`btn--ghost`).
+
+### The measurement approval page (`/app/share/measurement/{token}`)
+
+The change page's shell: `.share__head` (the auto's number as title, the project, address and period end in
+`.share__sub`), a `.panel` with `.share__figure` (the net to invoice this time) over a 12px `.progress` of the
+contract done and `.dash-facts`, the lines measured so far as a `.tbl.tbl--stack` (contracted, before, this time, to
+date with its %, value; a `.share__none` line counts the ones not started), **Totals** as `.dash-facts--row` with the
+net `<strong>` and a `.panel__foot` PDF link, the company's notes, and **Your answer**: the same form as a change's
+with **Approve** (`btn--primary`) and **Something is wrong** (`btn--ghost`); the note is optional to approve and
+required to dispute. Answered: `.share__decided` with `pill--ok` (approved or invoiced) or `pill--bad` (disputed, with
+the note and what happens next).
+
+### The supplier's page (`/app/share/issues/{token}`)
+
+`.share__head` (the company, "Issues assigned to you", "Hello, {supplier}" as title, what to do as `.share__sub`),
+then **To do** and **Fixed lately** panels of `.share__update` articles: number and title, status (`pill--warn` open,
+`pill--info` in progress, `pill--ok` fixed or closed), due date or `pill--bad` overdue, priority and kind pills,
+`.dash-facts--row` (project, where, phase), the description, the issue's `.photo-grid` (opening in
+`dialog.share-viewer`), what they said from the link as a `.plain-list`, and for an open issue a `form.form` (name,
+kept on that device, and a note in a `.form__grid`; `.share__decide` with **I started it**, **It's fixed**
+(`btn--primary`) and **Add photos** (`btn--ghost`), all `type="button"`). The consent `.hint` closes the page. It loads
+`admin/common.js` for `shrinkPhoto` and the `#toast`.
+
+### Activity and a record's History
+
+- **Activity** (`app/activity.js`, admins): a `.panel` whose `.panel__filters` row holds the person and area `.sel`s
+  and two date `.inp`s (compact: 28px, 12px, 16px on touch screens), then a `.tbl.tbl--stack` (When with the exact
+  time as `.sub`, Who with what kind of actor as `.sub`, What, Record with its project as `.sub`); a row that opens its
+  record is focusable and takes the pointer; a deleted record's row opens nothing. **Load more** sits in a `.panel__foot`.
+- **History** on a record is a `.panel` (`recordHistoryHtml`) whose flush body is a `.worklist--wrap`: the action (and
+  the record, when it's another one), who as the detail, `relTime` as when; a row about another record opens it,
+  the others are `disabled`. Admins get "See all the activity" in a `.panel__foot`.
+- `.panel__foot` centres actions under a panel's list with a top divider; `a.worklist__item` drops the underline and
+  `div.worklist__item` is a row with nothing to open (no pointer, no hover).
 
 ## Utilities
 

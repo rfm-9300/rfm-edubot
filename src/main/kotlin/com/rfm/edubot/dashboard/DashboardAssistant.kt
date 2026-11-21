@@ -17,6 +17,7 @@ import com.rfm.edubot.ai.tools.BookingToolPack
 import com.rfm.edubot.ai.tools.CompositeToolPack
 import com.rfm.edubot.ai.tools.CrmToolPack
 import com.rfm.edubot.ai.tools.TokenCount
+import com.rfm.edubot.ai.tools.ToolCallContext
 import com.rfm.edubot.ai.tools.ToolLoop
 import com.rfm.edubot.ai.tools.ToolPack
 import com.rfm.edubot.ai.tools.WriteDecision
@@ -30,11 +31,14 @@ import com.rfm.edubot.crm.CrmTools
 import com.rfm.edubot.crm.InvoiceRepository
 import com.rfm.edubot.crm.QuoteRepository
 import com.rfm.edubot.crm.StandardItemRepository
+import com.rfm.edubot.events.Actor
+import com.rfm.edubot.events.ActorContext
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import com.rfm.edubot.tenant.model.Tenant
 import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
+import kotlinx.coroutines.withContext
 import kotlinx.datetime.Instant
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -499,6 +503,15 @@ internal class DashboardAssistantService(
     private fun extensionPrompts(ctx: DashboardContext, usable: List<String>): List<String> =
         if (DashboardModules.AGENTS in usable) extension?.prompts(ctx, usable).orEmpty() else emptyList()
 
+    /**
+     * [pack]'s tools run as [actor] acting through the assistant, so what they change is in the activity log as that
+     * person's, marked as done by the assistant.
+     */
+    private class AssistedToolPack(private val pack: ToolPack, private val actor: Actor) : ToolPack by pack {
+        override suspend fun execute(call: ToolCall, context: ToolCallContext): JsonObject =
+            withContext(ActorContext(actor.copy(via = Actor.VIA_ASSISTANT))) { pack.execute(call, context) }
+    }
+
     /** The tools of one turn: the assistant's own first, so they take the place of the bot's versions of the same name. */
     private class Session(val usable: List<String>, val tools: ToolPack, val policy: ToolPack, val definitions: List<ToolDefinition>)
 
@@ -514,7 +527,7 @@ internal class DashboardAssistantService(
             StandardItemRepository(mongo, tenant.id),
             ClientServiceRepository(mongo, tenant.id),
         )
-        val tools = CompositeToolPack(own, CrmToolPack(crm), BookingToolPack(bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools()), extra)
+        val tools = AssistedToolPack(CompositeToolPack(own, CrmToolPack(crm), BookingToolPack(bookingDeps(mongo, tenant, BookingSource.ASSISTANT).tools()), extra), ctx.actor())
         val policy = CompositeToolPack(own, extra)
         val definitions = DashboardAssistantToolPolicy.filterDefinitions(tools.definitions.distinctBy { it.name }, usable, policy)
             .filter { settings.allowChanges || DashboardAssistantToolPolicy.isReadOnly(it.name, policy) }

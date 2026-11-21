@@ -1,14 +1,18 @@
 ---
-updated: 2026-11-13
+updated: 2026-11-20
 ---
 
 # Building: projects and their progress
 
 The opt-in category for construction and renovation companies: **Projects**, **Site diary**,
-**Issues**, **Change orders** and **Measurements**, a Projects card on Home, a read-only page the
-client opens from a link, and **My sites** on a site manager's own sign-in. Phase 1 is PR #88
+**Issues**, **Change orders** and **Measurements**, a Projects card on Home, the pages the client and
+suppliers open from links, and **My sites** on a site manager's own sign-in. Phase 1 is PR #88
 (2026-10-20); phase 2 (events for agents, change approval by link, the retention, PDFs, job costing,
-client updates, My sites) is PR #89 (2026-10-21). The plan, with the market research behind it
+client updates, My sites) is PR #89 (2026-10-21). The third parties' round (2026-11-20) makes the
+client's page a portal (what waits for their answer, the changes decided, the budget when the team
+shows it), lets the client approve or dispute measurements, gives suppliers a link to their issues,
+prints change orders, and keeps where every answer from a link came from; who did what is the
+[activity log](activity-log.md). The plan, with the market research behind it
 (Procore, Buildertrend, Fieldwire, JobTread, CompanyCam, Raken, and the Portuguese and Spanish tools
 built around autos de medição and certificaciones), is [`docs/plan-building.md`](../docs/plan-building.md);
 the structure and diagrams are in [`docs/architecture.md` → Building](../docs/architecture.md#building).
@@ -34,18 +38,19 @@ the structure and diagrams are in [`docs/architecture.md` → Building](../docs/
   `MeasurementService`, `ProjectCostsService`, `ProjectReportService`, `BuildingDocuments` over
   `BuildingPdf`), the events (`BuildingEvents`, `ProjectHealthWatch`), and imports nothing from Ktor's
   server (`ArchitectureBoundariesTest`). `building/api/` has the requests, DTOs and views;
-  `dashboard/building/` the six features (`ProjectReportRoutes` is the sixth), the client's pages
-  (`ProjectShareRoutes`, `ChangeApprovalRoutes`) and My sites (`MySitesRoutes`); Home's card is
-  `dashboard/overview/ProjectsOverview.kt`.
+  `dashboard/building/` the six features (`ProjectReportRoutes` is the sixth), the pages opened from
+  links (`ProjectShareRoutes`, `ChangeApprovalRoutes`, `MeasurementApprovalRoutes`, `SupplierIssueRoutes`)
+  and My sites (`MySitesRoutes`); Home's card is `dashboard/overview/ProjectsOverview.kt`.
 - Frontend: `building.js` (what the pages share: labels and pills, the progress bar and the timeline,
   the project picker, shrinking, uploading and viewing photos, the nav counts), `projects.js`,
   `site-diary.js`, `site-issues.js`, `change-orders.js`, `measurements.js`, `my-sites.js`
-  ([dashboard-frontend.md](dashboard-frontend.md)); the client's pages are `share/index.html` +
-  `share/share.js` and `share/change.html` + `share/change.js`. The components are in
+  ([dashboard-frontend.md](dashboard-frontend.md)); the link pages are `share/index.html` + `share/share.js`
+  (the project), `share/change.*`, `share/measurement.*` and `share/issues.*` (the supplier's, which loads
+  `admin/common.js` for `shrinkPhoto`). The components are in
   [`design-system/components.md`](../design-system/components.md) → Building.
 - Collections, all in the data database with `tenantId`: `building.projects`, `building.site_logs`,
   `building.photos`, `building.issues`, `building.change_orders`, `building.measurements`,
-  `building.reports`. Numbers come from `crm.sequences`: projects `OB-001`, issues `OC-001`, change
+  `building.reports`, `building.supplier_links`. Numbers come from `crm.sequences`: projects `OB-001`, issues `OC-001`, change
   orders `TM-001`; measurements are numbered per project.
 
 ## Progress against the plan (`ProjectProgress`)
@@ -135,8 +140,17 @@ the structure and diagrams are in [`docs/architecture.md` → Building](../docs/
   is 32 random bytes (base64url) on the project, enabled or not; rotating it makes a new one and the
   old link stops working at once.
 - It shows the company's name and logo, the project's progress, the updates the team posted, the plan
-  moved by approved changes, and only the diary days and photos marked shared. Never money, issues,
-  notes or people. A phase shows as late only on the team's side.
+  moved by approved changes, and only the diary days and photos marked shared. Never issues, notes or
+  the team's names. A phase shows as late only on the team's side.
+- **What waits for the client** (2026-11-20) comes first: the changes sent and the measurements sent and
+  unanswered, each linking to its own page, where the client answers. One decision path, the one already
+  guarded; anyone with the project's link can open them, as anyone with an item's link could.
+- Below, the changes decided (who, when, days) and, **only when the team turns it on** (`share.showBudget`,
+  the share drawer's "Show the budget to the client", `PATCH /building/projects/{id}/share`), the money: the
+  contract, approved changes, the current total, what waits for an answer, measured to date, invoiced and paid
+  (`ProjectCostsService` without bills or hours). Off by default: the page showed no money until then, and a
+  project link travels further than a change's. Each change's own page always shows its price and effect.
+  Renewing the link keeps the switch.
 - Answers `404` for an unknown or disabled token and for a company that isn't active; sends
   `X-Robots-Tag: noindex, nofollow` and `Referrer-Policy: no-referrer`, and the data `no-store`.
 - The page is plain scripts over the shared stylesheet and catalogs, in the company's language.
@@ -150,12 +164,18 @@ projects, overdue issues (both ranked after pending bookings), measurements to i
 waiting (after due-soon payments). Issues and changes count on a finished project too: snags after the
 handover, an extra still to sign.
 
-## Events, for the agents
+## Events, for the agents and the log
 
 - The services append domain events after their writes (`BuildingEvents`): `project.created`,
-  `project.status_changed`, `site_log.created`, `site_issue.created` and `.status_changed`,
-  `change_order.sent` and `.decided` (`via` the team or the client's link), `measurement.approved` and
-  `.invoiced`. Each names the project and its client as related records, so the client's timeline shows
+  `project.status_changed`, `site_log.created`, `site_issue.created` and `.status_changed` (`via` the team or
+  the supplier's link), `change_order.sent` and `.decided` (`via` the team or the client's link),
+  `measurement.sent`, `.approved` (`via`), `.disputed` and `.invoiced`.
+- **History only** (2026-11-20, for the [activity log](activity-log.md), no agent listens): `project.updated`,
+  `.deleted`, `.phases_changed`, `.share_changed` (on, off, renewed, budget shown or hidden),
+  `.retention_invoiced`; `site_log.updated` and `.deleted`; `site_photo.added`, `.updated` and `.deleted`;
+  `site_issue.updated` and `.deleted`; `change_order.created`, `.updated`, `.deleted` and `.reopened`;
+  `measurement.created`, `.updated`, `.reopened` and `.deleted`; `report.posted`, `.updated` and `.deleted`;
+  `supplier.link_changed`. Each names the project and its client as related records, so the client's timeline shows
   it and an agent's WhatsApp, task or notice has the client.
 - Health is computed, not stored, so `ProjectHealthWatch` (hourly, on a lease, like the agents'
   scheduler) keeps each running project's last-seen health in `watchedHealth`, written without a new
@@ -177,6 +197,51 @@ handover, an extra still to sign.
   read; any decision keeps the link so the client can see it.
 - The decision records `decidedVia = CLIENT_LINK` and the typed name, appends `change_order.decided`
   with a `CLIENT` actor (a new `ActorType`), and rings every user's bell (`change_order_decided`).
+- **The page shows what the change does** (2026-11-20): the contract before it (with the other approved
+  changes) and after it, and the planned completion before and after (`changeBudget`); the team's record
+  shows the same. A rejected change moves neither. The client downloads its PDF (`/app/share/change/{token}/pdf`).
+
+## Proof of an answer from a link
+
+- A client's or a supplier's answer keeps where it came from (`LinkProof`): the first `X-Forwarded-For`
+  address, else the connection's, and the browser's `User-Agent` (300 characters). The proxy in front of the
+  app sets the header, and the app's port isn't published in production, so it can't be forged from outside;
+  run behind something else, that would need checking.
+- On a change (`decisionProof`), a measurement (`approvalProof`, the dispute's `proof`) and each step an issue's
+  supplier made (`IssueEvent.proof`). The team's records and the change PDF show it ("Safari · iPhone" from the
+  agent, `deviceLabel`); a link page never sends it back. The pages say the address is kept.
+
+## The client approves a measurement
+
+- **Sending a measurement** (`POST /building/measurements/{id}/send`) gives a draft with something measured a
+  link, `/app/share/measurement/{token}` (`Measurement.approval`, partial unique index on `approval.token`).
+  The statuses stay `DRAFT`, `APPROVED`, `INVOICED`: "sent and unanswered" is `awaitingClient` (a draft with a
+  link and no dispute), so every rule that reads `!= DRAFT` (what was measured and billed, `measurement_open`,
+  costs) and the mobile app were left as they were.
+- The client reads what was measured (lines measured so far, this period, to date, the retention held and the
+  net) and **approves** (`APPROVED`, `approvedBy` their name, `approvedVia = CLIENT_LINK`, `measurement.approved`
+  for agents as when the team approves) or **disputes** with a note, required (`measurement.disputed`; the draft
+  keeps `dispute` for the team until it is sent again). One answer per sending (`already_decided`), the bell rings
+  (`measurement_decided`). The team can still approve a draft itself, a paper signature.
+- Editing the draft ends its link, like editing a sent change; sending again after a dispute makes a new one;
+  reopening an approved measurement drops it. The client downloads the auto's PDF from the page. Home's Projects
+  card counts the measurements waiting.
+
+## The supplier's link to their issues
+
+- One link per supplier (`building.supplier_links`, unique per company and supplier; `SupplierLinkService`
+  makes, renews and stops it from the issue drawer, `/building/suppliers/{id}/link`). It shows the issues
+  assigned to them across the company's projects, open ones and those fixed or closed in the last 30 days, with
+  the project's name and address, the place, due date and the issue's photos. Never money, the client, other
+  issues or the team's notes: of an issue's history, only what was said from the link.
+- From it the supplier starts an open issue (`IN_PROGRESS`) or says it's fixed (`RESOLVED`), in a name they type,
+  with a note (`SiteIssueService.moveBySupplier`, guarded on the status and `updatedAt` it read); closing and
+  reopening stay with the team, which checks the work. The step is `via = SUPPLIER_LINK`, stamped "name ·
+  supplier", `site_issue.status_changed` with a `SUPPLIER` actor (the supplier is a related record), and the bell
+  says so (`site_issue_supplier`).
+- Photos of the work go to the issue, inside the team (not shared), shrunk in the browser like the team's.
+- Renewing ends the old address at once; turning it off, archiving the supplier or the company not being active
+  makes it answer 404.
 
 ## Releasing the retention
 
@@ -190,8 +255,10 @@ handover, an extra still to sign.
 
 ## PDFs
 
-- `BuildingPdf` writes the measurement (lines, totals, retention, net, signature boxes) and the diary of
-  a period (at most 92 days, the six first photos of each day as thumbnails) over PDFBox, flowing from
+- `BuildingPdf` writes the measurement (lines, totals, retention, net, signature boxes), the change order
+  (2026-11-20: lines, total, days, the effect on the contract and the end, and who decided it, when, how and
+  from where, or signature boxes while nobody has) and the diary of a period (at most 92 days, the six first
+  photos of each day as thumbnails) over PDFBox, flowing from
   page to page with a running head, repeated column headings and page numbers. It is separate from the
   CRM's `PdfGenerator`, whose page the company designs block by block and which is Portuguese-only.
 - Text, numbers and dates follow the company's language through `BuildingCopy` (`1 234,56 €`,
@@ -258,6 +325,8 @@ handover, an extra still to sign.
 ## Not done yet
 
 On mobile: photos, PDFs and creating projects, changes and measurements (the app has the five pages
-and My sites since 2026-11-10, [mobile](mobile.md)); costs by cost code and per-employee labour rates; the measurement
-PDF's look under the company's document template. Phase 3: drawings with pins, checklists, offline
-capture, BC3 import.
+and My sites since 2026-11-10, [mobile](mobile.md)), and none of the third parties' round (sending a
+measurement, supplier links, the budget switch); costs by cost code and per-employee labour rates; the
+measurement PDF's look under the company's document template; sending a link by email from the drawer
+(WhatsApp and copying only); a supplier sending their own measurement or invoice. Phase 3: drawings with
+pins, checklists, offline capture, BC3 import.

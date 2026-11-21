@@ -73,16 +73,24 @@ class ProjectReportService(private val records: BuildingRecords, private val ai:
             postedBy = stamp.who, postedAt = stamp.now, updatedAt = stamp.now,
         )
         records.reports.insert(report)
+        records.events.reportPosted(report, project)
         return Outcome.Done(report)
     }
 
     suspend fun edit(id: ObjectId, text: String?, stamp: Stamp): Outcome<ProjectReport> {
         val report = records.reports.findById(id) ?: return Outcome.NotFound
         val body = body(text).orElse { return it.refused() }
-        return records.reports.replace(report.copy(text = body, updatedAt = stamp.now))?.let { Outcome.Done(it) } ?: Outcome.NotFound
+        val stored = records.reports.replace(report.copy(text = body, updatedAt = stamp.now)) ?: return Outcome.NotFound
+        records.projects.findById(stored.projectId)?.let { records.events.reportUpdated(stored, it) }
+        return Outcome.Done(stored)
     }
 
-    suspend fun delete(id: ObjectId): Outcome<Unit> = if (records.reports.delete(id)) Outcome.Done(Unit) else Outcome.NotFound
+    suspend fun delete(id: ObjectId): Outcome<Unit> {
+        val report = records.reports.findById(id) ?: return Outcome.NotFound
+        if (!records.reports.delete(id)) return Outcome.NotFound
+        records.projects.findById(report.projectId)?.let { records.events.reportDeleted(report, it) }
+        return Outcome.Done(Unit)
+    }
 
     private fun period(from: LocalDate?, to: LocalDate?, today: LocalDate): Parsed<Pair<LocalDate, LocalDate>> {
         val end = to ?: today

@@ -1,6 +1,10 @@
 package com.rfm.edubot.building
 
+import com.rfm.edubot.building.model.ApprovalLink
+import com.rfm.edubot.building.model.DecidedVia
+import com.rfm.edubot.building.model.LinkProof
 import com.rfm.edubot.building.model.Measurement
+import com.rfm.edubot.building.model.MeasurementDispute
 import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.ProjectStatus
@@ -8,15 +12,20 @@ import com.rfm.edubot.building.model.RetentionRelease
 import com.rfm.edubot.crm.QuoteInvoicing
 import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.LineItem
+import com.rfm.edubot.dashboard.DashboardModules
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
+import com.rfm.edubot.notifications.NotificationAudience
+import com.rfm.edubot.notifications.NotificationKinds
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 import kotlin.math.abs
 
 /**
  * A project's measurements (autos de medição), numbered in order: a draft with every billable line at the
- * quantities of the one before, quantities to date typed in, approved, then invoiced for what it adds, less the
- * retention, which is invoiced back once the project is finished. From its first measurement the project's quote is
- * billed only through them.
+ * quantities of the one before, quantities to date typed in, approved (by the team, or by the client from the link
+ * it was sent with), then invoiced for what it adds, less the retention, which is invoiced back once the project is
+ * finished. From its first measurement the project's quote is billed only through them.
  */
 class MeasurementService(private val records: BuildingRecords) {
     data class Invoiced(val measurement: Measurement, val invoice: Invoice)
@@ -56,12 +65,14 @@ class MeasurementService(private val records: BuildingRecords) {
         )
         records.measurements.insert(measurement) ?: return conflict("conflict")
         if (quote != null && quote.projectId == null) records.quoteService.setBillingProject(quote.id, project.id)
+        records.events.measurementCreated(measurement, project)
         return Outcome.Done(measurement)
     }
 
     /**
      * A draft's period end, notes and quantities to date by line key; a refused quantity names its line in
-     * [Outcome.Refused.detail]. A blank [notes] clears them; null keeps either.
+     * [Outcome.Refused.detail]. A blank [notes] clears them; null keeps either. A draft sent to the client loses its
+     * link: the client approves what they read. A dispute stays in view until it is sent again.
      */
     suspend fun update(id: ObjectId, periodEnd: LocalDate?, notes: String?, toDate: Map<String, Double>, stamp: Stamp): Outcome<Measurement> {
         val measurement = records.measurements.findById(id) ?: return Outcome.NotFound
@@ -82,29 +93,108 @@ class MeasurementService(private val records: BuildingRecords) {
             retentionCents = totals.retentionCents,
             netCents = totals.netCents,
             toDateCents = totals.toDateCents,
+            approval = null,
             updatedAt = stamp.now,
         )
-        return records.measurements.replace(measurement, next)?.let { Outcome.Done(it) } ?: conflict("conflict")
+        val stored = records.measurements.replace(measurement, next) ?: return conflict("conflict")
+        records.projects.findById(stored.projectId)?.let { records.events.measurementUpdated(stored, it) }
+        return Outcome.Done(stored)
     }
 
+    /**
+     * Sends a draft to its client to approve: it gets a link (`/app/share/measurement/{token}`), a new one after a
+     * dispute. Sending one the client hasn't answered yet keeps its link.
+     */
+    suspend fun send(id: ObjectId, stamp: Stamp): Outcome<Measurement> {
+        val measurement = records.measurements.findById(id) ?: return Outcome.NotFound
+        if (measurement.status != MeasurementStatus.DRAFT) return conflict("measurement_locked")
+        if (measurement.awaitingClient) return Outcome.Done(measurement)
+        if (nothingMeasured(measurement)) return invalid("nothing_measured")
+        val project = records.projects.findById(measurement.projectId) ?: return Outcome.NotFound
+        val next = measurement.copy(approval = ApprovalLink(secretToken(), stamp.now), dispute = null, updatedAt = stamp.now)
+        val stored = records.measurements.replace(measurement, next) ?: return conflict("conflict")
+        records.events.measurementSent(stored, project)
+        return Outcome.Done(stored)
+    }
+
+    /** The team approves a draft, for the client who signed it on paper or before it is sent. */
     suspend fun approve(id: ObjectId, stamp: Stamp): Outcome<Measurement> {
         val measurement = records.measurements.findById(id) ?: return Outcome.NotFound
         if (measurement.status != MeasurementStatus.DRAFT) return conflict("measurement_locked")
-        if (measurement.lines.all { abs(MeasurementMath.periodQty(it)) < 1e-9 }) return invalid("nothing_measured")
-        val next = measurement.copy(status = MeasurementStatus.APPROVED, approvedAt = stamp.now, approvedBy = stamp.who, updatedAt = stamp.now)
+        if (nothingMeasured(measurement)) return invalid("nothing_measured")
+        val next = measurement.copy(
+            status = MeasurementStatus.APPROVED, approvedAt = stamp.now, approvedBy = stamp.who, approvedVia = DecidedVia.TEAM, approvalProof = null,
+            dispute = null, updatedAt = stamp.now,
+        )
         val stored = records.measurements.replace(measurement, next) ?: return conflict("conflict")
         records.projects.findById(stored.projectId)?.let { records.events.measurementApproved(stored, it) }
         return Outcome.Done(stored)
     }
 
-    /** Back to draft: only the project's latest, and only before it is invoiced. */
+    /**
+     * The client's answer from the measurement's link ([token]): `APPROVED`, or `DISPUTED` with a [note] saying why, in
+     * the [name] they typed, [proof] where it came from. Once per sending: a second answer, or one racing the team's, is
+     * `already_decided`. The team hears it on the bell, and agents from `measurement.approved` or `.disputed`.
+     */
+    suspend fun decideByLink(id: ObjectId, token: String, decision: String, name: String, note: String?, proof: LinkProof?, stamp: Stamp): Outcome<Measurement> {
+        val measurement = records.measurements.findById(id)?.takeIf { it.approval?.token == token } ?: return Outcome.NotFound
+        if (!measurement.awaitingClient) return conflict("already_decided")
+        val approved = when (decision.trim().uppercase()) {
+            MeasurementStatus.APPROVED.name -> true
+            DISPUTED -> false
+            else -> return invalid("invalid_decision", "decision")
+        }
+        val words = when (val typed = linkWords(name, note)) {
+            is Outcome.Done -> typed.value
+            is Outcome.Refused -> return typed
+            Outcome.NotFound -> return Outcome.NotFound
+        }
+        val said = words.note
+        if (!approved && said == null) return invalid("note_required", "note")
+        val next = if (approved) {
+            measurement.copy(
+                status = MeasurementStatus.APPROVED, approvedAt = stamp.now, approvedBy = words.name, approvedVia = DecidedVia.CLIENT_LINK,
+                approvalProof = proof, updatedAt = stamp.now,
+            )
+        } else {
+            measurement.copy(dispute = MeasurementDispute(words.name, said.orEmpty(), stamp.now, proof), updatedAt = stamp.now)
+        }
+        val stored = records.measurements.replace(measurement, next) ?: return conflict("already_decided")
+        val project = records.projects.findById(stored.projectId)
+        if (project != null) {
+            if (approved) records.events.measurementApproved(stored, project) else records.events.measurementDisputed(stored, project)
+        }
+        runCatching {
+            records.notifications.notify(
+                tenantId = records.tenantId,
+                kind = NotificationKinds.MEASUREMENT_DECIDED,
+                audience = NotificationAudience.ALL,
+                params = mapOf(
+                    "name" to words.name, "n" to stored.number.toString(), "project" to project?.name.orEmpty(),
+                    "decision" to if (approved) MeasurementStatus.APPROVED.name else DISPUTED,
+                ),
+                link = DashboardModules.MEASUREMENTS,
+                subject = SubjectRef.of(SubjectTypes.MEASUREMENT, stored.id),
+            )
+        }
+        return Outcome.Done(stored)
+    }
+
+    /** Back to draft: only the project's latest, and only before it is invoiced. It must be sent to the client again. */
     suspend fun reopen(id: ObjectId, stamp: Stamp): Outcome<Measurement> {
         val measurement = records.measurements.findById(id) ?: return Outcome.NotFound
         if (measurement.status != MeasurementStatus.APPROVED) return conflict("measurement_locked")
         if (records.measurements.latest(measurement.projectId)?.id != measurement.id) return conflict("not_latest")
-        val next = measurement.copy(status = MeasurementStatus.DRAFT, approvedAt = null, approvedBy = null, updatedAt = stamp.now)
-        return records.measurements.replace(measurement, next)?.let { Outcome.Done(it) } ?: conflict("conflict")
+        val next = measurement.copy(
+            status = MeasurementStatus.DRAFT, approvedAt = null, approvedBy = null, approvedVia = null, approvalProof = null, approval = null,
+            updatedAt = stamp.now,
+        )
+        val stored = records.measurements.replace(measurement, next) ?: return conflict("conflict")
+        records.projects.findById(stored.projectId)?.let { records.events.measurementReopened(stored, it) }
+        return Outcome.Done(stored)
     }
+
+    private fun nothingMeasured(measurement: Measurement) = measurement.lines.all { abs(MeasurementMath.periodQty(it)) < 1e-9 }
 
     /**
      * The approved measurement's invoice, to the project's client: one line per line measured this period, named
@@ -165,7 +255,9 @@ class MeasurementService(private val records: BuildingRecords) {
         val stored = records.projects.update(project.id) { current ->
             ProjectChange.Ok(current.copy(retentionReleases = current.retentionReleases.map { if (it.id == release.id) it.copy(invoiceId = invoice.id) else it }))
         }
-        return Outcome.Done(RetentionInvoiced((stored as? ProjectChange.Ok)?.project ?: project, invoice))
+        val released = (stored as? ProjectChange.Ok)?.project ?: project
+        records.events.retentionInvoiced(released, invoice, amount)
+        return Outcome.Done(RetentionInvoiced(released, invoice))
     }
 
     /** Only the project's latest, before it is invoiced. Removing the last one frees the quote to be billed again. */
@@ -174,11 +266,15 @@ class MeasurementService(private val records: BuildingRecords) {
         if (measurement.status == MeasurementStatus.INVOICED) return conflict("measurement_invoiced")
         if (records.measurements.latest(measurement.projectId)?.id != measurement.id) return conflict("not_latest")
         records.measurements.delete(measurement.id)
+        val project = records.projects.findById(measurement.projectId)
         if (records.measurements.count(measurement.projectId) == 0L) {
-            val project = records.projects.findById(measurement.projectId)
             val quote = project?.quoteId?.let { records.quotes.findById(it) }
             if (quote != null && quote.projectId == project.id) records.quoteService.setBillingProject(quote.id, null)
         }
+        project?.let { records.events.measurementDeleted(measurement, it) }
         return Outcome.Done(Unit)
     }
 }
+
+/** The client's no to a measurement, as their link sends it. */
+private const val DISPUTED = "DISPUTED"

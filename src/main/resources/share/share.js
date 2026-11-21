@@ -1,6 +1,7 @@
-/* The page a client follows their project from (/app/share/{token}), with no account: progress, the updates the
-   company posted, the plan, and the diary days and photos it shared. It reads only /app/share/{token}/data and the
-   photos under it, and speaks the company's language. */
+/* The page a client follows their project from (/app/share/{token}), with no account: what waits for their answer
+   (changes and measurements, each answered on its own page), progress, the updates the company posted, the changes
+   decided, the budget when the company shows it, the plan, and the diary days and photos it shared. It reads only
+   /app/share/{token}/data and the photos under it, and speaks the company's language. */
 (function () {
   const root = document.getElementById('share');
   const viewer = document.getElementById('share-viewer');
@@ -14,6 +15,56 @@
   // "terça-feira, 20 de outubro" starts a heading in capitals, and only its first letter.
   const capFirst = s => (s ? s.charAt(0).toLocaleUpperCase(locale()) + s.slice(1) : s);
   const photoUrl = (id, thumb) => `${base}/photos/${encodeURIComponent(id)}${thumb ? '?size=thumb' : ''}`;
+  const money = eur => new Intl.NumberFormat(locale(), { style: 'currency', currency: 'EUR' }).format(Number(eur) || 0);
+  const signed = eur => `${Number(eur) > 0 ? '+' : ''}${money(eur)}`;
+  const days = n => (!n ? '' : n > 0 ? I18N.t('share.change.daysMore', { n }) : I18N.t('share.change.daysLess', { n: -n }));
+  const fact = (label, value, strong = false) => `<div><dt>${esc(label)}</dt><dd>${strong ? `<strong>${esc(value)}</strong>` : esc(value)}</dd></div>`;
+
+  // Changes and measurements the company sent and waits on: each opens its own page to answer from.
+  function decisionsHtml(list) {
+    if (!list.length) return '';
+    const rows = list.map(item => {
+      const title = item.kind === 'measurement' ? t('decisionMeasurement', { number: item.number }) : `${t('decisionChange', { number: item.number })} · ${item.title}`;
+      const detail = [item.sentAt ? t('decisionSent', { when: relative(item.sentAt) }) : '', item.amountEur != null ? signed(item.amountEur) : '', days(item.daysImpact)].filter(Boolean).join(' · ');
+      return `<li><a class="worklist__item" href="${esc(item.path)}" data-tone="warn">
+        <span class="worklist__dot" aria-hidden="true"></span>
+        <span class="worklist__main"><span class="worklist__title">${esc(title)}</span>${detail ? `<span class="worklist__detail">${esc(detail)}</span>` : ''}</span>
+        <span class="worklist__side"><span class="btn btn--sm btn--primary">${esc(t('decisionReview'))}</span></span></a></li>`;
+    }).join('');
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('decisionsTitle'))} <span class="tag">${list.length}</span></h2></header>
+      <div class="panel__body"><p class="hint">${esc(t('decisionsIntro'))}</p></div><ul class="worklist worklist--wrap">${rows}</ul></section>`;
+  }
+
+  // The changes already decided, newest first, each with its own page when it has one.
+  function changesHtml(list) {
+    if (!list.length) return '';
+    const rows = list.map(c => {
+      const approved = c.status === 'APPROVED';
+      const detail = [c.decidedBy ? I18N.t('share.change.decidedLine', { name: c.decidedBy, when: relative(c.decidedAt) }) : '', c.amountEur != null ? signed(c.amountEur) : '', days(c.daysImpact)].filter(Boolean).join(' · ');
+      const main = `<span class="worklist__dot" aria-hidden="true"></span>
+        <span class="worklist__main"><span class="worklist__title">${esc(`${c.number} · ${c.title}`)}</span>${detail ? `<span class="worklist__detail">${esc(detail)}</span>` : ''}</span>
+        <span class="worklist__side"><span class="pill ${approved ? 'pill--ok' : 'pill--bad'}">${esc(I18N.t(`share.change.${approved ? 'approved' : 'rejected'}`))}</span></span>`;
+      return `<li>${c.path ? `<a class="worklist__item" href="${esc(c.path)}" data-tone="${approved ? 'ok' : 'bad'}">${main}</a>` : `<div class="worklist__item" data-tone="${approved ? 'ok' : 'bad'}">${main}</div>`}</li>`;
+    }).join('');
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('changesTitle'))} <span class="tag">${list.length}</span></h2></header><ul class="worklist worklist--wrap">${rows}</ul></section>`;
+  }
+
+  // The money, when the company chose to show it: the contract as it stands, what waits, what was done and billed.
+  function budgetHtml(b) {
+    if (!b) return '';
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('budgetTitle'))}</h2></header>
+      <div class="panel__body share__progress">
+        <div class="share__figure">${esc(money(b.currentEur))}<span class="share__figure-label">${esc(t('budgetCurrent'))}</span></div>
+        <dl class="dash-facts dash-facts--row">
+          ${fact(t('budgetContract'), money(b.contractEur))}
+          ${b.changesEur ? fact(t('budgetChanges'), signed(b.changesEur)) : ''}
+          ${b.pendingEur ? fact(t('budgetPending'), signed(b.pendingEur)) : ''}
+          ${fact(t('budgetMeasured'), `${money(b.measuredEur)} · ${t('budgetMeasuredPct', { pct: clamp(b.measuredPct) })}`)}
+          ${fact(t('budgetInvoiced'), money(b.invoicedEur))}
+          ${fact(t('budgetPaid'), money(b.paidEur))}
+        </dl>
+      </div></section>`;
+  }
   let gallery = [];
   let current = 0;
 
@@ -82,7 +133,10 @@
         ${bar(d.progressPct, tone)}
         ${facts.length ? `<dl class="dash-facts dash-facts--row">${facts.map(([k, v]) => `<div><dt>${esc(k)}</dt><dd>${esc(v)}</dd></div>`).join('')}</dl>` : ''}
       </div></section>
+      ${decisionsHtml(d.decisions || [])}
       ${reports ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('reports'))}</h2></header>${reports}</section>` : ''}
+      ${budgetHtml(d.budget)}
+      ${changesHtml(d.changes || [])}
       ${phases ? `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('phases'))} <span class="tag">${d.phases.length}</span></h2></header>${phases}</section>` : ''}
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('updates'))}</h2></header>${updates || `<p class="share__none">${esc(t('noUpdates'))}</p>`}</section>
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('photos'))}${gallery.length ? ` <span class="tag">${gallery.length}</span>` : ''}</h2></header>

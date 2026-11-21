@@ -1,8 +1,10 @@
 /* Measurements (/app → Measurements): progress billing (autos de medição). Each measurement records how much
    of every contract line and approved addition is done to date; this period bills the difference with the
-   previous one, less the retention, and an approved measurement becomes an invoice in one click. */
+   previous one, less the retention. A draft can go to the client, who approves it or says what's wrong from a
+   link; an approved measurement becomes an invoice in one click. */
 
 const MEASUREMENT_FILTERS = {
+  waiting: m => m.awaitingClient,
   draft: m => m.status === 'DRAFT',
   approved: m => m.status === 'APPROVED',
   invoiced: m => m.status === 'INVOICED',
@@ -11,14 +13,37 @@ const MEASUREMENT_FILTERS = {
 
 function measurementRowHtml(m) {
   return `<tr class="conversation-row${m.status === 'INVOICED' ? ' is-paid' : m.status === 'DRAFT' ? ' is-draft' : ''}" data-measurement="${escapeHTML(m.id)}" tabindex="0">
-    <td class="name long"><div class="tbl__title"><span>${escapeHTML(m.projectName)}</span><span class="tbl__aside">${measurementStatusPill(m.status)}</span></div><div class="sub">${escapeHTML([m.projectNumber, bt('measurementN', { n: m.number })].join(' · '))}</div></td>
+    <td class="name long"><div class="tbl__title"><span>${escapeHTML(m.projectName)}</span><span class="tbl__aside">${measurementPill(m)}</span></div><div class="sub">${escapeHTML([m.projectNumber, bt('measurementN', { n: m.number })].join(' · '))}</div></td>
     <td class="mono nowrap"${cellLabel(BLD.thPeriodEnd)}>${escapeHTML(fmtDay(m.periodEnd))}</td>
     <td class="num nowrap"${cellLabel(BLD.thThisPeriod)}>${fmtEUR(m.grossEur)}</td>
     <td class="num nowrap"${cellLabel(BLD.thRetention)}>${fmtEUR(m.retentionEur)}</td>
     <td class="num nowrap"${cellLabel(BLD.thNet)}>${fmtEUR(m.netEur)}</td>
     <td${cellLabel(BLD.thToDate)}>${progressCellHtml(m.pctToDate, null, m.status === 'INVOICED' ? 'ok' : 'accent')}</td>
-    <td class="tbl__stack-hide"${cellLabel(BLD.thStatus)}>${measurementStatusPill(m.status)}</td>
+    <td class="tbl__stack-hide"${cellLabel(BLD.thStatus)}>${measurementPill(m)}</td>
   </tr>`;
+}
+
+const measurementApprovalUrl = token => `${location.origin}/app/share/measurement/${encodeURIComponent(token)}`;
+
+// While a measurement waits for its client, the link they approve it or dispute it from.
+function measurementLinkPanel(m) {
+  const url = measurementApprovalUrl(m.approvalToken);
+  return linkPanelHtml({
+    title: BLD.measurementLinkTitle,
+    intro: BLD.measurementLinkIntro,
+    url,
+    message: bt('measurementMessageLink', { title: bt('measurementN', { n: m.number }), project: `${m.projectNumber} · ${m.projectName}`, amount: plainMoney(fmtEUR(m.netEur)), url }),
+    phone: m.clientPhone,
+    name: m.clientName,
+  });
+}
+
+// The client's dispute of a draft: who, when, what they wrote and where it came from, until it is sent again.
+function measurementDisputeHtml(m) {
+  const d = m.dispute;
+  if (!d || m.status !== 'DRAFT') return '';
+  return `<div class="notice notice--warn" role="status"><div class="notice__text"><strong>${escapeHTML(bt('measurementDisputeLine', { name: d.name, when: fmtWhen(d.at) }))}</strong>
+    <span>${escapeHTML(d.note)}</span><span>${escapeHTML(BLD.measurementDisputeHint)}</span></div></div>${proofHtml(d.ip, d.device)}`;
 }
 
 function renderMeasurements(root) {
@@ -141,30 +166,38 @@ async function openMeasurementDetail(id) {
   const due = new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10);
   body.innerHTML = `
     ${recordFieldsHtml([
-      [BLD.thStatus, measurementStatusPill(m.status)],
+      [BLD.thStatus, measurementPill(m)],
       [BLD.project, docClientHtml(m.projectName, projectLink)],
       editable ? null : [BLD.thPeriodEnd, escapeHTML(fmtDay(m.periodEnd))],
       [BLD.thRetention, escapeHTML(`${fmtPct(m.retentionPct)}%`)],
       m.clientName ? [STR.lineClient, escapeHTML(m.clientName)] : null,
-      m.approvedAt ? [BLD.measurementApprovedBy, escapeHTML(`${fmtDay(m.approvedAt)} · ${m.approvedBy || ''}`)] : null,
+      m.approvedAt ? [BLD.measurementApprovedBy, escapeHTML([fmtDay(m.approvedAt), m.approvedBy, m.approvedVia === 'CLIENT_LINK' ? BLD.measurementViaLink : ''].filter(Boolean).join(' · '))] : null,
+      m.awaitingClient && m.sentAt ? [BLD.changeSentOn, escapeHTML(fmtDay(m.sentAt))] : null,
       m.invoiceNumber ? [STR.detailInvoice, escapeHTML(`${m.invoiceNumber} · ${invoiceStatusLabel(m.invoiceStatus)}`)] : null,
     ])}
+    ${m.approvedVia === 'CLIENT_LINK' ? proofHtml(m.approvalIp, m.approvalDevice) : ''}
+    ${measurementDisputeHtml(m)}
+    ${m.awaitingClient && m.approvalToken ? measurementLinkPanel(m) : ''}
     ${editable ? `<div class="form__row"><label class="lbl" for="ms-period">${escapeHTML(BLD.thPeriodEnd)}</label><input class="inp inp--mono" id="ms-period" type="date" value="${escapeHTML(m.periodEnd)}" /></div>
-      <p class="hint">${escapeHTML(BLD.measurementEditHint)}</p>` : ''}
+      <p class="hint">${escapeHTML(BLD.measurementEditHint)}</p>${m.awaitingClient ? `<p class="hint">${escapeHTML(BLD.measurementEditSentHint)}</p>` : ''}` : ''}
     ${measurementLinesHtml(m, editable)}
     <div data-ms-totals>${measurementTotalsHtml(totals(), m.retentionPct)}</div>
     <p class="hint hint--bad" data-ms-problem role="alert" hidden></p>
     ${editable ? `<div class="form__row"><label class="lbl" for="ms-notes">${escapeHTML(BLD.measurementNotes)} <span class="opt">${escapeHTML(STR.optional)}</span></label><textarea class="txt" id="ms-notes" maxlength="4000">${escapeHTML(m.notes || '')}</textarea></div>` : (m.notes ? `<p class="panel__text">${escapeHTML(m.notes)}</p>` : '')}
     ${canInvoice ? `<div class="form__row"><label class="lbl" for="ms-due">${escapeHTML(STR.quoteConvertDue)}</label><input class="inp inp--mono" id="ms-due" type="date" value="${due}" /></div>` : ''}
     ${m.status === 'APPROVED' && !m.clientId ? `<p class="hint hint--warn">${escapeHTML(BLD.measurementNoClient)}</p>` : ''}
+    ${recordHistoryHtml('measurement', m.id)}
     ${docFootHtml(`
       ${pdfUrlButton(`/app/api/building/measurements/${encodeURIComponent(m.id)}/pdf`, '', `${m.projectNumber} ${bt('measurementN', { n: m.number })}`)}
       ${m.status === 'INVOICED' && m.invoiceId && hasModule('invoices') && !linksBackTo(`invoice:${m.invoiceId}`) ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-open-invoice>${escapeHTML(STR.detailOpenDoc({ number: m.invoiceNumber || '' }))}</button>` : ''}
       ${m.status === 'APPROVED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-reopen>${escapeHTML(BLD.measurementReopen)}</button>` : ''}
       ${m.status !== 'INVOICED' && m.latest ? `<button class="btn btn--sm btn--ghost" type="button" data-ms-delete>${escapeHTML(BLD.delete)}</button>` : ''}
-      ${editable ? `<button class="btn btn--sm" type="button" data-ms-save>${escapeHTML(BLD.save)}</button><button class="btn btn--sm btn--primary" type="button" data-ms-approve>${escapeHTML(BLD.measurementApprove)}</button>` : ''}
+      ${editable ? `<button class="btn btn--sm" type="button" data-ms-save>${escapeHTML(BLD.save)}</button>
+        ${m.awaitingClient ? '' : `<button class="btn btn--sm" type="button" data-ms-send>${escapeHTML(m.dispute ? BLD.measurementResend : BLD.measurementSend)}</button>`}
+        <button class="btn btn--sm btn--primary" type="button" data-ms-approve>${escapeHTML(BLD.measurementApprove)}</button>` : ''}
       ${canInvoice && m.clientId ? `<button class="btn btn--sm btn--primary" type="button" data-ms-invoice>${escapeHTML(bt('measurementInvoice', { amount: fmtEUR(m.netEur) }))}</button>` : ''}`)}`;
   wirePdfButtons(body);
+  wireLinkPanel(body);
   const problem = $('[data-ms-problem]', body);
   // The quantities typed, the problems with them, and the totals they make, drawn as they change.
   const typed = () => m.lines.map(l => ({ line: l, qty: Number($(`[data-ml-qty="${CSS.escape(l.key)}"]`, body)?.value ?? l.toDateQty) }));
@@ -230,6 +263,16 @@ async function openMeasurementDetail(id) {
       after(BLD.measurementApproved, await api(`/app/api/building/measurements/${encodeURIComponent(m.id)}/approve`, { method: 'POST' }));
     } catch (err) { btn.disabled = false; toast(buildingErrorText(err, BLD.saveFailed)); }
   });
+  // Saved first, so the client reads what is on screen; the link opens with the measurement.
+  $('[data-ms-send]', body)?.addEventListener('click', async e => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    const saved = await save();
+    if (!saved) { btn.disabled = false; return; }
+    try {
+      after(BLD.measurementSentToast, await api(`/app/api/building/measurements/${encodeURIComponent(m.id)}/send`, { method: 'POST' }));
+    } catch (err) { btn.disabled = false; toast(buildingErrorText(err, BLD.saveFailed)); }
+  });
   $('[data-ms-reopen]', body)?.addEventListener('click', async () => {
     try { after(BLD.measurementReopened, await api(`/app/api/building/measurements/${encodeURIComponent(m.id)}/reopen`, { method: 'POST' })); } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   });
@@ -255,4 +298,5 @@ async function openMeasurementDetail(id) {
     } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   });
   openDrawer(bt('measurementTitle', { n: m.number, project: m.projectNumber }), body, true, { page: true, eyebrow: labels.measurements });
+  hydrateRecordHistory(body, here);
 }

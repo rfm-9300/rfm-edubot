@@ -476,6 +476,7 @@ function clientPaneHtml(r, m, bk) {
   const act = kind => (r.client.archivedAt ? null : kind);
   if (r.tab === 'overview') return clientOverviewHtml(r, m, bk);
   if (r.tab === 'automations') return '<div data-client-automations></div>';
+  if (r.tab === 'history') return recordHistoryHtml('client', r.client.id);
   if (r.tab === 'finance') return clientFinanceHtml(r, m, act);
   if (r.tab === 'emails') {
     if (!r.emails?.length) return `<div class="panel"><div class="empty"><p class="empty__title">${escapeHTML(GOOGLE.empty)}</p><p class="empty__desc">${escapeHTML(GOOGLE.emptyDesc)}</p></div></div>`;
@@ -552,6 +553,7 @@ function clientTabs(r) {
   if (hasModule('invoices')) tabs.push(['invoices', labels.invoices, r.invoices.length]);
   if (r.emails) tabs.push(['emails', GOOGLE.tab, r.emails.length]);
   if (hasModule('agents')) tabs.push(['automations', I18N.t('app.agents.automations.title'), (r.automations?.upcoming?.length || 0) + (r.automations?.tasks?.length || 0)]);
+  tabs.push(['history', ACT.historyTitle, 0]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'overview';
   return recordTabsHtml(tabs, r.tab);
 }
@@ -588,6 +590,7 @@ function renderClientRecord(focusTab = false) {
   if (r.tab === 'items' && !r.client.archivedAt) {
     wireClientItems(body, r.client, clientCatalogItems(r.client), saved => { r.client = saved; renderClientRecord(); });
   }
+  if (r.tab === 'history') hydrateRecordHistory(body, clientTrailEntry(r.client.id, r.client.name, 'history'));
   const automations = $('[data-client-automations]', body);
   if (automations) {
     window.AgentsUI.renderAutomations(automations, { type: 'client', id: r.client.id }, r.automations, {

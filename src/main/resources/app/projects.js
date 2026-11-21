@@ -215,6 +215,7 @@ function projectTabs(r) {
   if (hasModule('measurements')) tabs.push(['measurements', labels.measurements, r.measurements.length]);
   if (projectCostsOn()) tabs.push(['costs', bt('tab.costs'), 0]);
   tabs.push(['contract', bt('tab.contract'), r.project.contract.length]);
+  tabs.push(['history', ACT.historyTitle, 0]);
   if (!tabs.some(([id]) => id === r.tab)) r.tab = 'schedule';
   return `<div class="chip-tabs" role="tablist">${tabs.map(([id, label, n]) => `<button class="chip${id === r.tab ? ' is-on' : ''}" type="button" role="tab" aria-selected="${id === r.tab}" data-record-tab="${id}">${escapeHTML(label)}${n ? `<span class="chip__count">${n}</span>` : ''}</button>`).join('')}</div>`;
 }
@@ -423,6 +424,7 @@ function projectPaneHtml(r) {
   if (r.tab === 'schedule') return projectSchedulePane(r);
   if (r.tab === 'costs') return projectCostsPane(r);
   if (r.tab === 'reports') return projectReportsPane(r);
+  if (r.tab === 'history') return recordHistoryHtml('project', p.id);
   if (r.tab === 'diary') {
     if (!r.diary.length) return recordEmpty(BLD.diaryEmpty, 'diary', BLD.diaryNew);
     const rows = r.diary.map(e => `<tr class="conversation-row" data-record-open="diary:${escapeHTML(e.id)}">
@@ -586,6 +588,7 @@ function renderProjectRecord(focusTab = false) {
     if (el.tagName === 'TR') el.addEventListener('keydown', e => { if (e.key === 'Enter') open(); });
   });
   if (r.tab === 'photos') wirePhotoGrid(body, r.photos, projectTrailEntry(p, 'photos'), () => {});
+  if (r.tab === 'history') hydrateRecordHistory(body, projectTrailEntry(p, 'history'));
   if (focusTab) $('[data-record-tab].is-on', body)?.focus();
 }
 
@@ -983,6 +986,12 @@ async function openProjectShare(project) {
     const url = on ? projectShareUrl(p.shareToken) : '';
     const text = on ? bt('share.message', { name: p.name, url }) : '';
     const wa = p.clientPhone ? `${waHref(p.clientPhone)}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
+    // What the page shows follows the budget switch: with it, the money; never issues or internal notes.
+    const sees = ['share.sees1', 'share.sees2', 'share.sees3', 'share.sees5', p.shareBudget ? 'share.sees4Budget' : 'share.sees4'];
+    const seesHtml = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('share.seesTitle'))}</h2></header><div class="panel__body"><ul class="plain-list">${sees.map(k => `<li>${escapeHTML(bt(k))}</li>`).join('')}</ul></div></section>`;
+    const budgetHtml = `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('share.budgetTitle'))}</h2></header><div class="panel__body">
+      <label class="form__check"><input type="checkbox" data-share-budget${p.shareBudget ? ' checked' : ''} /> ${escapeHTML(bt('share.budgetLabel'))}</label>
+      <p class="hint">${escapeHTML(bt('share.budgetHint'))}</p></div></section>`;
     body.innerHTML = on
       ? `<p class="hint">${escapeHTML(bt('share.onIntro'))}</p>
         <div class="form__row"><label class="lbl" for="sh-url">${escapeHTML(bt('share.link'))}</label><input class="inp inp--mono" id="sh-url" readonly value="${escapeHTML(url)}" /></div>
@@ -991,15 +1000,30 @@ async function openProjectShare(project) {
           <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(p.clientName ? bt('share.whatsappTo', { name: p.clientName }) : bt('share.whatsapp'))}</a>
           <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
         </div>
-        <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('share.seesTitle'))}</h2></header><div class="panel__body"><ul class="plain-list">${['share.sees1', 'share.sees2', 'share.sees3', 'share.sees4'].map(k => `<li>${escapeHTML(bt(k))}</li>`).join('')}</ul></div></section>
+        ${budgetHtml}
+        ${seesHtml}
         <div class="drawer__foot"><button class="btn btn--sm btn--ghost" type="button" data-share-rotate>${escapeHTML(bt('share.rotate'))}</button><button class="btn btn--sm btn--ghost" type="button" data-share-off>${escapeHTML(bt('share.off'))}</button></div>`
       : `<p class="hint">${escapeHTML(bt('share.offIntro'))}</p>
-        <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(bt('share.seesTitle'))}</h2></header><div class="panel__body"><ul class="plain-list">${['share.sees1', 'share.sees2', 'share.sees3', 'share.sees4'].map(k => `<li>${escapeHTML(bt(k))}</li>`).join('')}</ul></div></section>
+        ${seesHtml}
         <div class="actions"><button class="btn btn--primary" type="button" data-share-on>${escapeHTML(bt('share.turnOn'))}</button></div>`;
     $('[data-share-copy]', body)?.addEventListener('click', async () => {
       try { await navigator.clipboard.writeText(url); toast(bt('share.copied')); } catch { $('#sh-url', body).select(); }
     });
     $('[data-share-on]', body)?.addEventListener('click', () => change('POST', '', bt('share.turnedOn')));
+    $('[data-share-budget]', body)?.addEventListener('change', async e => {
+      const show = e.target.checked;
+      e.target.disabled = true;
+      try {
+        p = await api(`/app/api/building/projects/${encodeURIComponent(p.id)}/share`, { method: 'PATCH', body: JSON.stringify({ showBudget: show }) });
+        toast(bt(show ? 'share.budgetShown' : 'share.budgetHidden'));
+        draw();
+        refreshBuildingPage();
+      } catch (err) {
+        e.target.checked = !show;
+        e.target.disabled = false;
+        toast(buildingErrorText(err, BLD.saveFailed));
+      }
+    });
     $('[data-share-off]', body)?.addEventListener('click', async () => {
       if (await confirmDialog({ title: bt('share.offTitle'), body: bt('share.offBody'), okLabel: bt('share.off') })) change('DELETE', '', bt('share.turnedOff'));
     });

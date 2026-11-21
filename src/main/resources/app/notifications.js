@@ -6,6 +6,8 @@ const NOTIFICATION_TONES = {
   agent_approval: 'warn', agent_failed: 'bad', agent_paused: 'warn', agent_task: 'info', agent_notice: 'accent', integration_reconnect: 'bad',
   service_submitted: 'warn', time_device_enrolled: 'info', time_missed_clock_out: 'warn', time_no_show: 'bad', conversation_handoff: 'warn', chatbot_answers: 'info',
   change_order_decided: n => (n.params?.decision === 'REJECTED' ? 'warn' : 'ok'),
+  measurement_decided: n => (n.params?.decision === 'DISPUTED' ? 'warn' : 'ok'),
+  site_issue_supplier: n => (n.params?.to === 'RESOLVED' ? 'ok' : 'info'),
 };
 const notificationTone = n => {
   const tone = NOTIFICATION_TONES[n.kind];
@@ -86,6 +88,8 @@ function notificationText(n) {
     case 'conversation_handoff': return { title: kind('conversation_handoff'), detail: line(p.reason, p.channel ? channelName(p.channel) : '') };
     case 'chatbot_answers': return { title: kind('chatbot_answers'), detail: line(p.flow, p.answers) };
     case 'change_order_decided': return { title: kind(p.decision === 'REJECTED' ? 'change_order_rejected' : 'change_order_approved'), detail: line(p.title, p.project) };
+    case 'measurement_decided': return { title: kind(p.decision === 'DISPUTED' ? 'measurement_disputed' : 'measurement_approved'), detail: p.project || '' };
+    case 'site_issue_supplier': return { title: kind(p.to === 'RESOLVED' ? 'site_issue_fixed' : 'site_issue_started'), detail: line(p.title, p.project) };
     default: return { title: n.body || NOTIFY.title, detail: '' };
   }
 }

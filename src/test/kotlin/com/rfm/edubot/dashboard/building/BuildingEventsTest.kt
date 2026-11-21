@@ -75,6 +75,9 @@ class BuildingEventsTest {
                 DomainEventTypes.PROJECT_CREATED, DomainEventTypes.PROJECT_STATUS_CHANGED, DomainEventTypes.SITE_LOG_CREATED,
                 DomainEventTypes.SITE_ISSUE_CREATED, DomainEventTypes.SITE_ISSUE_STATUS_CHANGED, DomainEventTypes.CHANGE_ORDER_SENT,
                 DomainEventTypes.CHANGE_ORDER_DECIDED, DomainEventTypes.MEASUREMENT_APPROVED, DomainEventTypes.MEASUREMENT_INVOICED,
+                // History only, for the activity log: the edits around them.
+                DomainEventTypes.PROJECT_UPDATED, DomainEventTypes.PROJECT_PHASES_CHANGED, DomainEventTypes.CHANGE_ORDER_CREATED,
+                DomainEventTypes.MEASUREMENT_CREATED, DomainEventTypes.MEASUREMENT_UPDATED,
             ),
             onProject.map { it.type }.toSet(),
         )

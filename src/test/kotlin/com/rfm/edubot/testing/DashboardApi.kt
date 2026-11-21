@@ -62,6 +62,7 @@ import io.ktor.client.engine.mock.respond
 import io.ktor.client.request.bearerAuth
 import io.ktor.client.request.forms.formData
 import io.ktor.client.request.forms.submitFormWithBinaryData
+import io.ktor.client.request.header
 import io.ktor.client.request.request
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
@@ -151,11 +152,19 @@ internal class DashboardApi(
         return dashboardToken(config, user, DashboardAccessPolicy.TENANT_USER, 1)
     }
 
-    /** Sends [body] as it is: JSON unless [type] says otherwise, nothing when it is null. */
-    suspend fun call(method: String, path: String, token: String?, body: String? = null, type: ContentType? = ContentType.Application.Json): Reply {
+    /** Sends [body] as it is: JSON unless [type] says otherwise, nothing when it is null, with any [headers]. */
+    suspend fun call(
+        method: String,
+        path: String,
+        token: String?,
+        body: String? = null,
+        type: ContentType? = ContentType.Application.Json,
+        headers: Map<String, String> = emptyMap(),
+    ): Reply {
         val response = http.request(path) {
             this.method = HttpMethod.parse(method)
             token?.let { bearerAuth(it) }
+            headers.forEach { (name, value) -> header(name, value) }
             if (body != null) {
                 type?.let { contentType(it) }
                 setBody(body)
@@ -177,6 +186,22 @@ internal class DashboardApi(
     suspend fun TestCompany.download(path: String, token: String = this.token): Download {
         val response = http.request(path) { bearerAuth(token) }
         return Download(response.status, response.contentType(), response.readRawBytes(), response.headers)
+    }
+
+    /** [path] as someone with only a link opens it: no sign-in. */
+    suspend fun publicDownload(path: String): Download {
+        val response = http.request(path)
+        return Download(response.status, response.contentType(), response.readRawBytes(), response.headers)
+    }
+
+    /** [bytes] posted as a file from a page anyone with the link opens, with the form's [fields]. */
+    suspend fun publicUpload(path: String, fileName: String, bytes: ByteArray, fields: Map<String, String> = emptyMap()): Reply {
+        val form = formData {
+            append("file", bytes, Headers.build { append(HttpHeaders.ContentDisposition, "filename=\"$fileName\"") })
+            fields.forEach { (name, value) -> append(name, value) }
+        }
+        val response = http.submitFormWithBinaryData(path, form)
+        return Reply(response.status, response.bodyAsText())
     }
 
     suspend fun TestCompany.get(path: String, token: String = this.token) = call("GET", path, token)

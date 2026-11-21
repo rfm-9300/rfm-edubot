@@ -82,11 +82,17 @@ class ClientRepository(private val mongoModule: MongoModule, private val tenantI
     }
 
     /** Only a client no quote, invoice, Serviços row, booking or payment refers to can be deleted; the others get archived. */
-    suspend fun delete(id: ObjectId): DirectoryDelete =
-        collection.deleteUnreferenced(
+    suspend fun delete(id: ObjectId): DirectoryDelete {
+        val client = findById(id)
+        val result = collection.deleteUnreferenced(
             mongoModule, tenantId, id, "clientId",
             listOf("crm.quotes", "crm.invoices", "crm.client_services", "bookings.appointments", "crm.payments"),
         )
+        if (result == DirectoryDelete.DELETED && client != null) {
+            events.append(tenantId, DomainEventTypes.CLIENT_DELETED, SubjectRef.of(SubjectTypes.CLIENT, client.id), EventPayloads.client(client))
+        }
+        return result
+    }
 
     suspend fun setArchived(id: ObjectId, archived: Boolean): Client? {
         val client = collection.setArchived(tenantId, id, archived)?.toClient() ?: return null
@@ -379,7 +385,14 @@ class QuoteRepository(mongoModule: MongoModule, private val tenantId: ObjectId) 
     }
 
     /** Removes the quote for good, returning it; null when there was none. Its number isn't reused. */
-    suspend fun delete(id: ObjectId): Quote? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toQuote()
+    suspend fun delete(id: ObjectId): Quote? {
+        val quote = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toQuote() ?: return null
+        events.append(
+            tenantId, DomainEventTypes.QUOTE_DELETED, SubjectRef.of(SubjectTypes.QUOTE, quote.id), EventPayloads.quote(quote),
+            EventPayloads.clientRefs(quote.clientId),
+        )
+        return quote
+    }
 
     data class ClientQuoteTotal(val clientId: ObjectId, val clientName: String, val clientNumber: String, val totalCents: Long, val quoteCount: Int)
 
@@ -596,24 +609,30 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     }
 
     /** A blank [code] clears it. */
-    suspend fun setTaxOfficeCode(id: ObjectId, code: String?): Invoice? =
-        collection.findOneAndUpdate(
+    suspend fun setTaxOfficeCode(id: ObjectId, code: String?): Invoice? {
+        val invoice = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(
                 Updates.set("taxOfficeCode", code?.trim()?.takeIf { it.isNotBlank() }),
                 Updates.set("updatedAt", SystemClock.now().toDate()),
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
-        )?.toInvoice()
+        )?.toInvoice() ?: return null
+        events.append(
+            tenantId, DomainEventTypes.INVOICE_TAX_CODE_SET, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
+            EventPayloads.invoice(invoice) { invoice.taxOfficeCode?.let { put("code", it) } }, invoice.relatedRefs(),
+        )
+        return invoice
+    }
 
     /** Splits what is still to receive into [parts] ([InvoiceInstallments.plan]). */
     suspend fun setInstallments(id: ObjectId, parts: List<InvoiceInstallments.Part>): InvoiceChange =
-        change(id) { InvoiceInstallments.plan(it, parts) }
+        change(id, DomainEventTypes.INVOICE_INSTALLMENTS_CHANGED) { InvoiceInstallments.plan(it, parts) }
 
     /** Records installment [index] as received now; receiving the last one pays the invoice. */
     suspend fun receiveInstallment(id: ObjectId, index: Int): InvoiceChange {
         val now = nowMillis()
-        return change(id) { InvoiceInstallments.receive(it, index, now) }
+        return change(id, DomainEventTypes.INVOICE_INSTALLMENT_PAID, index) { InvoiceInstallments.receive(it, index, now) }
     }
 
     /**
@@ -638,17 +657,22 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             Updates.combine(Updates.set("status", InvoiceStatus.CANCELLED.name), Updates.set("updatedAt", SystemClock.now().toDate())),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )?.toInvoice() ?: return InvoiceChange.Refused("conflict")
+        events.append(tenantId, DomainEventTypes.INVOICE_CANCELLED, SubjectRef.of(SubjectTypes.INVOICE, invoice.id), EventPayloads.invoice(invoice), invoice.relatedRefs())
         return InvoiceChange.Done(invoice)
     }
 
     /** Removes the invoice for good and returns what it was. */
-    suspend fun delete(id: ObjectId): Invoice? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toInvoice()
+    suspend fun delete(id: ObjectId): Invoice? {
+        val invoice = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toInvoice() ?: return null
+        events.append(tenantId, DomainEventTypes.INVOICE_DELETED, SubjectRef.of(SubjectTypes.INVOICE, invoice.id), EventPayloads.invoice(invoice), invoice.relatedRefs())
+        return invoice
+    }
 
     /**
      * Applies [decide] to the stored invoice. The write only lands if its status and installments are still the
      * ones [decide] saw, so two people receiving installments at once can't undo each other; it then tries again.
      */
-    private suspend fun change(id: ObjectId, decide: (Invoice) -> InvoiceInstallments.Outcome): InvoiceChange {
+    private suspend fun change(id: ObjectId, type: String, index: Int? = null, decide: (Invoice) -> InvoiceInstallments.Outcome): InvoiceChange {
         repeat(3) {
             val before = findById(id) ?: return InvoiceChange.NotFound
             val outcome = when (val decided = decide(before)) {
@@ -675,6 +699,14 @@ class InvoiceRepository(mongoModule: MongoModule, private val tenantId: ObjectId
                 ),
                 FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
             )?.toInvoice() ?: return@repeat
+            events.append(
+                tenantId, type, SubjectRef.of(SubjectTypes.INVOICE, invoice.id),
+                EventPayloads.invoice(invoice) {
+                    put("installments", invoice.installments.size)
+                    index?.let { put("index", it) }
+                },
+                invoice.relatedRefs(),
+            )
             appendPaid(invoice, before.status)
             return InvoiceChange.Done(invoice)
         }
@@ -777,6 +809,12 @@ internal fun InvoiceInstallment.toDocument(): Document = Document("amountCents",
 class StandardItemRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.standard_items")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
+
+    /** The activity log's record of a write to [item]. */
+    private suspend fun record(type: String, item: StandardItem) {
+        events.append(tenantId, type, SubjectRef(SubjectTypes.CATALOG_ITEM, item.id), EventPayloads.catalogItem(item))
+    }
 
     suspend fun search(query: String? = null, type: String? = null): List<StandardItem> {
         val filters = mutableListOf<Bson>(Filters.eq("tenantId", tenantId))
@@ -815,6 +853,7 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
             code = item.code?.takeIf { it.isNotBlank() } ?: freeCode(catalogCodePrefix(item.type)),
         )
         collection.insertOne(saved.toDocument())
+        record(DomainEventTypes.CATALOG_ITEM_CREATED, saved)
         return saved
     }
 
@@ -837,10 +876,14 @@ class StandardItemRepository(mongoModule: MongoModule, private val tenantId: Obj
             ),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return result?.toStandardItem()
+        return result?.toStandardItem()?.also { record(DomainEventTypes.CATALOG_ITEM_UPDATED, it) }
     }
 
-    suspend fun delete(id: String): Boolean = collection.deleteOne(scoped(Filters.eq("id", id))).deletedCount > 0
+    suspend fun delete(id: String): Boolean {
+        val item = collection.findOneAndDelete(scoped(Filters.eq("id", id)))?.toStandardItem() ?: return false
+        record(DomainEventTypes.CATALOG_ITEM_DELETED, item)
+        return true
+    }
 
     /** A `srv-<slug>` id (`mat-<slug>` for materials) not yet used by this tenant. */
     suspend fun freeId(name: String, type: String = "service"): String {

@@ -206,6 +206,7 @@ async function openQuoteDetail(id) {
   wirePdfButtons(form);
   openDrawer(quote.number, form, false, { page: true, eyebrow: STR.eyebrowQuote, tags: { kind: 'quotes', id: quote.id } });
   mountRecordAutomations(form, { type: 'quote', id: quote.id }, here);
+  mountRecordHistory(form, 'quote', quote.id, here);
 }
 
 async function deleteQuote(quote) {

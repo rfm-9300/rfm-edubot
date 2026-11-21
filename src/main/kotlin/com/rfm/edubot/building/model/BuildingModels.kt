@@ -45,12 +45,23 @@ data class RetentionRelease(
     val releasedAt: Instant,
 )
 
-/** The link the client follows the project from. A new [token] replaces the old one, which stops working. */
+/**
+ * The link the client follows the project from. A new [token] replaces the old one, which stops working.
+ * [showBudget] puts the money on that page (the contract, the changes, what was measured and billed); off, it shows none.
+ */
 data class ProjectShare(
     val token: String,
     val enabled: Boolean,
     val createdAt: Instant,
+    val showBudget: Boolean = false,
 )
+
+/**
+ * Where an answer given from a link came from (the client approving a change, a supplier fixing an issue), kept
+ * as proof beside the name they typed: the address the request came from and the browser's description of itself.
+ * The team sees it; the person who answered never gets it back.
+ */
+data class LinkProof(val ip: String?, val userAgent: String?)
 
 /**
  * A construction or renovation job. [contract] is what measurements bill (locked once one exists);
@@ -156,13 +167,18 @@ enum class IssuePriority { LOW, MEDIUM, HIGH }
 
 enum class IssueStatus { OPEN, IN_PROGRESS, RESOLVED, CLOSED }
 
-/** One status change of an issue; [from] is null for its creation. */
+/**
+ * One status change of an issue; [from] is null for its creation. [via] is null for the team's, and
+ * [DecidedVia.SUPPLIER_LINK] for the assigned supplier's from their link, with its [proof].
+ */
 data class IssueEvent(
     val at: Instant,
     val by: String,
     val from: IssueStatus?,
     val to: IssueStatus,
     val note: String? = null,
+    val via: DecidedVia? = null,
+    val proof: LinkProof? = null,
 )
 
 /** Something on site to fix or finish (a punch item, a defect, a safety problem), assigned to an employee or a supplier. */
@@ -198,8 +214,11 @@ enum class ChangeOrderKind { ADDITION, OMISSION }
 
 enum class ChangeOrderStatus { DRAFT, SENT, APPROVED, REJECTED }
 
-/** How a change order was decided: by someone on the team, or by the client from the change's link. */
-enum class DecidedVia { TEAM, CLIENT_LINK }
+/**
+ * How a change order or a measurement was decided: by someone on the team, or by the client from its link. An
+ * issue's history says [SUPPLIER_LINK] for what the assigned supplier did from theirs.
+ */
+enum class DecidedVia { TEAM, CLIENT_LINK, SUPPLIER_LINK }
 
 /**
  * The link a sent change gives its client to approve or reject it (`/app/share/change/{token}`). It keeps
@@ -229,6 +248,8 @@ data class ChangeOrder(
     val decidedBy: String? = null,
     val decisionNote: String? = null,
     val decidedVia: DecidedVia? = null,
+    /** Where the client's answer from the link came from; null for the team's. */
+    val decisionProof: LinkProof? = null,
     val approval: ChangeApproval? = null,
     val createdBy: String,
     val createdAt: Instant,
@@ -254,7 +275,17 @@ data class ProjectReport(
     val updatedAt: Instant,
 )
 
+/**
+ * [DRAFT] while the team measures; a draft with an [Measurement.approval] link is waiting for the client, who
+ * approves it or disputes it from there. [APPROVED] (by the client or the team) is what gets invoiced.
+ */
 enum class MeasurementStatus { DRAFT, APPROVED, INVOICED }
+
+/** The link a document sent to the client opens (`/app/share/measurement/{token}`), made when it was sent. */
+data class ApprovalLink(val token: String, val createdAt: Instant)
+
+/** The client said no to a measurement from its link: what they wrote, and where it came from. */
+data class MeasurementDispute(val name: String, val note: String, val at: Instant, val proof: LinkProof?)
 
 /**
  * A billable line as one measurement measured it: the contracted [quantity] and value, and how much of it was
@@ -292,9 +323,32 @@ data class Measurement(
     val notes: String? = null,
     val invoiceId: ObjectId? = null,
     val approvedAt: Instant? = null,
+    /** The team member who approved it, or the name the client typed on the link. */
     val approvedBy: String? = null,
+    val approvedVia: DecidedVia? = null,
+    val approvalProof: LinkProof? = null,
     val invoicedAt: Instant? = null,
+    /** Sent to the client to approve: kept after their answer so the link shows it, dropped when the draft is edited. */
+    val approval: ApprovalLink? = null,
+    /** The client's last dispute of this draft, until it is sent again. */
+    val dispute: MeasurementDispute? = null,
     val createdBy: String,
     val createdAt: Instant,
     val updatedAt: Instant,
+) {
+    /** Sent to the client and not answered yet. */
+    val awaitingClient: Boolean get() = status == MeasurementStatus.DRAFT && approval != null && dispute == null
+}
+
+/**
+ * The link a supplier opens to see the issues assigned to them, across the company's projects, and say they
+ * started or fixed one (`/app/share/issues/{token}`). One per supplier; a new [token] replaces the old.
+ */
+data class SupplierLink(
+    val id: ObjectId = ObjectId(),
+    val tenantId: ObjectId,
+    val supplierId: ObjectId,
+    val token: String,
+    val createdBy: String,
+    val createdAt: Instant,
 )

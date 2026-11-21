@@ -11,6 +11,7 @@ import com.rfm.edubot.testing.DashboardApi
 import com.rfm.edubot.testing.TestCompany
 import com.rfm.edubot.testing.TestMongo
 import com.rfm.edubot.testing.dashboardApiTest
+import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import kotlinx.datetime.Clock
 import kotlinx.serialization.json.addJsonObject
@@ -135,6 +136,51 @@ class ChangeApprovalTest {
 
         a.post("$api/changes/$change/status") { put("status", "DRAFT") }
         assertEquals(HttpStatusCode.NotFound, call("GET", "/app/share/change/$second/data", null).status, "back to draft, the link ends")
+    }
+
+    private suspend fun DashboardApi.change(company: TestCompany, projectId: String, title: String, priceEur: Double, days: Int): String =
+        company.post("$api/changes") {
+            put("projectId", projectId); put("title", title); put("daysImpact", days)
+            putJsonArray("items") { addJsonObject { put("description", title); put("quantity", 1.0); put("unit", "un"); put("unitPriceEur", priceEur) } }
+        }.text("id")!!
+
+    @Test
+    fun `the change's page shows what it does to the contract and the end, and keeps where the answer came from`() = dashboardApiTest(mongo) {
+        val a = company()
+        val clientId = client(a, name = "Ana Costa")
+        val projectId = project(a) {
+            put("clientId", clientId); put("plannedStart", a.day(-10)); put("plannedEnd", a.day(20))
+            putJsonArray("contract") { addJsonObject { put("description", "Moradia"); put("quantity", 1.0); put("unitPriceEur", 10000.0) } }
+        }.text("id")!!
+        val wall = change(a, projectId, "Muro", 500.0, days = 2)
+        a.post("$api/changes/$wall/status") { put("status", "APPROVED") }
+        val skylight = change(a, projectId, "Claraboia", 1850.0, days = 3)
+        val token = a.post("$api/changes/$skylight/status") { put("status", "SENT") }.text("approvalToken")!!
+
+        val page = call("GET", "/app/share/change/$token/data", null)
+        assertEquals(10500.0 to 12350.0, page.eur("contractBeforeEur") to page.eur("contractAfterEur"), "the contract with the approved wall, then with the skylight")
+        assertEquals(a.day(22) to a.day(25), page.text("endBefore") to page.text("endAfter"))
+
+        val answered = call(
+            "POST", "/app/share/change/$token/decision", null, """{"decision":"APPROVED","name":"Ana Costa"}""",
+            headers = mapOf("X-Forwarded-For" to "85.240.1.2, 10.0.0.9", "User-Agent" to "Mozilla/5.0 (iPhone) Safari/604.1"),
+        )
+        assertEquals(HttpStatusCode.OK, answered.status, answered.toString())
+        for (hidden in listOf("decisionIp", "decisionDevice", "decisionProof")) assertFalse(hidden in answered.obj, "the client never gets $hidden back")
+        val seen = a.get("$api/changes/$skylight")
+        assertEquals(listOf("85.240.1.2", "Mozilla/5.0 (iPhone) Safari/604.1"), listOf("decisionIp", "decisionDevice").map { seen.text(it) }, "the first forwarded address")
+        assertEquals(10500.0 to 12350.0, seen.eur("contractBeforeEur") to seen.eur("contractAfterEur"), "approved, the effect reads the same")
+        assertNull(a.get("$api/changes/$wall").text("decisionIp"), "a decision the team recorded has no proof")
+
+        val clientPdf = publicDownload("/app/share/change/$token/pdf")
+        assertEquals(HttpStatusCode.OK, clientPdf.status)
+        assertEquals(ContentType.Application.Pdf, clientPdf.contentType?.withoutParameters())
+        assertEquals("%PDF-", String(clientPdf.bytes.copyOfRange(0, 5)))
+        val teamPdf = a.download("$api/changes/$skylight/pdf")
+        assertEquals(HttpStatusCode.OK, teamPdf.status)
+        assertEquals(HttpStatusCode.NotFound, publicDownload("/app/share/change/not-a-token/pdf").status)
+        val b = company()
+        assertEquals(HttpStatusCode.NotFound, b.download("$api/changes/$skylight/pdf").status, "another company's change")
     }
 
     @Test

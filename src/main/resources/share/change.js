@@ -1,6 +1,6 @@
 /* The page a client approves or rejects a change order from (/app/share/change/{token}), with no account: the
-   change as it was sent, its value and days, and their decision in their own name. It reads and writes only
-   under its own link, and speaks the company's language. */
+   change as it was sent, its value and days, what it does to the contract and the end date, a PDF of it, and their
+   decision in their own name. It reads and writes only under its own link, and speaks the company's language. */
 (function () {
   const root = document.getElementById('share');
   const token = decodeURIComponent(location.pathname.split('/').filter(Boolean).pop() || '');
@@ -11,6 +11,19 @@
   const money = eur => new Intl.NumberFormat(locale(), { style: 'currency', currency: 'EUR' }).format(Number(eur) || 0);
   const qty = n => new Intl.NumberFormat(locale(), { maximumFractionDigits: 3 }).format(Number(n) || 0);
   const when = iso => (iso ? new Date(iso).toLocaleString(locale(), { day: 'numeric', month: 'long', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '');
+  const day = key => (key ? new Date(`${key}T00:00:00Z`).toLocaleDateString(locale(), { day: 'numeric', month: 'long', year: 'numeric', timeZone: 'UTC' }) : '');
+
+  // The contract and the planned completion without the change and with it; a rejected change moves neither.
+  function effectHtml(d) {
+    if (d.status === 'REJECTED') return '';
+    const ends = d.endBefore && d.endAfter && d.endBefore !== d.endAfter;
+    const fact = (label, value, strong) => `<div><dt>${esc(label)}</dt><dd>${strong ? `<strong>${esc(value)}</strong>` : esc(value)}</dd></div>`;
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('effectTitle'))}</h2></header>
+      <div class="panel__body"><dl class="dash-facts dash-facts--row">
+        ${fact(t('contractBefore'), money(d.contractBeforeEur))}${fact(t('contractAfter'), money(d.contractAfterEur), true)}
+        ${ends ? `${fact(t('endBefore'), day(d.endBefore))}${fact(t('endAfter'), day(d.endAfter), true)}` : ''}
+      </dl></div></section>`;
+  }
 
   function days(n) {
     if (!n) return t('daysNone');
@@ -63,9 +76,11 @@
         <div class="share__figure">${esc(money(Math.abs(d.totalEur)))}<span class="share__figure-label">${esc(t(addition ? 'addsPrice' : 'takesPrice'))}</span></div>
         <dl class="dash-facts dash-facts--row"><div><dt>${esc(t('time'))}</dt><dd>${esc(days(d.daysImpact))}</dd></div>${d.sentAt ? `<div><dt>${esc(t('sentOn'))}</dt><dd>${esc(when(d.sentAt))}</dd></div>` : ''}</dl>
       </div></section>
+      ${effectHtml(d)}
       ${d.description ? `<section class="panel"><div class="panel__body"><p class="panel__text">${esc(d.description)}</p></div></section>` : ''}
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('lines'))} <span class="tag">${d.items.length}</span></h2></header>
-        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${esc(t('thLine'))}</th><th class="right">${esc(t('thQty'))}</th><th class="right">${esc(t('thPrice'))}</th><th class="right">${esc(t('thTotal'))}</th></tr></thead><tbody>${rows}</tbody></table></div></section>
+        <div class="tbl-wrap"><table class="tbl tbl--stack"><thead><tr><th>${esc(t('thLine'))}</th><th class="right">${esc(t('thQty'))}</th><th class="right">${esc(t('thPrice'))}</th><th class="right">${esc(t('thTotal'))}</th></tr></thead><tbody>${rows}</tbody></table></div>
+        <div class="panel__foot"><a class="btn btn--sm btn--ghost" href="${esc(`${base}/pdf`)}" target="_blank" rel="noopener">${esc(t('pdf'))}</a></div></section>
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${esc(t('decideTitle'))}</h2></header>
         <div class="panel__body">${thanks ? `<p class="notice notice--info">${esc(thanks)}</p>` : ''}${decisionHtml(d)}</div></section>
       <footer class="share__foot"><span>${esc(d.company)}</span><span>${esc(I18N.t('app.poweredBy'))} <strong>The Bots Lab</strong></span></footer>`;

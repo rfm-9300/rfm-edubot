@@ -419,6 +419,8 @@ data class OverviewProjectsDto(
     val pendingChangesCents: Long,
     val toInvoiceCount: Int,
     val toInvoiceCents: Long,
+    /** Measurements sent to the client and not answered yet. */
+    val measurementsWaiting: Int,
     val behind: List<OverviewProjectRowDto>,
 )
 

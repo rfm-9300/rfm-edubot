@@ -352,6 +352,7 @@ function dashProjectsCard(o) {
       hasModule('site-diary') && p.active ? [STR.projectsDiariesToday, tApp('projectsDiariesOf', { n: p.diariesToday || 0, total: (p.diariesToday || 0) + (p.activeWithoutDiary || 0) })] : null,
       hasModule('measurements') ? [STR.projectsToInvoice, `${wholeCentsEUR(p.toInvoiceCents)} · ${p.toInvoiceCount || 0}`] : null,
       hasModule('change-orders') && p.pendingChanges ? [STR.projectsChangesWaiting, `${p.pendingChanges} · ${wholeCentsEUR(p.pendingChangesCents)}`] : null,
+      hasModule('measurements') && p.measurementsWaiting ? [STR.projectsMeasurementsWaiting, String(p.measurementsWaiting)] : null,
       p.planning ? [STR.projectsPlanning, p.planning] : null,
     ])}`;
   return dashCard({ order: 2, title: STR.snapProjects, go: 'projects', body });

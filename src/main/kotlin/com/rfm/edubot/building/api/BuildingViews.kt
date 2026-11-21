@@ -4,11 +4,15 @@ import com.rfm.edubot.building.BuildingRecords
 import com.rfm.edubot.building.MeasurementMath
 import com.rfm.edubot.building.PhaseState
 import com.rfm.edubot.building.ProjectCosts
+import com.rfm.edubot.building.ProjectCostsService
 import com.rfm.edubot.building.ProjectProgress
+import com.rfm.edubot.building.ChangeBudget
 import com.rfm.edubot.building.approvedEffect
+import com.rfm.edubot.building.changeBudget
 import com.rfm.edubot.building.measuredLines
 import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.building.model.ChangeOrderStatus
+import com.rfm.edubot.building.model.DecidedVia
 import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.MeasurementStatus
@@ -17,8 +21,11 @@ import com.rfm.edubot.building.model.ProjectReport
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
+import com.rfm.edubot.building.model.SupplierLink
 import com.rfm.edubot.crm.api.LineItemDto
+import com.rfm.edubot.crm.model.Supplier
 import com.rfm.edubot.tenant.model.Tenant
+import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
 import org.bson.types.ObjectId
 import kotlin.math.roundToInt
@@ -102,6 +109,7 @@ internal suspend fun BuildingRecords.projectDtos(list: List<Project>, today: Loc
             lastDiaryDay = lastDays[project.id]?.toString(),
             contractLocked = projectMeasurements.isNotEmpty(),
             shareEnabled = project.share?.enabled == true,
+            shareBudget = project.share?.showBudget == true,
             shareToken = if (detail) project.share?.takeIf { it.enabled }?.token else null,
             phases = phaseStates.map { (phase, state) ->
                 PhaseDto(
@@ -187,7 +195,9 @@ internal suspend fun BuildingRecords.issueDtos(list: List<SiteIssue>, today: Loc
     if (list.isEmpty()) return emptyList()
     val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
     val staff = employees.findByIds(list.mapNotNull { it.employeeId }).mapValues { it.value.name }
-    val vendors = suppliers.findByIds(list.mapNotNull { it.supplierId }).mapValues { it.value.name }
+    val vendorsById = suppliers.findByIds(list.mapNotNull { it.supplierId })
+    val vendors = vendorsById.mapValues { it.value.name }
+    val links = if (withPhotos) supplierLinks.forSuppliers(list.mapNotNull { it.supplierId }) else emptyMap()
     return list.map { issue ->
         val project = projectsById[issue.projectId]
         IssueDto(
@@ -208,10 +218,12 @@ internal suspend fun BuildingRecords.issueDtos(list: List<SiteIssue>, today: Loc
             employeeId = issue.employeeId?.toHexString(),
             supplierId = issue.supplierId?.toHexString(),
             assigneeName = issue.employeeId?.let { staff[it] } ?: issue.supplierId?.let { vendors[it] },
+            supplierPhone = issue.supplierId?.takeIf { withPhotos }?.let { vendorsById[it]?.phone },
+            supplierLinkToken = issue.supplierId?.let { links[it]?.token },
             dueDate = issue.dueDate?.toString(),
             resolvedAt = issue.resolvedAt?.toString(),
             closedAt = issue.closedAt?.toString(),
-            history = issue.history.map { IssueEventDto(it.at.toString(), it.by, it.from?.name, it.to.name, it.note) },
+            history = issue.history.map { IssueEventDto(it.at.toString(), it.by, it.from?.name, it.to.name, it.note, it.via?.name, it.proof?.ip, it.proof?.userAgent) },
             photos = if (withPhotos) photos.forIssue(issue.id).map { it.dto() } else emptyList(),
             createdBy = issue.createdBy,
             createdAt = issue.createdAt.toString(),
@@ -225,9 +237,11 @@ internal suspend fun BuildingRecords.changeDtos(list: List<ChangeOrder>): List<C
     val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
     val clientsById = clients.findByIds(projectsById.values.mapNotNull { it.clientId })
     val measured = measurements.forProjects(projectsById.keys).groupBy { it.projectId }
+    val projectChanges = changes.forProjects(projectsById.keys).groupBy { it.projectId }
     return list.map { change ->
         val project = projectsById[change.projectId]
         val client = project?.clientId?.let { clientsById[it] }
+        val budget = project?.let { changeBudget(change, it, projectChanges[it.id].orEmpty()) }
         ChangeOrderDto(
             id = change.id.toHexString(),
             number = change.number,
@@ -249,7 +263,13 @@ internal suspend fun BuildingRecords.changeDtos(list: List<ChangeOrder>): List<C
             decidedBy = change.decidedBy,
             decisionNote = change.decisionNote,
             decidedVia = change.decidedVia?.name,
+            decisionIp = change.decisionProof?.ip,
+            decisionDevice = change.decisionProof?.userAgent,
             approvalToken = change.approval?.token,
+            contractBeforeEur = eur(budget?.beforeCents ?: 0),
+            contractAfterEur = eur(budget?.afterCents ?: 0),
+            endBefore = budget?.endBefore?.toString(),
+            endAfter = budget?.endAfter?.toString(),
             measured = measuredLines(change, measured[change.projectId].orEmpty()),
             createdBy = change.createdBy,
             createdAt = change.createdAt.toString(),
@@ -276,6 +296,7 @@ internal suspend fun BuildingRecords.measurementDtos(list: List<Measurement>): L
             projectName = project?.name.orEmpty(),
             clientId = project?.clientId?.toHexString(),
             clientName = project?.clientId?.let { clientsById[it]?.name },
+            clientPhone = project?.clientId?.let { clientsById[it]?.phone },
             periodEnd = m.periodEnd.toString(),
             status = m.status.name,
             retentionPct = m.retentionPct,
@@ -309,7 +330,14 @@ internal suspend fun BuildingRecords.measurementDtos(list: List<Measurement>): L
             invoiceStatus = invoice?.status?.name,
             approvedAt = m.approvedAt?.toString(),
             approvedBy = m.approvedBy,
+            approvedVia = m.approvedVia?.name,
+            approvalIp = m.approvalProof?.ip,
+            approvalDevice = m.approvalProof?.userAgent,
             invoicedAt = m.invoicedAt?.toString(),
+            approvalToken = m.approval?.token,
+            sentAt = m.approval?.createdAt?.toString(),
+            awaitingClient = m.awaitingClient,
+            dispute = m.dispute?.let { MeasurementDisputeDto(it.name, it.note, it.at.toString(), it.proof?.ip, it.proof?.userAgent) },
             latest = latestNumber[m.projectId] == m.number,
             createdBy = m.createdBy,
             createdAt = m.createdAt.toString(),
@@ -328,7 +356,44 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
     val updates = logs.list(project.id, null, null, limit = SHARED_UPDATES * 3).filter { it.shared }.take(SHARED_UPDATES)
     val posted = reports.list(project.id, limit = SHARED_REPORTS)
     val byLog = shared.filter { it.logId != null }.groupBy { it.logId }
-    val days = approvedEffect(changes.list(project.id)).days
+    val projectChanges = changes.list(project.id)
+    val effect = approvedEffect(projectChanges)
+    val days = effect.days
+    val money = project.share?.showBudget == true
+    val sentChanges = projectChanges.filter { it.status == ChangeOrderStatus.SENT && it.approval != null }
+    val sentMeasurements = measurements.list(project.id).filter { it.awaitingClient }
+    val decisions = sentChanges.sortedBy { it.sentAt }.map {
+        SharedDecisionDto("change", it.number, it.title, it.sentAt?.toString(), "/app/share/change/${it.approval!!.token}", eur(it.signedCents).takeIf { money }, it.daysImpact)
+    } + sentMeasurements.sortedBy { it.number }.map {
+        SharedDecisionDto(
+            "measurement", it.number.toString(), "", it.approval?.createdAt?.toString(), "/app/share/measurement/${it.approval!!.token}",
+            eur(it.netCents).takeIf { money }, null,
+        )
+    }
+    val decided = projectChanges.filter { it.status == ChangeOrderStatus.APPROVED || it.status == ChangeOrderStatus.REJECTED }
+        .sortedByDescending { it.decidedAt }
+        .map {
+            SharedDecidedChangeDto(
+                it.number, it.title, it.kind.name, it.status.name, it.decidedAt?.toString(), it.decidedBy, it.daysImpact,
+                eur(it.signedCents).takeIf { money }, it.approval?.let { link -> "/app/share/change/${link.token}" },
+            )
+        }
+    val budget = if (money) {
+        val costs = ProjectCostsService(this).costs(project.id, withBills = false, withHours = false)
+        val current = project.contractCents + effect.cents
+        SharedBudgetDto(
+            contractEur = eur(project.contractCents),
+            changesEur = eur(effect.cents),
+            currentEur = eur(current),
+            pendingEur = eur(sentChanges.sumOf { it.signedCents }),
+            measuredEur = eur(costs?.measuredCents ?: 0),
+            measuredPct = if (current > 0) ((costs?.measuredCents ?: 0) * 100 / current).toInt().coerceIn(0, 100) else 0,
+            invoicedEur = eur(costs?.invoicedCents ?: 0),
+            paidEur = eur(costs?.receivedCents ?: 0),
+        )
+    } else {
+        null
+    }
     fun SitePhoto.shown() = SharedPhotoDto(id.toHexString(), caption, day.toString())
     return SharedProjectDto(
         company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
@@ -354,6 +419,9 @@ internal suspend fun BuildingRecords.sharedProjectDto(project: Project, tenant: 
         reports = posted.map { SharedReportDto(it.from.toString(), it.to.toString(), it.text, it.postedAt.toString()) },
         updates = updates.map { entry -> SharedUpdateDto(entry.day.toString(), entry.weather?.name, entry.workDone, byLog[entry.id].orEmpty().map { it.shown() }) },
         photos = shared.map { it.shown() },
+        decisions = decisions,
+        changes = decided,
+        budget = budget,
         updatedAt = (listOf(project.updatedAt) + updates.map { it.updatedAt } + shared.map { it.createdAt } + posted.map { it.updatedAt }).max().toString(),
     )
 }
@@ -437,8 +505,98 @@ internal suspend fun BuildingRecords.costsDto(costs: ProjectCosts): ProjectCosts
 
 private fun hours(minutes: Int): Double = (minutes * 100 / 60) / 100.0
 
-/** The change as its client's approval page shows it. */
-internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean) = SharedChangeDto(
+/**
+ * What [supplier]'s link shows: their open issues, and those fixed or closed since [since], with each project's name
+ * and address and the issue's photos; of the history, only what was said from the link.
+ */
+internal suspend fun BuildingRecords.supplierIssuesDto(supplier: Supplier, tenant: Tenant, today: LocalDate, hasLogo: Boolean, since: Instant): SupplierIssuesDto {
+    val open = issues.forSupplier(supplier.id, listOf(IssueStatus.OPEN, IssueStatus.IN_PROGRESS))
+    val done = issues.forSupplier(supplier.id, listOf(IssueStatus.RESOLVED, IssueStatus.CLOSED)).filter { (it.closedAt ?: it.resolvedAt ?: it.updatedAt) >= since }
+    val list = open + done
+    val projectsById = projects.byIds(list.map { it.projectId }).associateBy { it.id }
+    val photosByIssue = photos.forIssues(list.map { it.id }).groupBy { it.issueId }
+    return SupplierIssuesDto(
+        company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
+        hasLogo = hasLogo,
+        locale = tenant.locale,
+        supplier = supplier.name,
+        today = today.toString(),
+        issues = list.mapNotNull { issue ->
+            val project = projectsById[issue.projectId] ?: return@mapNotNull null
+            SupplierIssueDto(
+                id = issue.id.toHexString(),
+                number = issue.number,
+                title = issue.title,
+                description = issue.description,
+                location = issue.location,
+                kind = issue.kind.name,
+                priority = issue.priority.name,
+                status = issue.status.name,
+                dueDate = issue.dueDate?.toString(),
+                overdue = issue.isOverdue(today),
+                projectNumber = project.number,
+                projectName = project.name,
+                address = project.address,
+                phaseName = issue.phaseId?.let { id -> project.phases.firstOrNull { it.id == id }?.name },
+                photos = photosByIssue[issue.id].orEmpty().map { SharedPhotoDto(it.id.toHexString(), it.caption, it.day.toString()) },
+                answers = issue.history.filter { it.via == DecidedVia.SUPPLIER_LINK }.map { SupplierAnswerDto(it.at.toString(), it.by, it.to.name, it.note) },
+            )
+        },
+    )
+}
+
+/** [supplierId]'s issues link, or none. */
+internal fun supplierLinkDto(supplierId: ObjectId, link: SupplierLink?) = SupplierLinkDto(supplierId.toHexString(), link?.token, link?.createdAt?.toString())
+
+/** The measurement as its client's approval page shows it. */
+internal fun Measurement.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean): SharedMeasurementDto {
+    val totals = MeasurementMath.totals(lines, retentionPct)
+    val started = lines.filter { it.toDateQty > 0 || MeasurementMath.periodQty(it) != 0.0 }
+    return SharedMeasurementDto(
+        company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
+        hasLogo = hasLogo,
+        locale = tenant.locale,
+        projectNumber = project.number,
+        projectName = project.name,
+        address = project.address,
+        number = number,
+        periodEnd = periodEnd.toString(),
+        status = status.name,
+        awaiting = awaitingClient,
+        sentAt = approval?.createdAt?.toString(),
+        retentionPct = retentionPct,
+        contractEur = eur(totals.contractCents),
+        previousEur = eur(totals.previousCents),
+        toDateEur = eur(totals.toDateCents),
+        grossEur = eur(totals.grossCents),
+        retentionEur = eur(totals.retentionCents),
+        netEur = eur(totals.netCents),
+        pctToDate = if (totals.contractCents != 0L) (totals.toDateCents.toDouble() / totals.contractCents * 100).coerceIn(0.0, 100.0) else 0.0,
+        lines = started.map { line ->
+            SharedMeasurementLineDto(
+                description = line.description,
+                unit = line.unit,
+                quantity = line.quantity,
+                unitPriceEur = eur(line.unitPriceCents),
+                previousQty = line.previousQty,
+                periodQty = MeasurementMath.periodQty(line),
+                toDateQty = line.toDateQty,
+                periodEur = eur(MeasurementMath.periodCents(line)),
+                toDateEur = eur(MeasurementMath.toDateCents(line)),
+                pctToDate = MeasurementMath.pctToDate(line),
+            )
+        },
+        notStarted = lines.size - started.size,
+        notes = notes,
+        approvedAt = approvedAt?.toString(),
+        approvedBy = approvedBy,
+        approvedVia = approvedVia?.name,
+        dispute = dispute?.let { SharedDisputeDto(it.name, it.note, it.at.toString()) },
+    )
+}
+
+/** The change as its client's approval page shows it, with what it does to the project's [budget]. */
+internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Boolean, budget: ChangeBudget) = SharedChangeDto(
     company = tenant.documentTemplate.companyName.ifBlank { tenant.name },
     hasLogo = hasLogo,
     locale = tenant.locale,
@@ -458,6 +616,10 @@ internal fun ChangeOrder.sharedDto(project: Project, tenant: Tenant, hasLogo: Bo
     decidedBy = decidedBy,
     decidedVia = decidedVia?.name,
     decisionNote = decisionNote,
+    contractBeforeEur = eur(budget.beforeCents),
+    contractAfterEur = eur(budget.afterCents),
+    endBefore = budget.endBefore?.toString(),
+    endAfter = budget.endAfter?.toString(),
 )
 
 private const val SHARED_PHOTOS = 60

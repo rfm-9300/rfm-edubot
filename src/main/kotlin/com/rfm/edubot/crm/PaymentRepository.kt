@@ -152,7 +152,10 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
             Updates.combine(Updates.set("status", PaymentStatus.CANCELLED.name), Updates.set("updatedAt", SystemClock.now().toDate())),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )?.toPayment()
-        if (cancelled != null) return PaymentCancel.Done(cancelled)
+        if (cancelled != null) {
+            events.append(tenantId, DomainEventTypes.PAYMENT_CANCELLED, SubjectRef.of(SubjectTypes.PAYMENT, cancelled.id), EventPayloads.payment(cancelled), cancelled.relatedRefs())
+            return PaymentCancel.Done(cancelled)
+        }
         return when (findById(id)?.status) {
             null -> PaymentCancel.NotFound
             PaymentStatus.PAID -> PaymentCancel.Refused("payment_paid")
@@ -161,7 +164,11 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
     }
 
     /** Removes the payment for good and returns what it was. */
-    suspend fun delete(id: ObjectId): Payment? = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toPayment()
+    suspend fun delete(id: ObjectId): Payment? {
+        val payment = collection.findOneAndDelete(scoped(Filters.eq("_id", id)))?.toPayment() ?: return null
+        events.append(tenantId, DomainEventTypes.PAYMENT_DELETED, SubjectRef.of(SubjectTypes.PAYMENT, payment.id), EventPayloads.payment(payment), payment.relatedRefs())
+        return payment
+    }
 
     private fun Payment.relatedRefs(): List<SubjectRef> = listOfNotNull(
         clientId?.let { SubjectRef.of(SubjectTypes.CLIENT, it) },
@@ -181,12 +188,18 @@ class PaymentRepository(mongoModule: MongoModule, private val tenantId: ObjectId
         collection.updateMany(scoped(Filters.eq("projectId", projectId)), Updates.combine(Updates.set("projectId", null), Updates.set("updatedAt", SystemClock.now().toDate())))
     }
 
-    private suspend fun set(id: ObjectId, field: String, value: ObjectId?): Payment? =
-        collection.findOneAndUpdate(
+    private suspend fun set(id: ObjectId, field: String, value: ObjectId?): Payment? {
+        val payment = collection.findOneAndUpdate(
             scoped(Filters.eq("_id", id)),
             Updates.combine(Updates.set(field, value), Updates.set("updatedAt", SystemClock.now().toDate())),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
-        )?.toPayment()
+        )?.toPayment() ?: return null
+        events.append(
+            tenantId, DomainEventTypes.PAYMENT_UPDATED, SubjectRef.of(SubjectTypes.PAYMENT, payment.id),
+            EventPayloads.payment(payment) { put("field", field.removeSuffix("Id")) }, payment.relatedRefs(),
+        )
+        return payment
+    }
 
     private fun Document.toPayment() = Payment(
         id = getObjectId("_id"),

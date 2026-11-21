@@ -1,18 +1,20 @@
 package com.rfm.edubot.building
 
+import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.tenant.model.DocumentTemplate
 import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.LocalDate
 import kotlinx.datetime.daysUntil
 import kotlinx.datetime.minus
+import kotlinx.datetime.toLocalDateTime
 import org.bson.types.ObjectId
 
 /** A PDF Building wrote, and the name it downloads as. */
 class BuildingDocument(val fileName: String, val bytes: ByteArray)
 
 /**
- * Building's PDFs from its records, in the company's language and with its document template: a measurement, and
- * a project's diary for a period of at most [MAX_DIARY_DAYS] days with some of each day's photos.
+ * Building's PDFs from its records, in the company's language and with its document template: a measurement, a
+ * change order, and a project's diary for a period of at most [MAX_DIARY_DAYS] days with some of each day's photos.
  */
 class BuildingDocuments(private val records: BuildingRecords, private val store: PhotoStore) {
     suspend fun measurement(id: ObjectId, template: DocumentTemplate, locale: String, stamp: Stamp): BuildingDocument? {
@@ -22,6 +24,19 @@ class BuildingDocuments(private val records: BuildingRecords, private val store:
         val invoice = measurement.invoiceId?.let { records.invoices.findById(it) }
         val sheet = MeasurementSheet(measurement, project, client, measurement.approvedAt?.let(stamp::day), invoice?.number)
         return BuildingDocument("measurement-${measurement.number}-${project.number}.pdf", BuildingPdf(template, locale).measurement(sheet))
+    }
+
+    suspend fun changeOrder(id: ObjectId, template: DocumentTemplate, locale: String, stamp: Stamp): BuildingDocument? =
+        records.changes.findById(id)?.let { changeOrder(it, template, locale, stamp) }
+
+    /** [change] with what it does to its project's contract and end, and who decided it, when and from where. */
+    suspend fun changeOrder(change: ChangeOrder, template: DocumentTemplate, locale: String, stamp: Stamp): BuildingDocument? {
+        val project = records.projects.findById(change.projectId) ?: return null
+        val client = project.clientId?.let { records.clients.findById(it) }
+        val budget = changeBudget(change, project, records.changes.list(project.id))
+        val decidedOn = change.decidedAt?.let { BuildingCopy.dateTime(it.toLocalDateTime(stamp.zone)) }
+        val sheet = ChangeSheet(change, project, client, budget, change.sentAt?.let(stamp::day), decidedOn)
+        return BuildingDocument("change-${change.number}-${project.number}.pdf", BuildingPdf(template, locale).changeOrder(sheet))
     }
 
     /** The project's diary from [from] (30 days before [to] when null) to [to] (today when null). */

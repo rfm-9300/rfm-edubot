@@ -47,38 +47,66 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
             before = current.status
             projectFrom(draft, current.copy(updatedAt = stamp.now), stamp, locked)
         }
-        if (outcome is ProjectChange.Ok) before?.takeIf { it != outcome.project.status }?.let { records.events.projectStatusChanged(outcome.project, it) }
+        if (outcome is ProjectChange.Ok) {
+            records.events.projectUpdated(outcome.project)
+            before?.takeIf { it != outcome.project.status }?.let { records.events.projectStatusChanged(outcome.project, it) }
+        }
         return outcome.outcome()
     }
 
-    suspend fun setPhases(id: ObjectId, phases: List<PhaseDraft>, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current ->
+    suspend fun setPhases(id: ObjectId, phases: List<PhaseDraft>, stamp: Stamp): Outcome<Project> {
+        val outcome = records.projects.update(id) { current ->
             when (val parsed = phasesFrom(phases, current.phases, stamp.today)) {
                 is Parsed.Bad -> ProjectChange.Refused(parsed.error)
                 is Parsed.Good -> ProjectChange.Ok(current.copy(phases = parsed.value, updatedAt = stamp.now))
             }
-        }.outcome()
+        }
+        if (outcome is ProjectChange.Ok) records.events.projectPhasesChanged(outcome.project)
+        return outcome.outcome()
+    }
 
     suspend fun setPhaseProgress(id: ObjectId, phaseId: String, progress: Int, stamp: Stamp): Outcome<Project> {
         if (progress !in 0..100) return invalid("invalid_progress")
-        return records.projects.update(id) { current ->
+        val outcome = records.projects.update(id) { current ->
             if (current.phases.none { it.id == phaseId }) return@update ProjectChange.Refused("phase_not_found")
             ProjectChange.Ok(current.copy(phases = current.phases.map { if (it.id == phaseId) it.withProgress(progress, stamp.today) else it }, updatedAt = stamp.now))
-        }.outcome()
+        }
+        if (outcome is ProjectChange.Ok) {
+            records.events.projectPhasesChanged(outcome.project, outcome.project.phases.firstOrNull { it.id == phaseId }?.name, progress)
+        }
+        return outcome.outcome()
     }
 
     /** Turns the client's link on, with the token it had before, or a new one. */
     suspend fun share(id: ObjectId, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current ->
+        shareChange(id, ShareActions.ON) { current ->
             ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = true) ?: ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now))
-        }.outcome()
+        }
 
-    /** A new link; the old one stops working. */
+    /** A new link; the old one stops working. The budget stays shown or hidden as it was. */
     suspend fun rotateShare(id: ObjectId, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = ProjectShare(secretToken(), true, stamp.now), updatedAt = stamp.now)) }.outcome()
+        shareChange(id, ShareActions.ROTATED) { current ->
+            ProjectChange.Ok(current.copy(share = ProjectShare(secretToken(), true, stamp.now, current.share?.showBudget ?: false), updatedAt = stamp.now))
+        }
 
     suspend fun stopSharing(id: ObjectId, stamp: Stamp): Outcome<Project> =
-        records.projects.update(id) { current -> ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = false), updatedAt = stamp.now)) }.outcome()
+        shareChange(id, ShareActions.OFF) { current -> ProjectChange.Ok(current.copy(share = current.share?.copy(enabled = false), updatedAt = stamp.now)) }
+
+    /**
+     * Shows the money on the client's page ([show]: the contract, approved and pending changes, what was measured and
+     * billed) or hides it. Only once the page exists: turn the link on first.
+     */
+    suspend fun setShareBudget(id: ObjectId, show: Boolean, stamp: Stamp): Outcome<Project> =
+        shareChange(id, if (show) ShareActions.BUDGET_SHOWN else ShareActions.BUDGET_HIDDEN) { current ->
+            val share = current.share ?: return@shareChange ProjectChange.Refused("share_off")
+            ProjectChange.Ok(current.copy(share = share.copy(showBudget = show), updatedAt = stamp.now))
+        }
+
+    private suspend fun shareChange(id: ObjectId, action: String, change: suspend (Project) -> ProjectChange): Outcome<Project> {
+        val outcome = records.projects.update(id, change)
+        if (outcome is ProjectChange.Ok) records.events.projectShareChanged(outcome.project, action)
+        return outcome.outcome()
+    }
 
     /** Refused while a measurement bills the project: its invoices point at it. */
     suspend fun delete(id: ObjectId, companySlug: String): Outcome<Unit> {
@@ -92,6 +120,7 @@ class ProjectService(private val records: BuildingRecords, private val store: Ph
         store.deleteProject(companySlug, project.id)
         records.payments.clearProject(project.id)
         records.projects.delete(project.id)
+        records.events.projectDeleted(project)
         return Outcome.Done(Unit)
     }
 

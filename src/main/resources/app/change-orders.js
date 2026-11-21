@@ -143,16 +143,25 @@ const changeApprovalUrl = token => `${location.origin}/app/share/change/${encode
 
 // While a change is sent, the link its client approves or rejects it from, to copy or send by WhatsApp.
 function changeLinkPanel(c, url) {
-  const text = bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: plainMoney(fmtEUR(c.signedEur)), days: c.daysImpact, url });
-  const wa = c.clientPhone ? `${waHref(c.clientPhone)}?text=${encodeURIComponent(text)}` : `https://wa.me/?text=${encodeURIComponent(text)}`;
-  return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.changeLinkTitle)}</h2></header><div class="panel__body">
-    <p class="hint">${escapeHTML(BLD.changeLinkIntro)}</p>
-    <div class="form__row"><label class="lbl" for="co-link">${escapeHTML(BLD.changeLinkLabel)}</label><input class="inp inp--mono" id="co-link" readonly value="${escapeHTML(url)}" /></div>
-    <div class="actions">
-      <button class="btn btn--sm btn--primary" type="button" data-change-copy>${escapeHTML(bt('share.copy'))}</button>
-      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(c.clientName ? bt('share.whatsappTo', { name: c.clientName }) : bt('share.whatsapp'))}</a>
-      <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
-    </div></div></section>`;
+  return linkPanelHtml({
+    title: BLD.changeLinkTitle,
+    intro: BLD.changeLinkIntro,
+    url,
+    message: bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: plainMoney(fmtEUR(c.signedEur)), days: c.daysImpact, url }),
+    phone: c.clientPhone,
+    name: c.clientName,
+  });
+}
+
+// What the change does to its project: the contract and the planned end without it and with it.
+function changeEffectFields(c) {
+  const ends = c.endBefore && c.endAfter && c.endBefore !== c.endAfter;
+  return [
+    [BLD.changeContractBefore, escapeHTML(fmtEUR(c.contractBeforeEur))],
+    [BLD.changeContractAfter, recordFigureHtml(fmtEUR(c.contractAfterEur))],
+    ends ? [BLD.changeEndBefore, escapeHTML(fmtDay(c.endBefore))] : null,
+    ends ? [BLD.changeEndAfter, escapeHTML(fmtDay(c.endAfter))] : null,
+  ];
 }
 
 async function openChangeDetail(id) {
@@ -180,13 +189,18 @@ async function openChangeDetail(id) {
       decided ? [c.status === 'REJECTED' ? BLD.changeRejectedOn : BLD.changeApprovedOn, escapeHTML(decided)] : null,
       [BLD.thValue, recordFigureHtml(fmtEUR(c.signedEur))],
     ])}
+    ${c.decidedVia === 'CLIENT_LINK' ? proofHtml(c.decisionIp, c.decisionDevice) : ''}
+    <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.changeEffectTitle)}</h2></header>
+      <div class="panel__body">${recordFieldsHtml(changeEffectFields(c))}</div></section>
     ${link ? changeLinkPanel(c, link) : ''}
     ${c.description ? `<p class="panel__text">${escapeHTML(c.description)}</p>` : ''}
     ${docLinesHtml(c.items, c.totalEur)}
     ${c.decisionNote ? `<p class="hint">${escapeHTML(c.decisionNote)}</p>` : ''}
     ${c.status === 'APPROVED' ? `<p class="hint">${escapeHTML(c.kind === 'ADDITION' ? BLD.changeApprovedHint : BLD.changeOmittedHint)}</p>` : ''}
     ${c.status === 'APPROVED' && c.measured ? `<p class="hint">${escapeHTML(BLD.changeMeasuredHint)}</p>` : ''}
+    ${recordHistoryHtml('change_order', c.id)}
     ${docFootHtml(`
+      ${pdfUrlButton(`/app/api/building/changes/${encodeURIComponent(c.id)}/pdf`, '', c.number)}
       ${c.status !== 'APPROVED' ? `<button class="btn btn--sm btn--ghost" type="button" data-change-delete>${escapeHTML(BLD.delete)}</button>` : ''}
       ${c.status === 'SENT' || c.status === 'REJECTED' || (c.status === 'APPROVED' && !c.measured) ? `<button class="btn btn--sm btn--ghost" type="button" data-change-draft>${escapeHTML(BLD.changeBackToDraft)}</button>` : ''}
       ${c.status === 'SENT' && wa ? `<a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(BLD.changeWhatsApp)}</a>` : ''}
@@ -194,6 +208,8 @@ async function openChangeDetail(id) {
         <button class="btn btn--sm" type="button" data-change-decide="REJECTED">${escapeHTML(BLD.changeRecordRejection)}</button>
         <button class="btn btn--sm${c.status === 'SENT' ? ' btn--primary' : ''}" type="button" data-change-decide="APPROVED">${escapeHTML(BLD.changeRecordApproval)}</button>` : ''}
       ${c.status === 'DRAFT' ? `<button class="btn btn--sm btn--primary" type="button" data-change-send>${escapeHTML(BLD.changeMarkSent)}</button>` : ''}`)}`;
+  wirePdfButtons(body);
+  wireLinkPanel(body);
   const setStatus = async (status, done) => {
     try {
       await api(`/app/api/building/changes/${encodeURIComponent(c.id)}/status`, { method: 'POST', body: JSON.stringify({ status }) });
@@ -205,9 +221,6 @@ async function openChangeDetail(id) {
   $('[data-detail-link]', body)?.addEventListener('click', async () => {
     await ensureBuildingProjects().catch(() => {});
     openFrom(here, () => openProjectDrawer(c.projectId, 'changes'));
-  });
-  $('[data-change-copy]', body)?.addEventListener('click', async () => {
-    try { await navigator.clipboard.writeText(link); toast(bt('share.copied')); } catch { $('#co-link', body).select(); }
   });
   $('[data-change-send]', body)?.addEventListener('click', () => setStatus('SENT', BLD.changeSent));
   $('[data-change-draft]', body)?.addEventListener('click', () => setStatus('DRAFT', BLD.changeReopened));
@@ -223,4 +236,5 @@ async function openChangeDetail(id) {
     } catch (err) { toast(buildingErrorText(err, BLD.saveFailed)); }
   });
   openDrawer(c.title, body, true, { page: true, eyebrow: `${c.number} · ${changeKindLabel(c.kind)}` });
+  hydrateRecordHistory(body, here);
 }

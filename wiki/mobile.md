@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-16
+updated: 2026-11-20
 ---
 
 # Mobile app (Kotlin Multiplatform)
@@ -192,7 +192,10 @@ web-only.
 
 **Still web-only:** photos (counts only; no image loading in the app yet), every PDF (no platform
 file opener yet), creating projects, change orders and measurements, measuring quantities, editing
-client fields, the Email page, Instagram, chat flows and the rest listed in
+client fields, the Email page, Instagram, chat flows, and since 2026-11-20 the third parties' links
+(sending a measurement to the client, suppliers' links, the client page's budget switch), the Activity
+page and records' History ([activity-log.md](activity-log.md)); the app ignores the new fields they add
+to the projects, changes, measurements and issues it reads. The rest is listed in
 [`docs/architecture.md`](../docs/architecture.md#not-on-mobile). This pass was checked with the
 guide's builds and tests (JVM, Android unit, iOS simulator, the iOS framework link, the debug APK),
 decoding tests over server-shaped JSON, and on 2026-11-11 **a walkthrough on an Android phone**

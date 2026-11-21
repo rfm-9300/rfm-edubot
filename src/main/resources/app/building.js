@@ -42,6 +42,8 @@ const changeStatusPill = s => bldPill(changeStatusLabel(s), { SENT: 'warn', APPR
 const measurementStatusLabel = s => btOr(`measurementStatus.${s}`, s);
 const measurementStatusPill = s => bldPill(measurementStatusLabel(s), { DRAFT: 'accent', APPROVED: 'warn', INVOICED: 'ok' }[s] || '');
 const buildingErrorText = (err, fallback) => (err?.code ? btOr(`errors.${err.code}`, fallback) : fallback);
+// A measurement's pill: sent and not answered, or disputed by the client, says so before its status.
+const measurementPill = m => (m.awaitingClient ? bldPill(BLD.measurementAwaiting, 'warn') : m.dispute && m.status === 'DRAFT' ? bldPill(BLD.measurementDisputedPill, 'bad') : measurementStatusPill(m.status));
 const projectLabel = p => [p?.number, p?.name].filter(Boolean).join(' · ');
 const clampPct = n => Math.max(0, Math.min(100, Math.round(Number(n) || 0)));
 const fmtPct = n => new Intl.NumberFormat(uiLocale(), { maximumFractionDigits: 1 }).format(Number(n) || 0);
@@ -206,36 +208,53 @@ function wirePhotoGrid(root, photos, back, onChange) {
   }));
 }
 
-// The photo as JPEG, at most [max] px on its longest side; the browser turns the camera's way up.
-async function shrinkPhoto(file, max, quality) {
-  let image = null;
-  if (window.createImageBitmap) image = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
-  let url = null;
-  if (!image) {
-    url = URL.createObjectURL(file);
-    image = await new Promise((resolve, reject) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = reject;
-      img.src = url;
-    });
-  }
-  try {
-    const w = image.width || image.naturalWidth;
-    const h = image.height || image.naturalHeight;
-    const scale = Math.min(1, max / Math.max(w, h));
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(w * scale));
-    canvas.height = Math.max(1, Math.round(h * scale));
-    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
-    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
-    if (!blob) throw new Error('unreadable');
-    return blob;
-  } finally {
-    if (url) URL.revokeObjectURL(url);
-    image.close?.();
-  }
+/**
+ * A browser and its system as people say them ("Safari on iPhone"), from a `User-Agent`; the raw text when it reads
+ * as neither.
+ */
+function deviceLabel(ua) {
+  const s = String(ua || '');
+  if (!s) return '';
+  const os = [[/iPhone/, 'iPhone'], [/iPad/, 'iPad'], [/Android/, 'Android'], [/Windows/, 'Windows'], [/Mac OS X|Macintosh/, 'macOS'], [/CrOS/, 'ChromeOS'], [/Linux/, 'Linux']]
+    .find(([re]) => re.test(s))?.[1];
+  const browser = [[/Edg\//, 'Edge'], [/SamsungBrowser/, 'Samsung Internet'], [/OPR\/|Opera/, 'Opera'], [/Firefox|FxiOS/, 'Firefox'], [/Chrome|CriOS/, 'Chrome'], [/Safari/, 'Safari']]
+    .find(([re]) => re.test(s))?.[1];
+  return browser && os ? `${browser} · ${os}` : browser || os || s.slice(0, 80);
 }
+
+// Where an answer given from a link came from, under the decision it proves; the raw browser text on hover.
+function proofHtml(ip, device) {
+  if (!ip && !device) return '';
+  return `<p class="hint" title="${escapeHTML(device || '')}">${escapeHTML(bt('proofLine', { ip: ip || '—', device: deviceLabel(device) || '—' }))}</p>`;
+}
+
+/**
+ * A link the company sends someone outside it (a client approving a change or a measurement, a supplier and their
+ * issues): the address to copy, WhatsApp to [phone] (or to anyone) with [message], and the page itself. [tools] adds
+ * buttons, like renewing or turning the link off. Wire it with [wireLinkPanel].
+ */
+function linkPanelHtml({ title, intro, url, message, phone = '', name = '', tools = '' }) {
+  const text = encodeURIComponent(message);
+  const wa = phone ? `${waHref(phone)}?text=${text}` : `https://wa.me/?text=${text}`;
+  return `<section class="panel" data-link-panel><header class="panel__head"><h2 class="panel__title">${escapeHTML(title)}</h2></header><div class="panel__body">
+    ${intro ? `<p class="hint">${escapeHTML(intro)}</p>` : ''}
+    <div class="form__row"><label class="lbl">${escapeHTML(BLD.changeLinkLabel)}<input class="inp inp--mono" data-link-url readonly value="${escapeHTML(url)}" /></label></div>
+    <div class="actions">
+      <button class="btn btn--sm btn--primary" type="button" data-link-copy>${escapeHTML(bt('share.copy'))}</button>
+      <a class="btn btn--sm" href="${escapeHTML(wa)}" target="_blank" rel="noopener">${escapeHTML(name ? bt('share.whatsappTo', { name }) : bt('share.whatsapp'))}</a>
+      <a class="btn btn--sm btn--ghost" href="${escapeHTML(url)}" target="_blank" rel="noopener">${escapeHTML(bt('share.preview'))}</a>
+      ${tools}
+    </div></div></section>`;
+}
+function wireLinkPanel(root) {
+  $$('[data-link-panel]', root).forEach(panel => {
+    const input = $('[data-link-url]', panel);
+    $('[data-link-copy]', panel)?.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(input.value); toast(bt('share.copied')); } catch { input.select(); }
+    });
+  });
+}
+
 // Asks for photos (the camera on a phone offers itself); resolves with the files picked, or none.
 function pickPhotoFiles() {
   return new Promise(resolve => {
