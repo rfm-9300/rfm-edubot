@@ -386,6 +386,7 @@ window.__I18N_CATALOGS['en'] = {
     drawerModeHint: 'How a client, quote, invoice, project or any other record opens, and the forms to create or edit it. Saved on this browser.',
     drawerModeSide: 'Side panel', drawerModeSideDesc: 'Slides in from the right, over the page you are on.',
     drawerModePage: 'Full page', drawerModePageDesc: 'Fills the page beside the menu, with more room to work.',
+    drawerCrumbsAria: 'Where you are',
     openInbox: 'Open inbox', viewInvoices: 'View invoices', viewBookings: 'View bookings',
     waiting: 'Waiting', noThread: 'Select a conversation', noThreadDesc: 'Pick a customer on the left to read and reply.',
     quoteMarkSent: 'Mark sent', quoteAccept: 'Accept', quoteConvert: 'Convert to invoice',
