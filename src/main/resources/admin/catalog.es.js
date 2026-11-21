@@ -766,6 +766,7 @@ window.__I18N_CATALOGS['es'] = {
       error_empty_reply: 'El asistente no llegó a una respuesta. Inténtalo de nuevo o pregunta de otra forma.',
       errActionNotPending: 'Ese cambio ya no espera una decisión.',
       errChangesOff: 'Los cambios están desactivados en los ajustes del asistente.',
+      errThreadBusy: 'Ya hay una solicitud en curso en esta conversación. Vuelve a intentarlo en un momento.',
       errMessage: 'Los mensajes pueden tener hasta 4000 caracteres.',
       statusEXPIRED: 'No hecho',
       expiredHint: 'Seguiste sin decidir, así que nada cambió. Pídelo de nuevo si aún lo quieres.',

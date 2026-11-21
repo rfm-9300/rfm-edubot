@@ -2,6 +2,7 @@ package com.rfm.edubot.dashboard
 
 import at.favre.lib.crypto.bcrypt.BCrypt
 import com.rfm.edubot.admin.configureAdminAuth
+import com.rfm.edubot.ai.AiResponse
 import com.rfm.edubot.ai.TenantUsageRepository
 import com.rfm.edubot.ai.UsageSources
 import com.rfm.edubot.config.AppConfig
@@ -53,6 +54,10 @@ import io.ktor.server.routing.routing
 import io.ktor.server.testing.testApplication
 import io.mockk.every
 import io.mockk.mockk
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withTimeout
 import kotlinx.datetime.Clock
 import kotlinx.datetime.DatePeriod
 import kotlinx.datetime.LocalDate
@@ -460,6 +465,71 @@ class DashboardAssistantRoutesTest {
         assertEquals(listOf("Quantos orçamentos tenho?", "Tem 3 orçamentos."), retried.map { it.text("content") })
         assertTrue(retried.none { it.text("error") != null })
         assertEquals(HttpStatusCode.Conflict, http.send("POST", "/app/api/assistant/threads/$thread/retry", token).status)
+    }
+
+    @Test
+    fun `retrying a missing confirmation summary keeps the confirmed change in context`() = assistantTest { http, model ->
+        val c = company()
+        val token = http.token(c.admin)
+        val thread = http.newThread(token)
+        val invoice = c.invoice(c.client("Rui"), 300.0, 1)
+        model.call("mark_invoice_paid", obj { put("invoice_id", invoice.id.toHexString()) })
+        val card = http.ask(token, thread, "Marca a fatura como paga").obj().actions().single()
+        val actionId = card.text("id")!!
+        model.failures = 1
+
+        val confirmed = http.decide(token, thread, actionId, "confirm").obj()
+        assertEquals("CONFIRMED", confirmed.actions().single().text("status"))
+        assertEquals("model_unavailable", confirmed.messages().last().text("error"))
+
+        model.text("Fatura paga.")
+        val retried = http.send("POST", "/app/api/assistant/threads/$thread/retry", token).obj()
+        assertEquals("Fatura paga.", retried.messages().last().text("content"))
+        assertEquals("CONFIRMED", retried.actions().single().text("status"))
+        assertTrue(retried.messages().none { it.text("error") != null })
+        assertTrue(model.last.messages.last().content.orEmpty().contains(actionId))
+        assertTrue(model.last.messages.last().content.orEmpty().contains("Never propose this same change again"))
+    }
+
+    @Test
+    fun `a thread permits only one turn operation at a time across tabs`() = assistantTest { http, model ->
+        val c = company()
+        val token = http.token(c.admin)
+        val thread = http.newThread(token)
+        val otherThread = http.newThread(token)
+        val started = CompletableDeferred<Unit>()
+        val release = CompletableDeferred<Unit>()
+        model.step {
+            started.complete(Unit)
+            release.await()
+            AiResponse.Text("Primeira resposta.", ScriptedModel.USAGE, "first")
+        }.text("Outra conversa.")
+
+        coroutineScope {
+            val first = async { http.ask(token, thread, "Primeira pergunta") }
+            try {
+                withTimeout(10_000) { started.await() }
+                val path = "/app/api/assistant/threads/$thread"
+                val concurrent = listOf(
+                    http.ask(token, thread, "Segunda pergunta"),
+                    http.send("POST", "$path/retry", token),
+                    http.decide(token, thread, "act_pending", "confirm"),
+                    http.decide(token, thread, "act_pending", "cancel"),
+                    http.send("DELETE", path, token),
+                )
+                for (response in concurrent) {
+                    assertEquals(HttpStatusCode.Conflict, response.status)
+                    assertEquals("thread_busy", response.obj().text("error"))
+                }
+                assertEquals(HttpStatusCode.OK, http.ask(token, otherThread, "Olá").status)
+            } finally {
+                release.complete(Unit)
+            }
+            assertEquals(listOf("Primeira pergunta", "Primeira resposta."), first.await().obj().messages().map { it.text("content") })
+        }
+
+        assertEquals(2, model.requests.size)
+        assertEquals(HttpStatusCode.NoContent, http.send("DELETE", "/app/api/assistant/threads/$thread", token).status)
     }
 
     @Test

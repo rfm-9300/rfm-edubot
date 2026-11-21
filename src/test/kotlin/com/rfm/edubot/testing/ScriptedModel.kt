@@ -33,7 +33,7 @@ class ScriptedModel {
     }
 
     val requests = mutableListOf<Request>()
-    private val steps = ArrayDeque<(Request) -> AiResponse>()
+    private val steps = ArrayDeque<suspend (Request) -> AiResponse>()
     private var ids = 0
 
     /** Calls that throw before answering, as when the provider is down. */
@@ -62,7 +62,7 @@ class ScriptedModel {
     /** One step that calls several tools at once. */
     fun calls(vararg calls: Pair<String, JsonObject>) = step { toolUse(calls.toList(), null) }
 
-    fun step(answer: (Request) -> AiResponse) = apply { steps += answer }
+    fun step(answer: suspend (Request) -> AiResponse) = apply { steps += answer }
 
     fun pending(): Int = steps.size
 

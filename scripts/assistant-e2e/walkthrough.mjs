@@ -122,15 +122,15 @@ const browser = await puppeteer.launch({
 await browser.defaultBrowserContext().overridePermissions(APP, ['clipboard-read', 'clipboard-write', 'clipboard-sanitized-write']);
 const pageErrors = [];
 
-async function open(token, theme = 'light') {
+async function open(token, theme = 'light', locale = 'pt-PT') {
   const page = await browser.newPage();
   page.on('pageerror', e => pageErrors.push(e.message));
-  await page.evaluateOnNewDocument((t, th) => {
+  await page.evaluateOnNewDocument((t, th, lang) => {
     localStorage.setItem('dashboardToken', t);
-    localStorage.setItem('uiLocale', 'pt-PT');
+    localStorage.setItem('uiLocale', lang);
     localStorage.setItem('uiTheme', th);
-  }, token, theme);
-  await page.goto(`${APP}/app/#ai-assistant`, { waitUntil: 'networkidle0' });
+  }, token, theme, locale);
+  await page.goto(`${APP}/app/#ai-assistant`, { waitUntil: 'domcontentloaded' });
   await page.waitForSelector('.assistant');
   return page;
 }
@@ -145,6 +145,7 @@ async function shot(page, name) {
 const text = (page, selector) => page.$eval(selector, el => el.innerText).catch(() => '');
 const settle = page => page.waitForFunction(() => !document.querySelector('.chat__typing') && !document.querySelector('#assistant-input')?.disabled, { timeout: 60000 });
 async function ask(page, message) {
+  await page.bringToFront();
   await page.click('#assistant-input');
   await page.type('#assistant-input', message, { delay: HEADFUL ? 35 : 0 });
   await page.keyboard.press('Enter');
@@ -181,6 +182,7 @@ await check('a starter is answered from the company’s data as a table that say
   await settle(page);
   const answer = await text(page, '.chat__msg--rich');
   expect(answer.includes(overdue.number), `the overdue invoice ${overdue.number} isn't in: ${answer}`);
+  expect(!answer.includes('Bruno Sousa'), 'the invoice that is not overdue appeared');
   expect(await page.$('.chat__msg--rich .chat__table table'), 'no table');
   expect((await text(page, '.assistant__meta')).includes('Consultado: Faturas'), 'no “Consultado: Faturas”');
   expect((await text(page, '.assistant__title')) === 'Que faturas estão em atraso?', 'the first message didn’t name the conversation');
@@ -200,10 +202,12 @@ await check('a new client waits on a card with its details, and is made once con
     expect(card.includes(part), `card lacks “${part}”: ${card}`);
   }
   expect((await text(page, '.assistant__thread.is-active')).includes('1'), 'the conversation doesn’t show its waiting change');
+  expect(!(await api('GET', '/app/api/crm/clients', undefined, owner)).some(c => c.name === 'Rita Gomes'), 'client created before confirming');
   await shot(page, '03-card-pending');
   await page.click('[data-assistant-confirm]');
   await settle(page);
   expect(await lastCardState(page) === 'confirmed', `card is ${await lastCardState(page)}`);
+  expect((await api('GET', '/app/api/crm/clients', undefined, owner)).filter(c => c.name === 'Rita Gomes').length === 1, 'expected exactly one created client');
   await shot(page, '04-card-confirmed');
 });
 
@@ -223,6 +227,7 @@ await check('a proposed quote names its client and total, and can be declined', 
   await page.click('[data-assistant-cancel]');
   await settle(page);
   expect(await lastCardState(page) === 'cancelled', `card is ${await lastCardState(page)}`);
+  expect((await api('GET', '/app/api/crm/quotes', undefined, owner)).length === 1, 'declining the card wrote a quote');
 });
 
 await check('a card left waiting expires when the conversation moves on', async () => {
@@ -232,6 +237,7 @@ await check('a card left waiting expires when the conversation moves on', async 
   const expired = await page.$$eval('.assistant__action--expired', cards => cards.map(c => c.innerText));
   expect(expired.length === 1 && expired[0].includes('nada mudou'), `expired cards: ${expired.length}`);
   expect(!(await page.$('[data-assistant-confirm]')), 'an expired card can still be confirmed');
+  expect((await api('GET', '/app/api/crm/quotes', undefined, owner)).length === 1, 'an expired card wrote a quote');
   await shot(page, '06-card-expired');
 });
 
@@ -245,7 +251,38 @@ await check('a quote becomes its invoice, with the invoice and its PDF a click a
   const buttons = await page.$$eval('.assistant__action--confirmed', cards => [...cards.at(-1).querySelectorAll('.btn, .pdf')].map(x => x.innerText.trim()));
   expect(buttons.some(b => b === 'Abrir fatura'), `buttons: ${buttons.join(' | ')}`);
   expect(buttons.some(b => b.includes('PDF')), `no PDF button: ${buttons.join(' | ')}`);
+  const pdfButton = '.assistant__action--confirmed [data-pdf-url]';
+  const pdfUrl = await page.$eval(pdfButton, b => b.dataset.pdfUrl);
+  const [pdf, preview] = await Promise.all([
+    page.waitForResponse(res => res.url() === APP + pdfUrl),
+    browser.waitForTarget(target => target.opener() === page.target()),
+    page.click(pdfButton),
+  ]);
+  expect(pdf.ok() && pdf.headers()['content-type'].startsWith('application/pdf'), 'PDF did not download');
+  const download = await fetch(APP + pdfUrl, { headers: { Authorization: `Bearer ${owner}` } });
+  expect(Buffer.from(await download.arrayBuffer()).subarray(0, 5).toString() === '%PDF-', 'the PDF endpoint did not return a PDF');
+  await (await preview.page()).close();
+  await page.bringToFront();
   await shot(page, '07-quote-invoiced');
+});
+
+await check('when the model fails after confirmation, retry recovers the summary without redoing the write', async () => {
+  await ask(page, `Marca a fatura ${overdue.number} como paga`);
+  expect(await lastCardState(page) === 'pending', 'no invoice payment card');
+  await api('POST', '/__fail', { count: 3 }, undefined, MODEL);
+  await page.click('[data-assistant-confirm]');
+  await settle(page);
+  expect(await lastCardState(page) === 'confirmed', 'the invoice payment did not run');
+  expect(await page.$('.assistant__failed'), 'no recovery state for the failed confirmation summary');
+  await api('POST', '/__reset', {}, undefined, MODEL);
+  await page.click('[data-assistant-retry]');
+  await settle(page);
+  expect(!(await page.$('.assistant__failed')), 'the confirmation summary did not recover');
+  expect(!(await page.$('[data-assistant-confirm]')), 'retry proposed another change');
+  const request = await api('GET', '/__last', undefined, undefined, MODEL);
+  expect(/confirmed action act_[\da-f]+/.test(request.messages.at(-1).content), 'retry lost the confirmed action');
+  const paid = await api('GET', `/app/api/crm/invoices/${overdue.id}`, undefined, owner);
+  expect(paid.status === 'PAID', `expected invoice to be paid, was ${paid.status}`);
 });
 
 await check('when the model is down the turn says so and can be retried', async () => {
@@ -267,7 +304,31 @@ await check('a reply to a customer is drafted on a card, and says why it failed 
   await shot(page, '09-reply-card');
   await page.click('[data-assistant-confirm]');
   await settle(page);
-  expect(['failed', 'confirmed'].includes(await lastCardState(page)), `card is ${await lastCardState(page)}`);
+  expect(await lastCardState(page) === 'failed', `card is ${await lastCardState(page)}`);
+  expect(await page.$('.assistant__action--failed .hint--bad'), 'no failure explanation');
+});
+
+await check('a rejected message stays in the composer and can be submitted again', async () => {
+  const draft = 'Olá, estou a testar a recuperação do envio.';
+  const count = (await page.$$('.chat__msg--user')).length;
+  await page.setRequestInterception(true);
+  const reject = request => request.method() === 'POST' && /\/assistant\/threads\/[^/]+\/messages$/.test(request.url())
+    ? request.respond({ status: 409, contentType: 'application/json', body: '{"error":"thread_busy"}' })
+    : request.continue();
+  page.on('request', reject);
+  try {
+    await ask(page, draft);
+    expect(await toastSays(page, 'Já está a ser processado um pedido'), 'no localized conversation-busy message');
+    expect(await page.$eval('#assistant-input', el => el.value) === draft, 'the draft disappeared');
+    expect((await page.$$('.chat__msg--user')).length === count, 'a rejected message stayed in the transcript');
+  } finally {
+    await page.setRequestInterception(false);
+    page.off('request', reject);
+  }
+  await page.focus('#assistant-input');
+  await page.keyboard.press('Enter');
+  await settle(page);
+  expect((await page.$$('.chat__msg--user')).length === count + 1, 'the retried draft did not reach the conversation');
 });
 
 await check('conversations can be searched, renamed and deleted', async () => {
@@ -293,6 +354,8 @@ await check('conversations can be searched, renamed and deleted', async () => {
 });
 
 await check('an admin sets the instructions, style, language, answers-only and areas, and every turn follows them', async () => {
+  await ask(page, 'Faz um orçamento para a cliente Rita Gomes com Pintura por 600€');
+  expect(await lastCardState(page) === 'pending', 'no proposal to test against the new setting');
   await page.click('#assistant-settings');
   await page.waitForSelector('#as-instructions');
   await page.type('#as-instructions', 'As faturas vencem 30 dias depois de emitidas. Indique sempre o número do cliente.');
@@ -305,6 +368,10 @@ await check('an admin sets the instructions, style, language, answers-only and a
   await page.click('#drawer button[type=submit]');
   expect(await toastSays(page, 'guardadas'), 'no saved toast');
   await page.waitForFunction(() => [...document.querySelectorAll('.assistant__head .pill')].some(p => p.innerText === 'Só respostas'));
+  expect(!(await page.$('[data-assistant-confirm]')), 'an old card still offers confirmation in answers-only mode');
+  await page.click('[data-assistant-cancel]');
+  await settle(page);
+  expect(await lastCardState(page) === 'cancelled', 'an old card could not be declined in answers-only mode');
   await ask(page, 'Cria um cliente chamado Bloqueado com telefone +351 914 000 000 nif 223456789 morada Rua X em Faro');
   expect(!(await page.$('.assistant__action--pending')), 'a card appeared with changes off');
   const last = await api('GET', '/__last', undefined, undefined, MODEL);
@@ -320,6 +387,7 @@ await check('an admin sets the instructions, style, language, answers-only and a
 
 await check('in the dark theme the page stays readable', async () => {
   const dark = await open(owner, 'dark');
+  expect(await dark.$eval('html', el => el.dataset.theme) === 'dark', 'dark theme was not applied');
   await dark.waitForSelector('.assistant__thread');
   await dark.click('.assistant__thread:nth-child(2)');
   await settle(dark);
@@ -327,18 +395,79 @@ await check('in the dark theme the page stays readable', async () => {
   await dark.close();
 });
 
-await check('on a phone nothing scrolls sideways', async () => {
+await check('on a 375px phone and a 768px tablet nothing scrolls sideways', async () => {
   const phone = await browser.newPage();
   phone.on('pageerror', e => pageErrors.push(e.message));
-  await phone.setViewport({ width: 390, height: 844, isMobile: true, hasTouch: true });
+  await phone.setViewport({ width: 375, height: 844, isMobile: true, hasTouch: true });
   await phone.evaluateOnNewDocument(t => { localStorage.setItem('dashboardToken', t); localStorage.setItem('uiLocale', 'pt-PT'); localStorage.setItem('uiTheme', 'light'); }, owner);
-  await phone.goto(`${APP}/app/#ai-assistant`, { waitUntil: 'networkidle0' });
+  await phone.goto(`${APP}/app/#ai-assistant`, { waitUntil: 'domcontentloaded' });
   await phone.waitForSelector('.assistant');
-  const wide = await phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
-  expect(wide <= 1, `the page is ${wide}px wider than the phone`);
+  const overflow = () => phone.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(await overflow() <= 1, 'the page is wider than the phone');
+  const copySize = await phone.$$eval('.assistant__copy', buttons => buttons.map(button => {
+    const { width, height } = button.getBoundingClientRect();
+    return Math.min(width, height);
+  }));
+  expect(copySize.length && copySize.every(size => size >= 32), 'a copy button is smaller than 32px');
   await phone.screenshot({ path: path.join(OUT, '13-phone.png'), fullPage: true });
+  await phone.setViewport({ width: 768, height: 1024, isMobile: true, hasTouch: true });
+  expect(await overflow() <= 1, 'the page is wider than the tablet');
   await linger(2500);
   await phone.close();
+});
+
+await check('the assistant loads in English and Spanish', async () => {
+  for (const [locale, label] of [['en', 'AI Assistant'], ['es', 'Asistente IA']]) {
+    const translated = await open(owner, 'light', locale);
+    try {
+      expect((await text(translated, 'main')).includes(label), `no “${label}” in ${locale}`);
+    } finally {
+      await translated.close();
+    }
+  }
+});
+
+await check('earlier messages load and stay with their own conversation', async () => {
+  const long = await api('POST', '/app/api/assistant/threads', {}, owner);
+  const detail = `/app/api/assistant/threads/${long.id}`;
+  for (let i = 1; i <= 51; i += 1) {
+    await api('POST', detail + '/messages', { content: `Olá, mensagem ${i} do histórico.` }, owner);
+  }
+  const history = await open(owner);
+  try {
+    await history.waitForSelector('#assistant-older');
+    expect((await history.$$('.chat__msg--user')).length === 50, 'expected the latest 100 messages');
+    await history.click('#assistant-older');
+    await history.waitForFunction(() => document.querySelectorAll('.chat__msg--user').length === 51);
+    expect(!(await history.$('#assistant-older')), 'older page is still offered with the full history loaded');
+    expect((await text(history, '.chat__msg--user')).endsWith('mensagem 1 do histórico.'), 'the earliest message is missing');
+
+    await history.reload({ waitUntil: 'domcontentloaded' });
+    await history.waitForSelector('#assistant-older');
+    await history.setRequestInterception(true);
+    let hold;
+    const held = new Promise(resolve => { hold = resolve; });
+    history.on('request', request => {
+      if (request.url().startsWith(APP + detail + '?before=')) hold(request);
+      else request.continue();
+    });
+    await history.click('#assistant-older');
+    const olderRequest = await held;
+    await history.waitForFunction(() => document.querySelector('#assistant-older')?.disabled);
+    const other = await history.$eval('.assistant__thread:not(.is-active)', el => el.dataset.assistantThread);
+    const selector = `[data-assistant-thread="${other}"]`;
+    await history.click(selector);
+    await history.waitForSelector(selector + '.is-active');
+    const [olderResponse] = await Promise.all([
+      history.waitForResponse(res => res.url() === olderRequest.url()),
+      olderRequest.continue(),
+    ]);
+    await olderResponse.json();
+    await history.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    expect(!(await text(history, '#assistant-log')).includes('mensagem 1 do histórico.'), 'messages from the previous thread appeared in the selected thread');
+  } finally {
+    await history.close();
+  }
 });
 
 console.log('\nAs a member');

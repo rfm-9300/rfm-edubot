@@ -419,9 +419,12 @@ def assistant(body):
     today = today_of(systems)
     last = messages[-1]
 
-    # The person confirmed a proposed change: report what happened, from the last tool result.
+    # The person confirmed a proposed change: report its result, even with other cards in history.
     if last["role"] == "system" and re.search(r"confirm", last.get("content") or "", re.I):
         tool_results = [m for m in messages if m["role"] == "tool"]
+        action = re.search(r"confirmed action (act_[0-9a-f]+)", last["content"])
+        if action:
+            tool_results = [m for m in tool_results if m.get("tool_call_id") == action[1]]
         try:
             result = json.loads(tool_results[-1].get("content") or "{}") if tool_results else {}
         except json.JSONDecodeError:

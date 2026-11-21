@@ -100,6 +100,8 @@ internal data class AssistantMessage(
     val error: String? = null,
     /** The modules whose data the answer was read from. */
     val sources: List<String> = emptyList(),
+    /** The confirmed action whose summary failed, so a retry can resume that summary. */
+    val followUpActionId: String? = null,
 )
 
 /** Threads belong to one person in one company: [DashboardContext.assistantOwnerKey]. */
@@ -172,9 +174,13 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
         action: AssistantAction? = null,
         error: String? = null,
         sources: List<String> = emptyList(),
+        followUpActionId: String? = null,
     ): AssistantMessage {
         val now = SystemClock.now()
-        val message = AssistantMessage(role = role, content = content, createdAt = now, action = action, error = error, sources = sources)
+        val message = AssistantMessage(
+            role = role, content = content, createdAt = now, action = action, error = error,
+            sources = sources, followUpActionId = followUpActionId,
+        )
         val doc = Document("_id", message.id)
             .append("tenantId", tenantId)
             .append("ownerKey", ownerKey)
@@ -185,6 +191,7 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
         action?.let { doc.append("action", it.toDocument()) }
         error?.let { doc.append("error", it) }
         if (sources.isNotEmpty()) doc.append("sources", sources)
+        followUpActionId?.let { doc.append("followUpActionId", it) }
         messages.insertOne(doc)
         threads.updateOne(scope(tenantId, ownerKey, Filters.eq("_id", threadId)), Updates.set("updatedAt", now.toDate()))
         return message
@@ -275,6 +282,7 @@ internal class DashboardAssistantRepository(private val mongo: MongoModule) {
         action = get("action", Document::class.java)?.toAction(),
         error = getString("error"),
         sources = getList("sources", String::class.java).orEmpty(),
+        followUpActionId = getString("followUpActionId"),
     )
 
     private fun AssistantAction.toDocument() = Document("id", id)
@@ -399,11 +407,9 @@ internal class DashboardAssistantService(
     suspend fun retry(ctx: DashboardContext, ownerKey: String, threadId: ObjectId, enabledModules: List<String>): Boolean {
         val tenant = ctx.tenant
         val last = repository.listMessages(tenant.id, ownerKey, threadId, limit = 1).lastOrNull() ?: return false
-        when {
-            last.role == "assistant" && last.error != null -> repository.deleteMessage(tenant.id, ownerKey, last.id)
-            last.role != "user" -> return false
-        }
-        completeTurn(ctx, ownerKey, threadId, enabledModules)
+        if (last.role != "user" && last.error == null) return false
+        completeTurn(ctx, ownerKey, threadId, enabledModules, last.followUpActionId)
+        if (last.error != null) repository.deleteMessage(tenant.id, ownerKey, last.id)
         return true
     }
 
@@ -424,7 +430,7 @@ internal class DashboardAssistantService(
         }
         repository.finishAction(messageId, if ("error" in result) AssistantActionStatus.FAILED else AssistantActionStatus.CONFIRMED, result)
         try {
-            completeTurn(ctx, ownerKey, threadId, enabledModules, FOLLOW_UP)
+            completeTurn(ctx, ownerKey, threadId, enabledModules, action.id)
         } catch (e: Exception) {
             // The change and its result are saved; a missing follow-up must not turn a done change into a failed request.
             log.warn("Could not generate follow-up for confirmed dashboard action {}: {}", action.id, e.message)
@@ -432,10 +438,22 @@ internal class DashboardAssistantService(
         return ConfirmOutcome.DONE
     }
 
-    private suspend fun completeTurn(ctx: DashboardContext, ownerKey: String, threadId: ObjectId, enabledModules: List<String>, note: String? = null) {
+    private suspend fun completeTurn(
+        ctx: DashboardContext,
+        ownerKey: String,
+        threadId: ObjectId,
+        enabledModules: List<String>,
+        followUpActionId: String? = null,
+    ) {
         val tenant = ctx.tenant
+        suspend fun fail(error: String, sources: List<String> = emptyList()) {
+            repository.addMessage(
+                tenant.id, ownerKey, threadId, "assistant", "", error = error,
+                sources = sources, followUpActionId = followUpActionId,
+            )
+        }
         if (!withinBudget(tenant)) {
-            repository.addMessage(tenant.id, ownerKey, threadId, "assistant", "", error = AssistantErrors.BUDGET_EXCEEDED)
+            fail(AssistantErrors.BUDGET_EXCEEDED)
             return
         }
         val settings = settings.find(tenant.id)
@@ -443,7 +461,7 @@ internal class DashboardAssistantService(
         val history = repository.listMessages(tenant.id, ownerKey, threadId, limit = HISTORY)
         val context = AssistantPrompt.messages(ctx, settings, session.usable, extensionPrompts(ctx, session.usable)).map { ChatMessage(role = "system", content = it) } +
             AssistantHistory.toChat(history) +
-            listOfNotNull(note?.let { ChatMessage(role = "system", content = it) })
+            listOfNotNull(followUpActionId?.let { ChatMessage(role = "system", content = followUp(it)) })
 
         // Every write waits for the person's confirmation in the dashboard, and only one that can run is put to them:
         // the others go back to the model with what's wrong, so it can ask for what's missing.
@@ -466,7 +484,7 @@ internal class DashboardAssistantService(
             )
         } catch (e: Exception) {
             log.warn("Dashboard assistant turn failed for tenant={}: {}", tenant.id, e.message)
-            repository.addMessage(tenant.id, ownerKey, threadId, "assistant", "", error = AssistantErrors.MODEL_UNAVAILABLE)
+            fail(AssistantErrors.MODEL_UNAVAILABLE)
             return
         }
         onUsage(tenant, result.usage)
@@ -494,7 +512,7 @@ internal class DashboardAssistantService(
         }
         val text = result.text?.trim()
         if (text.isNullOrEmpty()) {
-            repository.addMessage(tenant.id, ownerKey, threadId, "assistant", "", error = AssistantErrors.EMPTY_REPLY, sources = sources)
+            fail(AssistantErrors.EMPTY_REPLY, sources)
         } else {
             repository.addMessage(tenant.id, ownerKey, threadId, "assistant", text, sources = sources)
         }
@@ -537,8 +555,8 @@ internal class DashboardAssistantService(
     companion object {
         private const val HISTORY = 30
         private const val MAX_STEPS = 6
-        private val FOLLOW_UP = """
-            The person just confirmed the change proposed above; its outcome is the last tool result.
+        private fun followUp(actionId: String) = """
+            The person just confirmed action $actionId. Use the tool result with that call ID as its outcome.
             Tell them what happened in a sentence or two, with the new record's number or name when there is one. If it failed, say why in plain words.
             If their request needs another change, propose it now with its tool. Never propose this same change again.
         """.trimIndent()

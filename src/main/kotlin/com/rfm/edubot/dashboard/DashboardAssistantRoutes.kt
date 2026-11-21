@@ -19,6 +19,7 @@ import io.ktor.server.routing.route
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
+import java.util.concurrent.ConcurrentHashMap
 
 /** `/assistant`: the dashboard AI assistant's threads, its proposed changes and its settings. */
 internal object AssistantRoutes : DashboardFeature(DashboardModules.AI_ASSISTANT) {
@@ -40,6 +41,7 @@ private fun Route.dashboardAssistantRoutes(
         inbox = inbox,
         onUsage = { tenant, usage -> TenantUsageRepository(mongo, tenant.id).recordUsage(usage.total.toLong(), UsageSources.ASSISTANT) },
     )
+    val operations = AssistantThreadOperations()
 
     route("/assistant") {
         get("/threads") {
@@ -70,48 +72,58 @@ private fun Route.dashboardAssistantRoutes(
         delete("/threads/{id}") {
             val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@delete call.respond(HttpStatusCode.BadRequest)
-            if (!service.repository.deleteThread(ctx.tenant.id, ctx.ownerKey, threadId)) return@delete call.respond(HttpStatusCode.NotFound)
-            call.respond(HttpStatusCode.NoContent)
+            operations.run(call, ctx, threadId) {
+                if (!service.repository.deleteThread(ctx.tenant.id, ctx.ownerKey, threadId)) return@run call.respond(HttpStatusCode.NotFound)
+                call.respond(HttpStatusCode.NoContent)
+            }
         }
         post("/threads/{id}/messages") {
             val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
-            val thread = service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) ?: return@post call.respond(HttpStatusCode.NotFound)
-            val content = runCatching { call.receive<AssistantMessageRequest>() }.getOrNull()?.content?.trim().orEmpty()
-            if (content.isBlank() || content.length > MAX_MESSAGE) {
-                return@post call.respond(HttpStatusCode.BadRequest, AssistantErrorDto("invalid_message", "content", MAX_MESSAGE))
+            operations.run(call, ctx, threadId) {
+                val thread = service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) ?: return@run call.respond(HttpStatusCode.NotFound)
+                val content = runCatching { call.receive<AssistantMessageRequest>() }.getOrNull()?.content?.trim().orEmpty()
+                if (content.isBlank() || content.length > MAX_MESSAGE) {
+                    return@run call.respond(HttpStatusCode.BadRequest, AssistantErrorDto("invalid_message", "content", MAX_MESSAGE))
+                }
+                service.reply(ctx.context, ctx.ownerKey, thread, ctx.modules, content)
+                call.respond(service.threadDetail(ctx, threadId) ?: return@run call.respond(HttpStatusCode.NotFound))
             }
-            service.reply(ctx.context, ctx.ownerKey, thread, ctx.modules, content)
-            call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{id}/retry") {
             val ctx = call.assistantContext()
             val threadId = call.parameters["id"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
-            if (service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) == null) return@post call.respond(HttpStatusCode.NotFound)
-            if (!service.retry(ctx.context, ctx.ownerKey, threadId, ctx.modules)) {
-                return@post call.respond(HttpStatusCode.Conflict, AssistantErrorDto("nothing_to_retry"))
+            operations.run(call, ctx, threadId) {
+                if (service.repository.findThread(ctx.tenant.id, ctx.ownerKey, threadId) == null) return@run call.respond(HttpStatusCode.NotFound)
+                if (!service.retry(ctx.context, ctx.ownerKey, threadId, ctx.modules)) {
+                    return@run call.respond(HttpStatusCode.Conflict, AssistantErrorDto("nothing_to_retry"))
+                }
+                call.respond(service.threadDetail(ctx, threadId) ?: return@run call.respond(HttpStatusCode.NotFound))
             }
-            call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/confirm") {
             val ctx = call.assistantContext()
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            when (service.confirm(ctx.context, ctx.ownerKey, threadId, ctx.modules, actionId)) {
-                ConfirmOutcome.NOT_PENDING -> return@post call.respond(HttpStatusCode.Conflict, AssistantErrorDto("action_not_pending"))
-                ConfirmOutcome.CHANGES_OFF -> return@post call.respond(HttpStatusCode.Forbidden, AssistantErrorDto("changes_off"))
-                ConfirmOutcome.DONE -> Unit
+            operations.run(call, ctx, threadId) {
+                when (service.confirm(ctx.context, ctx.ownerKey, threadId, ctx.modules, actionId)) {
+                    ConfirmOutcome.NOT_PENDING -> return@run call.respond(HttpStatusCode.Conflict, AssistantErrorDto("action_not_pending"))
+                    ConfirmOutcome.CHANGES_OFF -> return@run call.respond(HttpStatusCode.Forbidden, AssistantErrorDto("changes_off"))
+                    ConfirmOutcome.DONE -> Unit
+                }
+                call.respond(service.threadDetail(ctx, threadId) ?: return@run call.respond(HttpStatusCode.NotFound))
             }
-            call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         post("/threads/{threadId}/actions/{actionId}/cancel") {
             val ctx = call.assistantContext()
             val threadId = call.parameters["threadId"].toObjectId() ?: return@post call.respond(HttpStatusCode.BadRequest)
             val actionId = call.parameters["actionId"] ?: return@post call.respond(HttpStatusCode.BadRequest)
-            if (!service.repository.cancelAction(ctx.tenant.id, ctx.ownerKey, threadId, actionId)) {
-                return@post call.respond(HttpStatusCode.Conflict, AssistantErrorDto("action_not_pending"))
+            operations.run(call, ctx, threadId) {
+                if (!service.repository.cancelAction(ctx.tenant.id, ctx.ownerKey, threadId, actionId)) {
+                    return@run call.respond(HttpStatusCode.Conflict, AssistantErrorDto("action_not_pending"))
+                }
+                call.respond(service.threadDetail(ctx, threadId) ?: return@run call.respond(HttpStatusCode.NotFound))
             }
-            call.respond(service.threadDetail(ctx, threadId) ?: return@post call.respond(HttpStatusCode.NotFound))
         }
         get("/settings") {
             val ctx = call.assistantContext()
@@ -130,6 +142,21 @@ private fun Route.dashboardAssistantRoutes(
             }
             val saved = service.settings.save(ctx.tenant.id, settings, ctx.context.user?.email ?: "operator")
             call.respond(saved.dto(ctx))
+        }
+    }
+}
+
+/** One in-flight mutation per person's thread, including the model call, on the app's single server. */
+private class AssistantThreadOperations {
+    private val active = ConcurrentHashMap.newKeySet<Triple<ObjectId, String, ObjectId>>()
+
+    suspend fun run(call: ApplicationCall, ctx: AssistantRouteContext, threadId: ObjectId, block: suspend () -> Unit) {
+        val key = Triple(ctx.tenant.id, ctx.ownerKey, threadId)
+        if (!active.add(key)) return call.respond(HttpStatusCode.Conflict, AssistantErrorDto("thread_busy"))
+        try {
+            block()
+        } finally {
+            active.remove(key)
         }
     }
 }

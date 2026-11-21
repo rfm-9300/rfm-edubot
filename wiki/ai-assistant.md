@@ -1,10 +1,21 @@
 ---
-updated: 2026-10-09
+updated: 2026-11-20
 ---
 
 # Dashboard AI Assistant
 
 The `ai-assistant` module: the team's copilot in `/app`, which proposes changes on cards a person confirms. It is not the customer-facing persona ([ai-persona-and-bot.md](ai-persona-and-bot.md)).
+
+## Thread operations and recovery
+
+- The app allows one send, retry, confirmation, cancellation, or deletion at a time per person and
+  thread. A concurrent request gets `409 thread_busy` and can be retried. The guard lives in the
+  single app process. Mongo still claims each action atomically before execution.
+- If a change runs and its summary fails, the failed turn records the action ID. Retrying restores
+  the follow-up prompt for that specific result. A rejected send restores the draft in the web
+  composer, and a saved question with no response has a retry button.
+- Answers-only mode keeps existing proposals visible and allows the person to decline them.
+  Confirmation is blocked by the API and the web card explains why.
 
 ## AI Assistant: its own prompt, settings and checked cards (PR #55, shipped 2026-10-08, `b570df5`)
 
