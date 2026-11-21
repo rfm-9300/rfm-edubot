@@ -35,6 +35,7 @@ function measurementLinkPanel(m) {
     message: bt('measurementMessageLink', { title: bt('measurementN', { n: m.number }), project: `${m.projectNumber} · ${m.projectName}`, amount: plainMoney(fmtEUR(m.netEur)), url }),
     phone: m.clientPhone,
     name: m.clientName,
+    emailPath: `/app/api/building/measurements/${encodeURIComponent(m.id)}/link/email`,
   });
 }
 

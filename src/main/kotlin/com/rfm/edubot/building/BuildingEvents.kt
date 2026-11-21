@@ -66,6 +66,10 @@ class BuildingEvents(private val log: DomainEventLog, private val tenantId: Obje
     suspend fun projectShareChanged(project: Project, action: String) =
         append(DomainEventTypes.PROJECT_SHARE_CHANGED, SubjectRef.of(SubjectTypes.PROJECT, project.id), project, project(project) { put("action", action) })
 
+    /** The client's project page was sent by email to [to]. */
+    suspend fun projectLinkEmailed(project: Project, to: String) =
+        append(DomainEventTypes.PROJECT_LINK_EMAILED, SubjectRef.of(SubjectTypes.PROJECT, project.id), project, project(project) { put("to", to) })
+
     suspend fun retentionInvoiced(project: Project, invoice: Invoice, amountCents: Long) =
         append(
             DomainEventTypes.PROJECT_RETENTION_INVOICED, SubjectRef.of(SubjectTypes.PROJECT, project.id), project,
@@ -115,6 +119,17 @@ class BuildingEvents(private val log: DomainEventLog, private val tenantId: Obje
             buildJsonObject { put("name", supplierName); put("action", action) },
         )
 
+    /** A supplier's link to their issues was sent by email to [to]. */
+    suspend fun supplierLinkEmailed(supplierId: ObjectId, supplierName: String, to: String) =
+        log.append(
+            tenantId, DomainEventTypes.SUPPLIER_LINK_EMAILED, SubjectRef.of(SubjectTypes.SUPPLIER, supplierId),
+            buildJsonObject { put("name", supplierName); put("to", to) },
+        )
+
+    /** A sent change's approval link was emailed to [to]. */
+    suspend fun changeLinkEmailed(change: ChangeOrder, project: Project, to: String) =
+        append(DomainEventTypes.CHANGE_ORDER_LINK_EMAILED, SubjectRef.of(SubjectTypes.CHANGE_ORDER, change.id), project, change(change, project) { put("to", to) })
+
     suspend fun changeCreated(change: ChangeOrder, project: Project) =
         append(DomainEventTypes.CHANGE_ORDER_CREATED, SubjectRef.of(SubjectTypes.CHANGE_ORDER, change.id), project, change(change, project))
 
@@ -160,6 +175,10 @@ class BuildingEvents(private val log: DomainEventLog, private val tenantId: Obje
 
     suspend fun measurementReopened(measurement: Measurement, project: Project) =
         append(DomainEventTypes.MEASUREMENT_REOPENED, SubjectRef.of(SubjectTypes.MEASUREMENT, measurement.id), project, measurement(measurement, project))
+
+    /** A measurement's approval link was emailed to [to]. */
+    suspend fun measurementLinkEmailed(measurement: Measurement, project: Project, to: String) =
+        append(DomainEventTypes.MEASUREMENT_LINK_EMAILED, SubjectRef.of(SubjectTypes.MEASUREMENT, measurement.id), project, measurement(measurement, project) { put("to", to) })
 
     suspend fun measurementDeleted(measurement: Measurement, project: Project) =
         append(DomainEventTypes.MEASUREMENT_DELETED, SubjectRef.of(SubjectTypes.MEASUREMENT, measurement.id), project, measurement(measurement, project))

@@ -171,6 +171,7 @@ function supplierLinkPanel(issue) {
     message: bt('issueLinkMessage', { url }),
     phone: issue.supplierPhone,
     name: issue.assigneeName,
+    emailPath: `/app/api/building/suppliers/${encodeURIComponent(issue.supplierId)}/link/email`,
     tools: `<button class="btn btn--sm btn--ghost" type="button" data-supplier-link="rotate">${escapeHTML(BLD.issueLinkRotate)}</button>
       <button class="btn btn--sm btn--ghost" type="button" data-supplier-link="off">${escapeHTML(BLD.issueLinkStop)}</button>`,
   });

@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-20
+updated: 2026-11-21
 ---
 
 # Activity log: who did what
@@ -27,6 +27,8 @@ in [agents-automations.md](agents-automations.md).
 - Payloads carry the record's number, name or title as they were, so a deleted invoice still reads "FT 2026/12".
   The API sends a `label` built from them and an allow-list of facts (`to`, `from`, `via`, `decidedBy`, amounts,
   `action`, `phase`…); phones, emails and ids in payloads stay on the server.
+- **Links sent by email** (2026-11-21): `change_order.`, `measurement.`, `project.` and `supplier.link_emailed` are history
+  only, with the recipient as `to` (one of the allow-listed facts) and the sender as the actor.
 - What customers send in (`message.received`, `email.received`, `instagram.comment.received`) isn't activity and
   is left out.
 - Kept 365 days (the collection's TTL). Indexes for the log: `(tenantId, occurredAt, _id)` for the company's pages

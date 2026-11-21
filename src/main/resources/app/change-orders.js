@@ -150,6 +150,7 @@ function changeLinkPanel(c, url) {
     message: bt('changeMessageLink', { number: c.number, title: c.title, project: c.projectName, amount: plainMoney(fmtEUR(c.signedEur)), days: c.daysImpact, url }),
     phone: c.clientPhone,
     name: c.clientName,
+    emailPath: `/app/api/building/changes/${encodeURIComponent(c.id)}/link/email`,
   });
 }
 
