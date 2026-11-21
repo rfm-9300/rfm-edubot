@@ -182,3 +182,35 @@ function instagramConsent(authorizeUrl) {
     window.addEventListener('message', onMessage);
   });
 }
+
+// A photo as JPEG, at most [max] px on its longest side, the camera's way up: Building's pages and the supplier's
+// link shrink photos before sending them, so the server never decodes an image.
+async function shrinkPhoto(file, max, quality) {
+  let image = null;
+  if (window.createImageBitmap) image = await createImageBitmap(file, { imageOrientation: 'from-image' }).catch(() => null);
+  let url = null;
+  if (!image) {
+    url = URL.createObjectURL(file);
+    image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+  }
+  try {
+    const w = image.width || image.naturalWidth;
+    const h = image.height || image.naturalHeight;
+    const scale = Math.min(1, max / Math.max(w, h));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(w * scale));
+    canvas.height = Math.max(1, Math.round(h * scale));
+    canvas.getContext('2d').drawImage(image, 0, 0, canvas.width, canvas.height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', quality));
+    if (!blob) throw new Error('unreadable');
+    return blob;
+  } finally {
+    if (url) URL.revokeObjectURL(url);
+    image.close?.();
+  }
+}

@@ -319,6 +319,7 @@ async function openInvoiceDetail(id) {
   wirePdfButtons(form);
   openDrawer(inv.number, form, false, { page: true, eyebrow: STR.eyebrowInvoice, tags: { kind: 'invoices', id: inv.id } });
   mountRecordAutomations(form, { type: 'invoice', id: inv.id }, here);
+  mountRecordHistory(form, 'invoice', inv.id, here);
 }
 
 // "Same day next month" for installment dates; the 31st becomes the month's last day.

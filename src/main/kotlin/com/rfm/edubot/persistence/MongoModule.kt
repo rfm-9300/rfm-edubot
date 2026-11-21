@@ -121,6 +121,9 @@ class MongoModule(config: AppConfig.MongoConfig) {
             domainEvents.createIndex(Document("tenantId", 1).append("subject.type", 1).append("subject.id", 1).append("occurredAt", -1))
             domainEvents.createIndex(Document("tenantId", 1).append("related.type", 1).append("related.id", 1).append("occurredAt", -1))
             domainEvents.createIndex(Document("tenantId", 1).append("actor.type", 1).append("occurredAt", -1))
+            // The Activity page: a company's events newest first, and one person's.
+            domainEvents.createIndex(Document("tenantId", 1).append("occurredAt", -1).append("_id", -1))
+            domainEvents.createIndex(Document("tenantId", 1).append("actor.id", 1).append("occurredAt", -1))
             domainEvents.createIndex(Document("occurredAt", 1), IndexOptions().expireAfter(365, TimeUnit.DAYS))
 
             val agents = db.getCollection<Document>("agents")
@@ -282,6 +285,13 @@ class MongoModule(config: AppConfig.MongoConfig) {
             measurements.createIndex(Document("tenantId", 1).append("projectId", 1).append("number", 1), IndexOptions().unique(true))
             measurements.createIndex(Document("tenantId", 1).append("status", 1))
             measurements.createIndex(Document("tenantId", 1).append("invoiceId", 1))
+            measurements.createIndex(
+                Document("approval.token", 1),
+                IndexOptions().unique(true).partialFilterExpression(Document("approval.token", Document("\$type", "string"))),
+            )
+            val supplierLinks = db.getCollection<Document>("building.supplier_links")
+            supplierLinks.createIndex(Document("tenantId", 1).append("supplierId", 1), IndexOptions().unique(true))
+            supplierLinks.createIndex(Document("token", 1), IndexOptions().unique(true))
 
             val crmPayments = db.getCollection<Document>("crm.payments")
             crmPayments.createIndex(Document("tenantId", 1).append("supplierId", 1))

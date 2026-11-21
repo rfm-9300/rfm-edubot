@@ -25,7 +25,8 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 
 /**
- * `/building/measurements`: a project's measurements, from draft to approved to invoiced. Invoicing one needs
+ * `/building/measurements`: a project's measurements, from draft (sent to the client to approve, or not) to approved
+ * to invoiced. Invoicing one needs
  * invoices too, as does invoicing a finished project's retention (`/building/projects/{id}/retention/invoice`).
  */
 internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMENTS) {
@@ -64,6 +65,10 @@ internal object MeasurementRoutes : DashboardFeature(DashboardModules.MEASUREMEN
             post("/measurements/{id}/approve") {
                 val b = deps.building(call)
                 call.respondOutcome(b.measurements.approve(call.idParam("id"), b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
+            }
+            post("/measurements/{id}/send") {
+                val b = deps.building(call)
+                call.respondOutcome(b.measurements.send(call.idParam("id"), b.stamp)) { b.records.measurementDtos(listOf(it)).single() }
             }
             post("/measurements/{id}/reopen") {
                 val b = deps.building(call)

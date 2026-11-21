@@ -35,13 +35,16 @@ class SiteDiaryService(private val records: BuildingRecords) {
         val progress = moveProgress(entry.projectId, draft.phaseProgress, day, entry.progress, stamp).orElse { return it.refused() }
         val stored = edited.copy(progress = progress)
         if (!records.logs.replace(stored)) return conflict("day_taken")
+        records.projects.findById(stored.projectId)?.let { records.events.siteLogUpdated(stored, it) }
         return Outcome.Done(stored)
     }
 
     /** The day's photos stay in the project's gallery. */
     suspend fun delete(id: ObjectId): Boolean {
+        val entry = records.logs.findById(id) ?: return false
         if (!records.logs.delete(id)) return false
         records.photos.detach("logId", id)
+        records.projects.findById(entry.projectId)?.let { records.events.siteLogDeleted(entry, it) }
         return true
     }
 

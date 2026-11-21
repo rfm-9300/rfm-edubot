@@ -404,6 +404,7 @@ async function openPaymentDetail(id) {
   $('[data-pay-cancel]', form)?.addEventListener('click', () => cancelPayment(pay));
   $('[data-pay-delete]', form)?.addEventListener('click', () => deletePayment(pay));
   openDrawer(pay.number, form, false, { page: true, eyebrow: STR.eyebrowPayment, tags: { kind: 'payments', id: pay.id } });
+  mountRecordHistory(form, 'payment', pay.id, here);
 }
 
 // Links a payment to the client it was for, or unlinks it.

@@ -25,8 +25,10 @@ import com.rfm.edubot.conversation.DeliveryStatusRecorder
 import com.rfm.edubot.dashboard.DashboardUserRepository
 import com.rfm.edubot.dashboard.EmployeeLookup
 import com.rfm.edubot.dashboard.building.changeApprovalRoutes
+import com.rfm.edubot.dashboard.building.measurementApprovalRoutes
 import com.rfm.edubot.dashboard.building.mySitesRoutes
 import com.rfm.edubot.dashboard.building.projectShareRoutes
+import com.rfm.edubot.dashboard.building.supplierIssueRoutes
 import com.rfm.edubot.dashboard.dashboardAccountRoutes
 import com.rfm.edubot.dashboard.dashboardCompanyRoutes
 import com.rfm.edubot.dashboard.dashboardImpersonationRoute
@@ -147,7 +149,9 @@ internal fun Routing.installRoutes(s: AppServices) {
     backofficeRoutes()
     dashboardStaticRoutes()
     projectShareRoutes(s.mongo, s.tenants) { s.runtimeConfig.get().pdfStoragePath }
-    changeApprovalRoutes(s.mongo, s.tenants)
+    changeApprovalRoutes(s.mongo, s.tenants) { s.runtimeConfig.get().pdfStoragePath }
+    measurementApprovalRoutes(s.mongo, s.tenants) { s.runtimeConfig.get().pdfStoragePath }
+    supplierIssueRoutes(s.mongo, s.tenants) { s.runtimeConfig.get().pdfStoragePath }
     dashboardRoutes(
         mongo = s.mongo,
         tenantRepository = s.tenants,

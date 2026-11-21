@@ -5,22 +5,28 @@ import kotlinx.datetime.Instant
 import kotlinx.serialization.json.JsonObject
 import org.bson.types.ObjectId
 
-enum class ActorType { USER, OPERATOR, BOT, AGENT, SYSTEM, CLIENT }
+enum class ActorType { USER, OPERATOR, BOT, AGENT, SYSTEM, CLIENT, SUPPLIER }
 
 /**
  * Who caused a change: a dashboard user, a backoffice operator, the customer-facing bot, an agent run, the system,
- * or the company's client through a link the company sent them (approving a change order), by the name they typed.
+ * the company's client through a link the company sent them (a change order, a measurement), or a supplier through
+ * theirs (the issues assigned to them), by the name they typed. [via] says how a user acted when it wasn't by their own
+ * hand: `assistant` when the dashboard's AI assistant did it for them.
  */
 data class Actor(
     val type: ActorType,
     val id: String? = null,
     val name: String? = null,
     val runId: String? = null,
+    val via: String? = null,
 ) {
     companion object {
         val SYSTEM = Actor(ActorType.SYSTEM)
         fun bot(channel: String) = Actor(ActorType.BOT, id = channel.lowercase())
         fun agent(agentId: ObjectId, runId: ObjectId, name: String?) = Actor(ActorType.AGENT, agentId.toHexString(), name, runId.toHexString())
+
+        /** [via] for the dashboard's AI assistant acting for the user. */
+        const val VIA_ASSISTANT = "assistant"
     }
 }
 
@@ -63,6 +69,10 @@ object SubjectTypes {
     const val SITE_ISSUE = "site_issue"
     const val CHANGE_ORDER = "change_order"
     const val MEASUREMENT = "measurement"
+    const val SITE_PHOTO = "site_photo"
+    /** A client update the team posted on a project's page. */
+    const val REPORT = "report"
+    const val CATALOG_ITEM = "catalog_item"
     const val NONE = "none"
 
     /** Records an agent can run on by hand from their drawer. */
@@ -108,6 +118,66 @@ object DomainEventTypes {
     const val CHANGE_ORDER_DECIDED = "change_order.decided"
     const val MEASUREMENT_APPROVED = "measurement.approved"
     const val MEASUREMENT_INVOICED = "measurement.invoiced"
+    /** A measurement went to its client's link to approve. */
+    const val MEASUREMENT_SENT = "measurement.sent"
+    /** The client disputed a measurement from its link, with a note; approving it is `measurement.approved` (`via`). */
+    const val MEASUREMENT_DISPUTED = "measurement.disputed"
+
+    // History only: no agent listens for these (no spec), so the dispatcher never claims them. They are the
+    // activity log's record of who changed, cancelled or deleted what.
+    const val CLIENT_DELETED = "client.deleted"
+    const val QUOTE_DELETED = "quote.deleted"
+    const val INVOICE_CANCELLED = "invoice.cancelled"
+    const val INVOICE_DELETED = "invoice.deleted"
+    const val INVOICE_INSTALLMENTS_CHANGED = "invoice.installments_changed"
+    const val INVOICE_INSTALLMENT_PAID = "invoice.installment_paid"
+    const val INVOICE_TAX_CODE_SET = "invoice.tax_code_set"
+    const val SERVICE_UPDATED = "service.updated"
+    const val SERVICE_DELETED = "service.deleted"
+    const val PAYMENT_UPDATED = "payment.updated"
+    const val PAYMENT_CANCELLED = "payment.cancelled"
+    const val PAYMENT_DELETED = "payment.deleted"
+    const val SUPPLIER_CREATED = "supplier.created"
+    const val SUPPLIER_UPDATED = "supplier.updated"
+    const val SUPPLIER_ARCHIVED = "supplier.archived"
+    const val SUPPLIER_RESTORED = "supplier.restored"
+    const val SUPPLIER_DELETED = "supplier.deleted"
+    /** A supplier's link to the issues assigned to them was turned on, renewed or turned off (`action`). */
+    const val SUPPLIER_LINK_CHANGED = "supplier.link_changed"
+    const val EMPLOYEE_CREATED = "employee.created"
+    const val EMPLOYEE_UPDATED = "employee.updated"
+    const val EMPLOYEE_ARCHIVED = "employee.archived"
+    const val EMPLOYEE_RESTORED = "employee.restored"
+    const val EMPLOYEE_DELETED = "employee.deleted"
+    const val CATALOG_ITEM_CREATED = "catalog_item.created"
+    const val CATALOG_ITEM_UPDATED = "catalog_item.updated"
+    const val CATALOG_ITEM_DELETED = "catalog_item.deleted"
+    const val PROJECT_UPDATED = "project.updated"
+    const val PROJECT_DELETED = "project.deleted"
+    /** The phases were rewritten, or one phase's progress was set (`phase`, `toPct`). */
+    const val PROJECT_PHASES_CHANGED = "project.phases_changed"
+    /** The client's page was turned on or off, its link renewed, or its budget shown or hidden (`action`). */
+    const val PROJECT_SHARE_CHANGED = "project.share_changed"
+    const val PROJECT_RETENTION_INVOICED = "project.retention_invoiced"
+    const val SITE_LOG_UPDATED = "site_log.updated"
+    const val SITE_LOG_DELETED = "site_log.deleted"
+    const val SITE_PHOTO_ADDED = "site_photo.added"
+    const val SITE_PHOTO_UPDATED = "site_photo.updated"
+    const val SITE_PHOTO_DELETED = "site_photo.deleted"
+    const val SITE_ISSUE_UPDATED = "site_issue.updated"
+    const val SITE_ISSUE_DELETED = "site_issue.deleted"
+    const val CHANGE_ORDER_CREATED = "change_order.created"
+    const val CHANGE_ORDER_UPDATED = "change_order.updated"
+    const val CHANGE_ORDER_DELETED = "change_order.deleted"
+    /** Taken back to draft, from sent or decided. */
+    const val CHANGE_ORDER_REOPENED = "change_order.reopened"
+    const val MEASUREMENT_CREATED = "measurement.created"
+    const val MEASUREMENT_UPDATED = "measurement.updated"
+    const val MEASUREMENT_REOPENED = "measurement.reopened"
+    const val MEASUREMENT_DELETED = "measurement.deleted"
+    const val REPORT_POSTED = "report.posted"
+    const val REPORT_UPDATED = "report.updated"
+    const val REPORT_DELETED = "report.deleted"
 
     /** Agents react to events at most this many agent steps deep, so two agents can't feed each other forever. */
     const val MAX_DEPTH = 3
@@ -149,9 +219,17 @@ object DomainEventTypes {
         EventTypeSpec(CHANGE_ORDER_DECIDED, SubjectTypes.CHANGE_ORDER, DashboardModules.CHANGE_ORDERS),
         EventTypeSpec(MEASUREMENT_APPROVED, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
         EventTypeSpec(MEASUREMENT_INVOICED, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
+        EventTypeSpec(MEASUREMENT_SENT, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
+        EventTypeSpec(MEASUREMENT_DISPUTED, SubjectTypes.MEASUREMENT, DashboardModules.MEASUREMENTS),
     )
 
     private val byType = specs.associateBy { it.type }
 
     fun spec(type: String): EventTypeSpec? = byType[type]
+
+    /** Whether agents can react to [type]: only spec'd types are offered to them, so only those are dispatched. */
+    fun dispatched(type: String): Boolean = type in byType
+
+    /** What a customer sent in, not something someone did: the activity log leaves these out. */
+    val inbound = setOf(MESSAGE_RECEIVED, EMAIL_RECEIVED, INSTAGRAM_COMMENT_RECEIVED)
 }

@@ -6,6 +6,7 @@ import com.mongodb.client.model.Filters
 import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
+import com.rfm.edubot.building.model.ApprovalLink
 import com.rfm.edubot.building.model.ChangeApproval
 import com.rfm.edubot.building.model.ChangeOrder
 import com.rfm.edubot.building.model.ChangeOrderKind
@@ -16,7 +17,9 @@ import com.rfm.edubot.building.model.IssueEvent
 import com.rfm.edubot.building.model.IssueKind
 import com.rfm.edubot.building.model.IssuePriority
 import com.rfm.edubot.building.model.IssueStatus
+import com.rfm.edubot.building.model.LinkProof
 import com.rfm.edubot.building.model.Measurement
+import com.rfm.edubot.building.model.MeasurementDispute
 import com.rfm.edubot.building.model.MeasurementLine
 import com.rfm.edubot.building.model.MeasurementStatus
 import com.rfm.edubot.building.model.PhaseProgressChange
@@ -29,6 +32,7 @@ import com.rfm.edubot.building.model.RetentionRelease
 import com.rfm.edubot.building.model.SiteIssue
 import com.rfm.edubot.building.model.SiteLogEntry
 import com.rfm.edubot.building.model.SitePhoto
+import com.rfm.edubot.building.model.SupplierLink
 import com.rfm.edubot.building.model.Weather
 import com.rfm.edubot.crm.SequenceRepository
 import com.rfm.edubot.crm.getInstant
@@ -214,6 +218,9 @@ class SitePhotoRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     suspend fun forLogs(logIds: Collection<ObjectId>): List<SitePhoto> =
         if (logIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("logId", logIds.distinct()))).sort(Document("createdAt", 1)).toList().map { it.toPhoto() }
 
+    suspend fun forIssues(issueIds: Collection<ObjectId>): List<SitePhoto> =
+        if (issueIds.isEmpty()) emptyList() else collection.find(scoped(Filters.`in`("issueId", issueIds.distinct()))).sort(Document("createdAt", 1)).toList().map { it.toPhoto() }
+
     suspend fun forIssue(issueId: ObjectId): List<SitePhoto> =
         collection.find(scoped(Filters.eq("issueId", issueId))).sort(Document("createdAt", 1)).toList().map { it.toPhoto() }
 
@@ -297,6 +304,17 @@ class SiteIssueRepository(mongo: MongoModule, private val tenantId: ObjectId) {
     suspend fun insert(issue: SiteIssue) {
         collection.insertOne(issue.toDocument())
     }
+
+    /** Stores [next] only while the stored issue still has [expected]'s status and update time. */
+    suspend fun replace(expected: SiteIssue, next: SiteIssue): SiteIssue? {
+        val guard = Filters.and(Filters.eq("_id", expected.id), Filters.eq("status", expected.status.name), Filters.eq("updatedAt", expected.updatedAt.toDate()))
+        return next.takeIf { collection.replaceOne(scoped(guard), next.toDocument()).matchedCount > 0 }
+    }
+
+    /** A supplier's issues, in any of [statuses], across the company's projects. */
+    suspend fun forSupplier(supplierId: ObjectId, statuses: Collection<IssueStatus>): List<SiteIssue> =
+        collection.find(scoped(Filters.and(Filters.eq("supplierId", supplierId), Filters.`in`("status", statuses.map { it.name }))))
+            .sort(Document("dueDate", 1).append("createdAt", 1)).limit(MAX_LIST).toList().map { it.toIssue() }
 
     suspend fun replace(issue: SiteIssue): SiteIssue? =
         issue.takeIf { collection.replaceOne(scoped(Filters.eq("_id", issue.id)), issue.toDocument()).matchedCount > 0 }
@@ -437,6 +455,56 @@ class MeasurementRepository(mongo: MongoModule, private val tenantId: ObjectId) 
     companion object {
         const val COLLECTION = "building.measurements"
         const val MAX_LIST = 1000
+
+        /** The measurement a client's approval link opens, whatever its company. */
+        suspend fun byApprovalToken(mongo: MongoModule, token: String): Measurement? {
+            if (token.isBlank() || token.length > 100) return null
+            return mongo.database.getCollection<Document>(COLLECTION).find(Filters.eq("approval.token", token)).firstOrNull()?.toMeasurement()
+        }
+    }
+}
+
+/** The suppliers' links to the issues assigned to them: one per supplier, by company. */
+class SupplierLinkRepository(mongo: MongoModule, private val tenantId: ObjectId) {
+    private val collection = mongo.database.getCollection<Document>(COLLECTION)
+
+    suspend fun forSupplier(supplierId: ObjectId): SupplierLink? =
+        collection.find(scoped(Filters.eq("supplierId", supplierId))).firstOrNull()?.toSupplierLink()
+
+    suspend fun forSuppliers(supplierIds: Collection<ObjectId>): Map<ObjectId, SupplierLink> {
+        if (supplierIds.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("supplierId", supplierIds.distinct()))).toList().map { it.toSupplierLink() }.associateBy { it.supplierId }
+    }
+
+    /** Gives [supplierId] the link [token], in place of any other: the old token stops working at once. */
+    suspend fun put(supplierId: ObjectId, token: String, by: String, at: Instant): SupplierLink =
+        collection.findOneAndUpdate(
+            scoped(Filters.eq("supplierId", supplierId)),
+            Updates.combine(Updates.set("token", token), Updates.set("createdBy", by), Updates.set("createdAt", at.toDate())),
+            FindOneAndUpdateOptions().upsert(true).returnDocument(ReturnDocument.AFTER),
+        )!!.toSupplierLink()
+
+    suspend fun delete(supplierId: ObjectId): Boolean = collection.deleteOne(scoped(Filters.eq("supplierId", supplierId))).deletedCount > 0
+
+    private fun scoped(filter: Bson): Bson = Filters.and(Filters.eq("tenantId", tenantId), filter)
+
+    companion object {
+        const val COLLECTION = "building.supplier_links"
+
+        /** The link a supplier opens, whatever its company. */
+        suspend fun byToken(mongo: MongoModule, token: String): SupplierLink? {
+            if (token.isBlank() || token.length > 100) return null
+            return mongo.database.getCollection<Document>(COLLECTION).find(Filters.eq("token", token)).firstOrNull()?.toSupplierLink()
+        }
+
+        private fun Document.toSupplierLink() = SupplierLink(
+            id = getObjectId("_id"),
+            tenantId = getObjectId("tenantId"),
+            supplierId = getObjectId("supplierId"),
+            token = getString("token").orEmpty(),
+            createdBy = getString("createdBy").orEmpty(),
+            createdAt = getInstant("createdAt"),
+        )
     }
 }
 
@@ -510,6 +578,10 @@ private fun Document.double(field: String): Double? = (get(field) as? Number)?.t
 
 private fun Document.objectId(field: String): ObjectId? = get(field, ObjectId::class.java)
 
+private fun LinkProof.toDocument(): Document = Document("ip", ip).append("userAgent", userAgent)
+
+private fun Document.proof(field: String): LinkProof? = get(field, Document::class.java)?.let { LinkProof(it.getString("ip"), it.getString("userAgent")) }
+
 private fun Project.toDocument(): Document = Document("_id", id)
     .append("tenantId", tenantId)
     .append("number", number)
@@ -552,7 +624,7 @@ private fun Project.toDocument(): Document = Document("_id", id)
                 .append("progressPct", it.progressPct).append("weight", it.weight)
         },
     )
-    .append("share", share?.let { Document("token", it.token).append("enabled", it.enabled).append("createdAt", it.createdAt.toDate()) })
+    .append("share", share?.let { Document("token", it.token).append("enabled", it.enabled).append("createdAt", it.createdAt.toDate()).append("showBudget", it.showBudget) })
     .append("watchedHealth", watchedHealth)
     .append("version", version)
     .append("createdAt", createdAt.toDate())
@@ -611,7 +683,9 @@ private fun Document.toProject(): Project {
                 weight = it.int("weight"),
             )
         },
-        share = share?.let { ProjectShare(it.getString("token").orEmpty(), it.getBoolean("enabled") ?: false, it.getInstant("createdAt")) },
+        share = share?.let {
+            ProjectShare(it.getString("token").orEmpty(), it.getBoolean("enabled") ?: false, it.getInstant("createdAt"), it.getBoolean("showBudget") ?: false)
+        },
         watchedHealth = getString("watchedHealth"),
         version = (get("version") as? Number)?.toLong() ?: 0,
         createdAt = getInstant("createdAt"),
@@ -713,7 +787,13 @@ private fun SiteIssue.toDocument(): Document = Document("_id", id)
     .append("dueDate", dueDate?.toString())
     .append("resolvedAt", resolvedAt?.toDate())
     .append("closedAt", closedAt?.toDate())
-    .append("history", history.map { Document("at", it.at.toDate()).append("by", it.by).append("from", it.from?.name).append("to", it.to.name).append("note", it.note) })
+    .append(
+        "history",
+        history.map {
+            Document("at", it.at.toDate()).append("by", it.by).append("from", it.from?.name).append("to", it.to.name).append("note", it.note)
+                .append("via", it.via?.name).append("proof", it.proof?.toDocument())
+        },
+    )
     .append("createdBy", createdBy)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -736,7 +816,15 @@ private fun Document.toIssue() = SiteIssue(
     resolvedAt = instantOrNull("resolvedAt"),
     closedAt = instantOrNull("closedAt"),
     history = docs("history").map {
-        IssueEvent(it.getInstant("at"), it.getString("by").orEmpty(), enumOrNull<IssueStatus>(it.getString("from")), enumOr(it.getString("to"), IssueStatus.OPEN), it.getString("note"))
+        IssueEvent(
+            at = it.getInstant("at"),
+            by = it.getString("by").orEmpty(),
+            from = enumOrNull<IssueStatus>(it.getString("from")),
+            to = enumOr(it.getString("to"), IssueStatus.OPEN),
+            note = it.getString("note"),
+            via = enumOrNull<DecidedVia>(it.getString("via")),
+            proof = it.proof("proof"),
+        )
     },
     createdBy = getString("createdBy").orEmpty(),
     createdAt = getInstant("createdAt"),
@@ -759,6 +847,7 @@ private fun ChangeOrder.toDocument(): Document = Document("_id", id)
     .append("decidedBy", decidedBy)
     .append("decisionNote", decisionNote)
     .append("decidedVia", decidedVia?.name)
+    .append("decisionProof", decisionProof?.toDocument())
     .append("approval", approval?.let { Document("token", it.token).append("createdAt", it.createdAt.toDate()) })
     .append("createdBy", createdBy)
     .append("createdAt", createdAt.toDate())
@@ -781,6 +870,7 @@ private fun Document.toChange() = ChangeOrder(
     decidedBy = getString("decidedBy"),
     decisionNote = getString("decisionNote"),
     decidedVia = enumOrNull<DecidedVia>(getString("decidedVia")),
+    decisionProof = proof("decisionProof"),
     approval = get("approval", Document::class.java)?.let { ChangeApproval(it.getString("token").orEmpty(), it.getInstant("createdAt")) },
     createdBy = getString("createdBy").orEmpty(),
     createdAt = getInstant("createdAt"),
@@ -810,7 +900,14 @@ private fun Measurement.toDocument(): Document = Document("_id", id)
     .append("invoiceId", invoiceId)
     .append("approvedAt", approvedAt?.toDate())
     .append("approvedBy", approvedBy)
+    .append("approvedVia", approvedVia?.name)
+    .append("approvalProof", approvalProof?.toDocument())
     .append("invoicedAt", invoicedAt?.toDate())
+    .append("approval", approval?.let { Document("token", it.token).append("createdAt", it.createdAt.toDate()) })
+    .append(
+        "dispute",
+        dispute?.let { Document("name", it.name).append("note", it.note).append("at", it.at.toDate()).append("proof", it.proof?.toDocument()) },
+    )
     .append("createdBy", createdBy)
     .append("createdAt", createdAt.toDate())
     .append("updatedAt", updatedAt.toDate())
@@ -843,7 +940,13 @@ private fun Document.toMeasurement() = Measurement(
     invoiceId = objectId("invoiceId"),
     approvedAt = instantOrNull("approvedAt"),
     approvedBy = getString("approvedBy"),
+    approvedVia = enumOrNull<DecidedVia>(getString("approvedVia")),
+    approvalProof = proof("approvalProof"),
     invoicedAt = instantOrNull("invoicedAt"),
+    approval = get("approval", Document::class.java)?.let { ApprovalLink(it.getString("token").orEmpty(), it.getInstant("createdAt")) },
+    dispute = get("dispute", Document::class.java)?.let {
+        MeasurementDispute(it.getString("name").orEmpty(), it.getString("note").orEmpty(), it.getInstant("at"), it.proof("proof"))
+    },
     createdBy = getString("createdBy").orEmpty(),
     createdAt = getInstant("createdAt"),
     updatedAt = getInstant("updatedAt"),

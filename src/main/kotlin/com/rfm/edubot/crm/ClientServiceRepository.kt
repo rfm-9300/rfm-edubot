@@ -187,13 +187,18 @@ class ClientServiceRepository(mongoModule: MongoModule, private val tenantId: Ob
             Updates.combine(ops),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return doc?.toClientService()
+        val service = doc?.toClientService() ?: return null
+        events.append(tenantId, DomainEventTypes.SERVICE_UPDATED, SubjectRef.of(SubjectTypes.SERVICE, service.id), EventPayloads.service(service), service.relatedRefs())
+        return service
     }
 
     suspend fun delete(id: ObjectId): ClientServiceDelete {
         val existing = findById(id) ?: return ClientServiceDelete.NotFound
         if (existing.status == ClientServiceStatus.INVOICED) return ClientServiceDelete.Invoiced
         val removed = collection.deleteOne(scoped(Filters.eq("_id", id))).deletedCount > 0
+        if (removed) {
+            events.append(tenantId, DomainEventTypes.SERVICE_DELETED, SubjectRef.of(SubjectTypes.SERVICE, existing.id), EventPayloads.service(existing), existing.relatedRefs())
+        }
         return if (removed) ClientServiceDelete.Removed else ClientServiceDelete.NotFound
     }
 

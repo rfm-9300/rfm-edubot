@@ -48,6 +48,11 @@ internal class ProjectsOverview(mongo: MongoModule) : OverviewQueries(mongo) {
         } else {
             emptyList()
         }
+        val measurementsWaiting = if (DashboardModules.MEASUREMENTS in modules) {
+            records.measurements.list(statuses = listOf(MeasurementStatus.DRAFT)).count { it.awaitingClient }
+        } else {
+            0
+        }
         val finished = (overdue.map { it.projectId } + waiting.map { it.projectId } + toInvoice.map { it.projectId }).toSet() - ids.toSet()
         val label = (projects + records.projects.byIds(finished)).associate { it.id to "${it.number} · ${it.name}" }
 
@@ -114,6 +119,7 @@ internal class ProjectsOverview(mongo: MongoModule) : OverviewQueries(mongo) {
                 pendingChangesCents = waiting.sumOf { it.signedCents },
                 toInvoiceCount = toInvoice.size,
                 toInvoiceCents = toInvoice.sumOf { it.netCents },
+                measurementsWaiting = measurementsWaiting,
                 behind = behind.take(BEHIND_ROWS).map { (project, days) ->
                     OverviewProjectRowDto(
                         id = project.id.toHexString(),

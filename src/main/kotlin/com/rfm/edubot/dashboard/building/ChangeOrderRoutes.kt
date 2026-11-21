@@ -39,6 +39,11 @@ internal object ChangeOrderRoutes : DashboardFeature(DashboardModules.CHANGE_ORD
                 val change = b.records.changes.findById(call.idParam("id")) ?: return@get call.respond(HttpStatusCode.NotFound)
                 call.respond(b.records.changeDtos(listOf(change)).single())
             }
+            get("/changes/{id}/pdf") {
+                val b = deps.building(call)
+                val document = b.documents.changeOrder(call.idParam("id"), b.template, b.tenant.locale, b.stamp) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respondPdf(document)
+            }
             patch("/changes/{id}") {
                 val b = deps.building(call)
                 val id = call.idParam("id")

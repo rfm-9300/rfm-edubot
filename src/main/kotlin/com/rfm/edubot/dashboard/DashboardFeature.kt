@@ -63,6 +63,7 @@ internal class DashboardDeps(
 internal object DashboardFeatures {
     val all: List<DashboardFeature> = listOf(
         OverviewRoutes,
+        ActivityRoutes,
         ContactRoutes,
         InboxRoutes,
         PersonaRoutes,

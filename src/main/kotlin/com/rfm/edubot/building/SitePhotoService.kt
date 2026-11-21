@@ -10,7 +10,8 @@ import org.bson.types.ObjectId
 class SitePhotoService(private val records: BuildingRecords, private val store: PhotoStore) {
     /**
      * An upload as the browser sends it, already shrunk: [image] and its [thumb], both JPEG. [logId], [issueId] and
-     * [phaseId] say what it is of; without [shared] a photo of an issue stays inside the team.
+     * [phaseId] say what it is of; without [shared] a photo of an issue stays inside the team. [name] is who took it,
+     * when it comes from a supplier's link.
      */
     class Upload(
         val image: ByteArray,
@@ -21,6 +22,7 @@ class SitePhotoService(private val records: BuildingRecords, private val store: 
         val caption: String? = null,
         val shared: Boolean? = null,
         val takenAt: String? = null,
+        val name: String? = null,
     )
 
     suspend fun add(projectId: ObjectId, upload: Upload, companySlug: String, stamp: Stamp): Outcome<SitePhoto> {
@@ -58,14 +60,22 @@ class SitePhotoService(private val records: BuildingRecords, private val store: 
             createdAt = stamp.now,
         )
         records.photos.insert(photo)
+        records.events.photoAdded(photo, project)
         return Outcome.Done(photo)
     }
 
     /** A blank caption clears it; null keeps either. */
-    suspend fun edit(id: ObjectId, caption: String?, shared: Boolean?): SitePhoto? =
-        records.photos.update(id, caption?.trim()?.take(BuildingLimits.CAPTION), shared)
+    suspend fun edit(id: ObjectId, caption: String?, shared: Boolean?): SitePhoto? {
+        val photo = records.photos.update(id, caption?.trim()?.take(BuildingLimits.CAPTION), shared) ?: return null
+        records.projects.findById(photo.projectId)?.let { records.events.photoUpdated(photo, it) }
+        return photo
+    }
 
-    suspend fun delete(id: ObjectId): SitePhoto? = records.photos.delete(id)?.also(store::delete)
+    suspend fun delete(id: ObjectId): SitePhoto? {
+        val photo = records.photos.delete(id)?.also(store::delete) ?: return null
+        records.projects.findById(photo.projectId)?.let { records.events.photoDeleted(photo, it) }
+        return photo
+    }
 
     fun bytes(photo: SitePhoto, thumb: Boolean): ByteArray? = store.read(photo, thumb)
 }

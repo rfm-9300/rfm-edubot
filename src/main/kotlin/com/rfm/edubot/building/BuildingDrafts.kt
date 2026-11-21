@@ -152,6 +152,22 @@ internal fun secretToken(): String = Base64.getUrlEncoder().withoutPadding().enc
 
 internal fun objectIdOrNull(raw: String): ObjectId? = raw.takeIf(ObjectId::isValid)?.let(::ObjectId)
 
+/** What someone typed on a client's or a supplier's link: their name, and a note when they wrote one. */
+internal class LinkWords(val name: String, val note: String?)
+
+/** A name shorter than this is no name: whoever answers from a link must say who they are. */
+internal const val MIN_LINK_NAME = 2
+
+/** [name] and [note] as typed on a link, trimmed, or why they can't be taken (`detail` is the field). */
+internal fun linkWords(name: String, note: String?): Outcome<LinkWords> {
+    val who = name.trim()
+    if (who.length < MIN_LINK_NAME) return invalid("name_required", "name")
+    if (who.length > BuildingLimits.NAME) return invalid("name_too_long", "name")
+    val said = note?.trim()?.ifEmpty { null }
+    if (said != null && said.length > BuildingLimits.NOTE) return invalid("note_too_long", "note")
+    return Outcome.Done(LinkWords(who, said))
+}
+
 /** A text field of an edit: null keeps [current], blank clears it. */
 internal fun text(value: String?, current: String?, max: Int, tooLong: String): Parsed<String?> {
     if (value == null) return Parsed.Good(current)

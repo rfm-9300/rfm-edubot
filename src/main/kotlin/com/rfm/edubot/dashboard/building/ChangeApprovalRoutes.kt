@@ -1,9 +1,13 @@
 package com.rfm.edubot.dashboard.building
 
+import com.rfm.edubot.building.BuildingDocuments
 import com.rfm.edubot.building.BuildingRecords
 import com.rfm.edubot.building.ChangeOrderRepository
 import com.rfm.edubot.building.ChangeOrderService
+import com.rfm.edubot.building.PhotoStore
 import com.rfm.edubot.building.Stamp
+import com.rfm.edubot.building.changeBudget
+import com.rfm.edubot.building.Outcome
 import com.rfm.edubot.building.api.ChangeDecisionRequest
 import com.rfm.edubot.building.api.sharedDto
 import com.rfm.edubot.building.model.ChangeOrder
@@ -37,9 +41,12 @@ import kotlinx.coroutines.withContext
  * beside the project's page. It shows the change as it was sent and, once decided, the decision; it works
  * while the company is active and until the change goes back to draft.
  */
-internal fun Route.changeApprovalRoutes(mongo: MongoModule, tenants: TenantRepository) {
+internal fun Route.changeApprovalRoutes(mongo: MongoModule, tenants: TenantRepository, storagePath: () -> String) {
     class Approval(val change: ChangeOrder, val project: Project, val tenant: Tenant) {
-        fun dto(change: ChangeOrder = this.change) = change.sharedDto(project, tenant, hasLogo = tenant.documentTemplate.logoFile() != null)
+        val records = BuildingRecords(mongo, tenant.id)
+
+        suspend fun dto(change: ChangeOrder = this.change) =
+            change.sharedDto(project, tenant, hasLogo = tenant.documentTemplate.logoFile() != null, changeBudget(change, project, records.changes.list(project.id)))
     }
 
     suspend fun ApplicationCall.approval(): Approval? {
@@ -70,10 +77,23 @@ internal fun Route.changeApprovalRoutes(mongo: MongoModule, tenants: TenantRepos
         val name = request.name.trim()
         val stamp = Stamp(name, SystemClock.now(), approval.tenant.zone())
         val outcome = withContext(ActorContext(Actor(ActorType.CLIENT, name = name.take(MAX_ACTOR_NAME)))) {
-            ChangeOrderService(BuildingRecords(mongo, approval.tenant.id))
-                .decideByLink(approval.change.id, call.parameters["token"].orEmpty(), request.decision, request.name, request.note, stamp)
+            ChangeOrderService(approval.records)
+                .decideByLink(approval.change.id, call.parameters["token"].orEmpty(), request.decision, request.name, request.note, call.linkProof(), stamp)
         }
-        call.respondOutcome(outcome) { approval.dto(it) }
+        when (outcome) {
+            is Outcome.Done -> call.respond(approval.dto(outcome.value))
+            is Outcome.Refused -> call.respondRefused(outcome)
+            Outcome.NotFound -> call.respond(HttpStatusCode.NotFound)
+        }
+    }
+    // The client's copy of the change as it stands, with its decision once there is one.
+    get("/app/share/change/{token}/pdf") {
+        val approval = call.approval() ?: return@get
+        val stamp = Stamp(approval.change.createdBy, SystemClock.now(), approval.tenant.zone())
+        val template = approval.tenant.documentTemplate.withCompanyFallback(approval.tenant.name)
+        val document = BuildingDocuments(approval.records, PhotoStore(storagePath)).changeOrder(approval.change, template, approval.tenant.locale, stamp)
+            ?: return@get call.respond(HttpStatusCode.NotFound)
+        call.respondPdf(document)
     }
     get("/app/share/change/{token}/logo") {
         val approval = call.approval() ?: return@get

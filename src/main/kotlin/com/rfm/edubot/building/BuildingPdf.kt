@@ -1,5 +1,7 @@
 package com.rfm.edubot.building
 
+import com.rfm.edubot.building.model.ChangeOrder
+import com.rfm.edubot.building.model.ChangeOrderStatus
 import com.rfm.edubot.building.model.Measurement
 import com.rfm.edubot.building.model.Project
 import com.rfm.edubot.building.model.SiteLogEntry
@@ -26,6 +28,12 @@ import kotlin.math.min
 /** What a measurement's PDF prints: the measurement, its project and client, the company's day it was approved, and its invoice. */
 class MeasurementSheet(val measurement: Measurement, val project: Project, val client: Client?, val approvedOn: LocalDate?, val invoiceNumber: String?)
 
+/**
+ * What a change order's PDF prints: the change, its project and client, what it does to the contract and the
+ * planned end ([budget]), the company's day it was sent, and when it was decided in the company's time.
+ */
+class ChangeSheet(val change: ChangeOrder, val project: Project, val client: Client?, val budget: ChangeBudget, val sentOn: LocalDate?, val decidedOn: String?)
+
 /** One diary day, with some of its photos (thumbnail JPEGs) and how many more it has. */
 class DiaryDay(val entry: SiteLogEntry, val photos: List<DiaryPhoto>, val morePhotos: Int)
 
@@ -36,7 +44,8 @@ class DiarySheet(val project: Project, val client: Client?, val managerName: Str
 
 /**
  * Building's PDFs, in the company's [locale] and with its logo, name and colour: a measurement (auto de medição)
- * with its lines, totals and signature boxes, and the site diary of a period. Apart from the quotes' and invoices'
+ * with its lines, totals and signature boxes, a change order with what it does to the contract and who decided it,
+ * and the site diary of a period. Apart from the quotes' and invoices'
  * generator, whose page the company designs block by block; these flow from page to page.
  */
 class BuildingPdf(private val template: DocumentTemplate, private val locale: String) {
@@ -67,6 +76,34 @@ class BuildingPdf(private val template: DocumentTemplate, private val locale: St
             measurementTotals(w, m)
             m.notes?.takeIf { it.isNotBlank() }?.let { paragraphBlock(w, t("pdf.notes"), it) }
             signatures(w)
+        }
+    }
+
+    fun changeOrder(sheet: ChangeSheet): ByteArray {
+        val c = sheet.change
+        val title = t("pdf.changeTitle", "n" to c.number)
+        return write("$title · ${sheet.project.number}") { w ->
+            header(
+                w, title, t("pdf.changeStatus.${c.status.name}"),
+                listOfNotNull(
+                    t("pdf.project") to "${sheet.project.number} · ${sheet.project.name}",
+                    sheet.client?.let { t("pdf.client") to clientLine(it) },
+                    sheet.project.address?.takeIf { it.isNotBlank() }?.let { t("pdf.site") to it },
+                    t("pdf.kind") to t("pdf.kind.${c.kind.name}"),
+                    sheet.sentOn?.let { t("pdf.sent") to BuildingCopy.date(it) },
+                ),
+            )
+            w.room(30f)
+            w.wrap(c.title, w.bold, 12f, WIDTH).take(3).forEach { line ->
+                w.text(line, LEFT, w.y - 12f, 12f, w.bold, INK)
+                w.y -= 16f
+            }
+            w.y -= 8f
+            c.description?.takeIf { it.isNotBlank() }?.let { paragraphBlock(w, t("pdf.description"), it) }
+            changeLines(w, c)
+            changeTotals(w, c)
+            changeEffect(w, sheet)
+            changeDecision(w, sheet)
         }
     }
 
@@ -175,6 +212,117 @@ class BuildingPdf(private val template: DocumentTemplate, private val locale: St
             w.text("${t("pdf.signDate")}: ____ / ____ / ________", x, w.y - 74f, 8f, w.regular, MUTED)
         }
         w.y -= 92f
+    }
+
+    // ── The change order ──────────────────────────────────────────────────────────────────────────
+
+    private fun changeLines(w: Writer, c: ChangeOrder) {
+        val columns = listOf(
+            Column(t("pdf.thLine"), 255f, false), Column(t("pdf.thQty"), 55f, true), Column(t("pdf.thUnit"), 40f, false),
+            Column(t("pdf.thUnitPrice"), 80f, true), Column(t("pdf.thTotal"), 85f, true),
+        )
+        val xs = columns.runningFold(LEFT) { x, col -> x + col.width }
+        fun head() {
+            w.fill(SURFACE, LEFT, w.y - 20f, WIDTH, 20f)
+            columns.forEachIndexed { i, col ->
+                if (col.right) w.textRight(col.label, xs[i + 1] - CELL_PAD, w.y - 13f, 7f, w.bold, SOFT)
+                else w.text(w.fit(col.label, w.bold, 7f, col.width - CELL_PAD * 2), xs[i] + CELL_PAD, w.y - 13f, 7f, w.bold, SOFT)
+            }
+            w.y -= 20f
+        }
+        w.room(44f)
+        head()
+        c.items.forEach { item ->
+            val description = w.wrap(item.description, w.regular, 8.5f, columns[0].width - CELL_PAD * 2)
+            val rowH = description.size * 11f + 8f
+            if (w.y - rowH < BOTTOM) {
+                w.newPage()
+                head()
+            }
+            val baseline = w.y - 12f
+            description.forEachIndexed { i, text -> w.text(text, LEFT + CELL_PAD, baseline - i * 11f, 8.5f, w.regular, INK) }
+            w.textRight(BuildingCopy.decimal(locale, item.quantity), xs[2] - CELL_PAD, baseline, 8.5f, w.regular, INK)
+            w.text(w.fit(item.unit, w.regular, 8.5f, columns[2].width - CELL_PAD * 2), xs[2] + CELL_PAD, baseline, 8.5f, w.regular, SOFT)
+            w.textRight(BuildingCopy.money(locale, item.unitPriceCents), xs[4] - CELL_PAD, baseline, 8.5f, w.regular, INK)
+            w.textRight(BuildingCopy.money(locale, item.totalCents), xs[5] - CELL_PAD, baseline, 8.5f, w.bold, INK)
+            w.y -= rowH
+            w.line(RULE, LEFT, w.y, RIGHT, w.y, 0.5f)
+        }
+        w.y -= 16f
+    }
+
+    private fun changeTotals(w: Writer, c: ChangeOrder) {
+        w.room(48f)
+        val x = RIGHT - 250f
+        w.text(t("pdf.days"), LEFT, w.y - 11f, 8.5f, w.regular, SOFT)
+        w.text(days(c.daysImpact), LEFT, w.y - 25f, 9.5f, w.bold, INK)
+        w.fill(accent, x - 8f, w.y - 22f, 258f, 22f)
+        w.text(t("pdf.changeTotal.${c.kind.name}"), x, w.y - 15f, 9.5f, w.bold, onAccent)
+        w.textRight(BuildingCopy.money(locale, c.signedCents), RIGHT - 4f, w.y - 15f, 10f, w.bold, onAccent)
+        w.y -= 44f
+    }
+
+    private fun days(n: Int): String = when {
+        n == 0 -> t("pdf.daysNone")
+        n == 1 -> t("pdf.daysMore1")
+        n == -1 -> t("pdf.daysLess1")
+        n > 0 -> t("pdf.daysMore", "n" to n.toString())
+        else -> t("pdf.daysLess", "n" to (-n).toString())
+    }
+
+    /** The contract and the planned end without this change and with it. */
+    private fun changeEffect(w: Writer, sheet: ChangeSheet) {
+        val b = sheet.budget
+        val rows = listOfNotNull(
+            t("pdf.contractBefore") to BuildingCopy.money(locale, b.beforeCents),
+            t("pdf.contractAfter") to BuildingCopy.money(locale, b.afterCents),
+            b.endBefore?.let { t("pdf.endBefore") to BuildingCopy.date(it) },
+            b.endAfter?.let { t("pdf.endAfter") to BuildingCopy.date(it) },
+        )
+        w.room(rows.size * 16f + 30f)
+        w.text(t("pdf.effectTitle").uppercase(), LEFT, w.y - 8f, 6.8f, w.bold, MUTED)
+        w.y -= 16f
+        rows.forEachIndexed { i, (label, value) ->
+            val strong = i == 1 || i == 3
+            w.text(label, LEFT, w.y - 11f, 9f, if (strong) w.bold else w.regular, if (strong) INK else SOFT)
+            w.textRight(value, LEFT + 330f, w.y - 11f, 9f, if (strong) w.bold else w.regular, INK)
+            w.y -= 16f
+        }
+        w.y -= 14f
+    }
+
+    /** Who decided and when, how and from where; signature boxes while nobody has. */
+    private fun changeDecision(w: Writer, sheet: ChangeSheet) {
+        val c = sheet.change
+        w.room(40f)
+        w.text(t("pdf.decisionTitle").uppercase(), LEFT, w.y - 8f, 6.8f, w.bold, MUTED)
+        w.y -= 16f
+        if (c.status != ChangeOrderStatus.APPROVED && c.status != ChangeOrderStatus.REJECTED) {
+            w.text(t("pdf.awaiting"), LEFT, w.y - 10f, 9.5f, w.regular, INK)
+            w.y -= 30f
+            signatures(w)
+            return
+        }
+        val line = t("pdf.decided.${c.status.name}", "name" to c.decidedBy.orEmpty(), "when" to sheet.decidedOn.orEmpty())
+        w.wrap(line, w.bold, 10f, WIDTH).forEach {
+            w.room(14f)
+            w.text(it, LEFT, w.y - 10f, 10f, w.bold, INK)
+            w.y -= 14f
+        }
+        c.decidedVia?.let {
+            w.text(t("pdf.via.${it.name}"), LEFT, w.y - 9f, 8.5f, w.regular, SOFT)
+            w.y -= 14f
+        }
+        c.decisionProof?.let { proof ->
+            val text = t("pdf.proof", "ip" to (proof.ip ?: "—"), "device" to (proof.userAgent ?: "—"))
+            w.wrap(text, w.regular, 7.5f, WIDTH).take(3).forEach {
+                w.room(11f)
+                w.text(it, LEFT, w.y - 8f, 7.5f, w.regular, MUTED)
+                w.y -= 11f
+            }
+        }
+        w.y -= 6f
+        c.decisionNote?.takeIf { it.isNotBlank() }?.let { paragraphBlock(w, t("pdf.notes"), it) }
     }
 
     // ── The diary ─────────────────────────────────────────────────────────────────────────────────

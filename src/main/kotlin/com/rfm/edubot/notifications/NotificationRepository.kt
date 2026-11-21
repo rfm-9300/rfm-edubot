@@ -57,6 +57,10 @@ object NotificationKinds {
     const val CHATBOT_ANSWERS = "chatbot_answers"
     /** A client approved or rejected a change order from its link; its subject is the change. */
     const val CHANGE_ORDER_DECIDED = "change_order_decided"
+    /** A client approved or disputed a measurement from its link (`decision`); its subject is the measurement. */
+    const val MEASUREMENT_DECIDED = "measurement_decided"
+    /** A supplier started or fixed an issue from their link (`to`); its subject is the issue. */
+    const val SITE_ISSUE_SUPPLIER = "site_issue_supplier"
 }
 
 class NotificationRepository(mongo: MongoModule, private val clock: () -> Instant = SystemClock::now) {

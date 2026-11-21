@@ -2,6 +2,7 @@ package com.rfm.edubot.dashboard.building
 
 import com.rfm.edubot.building.api.IssueRequest
 import com.rfm.edubot.building.api.issueDtos
+import com.rfm.edubot.building.api.supplierLinkDto
 import com.rfm.edubot.building.model.IssueStatus
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.DashboardFeature
@@ -17,7 +18,11 @@ import io.ktor.server.routing.patch
 import io.ktor.server.routing.post
 import io.ktor.server.routing.route
 
-/** `/building/issues`: punch items, defects and safety problems on site, with their status history and photos. */
+/**
+ * `/building/issues`: punch items, defects and safety problems on site, with their status history and photos; and
+ * `/building/suppliers/{id}/link`, the link a supplier opens to see the issues assigned to them and say they started
+ * or fixed one.
+ */
 internal object SiteIssueRoutes : DashboardFeature(DashboardModules.SITE_ISSUES) {
     override fun Route.routes(deps: DashboardDeps) {
         route("/building") {
@@ -49,6 +54,28 @@ internal object SiteIssueRoutes : DashboardFeature(DashboardModules.SITE_ISSUES)
                 val b = deps.building(call)
                 if (!b.issues.delete(call.idParam("id"))) return@delete call.respond(HttpStatusCode.NotFound)
                 call.respond(DeletedDto(true))
+            }
+
+            get("/suppliers/{id}/link") {
+                val b = deps.building(call)
+                val id = call.idParam("id")
+                b.records.suppliers.findById(id) ?: return@get call.respond(HttpStatusCode.NotFound)
+                call.respond(supplierLinkDto(id, b.supplierLinks.find(id)))
+            }
+            post("/suppliers/{id}/link") {
+                val b = deps.building(call)
+                val id = call.idParam("id")
+                call.respondOutcome(b.supplierLinks.open(id, b.stamp)) { supplierLinkDto(id, it) }
+            }
+            post("/suppliers/{id}/link/rotate") {
+                val b = deps.building(call)
+                val id = call.idParam("id")
+                call.respondOutcome(b.supplierLinks.rotate(id, b.stamp)) { supplierLinkDto(id, it) }
+            }
+            delete("/suppliers/{id}/link") {
+                val b = deps.building(call)
+                val id = call.idParam("id")
+                call.respondOutcome(b.supplierLinks.stop(id)) { supplierLinkDto(id, null) }
             }
         }
     }

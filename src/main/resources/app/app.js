@@ -28,7 +28,9 @@ async function bootAuthed() {
   // An employee's session reaches only its own pages: no bell, no Home figures.
   if (!isPortal()) startNotifications();
   // The Chatbot page has no module of its own: it comes with Persona.
-  const pageOpens = page => state.me.modules.includes(page) || (page === 'chatbot' && state.me.modules.includes('persona'));
+  // Activity is no module: the company's admins have it.
+  const pageOpens = page => state.me.modules.includes(page) || (page === 'chatbot' && state.me.modules.includes('persona')) ||
+    (page === 'activity' && !isPortal() && isCompanyAdmin());
   if (!pageOpens(state.active)) state.active = state.me.modules[0] || 'settings';
   // The address may still name the previous session's page, or one this session can't open.
   const hashTab = (location.hash || '').replace('#', '');
@@ -93,7 +95,7 @@ function renderNav() {
     { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
     { id: 'groupBot', items: ['persona', 'chatbot', 'ai-assistant', 'agents'] },
-    { id: 'groupSetup', items: ['settings'] },
+    { id: 'groupSetup', items: ['settings', 'activity'] },
   ];
   const enabled = new Set(state.me.modules);
   // Financeiro isn't its own toggleable module — it's a combined week/month lens over
@@ -101,6 +103,8 @@ function renderNav() {
   if (enabled.has('invoices') || enabled.has('payments')) enabled.add('financeiro');
   // The Chatbot page shares the Persona module: whoever may see how the bot talks may see its fixed flows.
   if (enabled.has('persona')) enabled.add('chatbot');
+  // Who did what is the admins' to read.
+  if (!isPortal() && isCompanyAdmin()) enabled.add('activity');
   $('#nav').innerHTML = groups.map(g => {
     const items = g.items.filter(m => enabled.has(m));
     if (!items.length) return '';
@@ -256,6 +260,7 @@ async function loadModule(tab) {
     state.persona = persona;
   }
   if (tab === 'chatbot') await window.ChatbotUI.load().catch(err => { window.ChatbotUI.failed(err); });
+  if (tab === 'activity') await loadActivity();
   if (tab === 'ai-assistant') await window.AssistantUI.load();
   if (tab === 'settings') {
     state.webWidget = await api('/app/api/web-widget').catch(() => ({ publicKey: null, allowedOrigins: [] }));
@@ -357,6 +362,7 @@ function render() {
   if (state.active === 'site-issues') return renderSiteIssues(root);
   if (state.active === 'change-orders') return renderChangeOrders(root);
   if (state.active === 'measurements') return renderMeasurements(root);
+  if (state.active === 'activity') return renderActivity(root);
   renderSettings(root);
 }
 

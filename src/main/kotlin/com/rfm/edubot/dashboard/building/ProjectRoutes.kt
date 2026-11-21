@@ -6,6 +6,7 @@ import com.rfm.edubot.building.api.PhaseProgressRequest
 import com.rfm.edubot.building.api.PhasesRequest
 import com.rfm.edubot.building.api.PhotoUpdateRequest
 import com.rfm.edubot.building.api.ProjectRequest
+import com.rfm.edubot.building.api.ShareSettingsRequest
 import com.rfm.edubot.building.api.costsDto
 import com.rfm.edubot.building.api.dto
 import com.rfm.edubot.building.api.projectDtos
@@ -102,6 +103,13 @@ internal object ProjectRoutes : DashboardFeature(DashboardModules.PROJECTS) {
                 val b = deps.building(call)
                 call.respondOutcome(b.projects.share(call.idParam("id"), b.stamp)) { b.detail(it) }
             }
+            patch("/projects/{id}/share") {
+                val b = deps.building(call)
+                val id = call.idParam("id")
+                val show = call.receive<ShareSettingsRequest>().showBudget
+                    ?: return@patch call.respond(HttpStatusCode.BadRequest, ErrorBody(ApiErrors.INVALID_BODY, "showBudget"))
+                call.respondOutcome(b.projects.setShareBudget(id, show, b.stamp)) { b.detail(it) }
+            }
             post("/projects/{id}/share/rotate") {
                 val b = deps.building(call)
                 call.respondOutcome(b.projects.rotateShare(call.idParam("id"), b.stamp)) { b.detail(it) }
@@ -188,5 +196,6 @@ internal suspend fun ApplicationCall.receivePhoto(): SitePhotoService.Upload? {
         caption = fields["caption"],
         shared = fields["shared"]?.toBooleanStrictOrNull(),
         takenAt = fields["takenAt"],
+        name = fields["name"],
     )
 }

@@ -5,9 +5,12 @@ import com.rfm.edubot.conversation.model.Conversation
 import com.rfm.edubot.conversation.model.User
 import com.rfm.edubot.crm.model.Client
 import com.rfm.edubot.crm.model.ClientService
+import com.rfm.edubot.crm.model.Employee
 import com.rfm.edubot.crm.model.Invoice
 import com.rfm.edubot.crm.model.Payment
+import com.rfm.edubot.crm.StandardItem
 import com.rfm.edubot.crm.model.Quote
+import com.rfm.edubot.crm.model.Supplier
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonObjectBuilder
 import kotlinx.serialization.json.buildJsonObject
@@ -62,6 +65,24 @@ internal object EventPayloads {
         service.bookingId?.let { put("bookingId", it.toHexString()) }
         service.quoteId?.let { put("quoteId", it.toHexString()) }
         extra()
+    }
+
+    fun supplier(supplier: Supplier): JsonObject = buildJsonObject {
+        put("number", supplier.number)
+        put("name", supplier.name)
+        supplier.type?.let { put("type", it) }
+    }
+
+    fun employee(employee: Employee): JsonObject = buildJsonObject {
+        put("number", employee.number)
+        put("name", employee.name)
+        employee.role?.let { put("role", it) }
+    }
+
+    fun catalogItem(item: StandardItem): JsonObject = buildJsonObject {
+        item.code?.let { put("number", it) }
+        put("name", item.title)
+        put("type", item.type)
     }
 
     fun booking(booking: Booking, extra: JsonObjectBuilder.() -> Unit = {}): JsonObject = buildJsonObject {

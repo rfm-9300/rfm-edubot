@@ -16,6 +16,8 @@ import com.rfm.edubot.building.SiteDiaryService
 import com.rfm.edubot.building.SiteIssueService
 import com.rfm.edubot.building.SitePhotoService
 import com.rfm.edubot.building.Stamp
+import com.rfm.edubot.building.SupplierLinkService
+import com.rfm.edubot.building.model.LinkProof
 import com.rfm.edubot.dashboard.DashboardContext
 import com.rfm.edubot.dashboard.DashboardDeps
 import com.rfm.edubot.dashboard.moduleContext
@@ -32,6 +34,8 @@ import io.ktor.http.ContentType
 import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.plugins.origin
+import io.ktor.server.request.header
 import io.ktor.server.response.header
 import io.ktor.server.response.respond
 import io.ktor.server.response.respondBytes
@@ -53,6 +57,7 @@ internal class TenantBuilding(private val mongo: MongoModule, val ctx: Dashboard
     val measurements: MeasurementService get() = MeasurementService(records)
     val documents: BuildingDocuments get() = BuildingDocuments(records, store)
     val costs: ProjectCostsService get() = ProjectCostsService(records)
+    val supplierLinks: SupplierLinkService get() = SupplierLinkService(records)
 
     fun reports(ai: AiClient): ProjectReportService = ProjectReportService(records, ai, TenantUsageRepository(mongo, tenant.id))
     val template: DocumentTemplate get() = tenant.documentTemplate.withCompanyFallback(tenant.name)
@@ -90,6 +95,21 @@ internal suspend fun ApplicationCall.respondPdf(document: BuildingDocument) {
     response.header(HttpHeaders.ContentDisposition, ContentDisposition.Inline.withParameter(ContentDisposition.Parameters.FileName, document.fileName).toString())
     respondBytes(document.bytes, ContentType.Application.Pdf)
 }
+
+/**
+ * Where an answer from a client's or a supplier's link came from: the first `X-Forwarded-For` address (the proxy in
+ * front of the app sets it, and the app's port isn't reachable from outside), else the connection's, and the
+ * browser's `User-Agent`, both cut short.
+ */
+internal fun ApplicationCall.linkProof(): LinkProof {
+    val forwarded = request.header("X-Forwarded-For")?.split(',')?.firstOrNull()?.trim()?.takeIf { it.isNotEmpty() }
+    val ip = (forwarded ?: request.origin.remoteAddress).take(MAX_PROOF_IP).ifBlank { null }
+    val agent = request.header("User-Agent")?.trim()?.take(MAX_PROOF_AGENT)?.ifBlank { null }
+    return LinkProof(ip, agent)
+}
+
+private const val MAX_PROOF_IP = 64
+private const val MAX_PROOF_AGENT = 300
 
 /** `?projectId=`: the records of one project. */
 internal fun ApplicationCall.projectFilter(): ObjectId? =

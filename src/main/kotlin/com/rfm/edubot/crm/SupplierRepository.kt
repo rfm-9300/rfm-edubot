@@ -6,6 +6,11 @@ import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.Supplier
 import com.rfm.edubot.crm.model.SupplierService
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -17,6 +22,7 @@ import org.bson.types.ObjectId
 class SupplierRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.suppliers")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Supplier? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toSupplier()
@@ -47,10 +53,20 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
     }
 
     /** Only a supplier with no payments can be deleted; the others get archived. */
-    suspend fun delete(id: ObjectId): DirectoryDelete =
-        collection.deleteUnreferenced(mongoModule, tenantId, id, "supplierId", listOf("crm.payments"))
+    suspend fun delete(id: ObjectId): DirectoryDelete {
+        val supplier = findById(id)
+        val result = collection.deleteUnreferenced(mongoModule, tenantId, id, "supplierId", listOf("crm.payments"))
+        if (result == DirectoryDelete.DELETED && supplier != null) record(DomainEventTypes.SUPPLIER_DELETED, supplier)
+        return result
+    }
 
-    suspend fun setArchived(id: ObjectId, archived: Boolean): Supplier? = collection.setArchived(tenantId, id, archived)?.toSupplier()
+    suspend fun setArchived(id: ObjectId, archived: Boolean): Supplier? =
+        collection.setArchived(tenantId, id, archived)?.toSupplier()?.also { record(if (archived) DomainEventTypes.SUPPLIER_ARCHIVED else DomainEventTypes.SUPPLIER_RESTORED, it) }
+
+    /** The activity log's record of a write to [supplier]. */
+    private suspend fun record(type: String, supplier: Supplier) {
+        events.append(tenantId, type, SubjectRef.of(SubjectTypes.SUPPLIER, supplier.id), EventPayloads.supplier(supplier))
+    }
 
     /**
      * [address] is replaced as given (null clears it). [type], [contactPerson] and [services] are only written when
@@ -80,7 +96,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return doc?.toSupplier()
+        return doc?.toSupplier()?.also { record(DomainEventTypes.SUPPLIER_UPDATED, it) }
     }
 
     suspend fun create(
@@ -106,6 +122,7 @@ class SupplierRepository(private val mongoModule: MongoModule, private val tenan
             services = services,
         )
         collection.insertOne(supplier.toDocument())
+        record(DomainEventTypes.SUPPLIER_CREATED, supplier)
         return supplier
     }
 

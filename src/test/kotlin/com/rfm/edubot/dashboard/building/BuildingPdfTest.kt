@@ -143,4 +143,32 @@ class BuildingPdfTest {
         assertEquals(HttpStatusCode.OK, empty.status, "the last 30 days by default")
         assertTrue("Sem registos neste período." in textOf(empty.bytes))
     }
+
+    @Test
+    fun `a change order prints its lines, what it does to the contract, and who approved it from where`() = dashboardApiTest(mongo) {
+        val a = company()
+        val clientId = client(a, name = "Marta Marques")
+        val id = project(a) {
+            put("clientId", clientId); put("plannedStart", a.day(-10)); put("plannedEnd", a.day(20))
+            putJsonArray("contract") { addJsonObject { put("description", "Moradia"); put("quantity", 1.0); put("unitPriceEur", 10000.0) } }
+        }.text("id")!!
+        val change = a.post("$api/changes") {
+            put("projectId", id); put("title", "Claraboia na sala"); put("daysImpact", 3)
+            putJsonArray("items") { addJsonObject { put("description", "Claraboia 120x80"); put("quantity", 1.0); put("unit", "un"); put("unitPriceEur", 1850.0) } }
+        }
+        val number = change.text("number")!!
+        val waiting = a.download("$api/changes/${change.text("id")}/pdf")
+        assertEquals(HttpStatusCode.OK, waiting.status)
+        val unsigned = textOf(waiting.bytes)
+        assertTrue(number in unsigned && "Claraboia 120x80" in unsigned && "Marta Marques" in unsigned, unsigned)
+        assertTrue("O dono de obra" in unsigned, "undecided, it has signature boxes")
+
+        val token = a.post("$api/changes/${change.text("id")}/status") { put("status", "SENT") }.text("approvalToken")!!
+        call("POST", "/app/share/change/$token/decision", null, """{"decision":"APPROVED","name":"Marta Marques"}""", headers = mapOf("X-Forwarded-For" to "85.240.1.2"))
+        val signed = textOf(publicDownload("/app/share/change/$token/pdf").bytes)
+        assertTrue("Aprovada por Marta Marques" in signed, signed)
+        assertTrue("85.240.1.2" in signed, "where the answer came from")
+        assertTrue("10 000,00 €" in signed && "11 850,00 €" in signed, "the contract before and after")
+        assertFalse("O dono de obra" in signed, "decided, no signature boxes")
+    }
 }

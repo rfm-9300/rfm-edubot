@@ -5,6 +5,11 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.ReturnDocument
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.crm.model.Employee
+import com.rfm.edubot.events.DomainEventLog
+import com.rfm.edubot.events.DomainEventTypes
+import com.rfm.edubot.events.EventPayloads
+import com.rfm.edubot.events.SubjectRef
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
 import kotlinx.coroutines.flow.firstOrNull
@@ -17,6 +22,7 @@ import org.bson.types.ObjectId
 class EmployeeRepository(private val mongoModule: MongoModule, private val tenantId: ObjectId) {
     private val collection = mongoModule.database.getCollection<Document>("crm.employees")
     private val sequences = SequenceRepository(mongoModule, tenantId)
+    private val events = DomainEventLog(mongoModule)
 
     suspend fun findById(id: ObjectId): Employee? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toEmployee()
@@ -50,13 +56,23 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
      * deleted; the others get archived. Shifts are the working-time record the company keeps for five years, and
      * planned ones the attendance against it (absences included).
      */
-    suspend fun delete(id: ObjectId): DirectoryDelete =
-        collection.deleteUnreferenced(
+    suspend fun delete(id: ObjectId): DirectoryDelete {
+        val employee = findById(id)
+        val result = collection.deleteUnreferenced(
             mongoModule, tenantId, id, "employeeId",
             listOf("crm.payments", ServiceSubmissionRepository.COLLECTION, "crm.client_services", SHIFTS_COLLECTION, PLANNED_COLLECTION),
         )
+        if (result == DirectoryDelete.DELETED && employee != null) record(DomainEventTypes.EMPLOYEE_DELETED, employee)
+        return result
+    }
 
-    suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? = collection.setArchived(tenantId, id, archived)?.toEmployee()
+    suspend fun setArchived(id: ObjectId, archived: Boolean): Employee? =
+        collection.setArchived(tenantId, id, archived)?.toEmployee()?.also { record(if (archived) DomainEventTypes.EMPLOYEE_ARCHIVED else DomainEventTypes.EMPLOYEE_RESTORED, it) }
+
+    /** The activity log's record of a write to [employee]. */
+    private suspend fun record(type: String, employee: Employee) {
+        events.append(tenantId, type, SubjectRef.of(SubjectTypes.EMPLOYEE, employee.id), EventPayloads.employee(employee))
+    }
 
     /**
      * [role] is replaced as given (null clears it). [birthDate] (`yyyy-MM-dd`), [address], [taxId] and [email]
@@ -89,7 +105,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
             Updates.combine(updates),
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )
-        return doc?.toEmployee()
+        return doc?.toEmployee()?.also { record(DomainEventTypes.EMPLOYEE_UPDATED, it) }
     }
 
     suspend fun create(
@@ -117,6 +133,7 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
             updatedAt = now,
         )
         collection.insertOne(employee.toDocument())
+        record(DomainEventTypes.EMPLOYEE_CREATED, employee)
         return employee
     }
 

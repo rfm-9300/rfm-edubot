@@ -153,6 +153,36 @@ const ISSUE_NEXT = {
   CLOSED: [['OPEN', 'issueReopen', '']],
 };
 
+const supplierIssuesUrl = token => `${location.origin}/app/share/issues/${encodeURIComponent(token)}`;
+
+// The link the issue's supplier opens to see all the issues assigned to them, or a way to make one.
+function supplierLinkPanel(issue) {
+  if (!issue.supplierId) return '';
+  if (!issue.supplierLinkToken) {
+    return `<section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.issueLinkTitle)}</h2></header><div class="panel__body">
+      <p class="hint">${escapeHTML(bt('issueLinkIntro', { name: issue.assigneeName || '' }))}</p>
+      <div class="actions"><button class="btn btn--sm btn--primary" type="button" data-supplier-link="on">${escapeHTML(BLD.issueLinkCreate)}</button></div></div></section>`;
+  }
+  const url = supplierIssuesUrl(issue.supplierLinkToken);
+  return linkPanelHtml({
+    title: BLD.issueLinkTitle,
+    intro: bt('issueLinkIntro', { name: issue.assigneeName || '' }),
+    url,
+    message: bt('issueLinkMessage', { url }),
+    phone: issue.supplierPhone,
+    name: issue.assigneeName,
+    tools: `<button class="btn btn--sm btn--ghost" type="button" data-supplier-link="rotate">${escapeHTML(BLD.issueLinkRotate)}</button>
+      <button class="btn btn--sm btn--ghost" type="button" data-supplier-link="off">${escapeHTML(BLD.issueLinkStop)}</button>`,
+  });
+}
+
+// One step of an issue's status history: who, how (the supplier's link) and from where, and the note.
+function issueStepDetail(h) {
+  const parts = [h.by, h.via === 'SUPPLIER_LINK' ? BLD.issueViaLink : '', h.note];
+  if (h.via === 'SUPPLIER_LINK' && (h.ip || h.device)) parts.push(bt('proofLine', { ip: h.ip || '—', device: deviceLabel(h.device) || '—' }));
+  return parts.filter(Boolean).join(' · ');
+}
+
 async function openIssueDetail(id) {
   let issue;
   try { issue = await api(`/app/api/building/issues/${encodeURIComponent(id)}`); } catch { return toast(STR.loadFailed); }
@@ -184,12 +214,26 @@ async function openIssueDetail(id) {
         <div class="panel__body">${issue.photos.length ? photoGridHtml(issue.photos) : `<p class="dash-empty">${escapeHTML(BLD.issueNoPhotos)}</p>`}</div></section>
       <section class="panel"><header class="panel__head"><h2 class="panel__title">${escapeHTML(BLD.issueHistory)}</h2></header>
         <ul class="worklist worklist--wrap">${[...issue.history].reverse().map(h => `<li><button class="worklist__item" type="button" disabled data-tone="${{ CLOSED: 'ok', RESOLVED: 'accent', IN_PROGRESS: 'info' }[h.to] || 'warn'}"><span class="worklist__dot"></span>
-          <span class="worklist__main"><span class="worklist__title">${escapeHTML(h.from ? bt('issueMoved', { from: issueStatusLabel(h.from), to: issueStatusLabel(h.to) }) : BLD.issueCreated)}</span><span class="worklist__detail">${escapeHTML([h.by, h.note].filter(Boolean).join(' · '))}</span></span>
+          <span class="worklist__main"><span class="worklist__title">${escapeHTML(h.from ? bt('issueMoved', { from: issueStatusLabel(h.from), to: issueStatusLabel(h.to) }) : BLD.issueCreated)}</span><span class="worklist__detail">${escapeHTML(issueStepDetail(h))}</span></span>
           <span class="worklist__side"><span class="worklist__when">${escapeHTML(fmtDate(h.at))}</span></span></button></li>`).join('')}</ul></section>
+      ${supplierLinkPanel(issue)}
       ${docFootHtml(`
         <button class="btn btn--sm btn--ghost" type="button" data-issue-delete>${escapeHTML(BLD.delete)}</button>
         <button class="btn btn--sm btn--ghost" type="button" data-issue-edit>${escapeHTML(BLD.edit)}</button>
         ${[...(ISSUE_NEXT[issue.status] || [])].reverse().map(([to, key, cls]) => `<button class="btn btn--sm${cls === 'btn--accent' ? ' btn--primary' : ''}" type="button" data-issue-status="${to}">${escapeHTML(BLD[key])}</button>`).join('')}`)}`;
+    wireLinkPanel(body);
+    $$('[data-supplier-link]', body).forEach(b => b.addEventListener('click', async () => {
+      const action = b.dataset.supplierLink;
+      const ask = { rotate: [BLD.issueLinkRotateTitle, BLD.issueLinkRotateBody, BLD.issueLinkRotate], off: [BLD.issueLinkStopTitle, BLD.issueLinkStopBody, BLD.issueLinkStop] }[action];
+      if (ask && !await confirmDialog({ title: ask[0], body: ask[1], okLabel: ask[2], danger: action === 'off' })) return;
+      const path = `/app/api/building/suppliers/${encodeURIComponent(issue.supplierId)}/link${action === 'rotate' ? '/rotate' : ''}`;
+      b.disabled = true;
+      try {
+        await api(path, { method: action === 'off' ? 'DELETE' : 'POST' });
+        toast({ on: BLD.issueLinkCreated, rotate: BLD.issueLinkRotated, off: BLD.issueLinkStopped }[action]);
+        await reload();
+      } catch (err) { b.disabled = false; toast(buildingErrorText(err, BLD.saveFailed)); }
+    }));
     $('[data-detail-link]', body)?.addEventListener('click', async () => {
       await ensureBuildingProjects().catch(() => {});
       openFrom(here, () => openProjectDrawer(issue.projectId, 'issues'));

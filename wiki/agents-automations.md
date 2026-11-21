@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-04
+updated: 2026-11-20
 ---
 
 # Agents (automations) and Gmail
@@ -17,7 +17,9 @@ section the ops. Rodrigo asked to merge it the same day. What matters later:
   ship no company had it (0 of 5), so nothing automated runs in prod yet.
 - **Domain event outbox** `domain_events`: CRM, booking, contact and chat repositories append an event
   after their own write, best effort (a failure is logged, never fails the write). The dispatcher
-  claims and marks every event done even when no agent listens; record drawers read it as a timeline.
+  claims the events of the types agents can react to (those with an `EventTypeSpec`) and marks them done even
+  when no agent listens; since 2026-11-20 the other types are history only, written with `dispatch.status =
+  NONE` and never claimed, for the [activity log](activity-log.md), which also reads this collection.
   TTLs: events 365 days, finished runs 180, notifications 90, `outbound_log` 30, email text 90.
   Building's services append theirs too (2026-10-21, [building-projects.md](building-projects.md) →
   Events), and a client deciding a change from its link is the `CLIENT` actor, named as they typed.

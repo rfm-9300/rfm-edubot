@@ -165,6 +165,14 @@ internal data class ChangeOrderRequest(
 @Serializable
 internal data class ChangeStatusRequest(val status: String = "", val decidedBy: String? = null, val note: String? = null)
 
+/** The client's page settings: whether it shows the money. */
+@Serializable
+internal data class ShareSettingsRequest(val showBudget: Boolean? = null)
+
+/** A supplier's step on an issue from their link: `IN_PROGRESS` or `RESOLVED`, in their own name. */
+@Serializable
+internal data class SupplierIssueStatusRequest(val status: String = "", val name: String = "", val note: String? = null)
+
 /** The client's answer on the change's link: `APPROVED` or `REJECTED`, in their own name. */
 @Serializable
 internal data class ChangeDecisionRequest(val decision: String = "", val name: String = "", val note: String? = null)
