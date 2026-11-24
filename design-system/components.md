@@ -106,7 +106,7 @@ The backoffice's bar is `.topbar.topbar--one-row`: under 920px its search stays 
 
 On `/app` the actions are: theme · notifications bell (`#btn-notifications`) · account (`#btn-account`, `.iconbtn--avatar`) · Log out · New. The bell shows once someone is signed in, operators included; the account button stays `hidden` until the signed-in user is known, and stays hidden when an operator opens the dashboard (no user account). `#btn-new` is `span.btn__plus` + `span.btn__label` ("+ New client"; the backoffice's "+ New bot/client" uses the same markup); below 620px it keeps only the plus, a 36px square, with the label kept for screen readers.
 
-In the compact shell the bar is a 40px page bar on the main card: the crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon and name. `/app` keys that icon through the crumb's active `data-tab`; the backoffice copies the active nav item's computed `--nav-icon` in `setView()` because its nav is keyed by `href`. Its buttons are 28px. Under 560px the icon hides.
+In the compact shell the bar is at least 48px tall and its controls are 32px by default. The crumb's root and separator hide, and `.crumb__leaf` shows the page's nav icon and name. `/app` uses the crumb's active `data-tab`. The backoffice copies the active nav item's computed `--nav-icon` in `setView()` because its nav uses `href`. Under 560px the icon hides.
 
 ## View hero + stats
 
@@ -235,7 +235,7 @@ A compact `.sel` may sit in `.panel__tools` for long entity lists (e.g. filter S
 
 `.view__foot` holds secondary actions at the end of a view, right-aligned under its last panel (Passwords' "Change the master password").
 
-In the compact shell the chips in `.panel__tools`, `.panel__filters` and `.panel__views` read as flat view tabs: no border, `--nav-active` gray when chosen. A filter chip may end with `chipCount(n)` (`components.js`, a `.chip__count`) for the records it leads to, as Quotes and Invoices do; only add it where the chip's count matches the rows it shows (not where another filter, a client or supplier select, narrows the list too). The list page's panel (`.view > .panel`) runs edge to edge of the main card with only top and bottom rules, the table is a 32px grid (hairlines between columns), and `.view__hero` shows only its stats, as separate number cards: its heading is visually hidden, since the page bar names the page.
+In the compact shell the chips in `.panel__tools`, `.panel__filters` and `.panel__views` read as flat view tabs: no border, `--nav-active` gray when chosen. A filter chip may end with `chipCount(n)` (`components.js`, a `.chip__count`) for the records it leads to, as Quotes and Invoices do; only add it where the chip's count matches the rows it shows (not where another filter, a client or supplier select, narrows the list too). The list page's panel (`.view > .panel`) runs edge to edge of the main card. Its table has a tinted 32px header and 36px minimum body rows with hairlines between columns. Checking a row tints it with `--accent-soft`, and keyboard focus uses `--focus-ring` on the control. The page bar carries the page name, so `.view__hero` shows the stats as separate number cards.
 
 `crmPanel({ title: '' })` draws a head of view tabs only (`.panel__head--tabs`, the page bar names the page); wrap buttons that belong at its end (Columns, Fields) in `.panel__tools-end`. `pageCount(n)` (`components.js`) shows the list's count beside the page name in the bar (`#crumb-count`); `render()` clears it for every page, so a page sets it each render. A hero with no figures is `.view__hero--bare`, and in the compact shell the list under it starts right under the page bar. A list's name cell may lead with initials: `.tbl__who` > `.tbl__avatar` + a `.tbl__open` button (the Clients list).
 
@@ -948,12 +948,12 @@ Building blocks of the minimal-layout Home ([patterns.md](patterns.md#home-minim
 
 | Block | Role |
 |---|---|
-| `.dash__head` · `.dash__date` · `.dash__title` · `.dash__status--ok\|watch\|urgent` (+ `.dash__dot`, `.dash__sep`) · `.dash__actions` | Date eyebrow, greeting, health line, quick-create buttons |
-| `.dash-kpis` > `button.dash-kpi` (`__label` `__value` `__value--warn` `__meta` `__meta--bad`, optional `.spark`) | One hairline strip of up to 5 KPIs; cells share 1px grid gaps; one row on desktop, two columns under 700px (a lone last cell spans) |
+| `.dash__head` · `.dash__title` · `.dash__status--ok\|watch\|urgent` (+ `.dash__dot`, `.dash__sep`) · `.dash__actions` | Tenant-local date, health line and quick-create buttons |
+| `.dash-kpis` > `button.dash-kpi` (`__label` `__value` `__value--warn` `__meta` `__meta--bad`) | One hairline strip of up to 5 KPIs; cells share 1px grid gaps; one row on desktop, two columns under 700px (a lone last cell spans) |
 | `.dash-grid` > `.dash-col` × 2 (`.dash-grid--single`) | Wide main + side column; under 1100px the columns become `display: contents` and cards sort by `data-order` |
 | `.worklist` > `li` > `button.worklist__item` (`__dot` `__main` `__title` `__detail` `__side` `__meta` `__meta--amount` `__when`) | Needs-you queue, activity feed, overdue rows. `data-go` + optional `data-open` deep-links to a record |
 | `.agenda` > `.agenda__item` (`__time` `__rail` `__main` `__who` `__what`, `.is-past` / `.is-now`) | Today's bookings on a timeline rail |
-| `.bars` (`__scale` `__plot` `__pair` `__bar` `__labels` `__label.is-current`) | Grouped month columns; bar height is an inline `%` like `.meter__fill`; `role="img"` + a text `aria-label` |
+| `.bars` (`__scale` `__plot` `__pair` `__bar` `__labels` `__label.is-current`) | Grouped month columns with bar heights as inline percentages and a text `aria-label` on the chart. Cash flow uses `.bars--cash` for five labeled grid lines and `.legend--cash` for its two series |
 | `svg.spark` (`__line` `__area`, `.spark--tall`) | Trend line in the accent color, built in JS |
 | `.segbar` > `.segbar__seg` + `.legend` / `.legend--rows` (`__item` `__swatch` `__value`) | Receivables aging split and its key |
 | `.hbars` > `.hbars__row` (`__label` `__track` `__fill` `__value`), `.hbars--wide` for names | Pipeline stages, work by employee |
