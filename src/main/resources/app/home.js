@@ -1,4 +1,4 @@
-/* Home (/app → overview): the cockpit from GET /app/api/overview?extended=1. A KPI strip with sparklines,
+/* Home (/app → overview): the cockpit from GET /app/api/overview?extended=1. A KPI strip,
    what needs you, today's agenda, cash flow, receivables, the quote pipeline, services done, inbox activity, top
    clients, recent events, service insights and module tiles. Cards hidden in Settings → Home are left out. */
 
@@ -94,12 +94,6 @@ function niceCeil(v) {
   const p = Math.pow(10, Math.floor(Math.log10(v)));
   return ([1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10].find(s => v / p <= s) || 10) * p;
 }
-function dashGreeting() {
-  const hour = Number(new Intl.DateTimeFormat('en-GB', { hour: 'numeric', hourCycle: 'h23', timeZone: tenantTz() }).format(new Date()));
-  if (hour >= 5 && hour < 12) return STR.greetingMorning;
-  if (hour >= 12 && hour < 19) return STR.greetingAfternoon;
-  return STR.greetingEvening;
-}
 function monthLabel(key, long = false) {
   const [y, m] = String(key).split('-').map(Number);
   const opts = long ? { month: 'long', year: 'numeric', timeZone: 'UTC' } : { month: 'short', timeZone: 'UTC' };
@@ -163,7 +157,6 @@ function dashKpis(o, hidden) {
     cells.push({
       go: 'financeiro', label: STR.hl_collected_month, value: wholeCentsEUR(o.cash.collectedThisMonthCents),
       meta: deltaHint(pct, STR.vsLastMonth), trend: pct > 0 ? 'up' : pct < 0 ? 'down' : '',
-      spark: (o.cashFlow || []).map(m => m.inCents || 0),
     });
     const overdue = (o.cash.overdueCents || 0) > 0;
     cells.push({
@@ -189,7 +182,7 @@ function dashKpis(o, hidden) {
     if (hasModule('conversations')) {
       cells.push({
         go: 'conversations', label: STR.hl_waiting, value: o.inbox.waiting || 0, valueTone: o.inbox.waiting > 0 ? 'warn' : '',
-        meta: tApp('kpiMessagesToday', { n: o.inbox.messagesToday || 0 }), spark: (o.activity || []).map(d => d.count || 0),
+        meta: tApp('kpiMessagesToday', { n: o.inbox.messagesToday || 0 }),
       });
     } else if (hasModule('contacts')) {
       cells.push({ go: 'contacts', label: STR.hl_contacts, value: o.inbox.contacts || 0, meta: o.inbox.newContactsThisWeek ? tApp('kpiNewThisWeek', { n: o.inbox.newContactsThisWeek }) : '' });
@@ -202,7 +195,6 @@ function dashKpis(o, hidden) {
     cells.push({
       go: 'services', label: STR.kpiServicesMonth, value: svc.doneThisMonth || 0,
       meta: deltaHint(pct, STR.vsLastMonth), trend: pct > 0 ? 'up' : pct < 0 ? 'down' : '',
-      spark: (svc.months || []).map(m => m.count || 0),
     });
   }
   if (o.customers && !hidden.has('customers')) cells.push({ go: 'clients', label: STR.hl_clients, value: o.customers.total || 0, meta: plusThisMonth(o.customers.newThisMonth) });
@@ -214,16 +206,20 @@ function dashCashFlowCard(o) {
   const showIn = !!o.cash;
   const showOut = !!o.payments;
   let body = '';
-  if (flow.length) {
-    const peak = Math.max(0, ...flow.map(m => Math.max(showIn ? m.inCents || 0 : 0, showOut ? m.outCents || 0 : 0))) / 100;
-    const max = niceCeil(peak);
-    const height = eur => (max > 0 ? Math.min(100, (eur / max) * 100) : 0).toFixed(1);
-    const legend = `<ul class="legend">${showIn ? `<li class="legend__item"><span class="legend__swatch" data-tone="accent"></span>${escapeHTML(STR.dashMoneyIn)}</li>` : ''}${showOut ? `<li class="legend__item"><span class="legend__swatch" data-tone="muted"></span>${escapeHTML(STR.dashMoneyOut)}</li>` : ''}</ul>`;
+  const peak = Math.max(0, ...flow.map(m => Math.max(showIn ? m.inCents || 0 : 0, showOut ? m.outCents || 0 : 0))) / 100;
+  if (peak > 0) {
+    const step = Math.max(0.01, niceCeil(peak / 4));
+    const max = step * 4;
+    const height = eur => ((eur / max) * 100).toFixed(1);
+    const formatTick = step < 1 ? fmtEUR : fmtEURCompact;
+    const scale = [4, 3, 2, 1, 0].map(tick => `<span>${escapeHTML(formatTick(tick * step))}</span>`).join('');
+    const legend = `<ul class="legend legend--cash">${showIn ? `<li class="legend__item"><span class="legend__swatch" data-tone="accent"></span>${escapeHTML(STR.dashMoneyIn)}</li>` : ''}${showOut ? `<li class="legend__item"><span class="legend__swatch" data-tone="muted"></span>${escapeHTML(STR.dashMoneyOut)}</li>` : ''}</ul>`;
     const describe = m => [monthLabel(m.month, true), showIn ? `${STR.dashMoneyIn} ${centsEUR(m.inCents)}` : '', showOut ? `${STR.dashMoneyOut} ${centsEUR(m.outCents)}` : ''].filter(Boolean).join(' · ');
     const cols = flow.map(m => `<div class="bars__pair" title="${escapeHTML(describe(m))}">${showIn ? `<span class="bars__bar" data-tone="accent" style="height:${height((m.inCents || 0) / 100)}%"></span>` : ''}${showOut ? `<span class="bars__bar" data-tone="muted" style="height:${height((m.outCents || 0) / 100)}%"></span>` : ''}</div>`).join('');
     const labels = flow.map((m, i) => `<span class="bars__label${i === flow.length - 1 ? ' is-current' : ''}">${escapeHTML(monthLabel(m.month))}</span>`).join('');
-    const quiet = flow.every(m => !(m.inCents || m.outCents)) ? `<p class="dash-empty">${escapeHTML(STR.dashCashEmpty)}</p>` : '';
-    body = `${legend}${quiet}<div class="bars" role="img" aria-label="${escapeHTML(flow.map(describe).join('; '))}"><div class="bars__scale"><span>${escapeHTML(max ? fmtEURCompact(max) : '')}</span></div><div class="bars__plot">${cols}</div><div class="bars__labels">${labels}</div></div>`;
+    body = `${legend}<div class="bars bars--cash" role="img" aria-label="${escapeHTML(flow.map(describe).join('; '))}"><div class="bars__scale" aria-hidden="true">${scale}</div><div class="bars__plot">${cols}</div><div class="bars__labels" aria-hidden="true">${labels}</div></div>`;
+  } else if (flow.length) {
+    body = `<p class="dash-empty">${escapeHTML(STR.dashCashEmpty)}</p>`;
   }
   const months = flow.length || 1;
   const avg = key => flow.reduce((sum, m) => sum + (m[key] || 0), 0) / months;
@@ -682,15 +678,14 @@ function renderOverview(root) {
   const creators = [['invoices', STR.invoiceFormTitle], ['quotes', STR.quoteFormTitle], ['clients', STR.clientFormTitle], ['bookings', STR.bookingsNew]]
     .filter(([m]) => hasModule(m)).slice(0, 3);
   const actions = (hasModule('settings') ? `<button type="button" class="btn btn--sm btn--ghost" data-go="settings" data-settings="home">${escapeHTML(STR.customizeHome)}</button>` : '')
-    + creators.map(([m, label], i) => `<button type="button" class="btn btn--sm${i === 0 ? ' btn--primary' : ''}" data-create="${m}"><span class="btn__plus" aria-hidden="true">+</span>${escapeHTML(label)}</button>`).join('');
+    + creators.map(([m, label], i) => `<button type="button" class="btn btn--sm ${i === 0 ? 'btn--primary' : 'btn--ghost'}" data-create="${m}"><span class="btn__plus" aria-hidden="true">+</span>${escapeHTML(label)}</button>`).join('');
   const today = new Date().toLocaleDateString(uiLocale(), { weekday: 'long', day: 'numeric', month: 'long', timeZone: tenantTz() });
-  const head = `<header class="dash__head"><div><p class="dash__date">${escapeHTML(capFirst(today))}</p><h1 class="dash__title">${escapeHTML(dashGreeting())}</h1>${status}</div>${actions ? `<div class="dash__actions">${actions}</div>` : ''}</header>`;
+  const head = `<header class="dash__head"><div><h1 class="dash__title">${escapeHTML(capFirst(today))}</h1>${status}</div>${actions ? `<div class="dash__actions">${actions}</div>` : ''}</header>`;
 
   const kpis = hidden.has('highlights') ? [] : dashKpis(o, hidden);
   const kpiHtml = kpis.length ? `<section class="dash-kpis" aria-label="${escapeHTML(STR.dashKpisAria)}">${kpis.map(k => {
     const metaCls = k.trend === 'up' ? ' delta delta--up' : k.trend === 'down' ? ' delta delta--down' : k.metaTone === 'bad' ? ' dash-kpi__meta--bad' : '';
-    const spark = k.spark && k.spark.some(v => v > 0) ? sparkline(k.spark) : '';
-    return `<button type="button" class="dash-kpi" data-go="${escapeHTML(k.go)}"><span class="dash-kpi__label">${escapeHTML(k.label)}</span><span class="dash-kpi__value${k.valueTone === 'warn' ? ' dash-kpi__value--warn' : ''}">${escapeHTML(String(k.value))}</span><span class="dash-kpi__meta${metaCls}">${escapeHTML(k.meta || '')}</span>${spark}</button>`;
+    return `<button type="button" class="dash-kpi" data-go="${escapeHTML(k.go)}"><span class="dash-kpi__label">${escapeHTML(k.label)}</span><span class="dash-kpi__value${k.valueTone === 'warn' ? ' dash-kpi__value--warn' : ''}">${escapeHTML(String(k.value))}</span><span class="dash-kpi__meta${metaCls}">${escapeHTML(k.meta || '')}</span></button>`;
   }).join('')}</section>` : '';
 
   const setupCopy = { wa: STR.waConnect, ig: STR.igConnect, widget: STR.setupWidget, persona: STR.teachBot };

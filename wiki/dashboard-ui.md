@@ -1,10 +1,23 @@
 ---
-updated: 2026-11-19
+updated: 2026-11-21
 ---
 
 # Dashboard UI decisions
 
 Why `/app` and the backoffice look and behave the way they do. The binding rules (tokens, classes, i18n, checklists) are in [`design-system/`](../design-system/AGENTS.md); this page holds the decisions and history behind them.
+
+## Compact workspace polish (2026-11-21)
+
+- The shared page bar and navigation use 32px controls. On desktop the navigation list scrolls
+  between the brand and the summary when the enabled modules exceed the window height. Table headers take the raised neutral
+  surface, and a checked row takes the existing selection tint. The visible focus ring belongs
+  to the control within that row.
+- Home's heading is the date in the company's timezone and the active interface language. The
+  number strip uses figures and context. Trends live in their own cards, with a six-month cash-flow
+  chart that labels the grid and gives a zero-data state. Its scale, tooltips and accessible chart
+  label pass through the same amount formatters as the figures so the amounts switch covers them.
+- The sign-in views show the theme switch and form in a single column. The backoffice vault's
+  `.auth--view` renders inside the authenticated shell.
 
 ## Dashboard look: one skin, "Clean Ops" (switch removed 2026-09-29, shipped the same day, `166ad0f`; backoffice joined, shipped 2026-10-05, `c0738d0`)
 

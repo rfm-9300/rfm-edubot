@@ -49,7 +49,7 @@ function renderTenants() {
     .sort((a, b) => (group(a) - group(b)) || (Boolean(a.parentTenantId) - Boolean(b.parentTenantId)) || (order.get(a.id) - order.get(b.id)));
   renderSidebarStats();
   $('#view').innerHTML = `
-    <div class="view__hero"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
+    <div class="view__hero view__hero--bare"><div><h1 class="view__title">${escapeHTML(T.heroTitle)}</h1><p class="view__desc">${escapeHTML(T.heroDesc)}</p></div></div>
     <div class="panel"><div class="panel__head"><h2 class="panel__title">${escapeHTML(T.botsTitle)} <span class="tag">${rows.length}</span></h2>
       <div class="panel__tools panel__tools--chips" role="group" aria-label="${escapeHTML(T.statusFilterAria)}">
         ${STATUS_FILTERS.map(f => `<button class="chip ${state.filter === f ? 'is-on' : ''}" type="button" data-status-filter="${f}" aria-pressed="${state.filter === f}">${escapeHTML(T.filters[f])}<span class="chip__count">${counts[f]}</span></button>`).join('')}
