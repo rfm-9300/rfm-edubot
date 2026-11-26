@@ -4,8 +4,11 @@ import com.rfm.edubot.agents.model.ActionPreview
 import com.rfm.edubot.agents.registry.ActionCategory
 import com.rfm.edubot.agents.registry.ActionResult
 import com.rfm.edubot.agents.registry.AgentAction
+import com.rfm.edubot.agents.registry.AgentRegistry
+import com.rfm.edubot.agents.registry.Availability
 import com.rfm.edubot.agents.registry.IntegrationKind
 import com.rfm.edubot.agents.registry.Schema
+import com.rfm.edubot.agents.registry.SchemaProblem
 import com.rfm.edubot.agents.registry.SideEffect
 import com.rfm.edubot.agents.registry.string
 import com.rfm.edubot.agents.runtime.RunContext
@@ -36,7 +39,7 @@ object WhatsAppSendAction : AgentAction {
     override val recipientFields = setOf("to", "phone")
     override val toolDescription = "Send a WhatsApp message to the client of the record the agent works on. Outside WhatsApp's 24-hour window it falls back to email or a task."
     override val inputSchema = Schema.obj(
-        "to" to Schema.string(enum = listOf("client", "contact", "phone"), default = "client"),
+        "to" to Schema.string(enum = listOf("client", "contact", "employee", "phone"), default = "client"),
         "phone" to Schema.string(widget = "template", maxLength = 40),
         "text" to Schema.string(widget = "template", maxLength = 4096, description = "the message"),
         "attachPdf" to Schema.string(enum = listOf("none", "auto", "quote", "invoice"), default = "none"),
@@ -79,16 +82,18 @@ object WhatsAppSendAction : AgentAction {
         val pdf = input.string("attachPdf")?.takeIf { it != "none" }?.let { AgentDocuments.forRun(ctx, it) }
         val phone = recipient(input, ctx) ?: return AgentMessaging.fallback(ctx, fallback, "WhatsApp", "no_phone", text, pdf)
         val client = ctx.services.whatsApp(ctx.tenant) ?: return AgentMessaging.fallback(ctx, fallback, "WhatsApp", "no_channel", text, pdf)
-        AgentMessaging.capped(ctx, "whatsapp", phone)?.let { return it }
+        val team = teamMember(input, ctx)
+        // The company's caps protect customers; a member of the team has a cap of their own (see AgentMessaging.teamCapped).
+        (if (team != null) AgentMessaging.teamCapped(ctx, "whatsapp", phone) else AgentMessaging.capped(ctx, "whatsapp", phone))?.let { return it }
 
         if (!AgentMessaging.whatsAppWindowOpen(ctx, phone)) {
             val template = WhatsAppTemplateSending.mapping(input)
                 ?: return AgentMessaging.fallback(ctx, fallback, "WhatsApp", "window_closed", text, pdf)
-            return WhatsAppTemplateSending.send(ctx, client, phone, template)
+            return WhatsAppTemplateSending.send(ctx, client, phone, template, team)
         }
         val sent = AgentMessaging.deliver(ctx, "whatsapp", phone) { client.sendTextMessage(phone, text).id }
         when (sent) {
-            is Delivery.Sent -> AgentMessaging.storeOutbound(ctx, Platform.WHATSAPP, phone, MessageContent.Text(text), sent.providerMessageId)
+            is Delivery.Sent -> AgentMessaging.storeOutbound(ctx, Platform.WHATSAPP, phone, MessageContent.Text(text), sent.providerMessageId, team)
             Delivery.AlreadySent -> return ActionResult.Done(buildJsonObject { put("channel", "whatsapp") }, note = "already_sent")
             Delivery.InDoubt -> return ActionResult.Failed("send_in_doubt")
             is Delivery.Failed -> return if (sent.key == "window_closed") {
@@ -113,6 +118,23 @@ object WhatsAppSendAction : AgentAction {
         (sent as? Delivery.Sent)?.providerMessageId?.let { put("messageId", it) }
     }
 
+    /**
+     * `employee` writes to the run's own employee, so only an agent that runs for each employee can use it; such an
+     * agent has no client or chat contact to write to.
+     */
+    override fun inputProblems(input: JsonObject, registry: AgentRegistry, availability: Availability, subjectType: String?): List<SchemaProblem> {
+        val to = input.string("to") ?: "client"
+        return when {
+            to == "employee" && subjectType != SubjectTypes.EMPLOYEE -> listOf(SchemaProblem("to", "recipient_needs_employee"))
+            subjectType == SubjectTypes.EMPLOYEE && to != "employee" && to != "phone" -> listOf(SchemaProblem("to", "recipient_not_employee"))
+            else -> emptyList()
+        }
+    }
+
+    /** Who the message goes to when it's a member of the team (`to: employee`); null for a customer. */
+    private fun teamMember(input: JsonObject, ctx: RunContext): TeamMember? =
+        if (input.string("to") == "employee") TeamMember(AgentMessaging.variable(ctx, "employee.name")) else null
+
     /** The record's client or contact is on file; a typed number must be a client's or someone who wrote to the company. */
     override suspend fun reachesOnlyKnownContacts(input: JsonObject, ctx: RunContext): Boolean {
         if ((input.string("to") ?: "client") != "phone") return true
@@ -135,6 +157,7 @@ object WhatsAppSendAction : AgentAction {
         val raw = when (input.string("to") ?: "client") {
             "phone" -> input.string("phone")
             "contact" -> chatWaId ?: AgentMessaging.variable(ctx, "contact.waId")
+            "employee" -> AgentMessaging.variable(ctx, "employee.phone")
             else -> chatWaId ?: AgentMessaging.variable(ctx, "client.phone") ?: AgentMessaging.variable(ctx, "booking.contactPhone")
         }
         return AgentMessaging.normalizePhone(raw, ctx.tenant.locale)

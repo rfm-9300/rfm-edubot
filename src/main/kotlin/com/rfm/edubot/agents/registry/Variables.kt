@@ -1,5 +1,6 @@
 package com.rfm.edubot.agents.registry
 
+import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.events.SubjectTypes
 import kotlinx.serialization.Serializable
 
@@ -36,6 +37,37 @@ object AgentVariables {
         "openServicesCount" to VarType.NUMBER, "openServicesTotal" to VarType.MONEY, "openServicesTotalCents" to VarType.NUMBER,
         "lastActivityAt" to VarType.DATE, "daysSinceActivity" to VarType.NUMBER,
     )
+
+    /** `tags` is a list: `employee.tags contains equipa-a` picks a team out of everyone. */
+    val employee = vars(
+        "employee",
+        "id" to VarType.ID, "name" to VarType.TEXT, "firstName" to VarType.TEXT, "phone" to VarType.TEXT, "role" to VarType.TEXT,
+        "tags" to VarType.TEXT,
+    )
+
+    // An employee's day, one group per module (EmployeeBriefing): a count, and one line of text a WhatsApp template takes.
+
+    /** Their planned shifts today, excused ones left out. */
+    val shifts = vars("shifts", "count" to VarType.NUMBER, "today" to VarType.TEXT, "first" to VarType.TEXT)
+
+    /** The Serviços rows they do today, with the client and where. */
+    val services = vars("services", "count" to VarType.NUMBER, "today" to VarType.TEXT)
+
+    /** The site issues assigned to them that are still open. */
+    val issues = vars("issues", "count" to VarType.NUMBER, "overdue" to VarType.NUMBER, "list" to VarType.TEXT)
+
+    /**
+     * The module each group of an employee's day reads. Without it the group is empty, the agent editor doesn't offer
+     * it and an agent that uses it can't be switched on (`needs_module`).
+     */
+    val moduleOfGroup: Map<String, String> = mapOf(
+        "shifts" to DashboardModules.TIMESHEETS,
+        "services" to DashboardModules.SERVICES,
+        "issues" to DashboardModules.SITE_ISSUES,
+    )
+
+    /** The module [path]'s group needs, if any. */
+    fun moduleOf(path: String): String? = moduleOfGroup[path.substringBefore('.')]
 
     val quote = vars(
         "quote",
@@ -128,6 +160,7 @@ object AgentVariables {
     fun forSubject(subjectType: String?): List<VariableSpec> {
         val specific = when (subjectType) {
             SubjectTypes.CLIENT -> client
+            SubjectTypes.EMPLOYEE -> employee + shifts + services + issues
             SubjectTypes.QUOTE -> quote + client
             SubjectTypes.INVOICE -> invoice + client
             SubjectTypes.PAYMENT -> payment + client

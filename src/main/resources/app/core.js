@@ -45,6 +45,8 @@ let state = {
   projects: [], projectsView: 'list', projectsFilter: 'active',
   diary: [], diaryProject: '', issues: [], issuesFilter: 'open', issuesProject: '',
   changeOrders: [], changesFilter: 'all', changesProject: '', measurements: [], measurementsFilter: 'all', measurementsProject: '',
+  // Briefings: the list (GET /app/api/briefings), the one shown, the day picked (YYYY-MM-DD) and that day's people.
+  briefings: null, briefingId: '', briefingDayKey: '', briefingDay: null,
   fetched: {
     conversations: false, invoices: false, bookings: false, instagram: false, payments: false, submissions: false,
     projects: false, issues: false, changeOrders: false, measurements: false,

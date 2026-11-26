@@ -87,6 +87,10 @@ class AgentDefinitionValidator(private val registry: AgentRegistry) {
             }
         }
 
+        // A group of an employee's day (shifts, services, issues) reads a module the company may not have.
+        availability.missingModules(referencedPaths(definition).mapNotNull(AgentVariables::moduleOf).toSet())
+            .forEach { problems += DefinitionProblem("variables", "needs_module", it) }
+
         definition.exitRules.forEachIndexed { index, rule ->
             if (DomainEventTypes.spec(rule.event) == null) problems += DefinitionProblem("exitRules[$index]", "unknown_event", rule.event)
         }
@@ -111,6 +115,18 @@ class AgentDefinitionValidator(private val registry: AgentRegistry) {
     }
 
     private fun earlierOutputs(steps: Set<String>): Set<String> = steps.map { "steps.$it" }.toSet()
+
+    /** Every variable the definition reads: in its steps' inputs and guards, its conditions and its schedules' `where`. */
+    private fun referencedPaths(definition: AgentDefinition): List<String> = buildList {
+        definition.steps.forEach { step ->
+            addAll(TemplateRenderer.referencesIn(step.input))
+            step.guard?.let { group -> group.conditions.forEach { add(it.field) } }
+        }
+        definition.conditions?.conditions?.forEach { add(it.field) }
+        definition.triggers.filter { it.type == TriggerTypes.SCHEDULE }.forEach { trigger ->
+            ScheduleTrigger.where(trigger.config)?.conditions?.forEach { add(it.field) }
+        }
+    }
 
     /** Step ids a branch step may jump to. */
     private fun branchTargets(input: JsonObject): List<String> =

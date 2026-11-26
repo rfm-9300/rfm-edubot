@@ -546,6 +546,7 @@ private suspend fun defaultSubject(agents: AgentsModule, tenant: Tenant, agent: 
     val type = definition.triggers.firstNotNullOfOrNull { trigger -> agents.registry.trigger(trigger.type)?.subjectType(trigger.config) } ?: return null
     val collection = when (type) {
         SubjectTypes.CLIENT -> "crm.clients"
+        SubjectTypes.EMPLOYEE -> "crm.employees"
         SubjectTypes.QUOTE -> "crm.quotes"
         SubjectTypes.INVOICE -> "crm.invoices"
         SubjectTypes.PAYMENT -> "crm.payments"
@@ -556,6 +557,8 @@ private suspend fun defaultSubject(agents: AgentsModule, tenant: Tenant, agent: 
     }
     val filter = org.bson.Document("tenantId", tenant.id)
     if (type == SubjectTypes.EMAIL) filter.append("direction", EmailDirection.INBOUND.name)
+    // An archived employee's run is cancelled as a removed record, so the test takes someone still on the team.
+    if (type == SubjectTypes.EMPLOYEE) filter.append("archivedAt", null)
     val latest = agents.mongo.database.getCollection<org.bson.Document>(collection)
         .find(filter)
         .sort(org.bson.Document("createdAt", -1)).limit(1)

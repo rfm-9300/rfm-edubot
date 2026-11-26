@@ -308,6 +308,8 @@
   }
 
   const canManage = () => !!data.overview?.canManage;
+  // Opened from another page (Briefings), the module may not have loaded yet: who may manage comes with the overview.
+  const ensureOverview = async () => { if (!data.overview) data.overview = await d.api('/app/api/agents/overview'); };
 
   async function refresh() {
     try { await load(); } catch { d.toast(d.STR.loadFailed); }
@@ -514,6 +516,7 @@
         d.api(`/app/api/agents/${encodeURIComponent(id)}`),
         d.api(`/app/api/agents/runs?agentId=${encodeURIComponent(id)}&limit=30`),
         ensureCatalog(),
+        ensureOverview(),
       ]);
     } catch {
       d.closeDrawer({ dismissed: true });
@@ -961,7 +964,7 @@
   }
 
   // ── template gallery and guided setup ─────────────────────────────
-  const CATEGORIES = ['finance', 'sales', 'bookings', 'inbox', 'email', 'housekeeping'];
+  const CATEGORIES = ['finance', 'sales', 'bookings', 'inbox', 'email', 'team', 'housekeeping'];
   function renderGallery(pane) {
     const templates = catalog().templates || [];
     const categories = CATEGORIES.filter(c => templates.some(t => t.category === c));
@@ -993,6 +996,21 @@
   const templateName = t => tr(`templates.${t.key}.name`, null, t.name || t.key);
   const templateDesc = t => tr(`templates.${t.key}.desc`, null, '');
   const paramLabel = (template, name) => tr(`templates.${template.key}.params.${name}`, null, tr(`params.${name}`, null, fieldLabel(name)));
+
+  /** The gallery's templates of [category], in words (the Briefings page offers the team's as new briefings). */
+  async function templatesIn(category) {
+    await ensureCatalog();
+    return (catalog().templates || []).filter(t => t.category === category).map(t => ({
+      key: t.key, icon: t.icon, name: templateName(t), desc: templateDesc(t), available: t.available,
+      reason: t.available ? '' : (t.requires || [t.reason]).map(reasonText).join(' · '),
+    }));
+  }
+
+  /** A template's setup drawer, from another page: it creates a draft and opens it, as from the gallery. */
+  async function openTemplate(key) {
+    await Promise.all([ensureCatalog(), ensureOverview()]);
+    openTemplateSetup((catalog().templates || []).find(t => t.key === key));
+  }
 
   function openTemplateSetup(template) {
     if (!template) return;
@@ -2143,5 +2161,6 @@
   window.AgentsUI = {
     init, load, render, badge, canManage, newAgent, openAgent, openRun, openApproval, openTask, switchTab, ensureCatalog, recipeHtml, runPill, agentIcon,
     focusRef, openRef, renderAutomations, mountAutomations, mountPersonaAgents, reasonText, actionLabel, openDescribe,
+    templatesIn, openTemplate, problemText,
   };
 })();

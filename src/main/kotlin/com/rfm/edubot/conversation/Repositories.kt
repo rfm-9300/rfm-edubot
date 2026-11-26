@@ -58,7 +58,8 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         return doc?.toUser()
     }
 
-    suspend fun findOrCreate(waId: String, displayName: String? = null, channel: Platform = Platform.WHATSAPP): User {
+    /** [announce]: a new contact raises `contact.created` (agents greet leads); false for someone who isn't a lead, like a member of the team. */
+    suspend fun findOrCreate(waId: String, displayName: String? = null, channel: Platform = Platform.WHATSAPP, announce: Boolean = true): User {
         val existing = findByWaId(waId, channel)
         if (existing != null) {
             val now = SystemClock.now()
@@ -83,7 +84,7 @@ class UserRepository(mongoModule: MongoModule, private val tenantId: ObjectId) {
         )
         collection.insertOne(user.toDocument())
         log.info("Created new user: waId={}", waId)
-        events.append(tenantId, DomainEventTypes.CONTACT_CREATED, SubjectRef.of(SubjectTypes.CONTACT, user.id), EventPayloads.contact(user))
+        if (announce) events.append(tenantId, DomainEventTypes.CONTACT_CREATED, SubjectRef.of(SubjectTypes.CONTACT, user.id), EventPayloads.contact(user))
         return user
     }
 
@@ -412,6 +413,13 @@ class MessageRepository(mongoModule: MongoModule, private val tenantId: ObjectId
 
     suspend fun findById(id: ObjectId): Message? =
         collection.find(scoped(Filters.eq("_id", id))).firstOrNull()?.toMessage()
+
+    /** Outbound messages by their WhatsApp ids, with the delivery ticks the status webhooks gave them. */
+    suspend fun byWaMessageIds(ids: Collection<String>): Map<String, Message> {
+        if (ids.isEmpty()) return emptyMap()
+        return collection.find(scoped(Filters.`in`("waMessageId", ids.distinct()))).toList().map { it.toMessage() }
+            .mapNotNull { message -> message.waMessageId?.let { it to message } }.toMap()
+    }
 
     /** When each conversation's customer last wrote; for conversations stored before `lastInboundAt` existed. */
     suspend fun lastInboundByConversationIds(ids: Collection<ObjectId>): Map<ObjectId, kotlinx.datetime.Instant> {

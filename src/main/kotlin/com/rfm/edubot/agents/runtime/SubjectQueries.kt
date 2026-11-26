@@ -5,6 +5,8 @@ import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.model.UserRole
 import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.persistence.MongoModule
+import com.rfm.edubot.tags.RecordTagRepository
+import com.rfm.edubot.tags.TagKind
 import kotlinx.coroutines.flow.toList
 import kotlinx.datetime.Instant
 import kotlinx.datetime.LocalDate
@@ -106,6 +108,7 @@ class SubjectQueries(private val mongo: MongoModule) {
 
     /** Candidates for a schedule that runs once per record; the agent's conditions narrow them. */
     suspend fun forEachCandidates(tenantId: ObjectId, entity: String, now: Instant, limit: Int = 300): List<ObjectId> {
+        if (entity == SubjectTypes.EMPLOYEE) return employeesToBrief(tenantId, limit)
         val (name, filter) = when (entity) {
             SubjectTypes.CLIENT -> "crm.clients" to Filters.and(Filters.eq("tenantId", tenantId), Filters.exists("archivedAt", false))
             SubjectTypes.INVOICE -> "crm.invoices" to Filters.and(Filters.eq("tenantId", tenantId), Filters.`in`("status", listOf("PENDING", "OVERDUE")))
@@ -120,5 +123,22 @@ class SubjectQueries(private val mongo: MongoModule) {
             else -> return emptyList()
         }
         return collection(name).find(filter).limit(limit).toList().map { it.getObjectId("_id") }
+    }
+
+    /**
+     * The people an employee schedule writes to ([EmployeeAudience]), oldest record first. The opt-out is part of
+     * the query, so the limit counts only people who can get a message and the same ones get it every day.
+     */
+    private suspend fun employeesToBrief(tenantId: ObjectId, limit: Int): List<ObjectId> {
+        val optedOut = RecordTagRepository(mongo, tenantId).forKind(TagKind.EMPLOYEE)
+            .filterValues { EmployeeAudience.optedOut(it) }
+            .keys.mapNotNull { id -> runCatching { ObjectId(id) }.getOrNull() }
+        val filters = mutableListOf(
+            Filters.eq("tenantId", tenantId),
+            Filters.eq("archivedAt", null),
+            Filters.regex("phone", EmployeeAudience.PHONE_PATTERN),
+        )
+        if (optedOut.isNotEmpty()) filters += Filters.nin("_id", optedOut)
+        return collection("crm.employees").find(Filters.and(filters)).sort(Document("_id", 1)).limit(limit).toList().map { it.getObjectId("_id") }
     }
 }

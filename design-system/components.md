@@ -841,7 +841,7 @@ Rules: `.chatbot-list`, `.chatbot-side__scroll` and `.chatbot-try__body` are `po
 | `.inbox-avatar` (`--lg`) | Initials on `--accent-soft` (text `--accent-deep`, `--accent` on dark) |
 | `.chip__count` | Small mono count inside a filter chip |
 | `.thread-head` `__back` `__who` `__name` `__sub` `__tools` | Thread header; `__back` only under 920px |
-| `.thread-banner` (`--warn`) `__text` `__meta` | Full-width notice under the header: read-only website chat, AI paused (with Resume) |
+| `.thread-banner` (`--warn`) `__text` `__meta` | Full-width notice under the header: read-only website chat, AI paused (with Resume). The reason picks the words: paused by a person (who, when), handed over by the bot, a chat begun without a start word, or a chat an agent began with a member of the team (a briefing), where the bot never answers |
 | `.thread-log` / `.thread-day` / `.thread-skeleton` | Transcript on `--surface-2` (`--bg-deep` dark), day separators, loading bars |
 | `.thread-jump` | "New messages" pill floating over the log's bottom edge when messages arrive while scrolled up |
 | `.bubble` `--in` `--out` + `--customer` `--agent` `--ai` `--automation`, `.is-pending` `.is-failed` | Message. Customer: surface + hairline, left. Agent (a person): `--accent-soft`, right. AI: surface + dashed hairline, right. Automation (an agent from the Agents module): `--info-soft`, right, its `__author` in `--info-ink` led by a `__tag` pill ("Automation") and the agent's name; the list row's preview starts "Automation:" like "AI:". Parts: `__author` (`__tag`) `__text` (pre-wrap) `__media` `__meta` `__error` |

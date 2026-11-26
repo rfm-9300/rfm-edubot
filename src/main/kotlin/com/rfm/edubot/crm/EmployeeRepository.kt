@@ -33,6 +33,10 @@ class EmployeeRepository(private val mongoModule: MongoModule, private val tenan
         return collection.find(scoped(Filters.`in`("_id", ids.distinct()))).toList().map { it.toEmployee() }.associateBy { it.id }
     }
 
+    /** The team: every employee not archived, by name, at most [limit] (the Briefings page lists them all). */
+    suspend fun active(limit: Int = 300): List<Employee> =
+        collection.find(Filters.and(Filters.eq("tenantId", tenantId), archivedFilter(false))).sort(Document("name", 1)).limit(limit).toList().map { it.toEmployee() }
+
     suspend fun search(query: String, archived: Boolean = false): List<Employee> {
         val trimmed = query.trim()
         val text = if (trimmed.isBlank()) {

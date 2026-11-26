@@ -106,14 +106,13 @@ class AgentScheduler(
     private suspend fun fireSchedule(tenant: Tenant, agent: Agent, trigger: TriggerSpec, fireAt: Instant, now: Instant) {
         val runTrigger = RunTrigger(type = TriggerTypes.SCHEDULE, triggerId = trigger.id, firedAt = now)
         val entity = trigger.config.string("forEach")
-        val key = "schedule:${trigger.id}:${fireAt.toEpochMilliseconds()}"
         if (entity == null) {
-            starter.start(tenant, agent, runTrigger, subject = null, dedupeKey = key)
+            starter.start(tenant, agent, runTrigger, subject = null, dedupeKey = scheduleKey(trigger.id, fireAt))
             return
         }
         val where = ScheduleTrigger.where(trigger.config)
         for (id in queries.forEachCandidates(tenant.id, entity, now)) {
-            starter.start(tenant, agent, runTrigger, SubjectRef.of(entity, id), "$key:${id.toHexString()}", extraConditions = where)
+            starter.start(tenant, agent, runTrigger, SubjectRef.of(entity, id), scheduleKey(trigger.id, fireAt, id), extraConditions = where)
         }
     }
 
@@ -234,6 +233,13 @@ class AgentScheduler(
 
         fun laneKey(tenantId: ObjectId, subject: SubjectRef?, runId: ObjectId): String =
             "${tenantId.toHexString()}:${subject?.let { "${it.type}:${it.id}" } ?: runId.toHexString()}"
+
+        /**
+         * The dedupe key of the run a schedule's fire at [fireAt] starts, per record ([subjectId]) when it runs once
+         * per record. Sending a briefing by hand before the day's fire uses the same key, so the fire doesn't send it twice.
+         */
+        fun scheduleKey(triggerId: String, fireAt: Instant, subjectId: ObjectId? = null): String =
+            "schedule:$triggerId:${fireAt.toEpochMilliseconds()}" + (subjectId?.let { ":${it.toHexString()}" } ?: "")
 
         /** Local days whose fire time (at [at]) has passed within the last day, today first. */
         fun fireDates(now: Instant, zone: TimeZone, at: LocalTime): List<LocalDate> {

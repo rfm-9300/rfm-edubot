@@ -67,6 +67,8 @@ function inboxInitials(c) {
 const BOT_HANDOFF = 'bot:handoff';
 /** `autoReplyPausedBy` of a chat that began without a start word the company asks for (Conversation.START_GATE on the server). */
 const START_GATE = 'bot:start-gate';
+/** `autoReplyPausedBy` of a chat an agent began with a member of the team, like a daily briefing (Conversation.TEAM_MEMBER). */
+const TEAM_CHAT = 'bot:team';
 function inboxAgentLabel(userId, name) {
   if (name === BOT_HANDOFF) return STR.inboxPausedByBot;
   if ((userId && userId === state.me?.user?.id) || (name && name === state.me?.user?.email)) return STR.inboxYou;
@@ -450,9 +452,13 @@ function threadBannerHtml(c) {
   if (c.autoReplyEnabled !== false) return '';
   const handedOff = c.autoReplyPausedBy === BOT_HANDOFF;
   const gated = c.autoReplyPausedBy === START_GATE;
-  const by = c.autoReplyPausedBy && !handedOff && !gated ? tApp('inboxPausedBy', { who: inboxAgentLabel(null, c.autoReplyPausedBy) }) : '';
+  const team = c.autoReplyPausedBy === TEAM_CHAT;
+  const by = c.autoReplyPausedBy && !handedOff && !gated && !team ? tApp('inboxPausedBy', { who: inboxAgentLabel(null, c.autoReplyPausedBy) }) : '';
   const meta = [by, c.autoReplyPausedAt ? relTime(c.autoReplyPausedAt) : ''].filter(Boolean).join(' · ');
-  const [title, desc] = handedOff ? [STR.inboxHandoffTitle, STR.inboxHandoffDesc] : gated ? [STR.inboxGateTitle, STR.inboxGateDesc] : [STR.inboxAiPausedTitle, STR.inboxAiPausedDesc];
+  const [title, desc] = handedOff ? [STR.inboxHandoffTitle, STR.inboxHandoffDesc]
+    : gated ? [STR.inboxGateTitle, STR.inboxGateDesc]
+    : team ? [STR.inboxTeamTitle, STR.inboxTeamDesc]
+    : [STR.inboxAiPausedTitle, STR.inboxAiPausedDesc];
   return `<div class="thread-banner thread-banner--warn" role="status">
     <div class="thread-banner__text"><strong>${escapeHTML(title)}</strong><span>${escapeHTML(desc)}</span>${meta ? `<span class="thread-banner__meta">${escapeHTML(meta)}</span>` : ''}</div>
     <button type="button" class="btn btn--sm" data-ai-toggle="on">${escapeHTML(STR.inboxAiResume)}</button>

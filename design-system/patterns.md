@@ -399,6 +399,18 @@ Every style shares the same document rules, and the studio preview mirrors them:
 
 Defaults when the tenant leaves a text empty: invoices print "Pagamento até à data de vencimento." as payment terms and no terms section; quotes print no payment section (their own notes, if any, fill it) and "Este orçamento é válido por 30 dias." only when the quote has no validity date of its own. A section with no text is not printed at all. The studio preview follows the same rules, from the `defaults` the API sends.
 
+## Briefings (messages to the team)
+
+`app/briefings.js`, in the Business group after Timesheets. It shows only when the company has both Agents and Employees (no module of its own); strings are under `app.briefings.*`. A briefing is an agent that writes to each employee on a schedule, so the page reads and acts on that agent's runs and leaves setting one up and editing it to the Agents module's drawers (`AgentsUI.openTemplate`, `openAgent`, `openRun`), which open over it and refresh it when they save.
+
+1. `.view__hero` whose right column is a day `.period-nav` (‹ day ›, Today once away from today; no days ahead) over the day's numbers: sent, read, still to send, waiting for you, failed.
+2. `.notice`s under the hero, most urgent first: problems that keep it from being turned on (the Agents page's wording, `AgentsUI.problemText`) or no WhatsApp template picked (both `--warn`, with Edit); off (`--info`, with Turn on); messages waiting for approval (`--warn`, with Approve all and how to stop asking).
+3. A `.panel`: the briefing's name and status pill, a `.hint` line under it that wraps on a phone (when it goes, the template, what of the day it reads; `.panel__meta` stays one line, for short counts), Send now · Turn on/Pause · Edit in `.panel__tools`, the briefings as `.chip`s in `.panel__filters` when there are several, then a `.tbl.tbl--stack` with one row per member of the team: name (a `.tbl__open`) over the phone, the state pill with why under it, the message (cut short), when, and the row's actions (Approve, Send now, Send again).
+4. A row opens the person's drawer (`page: true`): `recordFieldsHtml` facts, the preview's warnings as a `.notice--warn`, the message in a `.wa-preview` bubble (`.bubble--automation`; a `.hint` says a message not sent yet is written again when it goes) and the actions in `.drawer__foot`, "Open the run" first with a way back to the person.
+5. State pills: scheduled, sending, held and sent `--info`; not sent yet `--accent`; delivered and read `--ok`; waiting for approval, no phone and "task instead" `--warn`; failed `--bad`; left out, nothing today, not included, skipped, cancelled and only drafted plain. "Send again" only follows a run: a person who got nothing yet has none.
+
+"New briefing" in the top bar (admins) opens a drawer with the Agents gallery's Team templates as `.gallery__card`s; picking one opens Agents' setup drawer, which makes the draft.
+
 ## New dashboard page
 
 1. Add a `nav__item` with `data-tab` / `href`.

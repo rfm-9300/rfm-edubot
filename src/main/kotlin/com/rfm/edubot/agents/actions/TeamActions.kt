@@ -22,6 +22,7 @@ import kotlin.time.Duration.Companion.days
 /** The dashboard view that shows a record of this type. */
 internal fun viewFor(subjectType: String?): String = when (subjectType) {
     SubjectTypes.CLIENT -> "clients"
+    SubjectTypes.EMPLOYEE -> "employees"
     SubjectTypes.QUOTE -> "quotes"
     SubjectTypes.INVOICE -> "invoices"
     SubjectTypes.PAYMENT -> "payments"

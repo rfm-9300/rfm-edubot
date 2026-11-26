@@ -311,6 +311,11 @@ class SiteIssueRepository(mongo: MongoModule, private val tenantId: ObjectId) {
         return next.takeIf { collection.replaceOne(scoped(guard), next.toDocument()).matchedCount > 0 }
     }
 
+    /** The issues assigned to an employee, in any of [statuses], across the company's projects (their daily briefing). */
+    suspend fun forEmployee(employeeId: ObjectId, statuses: Collection<IssueStatus>): List<SiteIssue> =
+        collection.find(scoped(Filters.and(Filters.eq("employeeId", employeeId), Filters.`in`("status", statuses.map { it.name }))))
+            .sort(Document("dueDate", 1).append("createdAt", 1)).limit(MAX_LIST).toList().map { it.toIssue() }
+
     /** A supplier's issues, in any of [statuses], across the company's projects. */
     suspend fun forSupplier(supplierId: ObjectId, statuses: Collection<IssueStatus>): List<SiteIssue> =
         collection.find(scoped(Filters.and(Filters.eq("supplierId", supplierId), Filters.`in`("status", statuses.map { it.name }))))
