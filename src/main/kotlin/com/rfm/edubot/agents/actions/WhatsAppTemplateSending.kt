@@ -64,13 +64,14 @@ internal object WhatsAppTemplateSending {
         return prepare(ctx, client, mapping)
     }
 
-    suspend fun send(ctx: RunContext, client: WhatsAppClient, phone: String, mapping: Mapping): ActionResult {
+    /** [team]: the recipient is a member of the team, whose chat is kept from the bot (AgentMessaging.storeOutbound). */
+    suspend fun send(ctx: RunContext, client: WhatsAppClient, phone: String, mapping: Mapping, team: TeamMember? = null): ActionResult {
         val prepared = prepare(ctx, client, mapping) ?: return ActionResult.Failed("template_not_found")
         if (!prepared.complete) return ActionResult.Failed("template_params")
         val (template, values, body) = prepared
         return when (val sent = AgentMessaging.deliver(ctx, "whatsapp", phone) { client.sendTemplate(phone, template.name, template.language, template.bodyParameters(values)).id }) {
             is Delivery.Sent -> {
-                AgentMessaging.storeOutbound(ctx, Platform.WHATSAPP, phone, MessageContent.Template(template.name, template.language, body), sent.providerMessageId)
+                AgentMessaging.storeOutbound(ctx, Platform.WHATSAPP, phone, MessageContent.Template(template.name, template.language, body), sent.providerMessageId, team)
                 ActionResult.Done(
                     buildJsonObject {
                         put("channel", "whatsapp")

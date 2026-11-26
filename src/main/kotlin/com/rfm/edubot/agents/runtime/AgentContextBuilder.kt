@@ -52,6 +52,7 @@ data class SubjectContext(val variables: JsonObject, val label: String?, val cli
  */
 class AgentContextBuilder(private val mongo: MongoModule, private val clock: () -> Instant) {
     private val buildingSubjects = BuildingSubjects(mongo)
+    private val employeeBriefing = EmployeeBriefing(mongo)
 
     suspend fun build(
         tenant: Tenant,
@@ -65,7 +66,7 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
         val now = clock()
         val today = now.toLocalDateTime(zone).date
         val formatter = ValueFormatter(locale, zone)
-        val record = subject?.let { load(tenant, it, today, now, formatter) }
+        val record = subject?.let { load(tenant, it, today, now, formatter, locale) }
         val variables = buildJsonObject {
             put("now", now.toString())
             put("today", today.toString())
@@ -111,11 +112,15 @@ class AgentContextBuilder(private val mongo: MongoModule, private val clock: () 
 
     private class Loaded(val variables: Map<String, JsonElement>, val label: String?, val clientId: ObjectId?, val automationPaused: Boolean, val exists: Boolean = true)
 
-    private suspend fun load(tenant: Tenant, subject: SubjectRef, today: LocalDate, now: Instant, formatter: ValueFormatter): Loaded? {
+    private suspend fun load(tenant: Tenant, subject: SubjectRef, today: LocalDate, now: Instant, formatter: ValueFormatter, locale: String): Loaded? {
         val id = runCatching { ObjectId(subject.id) }.getOrNull()
         return when (subject.type) {
             SubjectTypes.CLIENT -> id?.let { ClientRepository(mongo, tenant.id).findById(it) }?.let { client ->
                 Loaded(mapOf("client" to clientVariables(tenant, client, today, formatter, withActivity = true)), "${client.number} · ${client.name}", client.id, client.automationPaused)
+            }
+            SubjectTypes.EMPLOYEE -> id?.let { EmployeeRepository(mongo, tenant.id).findById(it) }?.takeIf { it.archivedAt == null }?.let { employee ->
+                val zone = TimeZone.of(TenantTimeZones.normalize(tenant.timezone))
+                Loaded(employeeBriefing.variables(tenant, employee, now, zone, locale, formatter), employee.name, null, false)
             }
             SubjectTypes.QUOTE -> id?.let { QuoteRepository(mongo, tenant.id).findById(it) }?.let { quote ->
                 val client = ClientRepository(mongo, tenant.id).findById(quote.clientId)

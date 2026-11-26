@@ -143,6 +143,18 @@ class AgentRunRepository(mongo: MongoModule, private val clock: () -> Instant = 
         return collection.find(Filters.and(filters)).sort(Document("createdAt", -1)).limit(limit.coerceIn(1, 200)).toList().map { it.toRun() }
     }
 
+    /** An agent's real runs created from [from] to before [to], oldest first (by id within the same instant): a briefing's day. */
+    suspend fun forAgentBetween(tenantId: ObjectId, agentId: ObjectId, from: Instant, to: Instant, limit: Int = 2000): List<AgentRun> =
+        collection.find(
+            Filters.and(
+                Filters.eq("tenantId", tenantId),
+                Filters.eq("agentId", agentId),
+                Filters.gte("createdAt", from.toDate()),
+                Filters.lt("createdAt", to.toDate()),
+                Filters.ne("dryRun", true),
+            ),
+        ).sort(Document("createdAt", 1).append("_id", 1)).limit(limit).toList().map { it.toRun() }
+
     /** Real runs on [clientId] itself or on its quotes, invoices, bookings and chats, newest first. */
     suspend fun forClient(tenantId: ObjectId, clientId: ObjectId, limit: Int = 30): List<AgentRun> =
         collection.find(

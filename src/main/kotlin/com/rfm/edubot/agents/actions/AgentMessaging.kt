@@ -11,6 +11,7 @@ import com.rfm.edubot.agents.templates.AgentCopy
 import com.rfm.edubot.conversation.ConversationRepository
 import com.rfm.edubot.conversation.MessageRepository
 import com.rfm.edubot.conversation.UserRepository
+import com.rfm.edubot.conversation.model.Conversation
 import com.rfm.edubot.conversation.model.Message
 import com.rfm.edubot.conversation.model.MessageAuthor
 import com.rfm.edubot.conversation.model.MessageContent
@@ -68,6 +69,9 @@ internal object AgentDocuments {
     }
 }
 
+/** A message's recipient when they are a member of the company's team (an employee), with their [name]. */
+internal data class TeamMember(val name: String?)
+
 internal sealed class Delivery {
     data class Sent(val providerMessageId: String?) : Delivery()
     data object AlreadySent : Delivery()
@@ -114,13 +118,31 @@ internal object AgentMessaging {
         return if (attempts < 1) ActionResult.Wait(ctx.now + 1.days, note = "recipient_cap", retrySameStep = true) else ActionResult.Skipped("recipient_cap")
     }
 
-    /** Writes an agent's message into the customer's conversation, so the reply bot sees it when they answer. */
-    suspend fun storeOutbound(ctx: RunContext, platform: Platform, waId: String, content: MessageContent, providerMessageId: String?) {
+    /**
+     * A member of the team's own cap. The company's caps protect customers, and its weekly one (5 by default) would
+     * stop a daily message on the sixth day, so a message to the team counts only against [TEAM_DAILY_CAP] in a day,
+     * whatever the agent: a schedule set to every hour can't flood anyone. Over it the message is skipped, not held
+     * for a day like a customer's, since what it says is about today.
+     */
+    suspend fun teamCapped(ctx: RunContext, channel: String, recipient: String): ActionResult? {
+        val sent = ctx.services.outboundLog.countForRecipient(ctx.tenant.id, OutboundLogRepository.normalizeRecipient(channel, recipient), ctx.now - 1.days)
+        return if (sent >= TEAM_DAILY_CAP) ActionResult.Skipped("recipient_cap") else null
+    }
+
+    /** Messages a member of the team may get from agents in 24 hours: the day's briefing, a resend and one more. */
+    const val TEAM_DAILY_CAP = 3
+
+    /**
+     * Writes an agent's message into the customer's conversation, so the reply bot sees it when they answer, and
+     * the delivery ticks reach it. A message to a member of the team ([team]) starts their chat with the bot off and
+     * without a new-contact event: they aren't a customer, and what they answer is for a person to read.
+     */
+    suspend fun storeOutbound(ctx: RunContext, platform: Platform, waId: String, content: MessageContent, providerMessageId: String?, team: TeamMember? = null) {
         val mongo = ctx.services.mongo
         val users = UserRepository(mongo, ctx.tenant.id)
-        val user = users.findByWaId(waId, platform) ?: users.findOrCreate(waId, null, platform)
+        val user = users.findByWaId(waId, platform) ?: users.findOrCreate(waId, team?.name, platform, announce = team == null)
         val conversations = ConversationRepository(mongo, ctx.tenant.id)
-        val conversation = conversations.findOrCreate(user.id, waId, platform)
+        val conversation = conversations.findOrCreate(user.id, waId, platform, pausedBy = team?.let { Conversation.TEAM_MEMBER })
         MessageRepository(mongo, ctx.tenant.id).insert(
             Message(
                 tenantId = ctx.tenant.id,

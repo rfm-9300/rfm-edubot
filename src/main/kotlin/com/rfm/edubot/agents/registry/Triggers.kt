@@ -18,6 +18,7 @@ object TriggerTypes {
     /** The module a tenant needs to have records of each type. */
     val moduleOfEntity: Map<String, String> = mapOf(
         SubjectTypes.CLIENT to DashboardModules.CLIENTS,
+        SubjectTypes.EMPLOYEE to DashboardModules.EMPLOYEES,
         SubjectTypes.QUOTE to DashboardModules.QUOTES,
         SubjectTypes.INVOICE to DashboardModules.INVOICES,
         SubjectTypes.PAYMENT to DashboardModules.PAYMENTS,
@@ -67,7 +68,7 @@ object EventTrigger : AgentTriggerType {
  */
 object ScheduleTrigger : AgentTriggerType {
     val frequencies = listOf("hourly", "daily", "weekly", "monthly")
-    val forEachEntities = listOf(SubjectTypes.CLIENT, SubjectTypes.INVOICE, SubjectTypes.PAYMENT, SubjectTypes.QUOTE, SubjectTypes.BOOKING)
+    val forEachEntities = listOf(SubjectTypes.CLIENT, SubjectTypes.INVOICE, SubjectTypes.PAYMENT, SubjectTypes.QUOTE, SubjectTypes.BOOKING, SubjectTypes.EMPLOYEE)
 
     override val key = TriggerTypes.SCHEDULE
     override val configSchema = Schema.obj(
@@ -83,6 +84,7 @@ object ScheduleTrigger : AgentTriggerType {
 
     override fun subjectType(config: JsonObject): String? = config.string("forEach")
 
+    /** The record's module; what an employee's run reads of their day needs its own (AgentVariables.moduleOfGroup). */
     override fun requiredModules(config: JsonObject): Set<String> = setOfNotNull(config.string("forEach")?.let { TriggerTypes.moduleOfEntity[it] })
 
     override fun validate(config: JsonObject): List<SchemaProblem> {

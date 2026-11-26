@@ -64,7 +64,8 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
             Updates.set("edited", editedInput != null),
         )
         editedInput?.let { updates += Updates.set("input", BsonJson.toDocument(it)) }
-        return decide(tenantId, id, Updates.combine(updates))
+        // Past its expiry it no longer counts, even before the scheduler's sweep marks it expired.
+        return decide(tenantId, id, Updates.combine(updates), unexpiredAt = clock())
     }
 
     suspend fun reject(tenantId: ObjectId, id: ObjectId, by: String?, byName: String?, reason: String?): AgentApproval? =
@@ -124,9 +125,16 @@ class AgentApprovalRepository(mongo: MongoModule, private val clock: () -> Insta
     private fun aboutEmails(tenantId: ObjectId, ids: List<String>): Bson =
         Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("subject.type", SubjectTypes.EMAIL), Filters.`in`("subject.id", ids))
 
-    private suspend fun decide(tenantId: ObjectId, id: ObjectId, update: Bson): AgentApproval? =
+    private suspend fun decide(tenantId: ObjectId, id: ObjectId, update: Bson, unexpiredAt: Instant? = null): AgentApproval? =
         collection.findOneAndUpdate(
-            Filters.and(Filters.eq("tenantId", tenantId), Filters.eq("_id", id), Filters.eq("status", ApprovalStatus.PENDING.name)),
+            Filters.and(
+                listOfNotNull(
+                    Filters.eq("tenantId", tenantId),
+                    Filters.eq("_id", id),
+                    Filters.eq("status", ApprovalStatus.PENDING.name),
+                    unexpiredAt?.let { Filters.gt("expiresAt", it.toDate()) },
+                ),
+            ),
             update,
             FindOneAndUpdateOptions().returnDocument(ReturnDocument.AFTER),
         )?.toApproval()

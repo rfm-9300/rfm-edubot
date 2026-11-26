@@ -82,7 +82,7 @@ object AgentCatalog {
 
     fun build(registry: AgentRegistry, availability: Availability, templates: List<JsonObject> = emptyList()): AgentCatalogDto {
         val subjectTypes = listOf(
-            SubjectTypes.CLIENT, SubjectTypes.QUOTE, SubjectTypes.INVOICE, SubjectTypes.PAYMENT, SubjectTypes.BOOKING,
+            SubjectTypes.CLIENT, SubjectTypes.EMPLOYEE, SubjectTypes.QUOTE, SubjectTypes.INVOICE, SubjectTypes.PAYMENT, SubjectTypes.BOOKING,
             SubjectTypes.SERVICE, SubjectTypes.CONVERSATION, SubjectTypes.CONTACT, SubjectTypes.INSTAGRAM_COMMENT, SubjectTypes.EMAIL,
             SubjectTypes.PROJECT, SubjectTypes.SITE_LOG, SubjectTypes.SITE_ISSUE, SubjectTypes.CHANGE_ORDER, SubjectTypes.MEASUREMENT,
         )
@@ -124,7 +124,9 @@ object AgentCatalog {
                 CatalogEntityDto(type, module, module in availability.modules, statuses[type].orEmpty())
             },
             operators = com.rfm.edubot.agents.runtime.ConditionEvaluator.operators.toList(),
-            variables = mapOf(SubjectTypes.NONE to AgentVariables.forSubject(null)) + subjectTypes.associateWith { AgentVariables.forSubject(it) },
+            // A group of an employee's day whose module the company lacks is always empty, so it isn't offered.
+            variables = (mapOf(SubjectTypes.NONE to AgentVariables.forSubject(null)) + subjectTypes.associateWith { AgentVariables.forSubject(it) })
+                .mapValues { (_, specs) -> specs.filter { spec -> AgentVariables.moduleOf(spec.path).let { it == null || it in availability.modules } } },
             integrations = availability.integrations.map { it.name },
             templates = templates,
         )

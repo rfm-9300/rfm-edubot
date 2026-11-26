@@ -23,6 +23,7 @@ import com.rfm.edubot.agents.store.AgentJson
 import com.rfm.edubot.agents.store.AgentRunRepository
 import com.rfm.edubot.dashboard.DashboardModules
 import com.rfm.edubot.events.ActorContext
+import com.rfm.edubot.events.SubjectTypes
 import com.rfm.edubot.notifications.NotificationAudience
 import com.rfm.edubot.notifications.NotificationKinds
 import com.rfm.edubot.tenant.model.Tenant
@@ -31,8 +32,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlinx.datetime.DateTimeUnit
 import kotlinx.datetime.Instant
 import kotlinx.datetime.TimeZone
+import kotlinx.datetime.atStartOfDayIn
+import kotlinx.datetime.plus
 import kotlinx.datetime.toLocalDateTime
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -167,7 +171,7 @@ class AgentRunExecutor(
                 }
                 action.sideEffect != SideEffect.NONE && autonomy == Autonomy.APPROVE -> {
                     val preview = action.preview(input, ctx)
-                    requestApprovals(run.copy(currentStep = index), step, listOf(ProposedAction(action.key, input, preview)), JsonObject(emptyMap()))
+                    requestApprovals(run.copy(currentStep = index), step, listOf(ProposedAction(action.key, input, preview)), JsonObject(emptyMap()), zone)
                     return
                 }
                 else -> {
@@ -237,7 +241,7 @@ class AgentRunExecutor(
                         index += 1
                     } else {
                         run = record(run, StepResult(step.id, step.action, StepStatus.AWAITING_APPROVAL, clock(), null, 1, input, result.output))
-                        requestApprovals(run.copy(currentStep = index, context = withStepOutput(variables, step.id, result.output)), step, result.proposals, result.output)
+                        requestApprovals(run.copy(currentStep = index, context = withStepOutput(variables, step.id, result.output)), step, result.proposals, result.output, zone)
                         return
                     }
                 }
@@ -292,9 +296,10 @@ class AgentRunExecutor(
         return ActionResult.Done(output, note = "approved")
     }
 
-    private suspend fun requestApprovals(run: AgentRun, step: StepSpec, proposals: List<ProposedAction>, output: JsonObject) {
+    private suspend fun requestApprovals(run: AgentRun, step: StepSpec, proposals: List<ProposedAction>, output: JsonObject, zone: TimeZone) {
         val now = clock()
         val expiry = module.settings.get(run.tenantId).company.approvalExpiryDays.coerceIn(1, 30)
+        val expiresAt = approvalExpiry(run, now, expiry, zone)
         val approvals = proposals.mapIndexed { seq, proposal ->
             module.approvals.insert(
                 AgentApproval(
@@ -311,7 +316,7 @@ class AgentRunExecutor(
                     subjectLabel = run.subjectLabel,
                     approvers = run.definition.policy.approvers,
                     createdAt = now,
-                    expiresAt = now + expiry.days,
+                    expiresAt = expiresAt,
                 ),
             )
         }
@@ -368,6 +373,18 @@ class AgentRunExecutor(
         private val HOLD = 30.minutes
 
         fun backoff(attempt: Int) = (30.seconds * (1 shl (attempt - 1).coerceIn(0, 6))).coerceAtMost(30.minutes)
+
+        /**
+         * When a person's approval stops counting: the company's expiry, or, on an employee's run, the end of that day.
+         * An employee's message is about their day ("today you work…") and is stored as written, so approved the next
+         * morning it would send yesterday's shifts as today's, beside that day's own message.
+         */
+        fun approvalExpiry(run: AgentRun, now: Instant, expiryDays: Int, zone: TimeZone): Instant {
+            val usual = now + expiryDays.days
+            if (run.subject?.type != SubjectTypes.EMPLOYEE) return usual
+            val endOfDay = now.toLocalDateTime(zone).date.plus(1, DateTimeUnit.DAY).atStartOfDayIn(zone)
+            return minOf(usual, endOfDay)
+        }
 
         fun record(run: AgentRun, result: StepResult): AgentRun {
             val index = run.steps.indexOfFirst { it.stepId == result.stepId }

@@ -80,6 +80,9 @@ data class Conversation(
 
         /** [autoReplyPausedBy] when the chat began without a start word the company asks for, so nobody answered it yet. */
         const val START_GATE = "bot:start-gate"
+
+        /** [autoReplyPausedBy] of a chat an agent began with a member of the team (a daily briefing): the bot never answers staff. */
+        const val TEAM_MEMBER = "bot:team"
     }
 }
 

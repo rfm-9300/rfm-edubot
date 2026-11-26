@@ -28,9 +28,10 @@ async function bootAuthed() {
   // An employee's session reaches only its own pages: no bell, no Home figures.
   if (!isPortal()) startNotifications();
   // The Chatbot page has no module of its own: it comes with Persona.
-  // Activity is no module: the company's admins have it.
+  // Activity is no module: the company's admins have it. Briefings come with Agents and Employees together.
   const pageOpens = page => state.me.modules.includes(page) || (page === 'chatbot' && state.me.modules.includes('persona')) ||
-    (page === 'activity' && !isPortal() && isCompanyAdmin());
+    (page === 'activity' && !isPortal() && isCompanyAdmin()) ||
+    (page === 'briefings' && state.me.modules.includes('agents') && state.me.modules.includes('employees'));
   if (!pageOpens(state.active)) state.active = state.me.modules[0] || 'settings';
   // The address may still name the previous session's page, or one this session can't open.
   const hashTab = (location.hash || '').replace('#', '');
@@ -92,7 +93,7 @@ function renderNav() {
   const groups = [
     { id: 'home', items: ['overview', HOURS_TAB, PORTAL_TAB, SITES_TAB] },
     { id: 'groupInbox', items: ['conversations', 'contacts', 'email', 'instagram'] },
-    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings'] },
+    { id: 'groupBusiness', items: ['clients', 'services', 'quotes', 'invoices', 'financeiro', 'suppliers', 'employees', 'timesheets', 'briefings', 'payments', 'catalog', 'bookings'] },
     { id: 'groupBuilding', items: ['projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'] },
     { id: 'groupBot', items: ['persona', 'chatbot', 'ai-assistant', 'agents'] },
     { id: 'groupSetup', items: ['settings', 'activity'] },
@@ -103,6 +104,8 @@ function renderNav() {
   if (enabled.has('invoices') || enabled.has('payments')) enabled.add('financeiro');
   // The Chatbot page shares the Persona module: whoever may see how the bot talks may see its fixed flows.
   if (enabled.has('persona')) enabled.add('chatbot');
+  // Briefings are agents that write to each employee: the page needs both modules, and has none of its own.
+  if (enabled.has('agents') && enabled.has('employees')) enabled.add('briefings');
   // Who did what is the admins' to read.
   if (!isPortal() && isCompanyAdmin()) enabled.add('activity');
   $('#nav').innerHTML = groups.map(g => {
@@ -305,6 +308,7 @@ async function loadModule(tab) {
     state.fetched.measurements = true;
   }
   if (tab === 'agents') await window.AgentsUI.load();
+  if (tab === 'briefings') await loadBriefings();
   if (tab === 'email') await window.EmailUI.load();
   if (tab === 'instagram') {
     try { state.instagram = await api('/app/api/instagram?refresh=1'); }
@@ -324,12 +328,13 @@ function render() {
   $('#meta-clock').textContent = new Date().toLocaleString(uiLocale(), { hour: '2-digit', minute: '2-digit' });
   updateSidebarKpis();
   $('#btn-new').hidden = !['clients', 'services', 'quotes', 'invoices', 'suppliers', 'employees', 'timesheets', 'payments', 'catalog', 'bookings', 'agents', PORTAL_TAB,
-    'projects', 'site-diary', 'site-issues', 'change-orders', 'measurements'].includes(state.active)
-    || (state.active === 'agents' && !window.AgentsUI?.canManage());
+    'projects', 'site-diary', 'site-issues', 'change-orders', 'measurements', 'briefings'].includes(state.active)
+    || (state.active === 'agents' && !window.AgentsUI?.canManage())
+    || (state.active === 'briefings' && !state.briefings?.canManage);
   const newButtonLabels = {
     clients: STR.clientFormTitle, services: CRM.services.formTitle, quotes: STR.quoteFormTitle,
     invoices: STR.invoiceFormTitle, suppliers: CRM.suppliers.formTitle, employees: CRM.employees.formTitle, payments: CRM.payments.formTitle, catalog: STR.catalogFormTitle, bookings: STR.bookingsNew,
-    agents: I18N.t('app.agents.newAgent'), [PORTAL_TAB]: PORTAL.newTitle, timesheets: TIME.addShift,
+    agents: I18N.t('app.agents.newAgent'), briefings: BRF.new, [PORTAL_TAB]: PORTAL.newTitle, timesheets: TIME.addShift,
     projects: BLD.formNewTitle, 'site-diary': BLD.diaryNew, 'site-issues': BLD.issueNew, 'change-orders': BLD.changeNew, measurements: BLD.measurementNew,
   };
   $('#btn-new .btn__label').textContent = newButtonLabels[state.active] || `${STR.newPrefix} ${labels[state.active] || ''}`;
@@ -352,6 +357,7 @@ function render() {
   if (state.active === 'bookings') return renderBookings(root);
   if (state.active === 'instagram') return renderInstagram(root);
   if (state.active === 'agents') return window.AgentsUI.render(root);
+  if (state.active === 'briefings') return renderBriefings(root);
   if (state.active === 'email') return window.EmailUI.render(root);
   if (state.active === PORTAL_TAB) return renderMyServices(root);
   if (state.active === HOURS_TAB) return window.TimesheetsUI.renderMine(root);
@@ -477,8 +483,10 @@ function agentsDeps() {
     statusLabel: recordStatusLabel,
     openSubject: openAgentSubject,
     canOpenSubject: canOpenAgentSubject,
-    // Something changed in Agents while another view is showing: keep Home's card and rows and the nav count in step.
+    // Something changed in Agents while another view is showing: keep Home's card and rows, the Briefings page (whose
+    // briefings are agents, set up and edited in Agents' drawers over it) and the nav count in step.
     onChange: () => {
+      if (state.active === 'briefings') return reloadBriefings();
       if (state.active !== 'overview') return renderNav();
       loadModule('overview').then(render).catch(() => renderNav());
     },
@@ -617,6 +625,7 @@ async function init(relayed = false) {
     if (state.active === 'payments') return openPaymentForm();
     if (state.active === 'bookings') return openBookingForm();
     if (state.active === 'agents') return window.AgentsUI.newAgent();
+    if (state.active === 'briefings') return openBriefingChooser();
     if (state.active === 'projects') return openProjectForm();
     if (state.active === 'site-diary') return openDiaryForm(null, { projectId: state.diaryProject });
     if (state.active === 'site-issues') return openIssueForm(null, { projectId: state.issuesProject });

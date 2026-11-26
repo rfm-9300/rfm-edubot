@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-17
+updated: 2026-11-24
 ---
 
 # Conversations inbox and channels
@@ -59,6 +59,9 @@ has the sequence diagram. Decisions and gotchas:
 - **An agent reply pauses the AI** for that conversation (`autoReplyPausedBy`/`At`), text or template,
   so the bot never answers over a person; the thread shows who paused it and a Resume button. Chosen as
   the default without asking Rodrigo; revisit if tenants want the AI to keep going.
+- **A chat an agent starts with a member of the team** (a daily briefing) begins with the AI off,
+  `autoReplyPausedBy = bot:team`, and its own banner: an employee's answer is for a person to read, not
+  for the customer bot ([team-briefings.md](team-briefings.md)).
 - **24-hour window is enforced before calling Meta** (`409 window_closed`). Reason: Meta usually
   *accepts* an out-of-window text and fails it later by status webhook (`131047`), so the send call
   alone would claim success. The pipeline stores `lastInboundAt` + `unreadCount` on new customer

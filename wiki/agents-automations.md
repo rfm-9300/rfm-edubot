@@ -1,5 +1,5 @@
 ---
-updated: 2026-11-20
+updated: 2026-11-24
 ---
 
 # Agents (automations) and Gmail
@@ -73,3 +73,20 @@ yearly CASA. Three things stand in the way, and `docs/google-oauth-verification.
   Google's unverified-app screen while testing; each account counts toward a lifetime cap of 100
   new users until verification. Adding a redirect URI or renaming the app after approval means
   verifying again.
+
+## Daily messages to the team: `forEach: employee` (2026-11-24)
+
+A schedule can run once per **employee**, which is how a company messages its own people every day:
+the daily briefings and the Briefings page, in [team-briefings.md](team-briefings.md). What the
+engine gained for it, used by any agent:
+
+- `ScheduleTrigger` accepts `forEach: employee` (needs only the `employees` module); each person is
+  their own run, with its own dedupe key (`AgentScheduler.scheduleKey`) and history.
+- An employee's run reads `employee.*` and their day as `shifts.*`, `services.*` and `issues.*`
+  (`EmployeeBriefing`); a group needs its module (`AgentVariables.moduleOfGroup`), which the validator
+  checks (`needs_module`) and the catalog's variable lists follow.
+- `whatsapp.send` has `to: employee`, valid only on an employee's run. A team member is outside the
+  company's per-recipient caps but under a cap of their own (3 in 24 hours, skipped not held), and a
+  chat an agent starts with them begins with the bot off (`bot:team`) and announces no new contact.
+- An employee's run's approval expires at the end of its local day, and no approval can be approved
+  after its expiry, even before the scheduler's sweep marks it.

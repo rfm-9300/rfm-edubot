@@ -6,6 +6,7 @@ import com.mongodb.client.model.FindOneAndUpdateOptions
 import com.mongodb.client.model.Updates
 import com.rfm.edubot.persistence.MongoModule
 import com.rfm.edubot.shared.SystemClock
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.toList
 import org.bson.Document
 import org.bson.types.ObjectId
@@ -39,6 +40,10 @@ class RecordTagRepository(private val mongo: MongoModule, private val tenantId: 
         if (orphans.isNotEmpty()) collection.deleteMany(Filters.`in`("_id", orphans.map { it["_id"] }))
         return live.associate { it.getString("recordId") to it.getList("tags", String::class.java).orEmpty() }
     }
+
+    /** The tags of one record of [kind]; none when it has none. */
+    suspend fun forRecord(kind: TagKind, recordId: String): List<String> =
+        collection.find(Filters.and(scoped(kind), Filters.eq("recordId", recordId))).firstOrNull()?.getList("tags", String::class.java).orEmpty()
 
     /**
      * Replaces the tags of [recordId] with the already cleaned [tags]; none removes them. False when the company

@@ -60,6 +60,7 @@ object AgentTemplates {
     const val INBOX = "inbox"
     const val EMAIL = "email"
     const val HOUSEKEEPING = "housekeeping"
+    const val TEAM = "team"
 
     private val templates: List<AgentTemplate> = listOf(
         // Finance
@@ -432,6 +433,25 @@ object AgentTemplates {
         ) {
             digest("missing_client_data", onSchedule("weekly", text("time"), weekdays = listOf(int("weekday"))), skipWhenEmpty = true)
         },
+        // Team: each employee's own message about their day (TemplateScope.teamBriefing), the Briefings page's agents.
+        AgentTemplate(
+            key = "daily_shift_briefing", category = TEAM, kind = AgentKind.WORKFLOW, icon = "calendar",
+            modules = setOf(DashboardModules.EMPLOYEES, DashboardModules.TIMESHEETS), params = briefingParams,
+        ) {
+            teamBriefing(count = "shifts.count", day = "{{shifts.today}}")
+        },
+        AgentTemplate(
+            key = "daily_services_briefing", category = TEAM, kind = AgentKind.WORKFLOW, icon = "list",
+            modules = setOf(DashboardModules.EMPLOYEES, DashboardModules.SERVICES), params = briefingParams,
+        ) {
+            teamBriefing(count = "services.count", day = "{{services.today}}")
+        },
+        AgentTemplate(
+            key = "open_issues_briefing", category = TEAM, kind = AgentKind.WORKFLOW, icon = "alert",
+            modules = setOf(DashboardModules.EMPLOYEES, DashboardModules.SITE_ISSUES), params = briefingParams,
+        ) {
+            teamBriefing(count = "issues.count", day = "{{issues.list}}")
+        },
     )
 
     private val byKey = templates.associateBy { it.key }
@@ -557,6 +577,27 @@ private class TemplateScope(private val key: String, val params: JsonObject, pri
 
     fun choice(name: String, vararg options: String) = json("name" to name, "type" to "choice", "options" to options.toList())
 
+    /**
+     * Every day at the chosen time, one WhatsApp message to each employee about their day ([day]), when they have
+     * something ([count] > 0). They never wrote to the company, so it goes as an approved template: the draft leaves
+     * the template to pick in the step, with its two values set (first name, then [day]). Like every message it starts
+     * on "Ask me first"; a team that wants it each morning without a tap picks "Act on its own". It ignores the
+     * company's "business days only": a Saturday message held to Monday would arrive beside Monday's own.
+     */
+    fun teamBriefing(count: String, day: String) = AgentDefinition(
+        triggers = listOf(onSchedule("daily", text("time"), weekdays = if (flag("weekdaysOnly")) listOf(1, 2, 3, 4, 5) else null, forEach = SubjectTypes.EMPLOYEE)),
+        steps = listOf(
+            StepSpec(
+                "s1",
+                "whatsapp.send",
+                json("to" to "employee", "text" to copy("message"), "templateParams" to listOf("{{employee.firstName}}", day), "fallback" to (text("fallback") ?: "task")),
+                guard = whenAll(cond(count, "gt", 0)),
+                autonomy = autonomy,
+            ),
+        ),
+        policy = policy().copy(businessDaysOnly = false),
+    )
+
     /** A summary for the team, skipped when there is nothing to report if [skipWhenEmpty]. */
     fun digest(kind: String, trigger: TriggerSpec, skipWhenEmpty: Boolean = flag("skipWhenEmpty")) = AgentDefinition(
         triggers = listOf(trigger),
@@ -571,6 +612,14 @@ private class TemplateScope(private val key: String, val params: JsonObject, pri
 private val autonomyParam = "autonomy" to Schema.string(enum = Autonomy.entries.map { it.name }, default = Autonomy.APPROVE.name, widget = "autonomy")
 private val audienceParam = "audience" to Schema.string(enum = listOf("admins", "everyone"), default = "admins", widget = "audience")
 private val skipWhenEmptyParam = "skipWhenEmpty" to Schema.boolean(default = true)
+
+/** A team briefing's setup: when it goes, and what happens when WhatsApp can't take it (no email: employees aren't clients). */
+private val briefingParams = Schema.obj(
+    "time" to Schema.string(widget = "time", default = "08:00"),
+    "weekdaysOnly" to Schema.boolean(default = false),
+    "fallback" to Schema.string(enum = listOf("task", "none"), default = "task", widget = "fallback"),
+    autonomyParam,
+)
 
 private fun fallbackParam(default: String = "email") = "fallback" to Schema.string(enum = listOf("email", "task", "none"), default = default, widget = "fallback")
 

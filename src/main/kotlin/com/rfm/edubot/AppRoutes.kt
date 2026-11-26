@@ -16,6 +16,7 @@ import com.rfm.edubot.admin.vault.vaultRoutes
 import com.rfm.edubot.agents.AgentsModule
 import com.rfm.edubot.agents.agentAdminRoutes
 import com.rfm.edubot.agents.agentRoutes
+import com.rfm.edubot.agents.briefings.briefingRoutes
 import com.rfm.edubot.agents.ai.AgentAssistant
 import com.rfm.edubot.agents.runtime.AgentRuntime
 import com.rfm.edubot.ai.AiClient
@@ -188,6 +189,7 @@ internal fun Routing.installRoutes(s: AppServices) {
     )
     agentRoutes(s.agents, s.agentRuntime, s.tenants)
     agentAdminRoutes(s.agents, s.agentRuntime, s.tenants)
+    briefingRoutes(s.agents, s.agentRuntime)
     notificationRoutes(s.notifications)
     adminRoutes()
     tenantAdminRoutes(

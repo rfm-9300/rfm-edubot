@@ -413,6 +413,47 @@ class AgentRuntimeTest {
         assertEquals(Instant.parse("2026-10-03T08:00:00Z"), next)
     }
 
+    @Test
+    fun `a daily schedule over employees starts a run for each person with their own shifts`() = runBlocking {
+        tenant = tenant.copy(enabledModules = tenant.enabledModules.orEmpty() + listOf(DashboardModules.EMPLOYEES, DashboardModules.TIMESHEETS))
+        val employees = com.rfm.edubot.crm.EmployeeRepository(mongo, tenant.id)
+        val ana = employees.create("Ana Costa", "+351 912 000 001")
+        val rui = employees.create("Rui Lopes", "+351 912 000 002")
+        val eva = employees.create("Eva Dias", "+351 912 000 003")
+        val noPhone = employees.create("Teo Sem Telefone", "")
+        com.rfm.edubot.tags.RecordTagRepository(mongo, tenant.id).set(com.rfm.edubot.tags.TagKind.EMPLOYEE, eva.id.toHexString(), listOf("No-Briefing"))
+        val plans = com.rfm.edubot.timesheets.PlannedShiftRepository(mongo, tenant.id)
+        listOf(ana.id to "Obra A", eva.id to "Obra B", noPhone.id to "Obra C").forEach { (employeeId, site) ->
+            plans.insert(
+                com.rfm.edubot.timesheets.model.PlannedShift(
+                    tenantId = tenant.id, employeeId = employeeId, day = LocalDate(2026, 10, 2),
+                    startAt = Instant.parse("2026-10-02T07:00:00Z"), endAt = Instant.parse("2026-10-02T15:00:00Z"), siteName = site,
+                    createdBy = "test", createdAt = now, updatedAt = now,
+                ),
+            )
+        }
+        val daily = TriggerSpec("d1", TriggerTypes.SCHEDULE, buildJsonObject { put("frequency", "daily"); put("time", "09:00"); put("forEach", "employee") })
+        val hasShift = com.rfm.edubot.agents.model.ConditionGroup(
+            com.rfm.edubot.agents.model.ConditionMatch.ALL,
+            listOf(com.rfm.edubot.agents.model.Condition("shifts.count", "gt", JsonPrimitive(0))),
+        )
+        val agent = agent(
+            AgentDefinition(
+                listOf(daily),
+                steps = listOf(StepSpec("s1", "test.send", text("{{employee.firstName}}: {{shifts.today}}"), guard = hasShift)),
+                policy = AgentPolicy(autonomy = Autonomy.AUTO),
+            ),
+        )
+
+        now = Instant.parse("2026-10-02T08:00:30Z")
+        runtime.scheduler.tick()
+        runtime.scheduler.tick()
+        eventually { runsFor(agent).size == 2 && runsFor(agent).all { it.status == RunStatus.SUCCEEDED } }
+
+        assertEquals(listOf("Ana: 08:00-16:00 Obra A"), sent, "Rui has no shift, Eva opted out, and the one with no phone isn't asked")
+        assertEquals(setOf(SubjectRef.of(SubjectTypes.EMPLOYEE, ana.id), SubjectRef.of(SubjectTypes.EMPLOYEE, rui.id)), runsFor(agent).map { it.subject }.toSet())
+    }
+
     private suspend fun backdate(collection: String, id: ObjectId, field: String, at: Instant) {
         mongo.database.getCollection<Document>(collection).updateOne(Filters.eq("_id", id), Updates.set(field, Date(at.toEpochMilliseconds())))
     }
